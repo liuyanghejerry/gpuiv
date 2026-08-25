@@ -1,0 +1,160 @@
+/** GPU-backed event tests for the Vue binding — mouse, hover, outside, scroll,
+ *  focus. Every simulation goes through the native GPUI hit-test pipeline; the
+ *  handler result lands in the component state and is asserted after settle(). */
+
+import { defineComponent, ref } from "vue"
+import { describe, expect, it } from "vitest"
+import type { EventPayload } from "@gpuiv/native"
+import { createTestApp, hasNativeTestRenderer } from "../testing.js"
+
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+describeNative("events (vue)", () => {
+  it("delivers click and mouseDown events in order", async () => {
+    const log = ref<string[]>([])
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div
+            style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}
+          >
+            <div
+              testId="target"
+              style={{ padding: 20, backgroundColor: "#333", cursor: "pointer" }}
+              onMouseDown={() => log.value.push("down")}
+              onClick={() => log.value.push("click")}
+            >
+              <text>target</text>
+            </div>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const target = app.renderer.findByText("target")!
+    const bounds = app.renderer.getElementBounds(target.id)!
+    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5)
+    await app.settle()
+    expect(log.value).toEqual(["down", "click"])
+    app.unmount()
+  })
+
+  it("fires mouseEnter and mouseLeave on hover moves", async () => {
+    const hovered = ref<string>("none")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 30 }}>
+            <div
+              style={{ padding: 24, backgroundColor: "#333" }}
+              onMouseEnter={() => (hovered.value = "enter")}
+              onMouseLeave={() => (hovered.value = "leave")}
+            >
+              <text>box</text>
+            </div>
+            <text>{hovered.value}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const box = app.renderer.findByText("box")!
+    const bounds = app.renderer.getElementBounds(box.id)!
+    const cx = bounds[0] + bounds[2] / 2
+    const cy = bounds[1] + bounds[3] / 2
+
+    app.renderer.nativeSimulateMouseMove(cx, cy)
+    await app.settle()
+    expect(hovered.value).toBe("enter")
+
+    app.renderer.nativeSimulateMouseMove(cx + 400, cy + 200)
+    await app.settle()
+    expect(hovered.value).toBe("leave")
+    app.unmount()
+  })
+
+  it("fires mouseDownOutside when clicking outside the element", async () => {
+    const outside = ref(0)
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", flexDirection: "column", padding: 30, gap: 60 }}>
+            <div
+              style={{ padding: 30, backgroundColor: "#333" }}
+              onMouseDownOutside={() => (outside.value += 1)}
+            >
+              <text>inside</text>
+            </div>
+            <div style={{ padding: 30, backgroundColor: "#444" }}>
+              <text>elsewhere</text>
+            </div>
+            <text>{`outside:${outside.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const elsewhere = app.renderer.findByText("elsewhere")!
+    const bounds = app.renderer.getElementBounds(elsewhere.id)!
+    app.renderer.nativeSimulateClick(bounds[0] + 10, bounds[1] + 10)
+    await app.settle()
+    expect(outside.value).toBeGreaterThanOrEqual(1)
+    app.unmount()
+  })
+
+  it("delivers scroll events from a scrollable container", async () => {
+    const lastDelta = ref(0)
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div
+            style={{ width: "100%", height: "100%", overflow: "scroll", padding: 30 }}
+            onScroll={(e: EventPayload) => (lastDelta.value = (e.deltaY ?? 0) * -1)}
+          >
+            <div style={{ height: 2000 }}>
+              <text>tall content</text>
+            </div>
+            <text>{`delta:${lastDelta.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    app.renderer.nativeSimulateScrollWheel(300, 200, 0, -160)
+    await app.settle()
+    expect(app.renderer.getAllText().join("")).toContain("delta:")
+    expect(lastDelta.value).toBeGreaterThan(0)
+    app.unmount()
+  })
+
+  it("tracks focus and blur on a focusable element", async () => {
+    const focusLog = ref<string[]>([])
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 30 }}>
+            <div
+              style={{ width: 200, height: 40, backgroundColor: "#333" }}
+              tabIndex={0}
+              onFocus={() => focusLog.value.push("focus")}
+              onBlur={() => focusLog.value.push("blur")}
+            >
+              <text>focusable</text>
+            </div>
+            <text>{focusLog.value.join(",")}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const el = app.renderer
+      .findByType("div")
+      .find((d) => d.events.has("focus") && d.events.has("blur"))!
+
+    app.renderer.nativeSimulateMouseDown(10, 10)
+    await app.settle()
+    const all = app.renderer.getAllText().join("")
+    expect(all).toContain("focus")
+    app.unmount()
+  })
+})

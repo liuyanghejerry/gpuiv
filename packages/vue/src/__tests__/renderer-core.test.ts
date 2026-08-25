@@ -235,3 +235,115 @@ describe("vue renderer core", () => {
     expect(kids.get(2)).toEqual([4, 5, 3])
   })
 })
+
+describe("vue renderer lifecycle semantics", () => {
+  it("destroys and recreates nodes on v-if toggle", async () => {
+    const shown = ref(true)
+    const Comp = defineComponent({
+      setup: () => () => h("div", shown.value ? [h("span", "A")] : []),
+    })
+    const { mock, host } = mountApp(Comp)
+    const before = mock.applied.filter((o) => o[0] === "createElement").length
+
+    shown.value = false
+    await nextTick()
+    host.flushMutations()
+    expect(mock.applied).toContainEqual(["removeChild", 2, 3])
+    expect(mock.applied).toContainEqual(["destroyElement", 3])
+
+    shown.value = true
+    await nextTick()
+    host.flushMutations()
+    const creates = mock.applied.filter((o) => o[0] === "createElement")
+    expect(creates.length).toBeGreaterThan(before)
+    expect(mock.applied).toContainEqual(["appendChild", 2, creates.at(-1)![1]])
+  })
+
+  it("clears the style when the style binding is removed", async () => {
+    const styleOn = ref(true)
+    const Comp = defineComponent({
+      setup: () => () => h("div", { style: styleOn.value ? { width: 100 } : null }),
+    })
+    const { mock, host } = mountApp(Comp)
+    expect(mock.applied).toContainEqual(["setStyle", 2, { width: 100 }])
+
+    styleOn.value = false
+    await nextTick()
+    host.flushMutations()
+    expect(mock.applied).toContainEqual(["setStyle", 2, {}])
+  })
+
+  it("unregisters an event listener when the handler prop is removed", async () => {
+    const withHandler = ref(true)
+    const Comp = defineComponent({
+      setup: () => () =>
+        h("div", withHandler.value ? { onClick: () => {} } : {}),
+    })
+    const { mock, host } = mountApp(Comp)
+    expect(mock.applied).toContainEqual(["setEventListener", 2, "click", true])
+
+    withHandler.value = false
+    await nextTick()
+    host.flushMutations()
+    expect(mock.applied).toContainEqual(["setEventListener", 2, "click", false])
+  })
+
+  it("replaces element children with a single text run via setElementText", async () => {
+    const asText = ref(true)
+    const Comp = defineComponent({
+      setup: () => () =>
+        h(
+          "div",
+          asText.value ? { children: undefined } : {},
+          asText.value ? undefined : [h("span", "old")],
+        ) as never,
+    })
+    // Simpler shape: string child switches to element child and back.
+    const Alt = defineComponent({
+      setup: () => () =>
+        h("div", asText.value ? "now text" : h("span", "old")),
+    })
+    const { mock, host } = mountApp(Alt)
+    expect(mock.applied).toContainEqual(["setText", 2, "now text"])
+
+    asText.value = false
+    await nextTick()
+    host.flushMutations()
+    // Vue clears the old text content before mounting the element child.
+    expect(mock.applied).toContainEqual(["setText", 2, ""])
+    expect(mock.applied).toContainEqual(["appendChild", 2, 3])
+  })
+
+  it("forwards input attributes as custom props", () => {
+    const Comp = defineComponent({
+      setup: () => () =>
+        h("input", {
+          value: "hello",
+          placeholder: "Type...",
+          readOnly: true,
+        }),
+    })
+    const { mock } = mountApp(Comp)
+    expect(mock.applied).toContainEqual(["setCustomPropValue", 2, "value", "hello"])
+    expect(mock.applied).toContainEqual(["setCustomPropValue", 2, "placeholder", "Type..."])
+    expect(mock.applied).toContainEqual(["setCustomPropValue", 2, "readOnly", true])
+  })
+
+  it("keeps hover/active nested style objects intact", () => {
+    const style = {
+      backgroundColor: "#000",
+      hover: { backgroundColor: "#111" },
+      active: { backgroundColor: "#222" },
+    }
+    expect(toGpuixStyle(style)).toEqual(style)
+  })
+
+  it("ignores the class prop entirely", () => {
+    const Comp = defineComponent({
+      setup: () => () => h("div", { class: "fancy", style: { width: 10 } }),
+    })
+    const { mock } = mountApp(Comp)
+    expect(mock.applied.some((o) => o[0] === "setCustomPropValue")).toBe(false)
+    expect(mock.applied).toContainEqual(["setStyle", 2, { width: 10 }])
+  })
+})
