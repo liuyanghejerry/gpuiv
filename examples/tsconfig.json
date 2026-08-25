@@ -4,10 +4,10 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
-    "jsxImportSource": "@gpuix/react",
+    "jsxImportSource": "vue",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true
   },
-  "include": ["./*.tsx"]
+  "include": ["./*.tsx", "./*.d.ts"]
 }

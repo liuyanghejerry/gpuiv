@@ -1,20 +1,19 @@
 /**
- * Visual tests for the GPUIX diff viewer example.
+ * Visual tests for the GPUIX diff viewer example (Vue).
  *
  * Uses the native GPUI test renderer (real Metal rendering on macOS) to
- * validate diff rendering end-to-end: React → Rust RetainedTree → GpuixView →
+ * validate diff rendering end-to-end: Vue → Rust RetainedTree → GpuixView →
  * GPUI layout → Metal → screenshot.
  *
- * Each test renders a diff, takes a screenshot, and verifies text content.
- * Screenshots are saved to /tmp/gpuix-diff-*.png for manual inspection.
- *
- * @ts-nocheck
+ * Screenshots are saved to /tmp/gpuiv-diff-*.png for manual inspection.
  */
 
+// @ts-nocheck
+
 import fs from "fs"
-import { describe, it, expect, beforeEach } from "vitest"
-import React from "react"
-import { createTestRoot, hasNativeTestRenderer } from "@gpuix/react"
+import { beforeAll, describe, it, expect, beforeEach } from "vitest"
+import { defineComponent } from "vue"
+import { createTestApp, hasNativeTestRenderer } from "@gpuiv/vue"
 import type { StructuredPatchHunk as Hunk } from "diff"
 import { DiffViewer } from "./diff"
 
@@ -127,80 +126,58 @@ const longHunk: Hunk[] = [
 
 // ── Tests ────────────────────────────────────────────────────────────
 
-describeNative("diff viewer", () => {
-  let testRoot: ReturnType<typeof createTestRoot>
+describeNative("diff viewer (vue)", () => {
+  let app: ReturnType<typeof createTestApp> | undefined
 
   beforeEach(() => {
-    testRoot = createTestRoot()
+    app?.unmount()
   })
 
-  describe("unified view", () => {
-    it("renders a simple unified diff with syntax highlighting", () => {
-      function UnifiedSimple() {
-        return (
+  function mountDiff(hunks: Hunk[], filePath: string, extraStyle = {}) {
+    const Comp = defineComponent({
+      setup() {
+        return () => (
           <div
             style={{
               width: "100%",
               height: "100%",
               backgroundColor: DIFF_BG,
               overflow: "scroll",
+              ...extraStyle,
             }}
           >
-            <DiffViewer
-              hunks={simpleHunks}
-              filePath="test.ts"
-              splitView={false}
-            />
+            <DiffViewer hunks={hunks} filePath={filePath} splitView={false} />
           </div>
         )
-      }
+      },
+    })
+    app = createTestApp(Comp)
+    return app.renderer
+  }
 
-      testRoot.render(<UnifiedSimple />)
-
-      // Verify key text content is present
-      const allText = testRoot.renderer.getAllText()
-      // Line numbers and code should be present
+  describe("unified view", () => {
+    it("renders a simple unified diff with syntax highlighting", () => {
+      const renderer = mountDiff(simpleHunks, "test.ts")
+      const allText = renderer.getAllText()
       expect(allText.some((t: string) => t.includes("const"))).toBe(true)
 
-      const path = `${SCREENSHOT_DIR}/gpuix-diff-unified-simple.png`
+      const path = `${SCREENSHOT_DIR}/gpuiv-diff-unified-simple.png`
       if (fs.existsSync(path)) fs.unlinkSync(path)
-      testRoot.renderer.captureScreenshot(path)
+      renderer.captureScreenshot(path)
       expect(fs.existsSync(path)).toBe(true)
       expect(fs.statSync(path).size).toBeGreaterThan(0)
     })
 
     it("renders multi-hunk diff with hunk separators", () => {
-      function UnifiedMultiHunk() {
-        return (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              backgroundColor: DIFF_BG,
-              overflow: "scroll",
-            }}
-          >
-            <DiffViewer
-              hunks={multiHunkPatch}
-              filePath="counter.tsx"
-              splitView={false}
-            />
-          </div>
-        )
-      }
-
-      testRoot.render(<UnifiedMultiHunk />)
-
-      const allText = testRoot.renderer.getAllText()
-      // Should contain both hunks' content
+      const renderer = mountDiff(multiHunkPatch, "counter.tsx")
+      const allText = renderer.getAllText()
       expect(allText.some((t: string) => t.includes("import"))).toBe(true)
       expect(allText.some((t: string) => t.includes("button"))).toBe(true)
-      // Should have hunk separator
       expect(allText.some((t: string) => t.includes("..."))).toBe(true)
 
-      const path = `${SCREENSHOT_DIR}/gpuix-diff-unified-multi.png`
+      const path = `${SCREENSHOT_DIR}/gpuiv-diff-unified-multi.png`
       if (fs.existsSync(path)) fs.unlinkSync(path)
-      testRoot.renderer.captureScreenshot(path)
+      renderer.captureScreenshot(path)
       expect(fs.existsSync(path)).toBe(true)
       expect(fs.statSync(path).size).toBeGreaterThan(0)
     })
@@ -208,62 +185,55 @@ describeNative("diff viewer", () => {
 
   describe("split view", () => {
     it("renders split diff with left/right panes", () => {
-      function SplitSimple() {
-        return (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              backgroundColor: DIFF_BG,
-              overflow: "scroll",
-            }}
-          >
-            <DiffViewer
-              hunks={simpleHunks}
-              filePath="test.ts"
-              splitView={true}
-            />
-          </div>
-        )
-      }
-
-      testRoot.render(<SplitSimple />)
-
-      const allText = testRoot.renderer.getAllText()
+      const Comp = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                backgroundColor: DIFF_BG,
+                overflow: "scroll",
+              }}
+            >
+              <DiffViewer hunks={simpleHunks} filePath="test.ts" splitView={true} />
+            </div>
+          )
+        },
+      })
+      app = createTestApp(Comp)
+      const allText = app.renderer.getAllText()
       expect(allText.some((t: string) => t.includes("const"))).toBe(true)
 
-      const path = `${SCREENSHOT_DIR}/gpuix-diff-split-simple.png`
+      const path = `${SCREENSHOT_DIR}/gpuiv-diff-split-simple.png`
       if (fs.existsSync(path)) fs.unlinkSync(path)
-      testRoot.renderer.captureScreenshot(path)
+      app.renderer.captureScreenshot(path)
       expect(fs.existsSync(path)).toBe(true)
       expect(fs.statSync(path).size).toBeGreaterThan(0)
     })
 
     it("renders multi-hunk split diff", () => {
-      function SplitMultiHunk() {
-        return (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              backgroundColor: DIFF_BG,
-              overflow: "scroll",
-            }}
-          >
-            <DiffViewer
-              hunks={multiHunkPatch}
-              filePath="counter.tsx"
-              splitView={true}
-            />
-          </div>
-        )
-      }
+      const Comp = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                backgroundColor: DIFF_BG,
+                overflow: "scroll",
+              }}
+            >
+              <DiffViewer hunks={multiHunkPatch} filePath="counter.tsx" splitView={true} />
+            </div>
+          )
+        },
+      })
+      app = createTestApp(Comp)
 
-      testRoot.render(<SplitMultiHunk />)
-
-      const path = `${SCREENSHOT_DIR}/gpuix-diff-split-multi.png`
+      const path = `${SCREENSHOT_DIR}/gpuiv-diff-split-multi.png`
       if (fs.existsSync(path)) fs.unlinkSync(path)
-      testRoot.renderer.captureScreenshot(path)
+      app.renderer.captureScreenshot(path)
       expect(fs.existsSync(path)).toBe(true)
       expect(fs.statSync(path).size).toBeGreaterThan(0)
     })
@@ -271,80 +241,66 @@ describeNative("diff viewer", () => {
 
   describe("scrolling", () => {
     it("scrolls through a long diff and produces different screenshots", () => {
-      function LongDiff() {
-        // Constrained height so content overflows and scrolling is needed.
-        // Full width fills the canvas, but short height forces scroll.
-        return (
-          <div
-            style={{
-              width: "100%",
-              height: 300,
-              backgroundColor: DIFF_BG,
-              overflow: "scroll",
-            }}
-          >
-            <DiffViewer
-              hunks={longHunk}
-              filePath="utils.ts"
-              splitView={false}
-            />
-          </div>
-        )
-      }
+      const Comp = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{
+                width: "100%",
+                height: 300,
+                backgroundColor: DIFF_BG,
+                overflow: "scroll",
+              }}
+            >
+              <DiffViewer hunks={longHunk} filePath="utils.ts" splitView={false} />
+            </div>
+          )
+        },
+      })
+      app = createTestApp(Comp)
+      const { renderer } = app
 
-      testRoot.render(<LongDiff />)
-
-      const pathBefore = `${SCREENSHOT_DIR}/gpuix-diff-scroll-before.png`
-      const pathAfter = `${SCREENSHOT_DIR}/gpuix-diff-scroll-after.png`
+      const pathBefore = `${SCREENSHOT_DIR}/gpuiv-diff-scroll-before.png`
+      const pathAfter = `${SCREENSHOT_DIR}/gpuiv-diff-scroll-after.png`
       if (fs.existsSync(pathBefore)) fs.unlinkSync(pathBefore)
       if (fs.existsSync(pathAfter)) fs.unlinkSync(pathAfter)
 
-      // Screenshot before scrolling
-      testRoot.renderer.captureScreenshot(pathBefore)
+      renderer.captureScreenshot(pathBefore)
+      renderer.nativeSimulateScrollWheel(450, 150, 0, -200)
+      renderer.captureScreenshot(pathAfter)
 
-      // Scroll down 200px inside the container
-      testRoot.renderer.nativeSimulateScrollWheel(450, 150, 0, -200)
-
-      // Screenshot after scrolling
-      testRoot.renderer.captureScreenshot(pathAfter)
-
-      // Both should exist with content
       expect(fs.existsSync(pathBefore)).toBe(true)
       expect(fs.existsSync(pathAfter)).toBe(true)
       expect(fs.statSync(pathBefore).size).toBeGreaterThan(0)
       expect(fs.statSync(pathAfter).size).toBeGreaterThan(0)
-
-      // Before and after scroll should produce different pixels
-      expect(
-        fs.readFileSync(pathBefore).equals(fs.readFileSync(pathAfter)),
-      ).toBe(false)
+      expect(fs.readFileSync(pathBefore).equals(fs.readFileSync(pathAfter))).toBe(false)
     })
   })
 
   describe("empty state", () => {
     it("renders 'No changes' for empty hunks", () => {
-      function EmptyDiff() {
-        return (
-          <div
-            style={{
-              width: "100%",
-              height: "100%",
-              backgroundColor: DIFF_BG,
-            }}
-          >
-            <DiffViewer hunks={[]} filePath="empty.ts" />
-          </div>
-        )
-      }
-
-      testRoot.render(<EmptyDiff />)
-
-      const allText = testRoot.renderer.getAllText()
+      const Comp = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{
+                width: "100%",
+                height: "100%",
+                backgroundColor: DIFF_BG,
+              }}
+            >
+              <DiffViewer hunks={[]} filePath="empty.ts" />
+            </div>
+          )
+        },
+      })
+      app = createTestApp(Comp)
+      const allText = app.renderer.getAllText()
       expect(allText.some((t: string) => t.includes("No changes"))).toBe(true)
 
-      const path = `${SCREENSHOT_DIR}/gpuix-diff-empty.png`
+      const path = `${SCREENSHOT_DIR}/gpuiv-diff-empty.png`
       if (fs.existsSync(path)) fs.unlinkSync(path)
-      testRoot.renderer.captureScreenshot(path)
+      app.renderer.captureScreenshot(path)
       expect(fs.existsSync(path)).toBe(true)
     })
   })

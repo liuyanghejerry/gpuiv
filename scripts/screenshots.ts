@@ -19,12 +19,11 @@ const OUT = path.join(ROOT, 'docs', 'images')
 /** `[source screenshot, committed name]`, relative to the repo root. */
 const CURATED: [string, string][] = [
   ['examples/screenshots/chat-top.png', 'chat-app.png'],
-  ['packages/react/screenshots/showcase.png', 'showcase.png'],
-  ['packages/react/screenshots/markdown-document.png', 'markdown.png'],
-  ['packages/react/screenshots/code-typescript.png', 'code.png'],
-  ['packages/react/screenshots/diff-multi-file.png', 'diff.png'],
-  ['packages/react/screenshots/selection-after.png', 'selection.png'],
-  ['packages/react/screenshots/metrics-roomy.png', 'metrics.png'],
+  ['examples/screenshots/chat-model-picker.png', 'chat-model-picker.png'],
+  ['examples/screenshots/chat-sidebar-collapsed.png', 'chat-sidebar-collapsed.png'],
+  ['packages/vue/screenshots/showcase.png', 'showcase.png'],
+  ['packages/vue/screenshots/selection-after.png', 'selection.png'],
+  ['packages/vue/screenshots/metrics-roomy.png', 'metrics.png'],
 ]
 
 function run(command: string, args: string[], cwd: string) {
@@ -37,10 +36,7 @@ function run(command: string, args: string[], cwd: string) {
 }
 
 console.log('[screenshots] rendering visual tests')
-run('bun', ['run', 'test', 'showcase'], path.join(ROOT, 'packages', 'react'))
-run('bun', ['run', 'test', 'markdown'], path.join(ROOT, 'packages', 'react'))
-run('bun', ['run', 'test', 'code'], path.join(ROOT, 'packages', 'react'))
-run('bun', ['run', 'test', 'diff-native'], path.join(ROOT, 'packages', 'react'))
+run('bun', ['run', 'test', 'showcase'], path.join(ROOT, 'packages', 'vue'))
 run('bun', ['run', 'test', 'chat'], path.join(ROOT, 'examples'))
 
 fs.mkdirSync(OUT, { recursive: true })

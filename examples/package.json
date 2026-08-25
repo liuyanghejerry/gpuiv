@@ -1,5 +1,5 @@
 {
-  "name": "@gpuix/examples",
+  "name": "@gpuiv/examples",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -11,17 +11,19 @@
     "compile": "bun compile-chat.ts"
   },
   "dependencies": {
-    "@gpuix/react": "workspace:*",
+    "@gpuiv/native": "workspace:*",
+    "@gpuiv/vue": "workspace:*",
     "@kmamal/sdl": "^0.11.12",
     "diff": "^7.0.0",
-    "react": "^19.2.4",
     "safe-mdx": "1.14.0",
-    "shiki": "^3.0.0"
+    "shiki": "^3.0.0",
+    "vue": "^3.5.13"
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",
-    "@types/react": "^19.2.0",
     "tsx": "^4.19.0",
-    "vitest": "^4.0.18"
+    "vitest": "^4.0.18",
+    "@types/node": "^25.3.3",
+    "@types/bun": "^1.2.0"
   }
 }

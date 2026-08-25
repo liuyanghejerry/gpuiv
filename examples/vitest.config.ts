@@ -1,4 +1,4 @@
-import { applyMacCpuThrottleFromEnv } from '@gpuix/react'
+import { applyMacCpuThrottleFromEnv } from '@gpuiv/vue'
 import { defineConfig } from 'vitest/config'
 
 applyMacCpuThrottleFromEnv()

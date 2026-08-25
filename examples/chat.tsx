@@ -1,5 +1,5 @@
 /**
- * A Waku-style desktop app, rendered natively on the GPU.
+ * A Waku-style desktop app, rendered natively on the GPU — Vue 3 + `@gpuiv/vue`.
  *
  * Layout, palette, and chrome follow https://github.com/egoist/waku:
  * transparent titlebar, traffic lights in the sidebar, graphite surfaces,
@@ -9,26 +9,38 @@
  * Slow CPU:  THROTTLE=utility bun --hot chat.tsx
  */
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  cloneVNode,
+  computed,
+  defineComponent,
+  h,
+  ref,
+  watch,
+  type PropType,
+  type Ref,
+  type VNodeChild,
+} from 'vue'
 import {
   applyMacCpuThrottleFromEnv,
+  createApp,
   motion,
-  render,
   Select,
-  VirtualList,
   SelectContent,
   SelectItem,
   SelectLabel,
   SelectTrigger,
   useGpuix,
+  VirtualList,
+  type EventPayload,
+  type SelectItemState,
+  type SelectTriggerState,
   type StyleDesc,
-} from '@gpuix/react'
-import { SafeMdxRenderer } from 'safe-mdx'
+} from '@gpuiv/vue'
 import { mdxParse } from 'safe-mdx/parse'
-import type { Root } from 'mdast'
+import type { Root, RootContent, Table } from 'mdast'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import iconCompose from './assets/icons/compose.svg' with { type: 'file' }
 import iconSearch from './assets/icons/search.svg' with { type: 'file' }
 import iconSidebar from './assets/icons/panel-left.svg' with { type: 'file' }
@@ -126,9 +138,21 @@ const ICONS = {
 
 type IconName = keyof typeof ICONS
 
-function Icon({ name, size = 14, color }: { name: IconName; size?: number; color: string }) {
-  return <svg src={ICONS[name]} style={{ width: size, height: size, flexShrink: 0, color }} />
-}
+const Icon = defineComponent({
+  props: {
+    name: { type: String as PropType<IconName>, required: true },
+    size: { type: Number, default: 14 },
+    color: { type: String, required: true },
+  },
+  setup(props) {
+    return () => (
+      <svg
+        src={ICONS[props.name]}
+        style={{ width: props.size, height: props.size, flexShrink: 0, color: props.color }}
+      />
+    )
+  },
+})
 
 const CHAT_THEME = {
   text: C.text,
@@ -249,6 +273,19 @@ const CONVERSATIONS: Conversation[] = [
   },
 ]
 
+function groupByGroup<T extends { group: string }>(items: T[]): { name: string; items: T[] }[] {
+  const out: { name: string; items: T[] }[] = []
+  for (const item of items) {
+    const last = out[out.length - 1]
+    if (last && last.name === item.group) last.items.push(item)
+    else out.push({ name: item.group, items: [item] })
+  }
+  return out
+}
+
+const CONVERSATION_GROUPS = groupByGroup(CONVERSATIONS)
+const MODEL_GROUPS = groupByGroup(MODELS)
+
 const OVERVIEW = `**Waku** is a native control plane for local coding agents. Rust plus GPUI. One window, no Electron.`
 
 const ARCHITECTURE = `The desktop is an RPC client. The daemon owns provider sessions over a WebSocket.`
@@ -356,328 +393,325 @@ return <SafeMdxRenderer markdown={source} mdast={tree} />
   MDX components also map to ordinary GPUIX React components.
 </Callout>`
 
-function IconButton({
-  icon,
-  onClick,
-  dimmed,
-  size = 14,
-  testId,
-}: {
-  icon: IconName
-  onClick?: () => void
-  dimmed?: boolean
-  size?: number
-  testId?: string
-}) {
-  return (
-    <div
-      testId={testId}
-      style={{
-        width: 26,
-        height: 26,
-        flexShrink: 0,
-        borderRadius: 6,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        cursor: 'pointer',
-        opacity: dimmed ? 0.35 : 1,
-        hover: dimmed ? undefined : { backgroundColor: C.overlay },
-        active: dimmed ? undefined : { backgroundColor: C.overlayStrong },
-      }}
-      onClick={onClick}
-    >
-      <Icon name={icon} size={size} color={C.tertiary} />
-    </div>
-  )
-}
-
-function SidebarAction({ icon, label }: { icon: IconName; label: string }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        height: 32,
-        paddingLeft: 4,
-        paddingRight: 4,
-        borderRadius: 7,
-        cursor: 'pointer',
-        hover: { backgroundColor: C.item },
-        active: { backgroundColor: C.overlayStrong },
-      }}
-    >
+const IconButton = defineComponent({
+  props: {
+    icon: { type: String as PropType<IconName>, required: true },
+    onClick: { type: Function as PropType<() => void>, default: undefined },
+    dimmed: { type: Boolean, default: false },
+    size: { type: Number, default: 14 },
+    testId: { type: String, default: undefined },
+  },
+  setup(props) {
+    return () => (
       <div
+        testId={props.testId}
         style={{
-          width: 20,
-          height: 20,
+          width: 26,
+          height: 26,
           flexShrink: 0,
+          borderRadius: 6,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          cursor: 'pointer',
+          opacity: props.dimmed ? 0.35 : 1,
+          hover: props.dimmed ? undefined : { backgroundColor: C.overlay },
+          active: props.dimmed ? undefined : { backgroundColor: C.overlayStrong },
         }}
+        onClick={props.onClick}
       >
-        <Icon name={icon} size={14} color={C.secondary} />
+        <Icon name={props.icon} size={props.size} color={C.tertiary} />
       </div>
-      <text style={{ fontSize: 13, color: C.secondary }}>{label}</text>
-    </div>
-  )
-}
+    )
+  },
+})
 
-function ConversationRow({
-  conversation,
-  active,
-  onSelect,
-}: {
-  conversation: Conversation
-  active: boolean
-  onSelect: (id: string) => void
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4,
-        paddingLeft: 8,
-        paddingRight: 8,
-        paddingTop: 7,
-        paddingBottom: 7,
-        borderRadius: 7,
-        cursor: 'pointer',
-        backgroundColor: active ? C.item : '#00000000',
-        hover: { backgroundColor: C.item },
-      }}
-      onClick={() => onSelect(conversation.id)}
-    >
-      <text
-        style={{
-          fontSize: 13.5,
-          lineHeight: 18,
-          color: C.text,
-          whiteSpace: 'nowrap',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        {conversation.title}
-      </text>
-      <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-        <Icon name="folder" size={12.5} color={C.tertiary} />
-        <text
-          style={{
-            fontSize: 13,
-            lineHeight: 15,
-            color: C.tertiary,
-            flexGrow: 1,
-            minWidth: 0,
-            whiteSpace: 'nowrap',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {conversation.project}
-        </text>
-        <text style={{ fontSize: 12.5, color: C.ghost, flexShrink: 0 }}>{conversation.time}</text>
-      </div>
-    </div>
-  )
-}
-
-function Sidebar({
-  activeId,
-  onSelect,
-  onCollapse,
-}: {
-  activeId: string
-  onSelect: (id: string) => void
-  onCollapse: () => void
-}) {
-  const groups = useMemo(() => {
-    const out: { name: string; items: Conversation[] }[] = []
-    for (const conversation of CONVERSATIONS) {
-      const last = out[out.length - 1]
-      if (last && last.name === conversation.group) last.items.push(conversation)
-      else out.push({ name: conversation.group, items: [conversation] })
-    }
-    return out
-  }, [])
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        width: SIDEBAR_WIDTH,
-        flexShrink: 0,
-        height: '100%',
-        backgroundColor: C.sidebar,
-        userSelect: 'none',
-      }}
-    >
+const SidebarAction = defineComponent({
+  props: {
+    icon: { type: String as PropType<IconName>, required: true },
+    label: { type: String, required: true },
+  },
+  setup(props) {
+    return () => (
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
           alignItems: 'center',
-          height: TITLEBAR_HEIGHT,
-          flexShrink: 0,
+          gap: 10,
+          height: 32,
+          paddingLeft: 4,
+          paddingRight: 4,
+          borderRadius: 7,
+          cursor: 'pointer',
+          hover: { backgroundColor: C.item },
+          active: { backgroundColor: C.overlayStrong },
         }}
       >
-        <div style={{ width: TRAFFIC_LIGHT_CLEARANCE, height: '100%', flexShrink: 0 }} />
-        <IconButton
-          icon="sidebar"
-          size={16}
-          testId="sidebar-collapse"
-          onClick={onCollapse}
-        />
+        <div
+          style={{
+            width: 20,
+            height: 20,
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Icon name={props.icon} size={14} color={C.secondary} />
+        </div>
+        <text style={{ fontSize: 13, color: C.secondary }}>{props.label}</text>
+      </div>
+    )
+  },
+})
+
+const ConversationRow = defineComponent({
+  props: {
+    conversation: { type: Object as PropType<Conversation>, required: true },
+    active: { type: Boolean, default: false },
+    onSelect: { type: Function as PropType<(id: string) => void>, required: true },
+  },
+  setup(props) {
+    return () => (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          paddingLeft: 8,
+          paddingRight: 8,
+          paddingTop: 7,
+          paddingBottom: 7,
+          borderRadius: 7,
+          cursor: 'pointer',
+          backgroundColor: props.active ? C.item : '#00000000',
+          hover: { backgroundColor: C.item },
+        }}
+        onClick={() => props.onSelect(props.conversation.id)}
+      >
+        <text
+          style={{
+            fontSize: 13.5,
+            lineHeight: 18,
+            color: C.text,
+            whiteSpace: 'nowrap',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {props.conversation.title}
+        </text>
+        <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+          <Icon name="folder" size={12.5} color={C.tertiary} />
+          <text
+            style={{
+              fontSize: 13,
+              lineHeight: 15,
+              color: C.tertiary,
+              flexGrow: 1,
+              minWidth: 0,
+              whiteSpace: 'nowrap',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {props.conversation.project}
+          </text>
+          <text style={{ fontSize: 12.5, color: C.ghost, flexShrink: 0 }}>{props.conversation.time}</text>
+        </div>
+      </div>
+    )
+  },
+})
+
+const Sidebar = defineComponent({
+  props: {
+    activeId: { type: String, required: true },
+    onSelect: { type: Function as PropType<(id: string) => void>, required: true },
+    onCollapse: { type: Function as PropType<() => void>, required: true },
+  },
+  setup(props) {
+    return () => (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          width: SIDEBAR_WIDTH,
+          flexShrink: 0,
+          height: '100%',
+          backgroundColor: C.sidebar,
+          userSelect: 'none',
+        }}
+      >
         <div
           style={{
             display: 'flex',
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 2,
-            marginLeft: 6,
+            height: TITLEBAR_HEIGHT,
+            flexShrink: 0,
           }}
         >
-          <IconButton icon="arrowLeft" dimmed />
-          <IconButton icon="arrowRight" dimmed />
+          <div style={{ width: TRAFFIC_LIGHT_CLEARANCE, height: '100%', flexShrink: 0 }} />
+          <IconButton
+            icon="sidebar"
+            size={16}
+            testId="sidebar-collapse"
+            onClick={props.onCollapse}
+          />
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 2,
+              marginLeft: 6,
+            }}
+          >
+            <IconButton icon="arrowLeft" dimmed />
+            <IconButton icon="arrowRight" dimmed />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', paddingLeft: 10, paddingRight: 10 }}>
+          <SidebarAction icon="compose" label="New Task" />
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            flexGrow: 1,
+            minHeight: 0,
+            overflowY: 'scroll',
+            paddingLeft: 10,
+            paddingRight: 10,
+          }}
+        >
+          <div style={{ paddingBottom: 6 }}>
+            <SidebarAction icon="search" label="Search" />
+          </div>
+          {CONVERSATION_GROUPS.map((group, groupIndex) => (
+            <div
+              key={group.name}
+              style={{ display: 'flex', flexDirection: 'column', paddingBottom: 10 }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  height: 28,
+                  paddingLeft: 8,
+                  paddingRight: 8,
+                }}
+              >
+                <text
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: C.secondary,
+                    flexGrow: 1,
+                    minWidth: 0,
+                  }}
+                >
+                  {group.name}
+                </text>
+                {groupIndex === 0 && <Icon name="listFilter" size={14} color={C.secondary} />}
+              </div>
+              {group.items.map((conversation) => (
+                <ConversationRow
+                  key={conversation.id}
+                  conversation={conversation}
+                  active={conversation.id === props.activeId}
+                  onSelect={props.onSelect}
+                />
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            height: 40,
+            flexShrink: 0,
+            paddingLeft: 10,
+            paddingRight: 10,
+          }}
+        >
+          <IconButton icon="settings" />
         </div>
       </div>
+    )
+  },
+})
 
-      <div style={{ display: 'flex', flexDirection: 'column', paddingLeft: 10, paddingRight: 10 }}>
-        <SidebarAction icon="compose" label="New Task" />
-      </div>
-
+const UserTurn = defineComponent({
+  props: { text: { type: String, required: true } },
+  setup(props) {
+    return () => (
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
-          flexGrow: 1,
-          minHeight: 0,
-          overflowY: 'scroll',
-          paddingLeft: 10,
-          paddingRight: 10,
+          alignItems: 'flex-end',
+          width: '100%',
         }}
       >
-        <div style={{ paddingBottom: 6 }}>
-          <SidebarAction icon="search" label="Search" />
+        <div
+          style={{
+            maxWidth: 540,
+            backgroundColor: C.raised,
+            borderRadius: 12,
+            paddingTop: 8,
+            paddingBottom: 8,
+            paddingLeft: 12,
+            paddingRight: 12,
+          }}
+        >
+          <text style={{ fontSize: 14, lineHeight: 20, color: C.text }}>{props.text}</text>
         </div>
-        {groups.map((group, groupIndex) => (
-          <div
-            key={group.name}
-            style={{ display: 'flex', flexDirection: 'column', paddingBottom: 10 }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'row',
-                alignItems: 'center',
-                height: 28,
-                paddingLeft: 8,
-                paddingRight: 8,
-              }}
-            >
-              <text
-                style={{
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: C.secondary,
-                  flexGrow: 1,
-                  minWidth: 0,
-                }}
-              >
-                {group.name}
-              </text>
-              {groupIndex === 0 && <Icon name="listFilter" size={14} color={C.secondary} />}
-            </div>
-            {group.items.map((conversation) => (
-              <ConversationRow
-                key={conversation.id}
-                conversation={conversation}
-                active={conversation.id === activeId}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-        ))}
       </div>
+    )
+  },
+})
 
+const WorkedFor = defineComponent({
+  props: { duration: { type: String, required: true } },
+  setup(props) {
+    return () => (
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
           alignItems: 'center',
-          height: 40,
-          flexShrink: 0,
-          paddingLeft: 10,
-          paddingRight: 10,
+          gap: 10,
+          height: 24,
+          width: '100%',
         }}
       >
-        <IconButton icon="settings" />
+        <div style={{ height: 1, flexGrow: 1, backgroundColor: C.border }} />
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 5,
+            flexShrink: 0,
+          }}
+        >
+          <text style={{ fontSize: 13.5, lineHeight: 18, fontWeight: 500, color: C.tertiary }}>
+            {props.duration}
+          </text>
+          <Icon name="chevronRight" size={11.5} color={C.tertiary} />
+        </div>
+        <div style={{ height: 1, flexGrow: 1, backgroundColor: C.border }} />
       </div>
-    </div>
-  )
-}
-
-function UserTurn({ text }: { text: string }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-end',
-        width: '100%',
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 540,
-          backgroundColor: C.raised,
-          borderRadius: 12,
-          paddingTop: 8,
-          paddingBottom: 8,
-          paddingLeft: 12,
-          paddingRight: 12,
-        }}
-      >
-        <text style={{ fontSize: 14, lineHeight: 20, color: C.text }}>{text}</text>
-      </div>
-    </div>
-  )
-}
-
-function WorkedFor({ duration }: { duration: string }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        height: 24,
-        width: '100%',
-      }}
-    >
-      <div style={{ height: 1, flexGrow: 1, backgroundColor: C.border }} />
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'row',
-          alignItems: 'center',
-          gap: 5,
-          flexShrink: 0,
-        }}
-      >
-        <text style={{ fontSize: 13.5, lineHeight: 18, fontWeight: 500, color: C.tertiary }}>
-          {duration}
-        </text>
-        <Icon name="chevronRight" size={11.5} color={C.tertiary} />
-      </div>
-      <div style={{ height: 1, flexGrow: 1, backgroundColor: C.border }} />
-    </div>
-  )
-}
+    )
+  },
+})
 
 const ROW_INNER_STYLE = { width: CONTENT_MAX_WIDTH, maxWidth: '100%' } as const
 const ROW_STYLE = {
@@ -694,22 +728,29 @@ const ROW_STYLE_FIRST = { ...ROW_STYLE, paddingTop: 22 } as const
 const ROW_STYLE_LAST = { ...ROW_STYLE, paddingBottom: 22 } as const
 const ROW_STYLE_ONLY = { ...ROW_STYLE, paddingTop: 22, paddingBottom: 22 } as const
 
-function TranscriptRow({
-  children,
-  first,
-  last,
-}: {
-  children: React.ReactNode
-  first?: boolean
-  last?: boolean
-}) {
-  const style = first && last ? ROW_STYLE_ONLY : first ? ROW_STYLE_FIRST : last ? ROW_STYLE_LAST : ROW_STYLE
-  return (
-    <div style={style}>
-      <div style={ROW_INNER_STYLE}>{children}</div>
-    </div>
-  )
-}
+const TranscriptRow = defineComponent({
+  props: {
+    first: { type: Boolean, default: false },
+    last: { type: Boolean, default: false },
+  },
+  setup(props, { slots }) {
+    return () => {
+      const style =
+        props.first && props.last
+          ? ROW_STYLE_ONLY
+          : props.first
+            ? ROW_STYLE_FIRST
+            : props.last
+              ? ROW_STYLE_LAST
+              : ROW_STYLE
+      return (
+        <div style={style}>
+          <div style={ROW_INNER_STYLE}>{slots.default?.()}</div>
+        </div>
+      )
+    }
+  },
+})
 
 function expandTurns(count: number): Turn[] {
   if (count <= TURNS.length) return TURNS
@@ -720,115 +761,121 @@ function expandTurns(count: number): Turn[] {
   return out
 }
 
-const Transcript = memo(function Transcript({
-  turns,
-  includeSafeMdx = false,
-  listRef,
-}: {
-  turns: Turn[]
-  includeSafeMdx?: boolean
-  listRef?: React.Ref<{ id: number }>
-}) {
-  const extra = includeSafeMdx ? 1 : 0
-  return (
-    <VirtualList
-      ref={listRef}
-      itemCount={turns.length + extra}
-      overdraw={240}
-      estimatedItemHeight={220}
-      style={{ flexGrow: 1, minHeight: 0, width: '100%' }}
-      renderItem={(index) => {
-        if (includeSafeMdx && index === 0) {
-          return (
-            <TranscriptRow key="safemdx" first>
-              <UserTurn text="Can Markdown be composed as normal React elements instead?" />
-              <SafeMdxContent source={SAFE_MDX_STRESS} />
-            </TranscriptRow>
-          )
-        }
-        const turnIndex = index - extra
-        const turn = turns[turnIndex]
-        if (!turn) return null
-        return (
-          <TranscriptRow
-            key={turnIndex}
-            first={!includeSafeMdx && turnIndex === 0}
-            last={turnIndex === turns.length - 1}
-          >
-            {turn.kind === 'user' && <UserTurn text={turn.text} />}
-            {turn.kind === 'fold' && <WorkedFor duration={turn.duration} />}
-            {turn.kind === 'markdown' && <markdown source={turn.source} theme={CHAT_THEME} />}
-            {turn.kind === 'code' && (
-              <code code={turn.source} language={turn.language} showLineNumbers theme={CHAT_THEME} />
-            )}
-            {turn.kind === 'diff' && <diff patch={turn.patch} wordDiff theme={CHAT_THEME} />}
-          </TranscriptRow>
-        )
-      }}
-    />
-  )
+interface ListHandle {
+  /** The mounted host element (the native `virtual-list` node). */
+  $el: { id: number }
+}
+
+// `memo(Transcript)` — Vue's prop comparison skips the update when `turns`
+// keeps the same reference, which is exactly what the memo did in React.
+const Transcript = defineComponent({
+  props: {
+    turns: { type: Array as () => Turn[], required: true },
+    includeSafeMdx: { type: Boolean, default: false },
+    listRef: { type: Object as PropType<Ref<ListHandle | null>>, default: null },
+  },
+  setup(props) {
+    return () => {
+      const extra = props.includeSafeMdx ? 1 : 0
+      return (
+        <VirtualList
+          ref={props.listRef}
+          itemCount={props.turns.length + extra}
+          overdraw={240}
+          estimatedItemHeight={220}
+          style={{ flexGrow: 1, minHeight: 0, width: '100%' }}
+          renderItem={(index) => {
+            if (props.includeSafeMdx && index === 0) {
+              return (
+                <TranscriptRow key="safemdx" first>
+                  <UserTurn text="Can Markdown be composed as normal React elements instead?" />
+                  <SafeMdxContent source={SAFE_MDX_STRESS} />
+                </TranscriptRow>
+              )
+            }
+            const turnIndex = index - extra
+            const turn = props.turns[turnIndex]
+            if (!turn) return null
+            return (
+              <TranscriptRow
+                key={turnIndex}
+                first={!props.includeSafeMdx && turnIndex === 0}
+                last={turnIndex === props.turns.length - 1}
+              >
+                {turn.kind === 'user' && <UserTurn text={turn.text} />}
+                {turn.kind === 'fold' && <WorkedFor duration={turn.duration} />}
+                {turn.kind === 'markdown' && <markdown source={turn.source} theme={CHAT_THEME} />}
+                {turn.kind === 'code' && (
+                  <code code={turn.source} language={turn.language} showLineNumbers theme={CHAT_THEME} />
+                )}
+                {turn.kind === 'diff' && <diff patch={turn.patch} wordDiff theme={CHAT_THEME} />}
+              </TranscriptRow>
+            )
+          }}
+        />
+      )
+    }
+  },
 })
 
-function Header({
-  collapsed,
-  onExpand,
-  title,
-  turnCount,
-}: {
-  collapsed: boolean
-  onExpand: () => void
-  title: string
-  turnCount: number
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        height: TITLEBAR_HEIGHT,
-        flexShrink: 0,
-        paddingLeft: collapsed ? 0 : 14,
-        paddingRight: 14,
-        userSelect: 'none',
-      }}
-    >
-      {collapsed && (
-        <>
-          <div style={{ width: TRAFFIC_LIGHT_CLEARANCE - 8, height: '100%', flexShrink: 0 }} />
-          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <IconButton icon="sidebar" testId="sidebar-expand" onClick={onExpand} />
-            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-              <IconButton icon="arrowLeft" dimmed />
-              <IconButton icon="arrowRight" dimmed />
-            </div>
-          </div>
-        </>
-      )}
-      <text
+const Header = defineComponent({
+  props: {
+    collapsed: { type: Boolean, required: true },
+    onExpand: { type: Function as PropType<() => void>, required: true },
+    title: { type: String, required: true },
+    turnCount: { type: Number, required: true },
+  },
+  setup(props) {
+    return () => (
+      <div
         style={{
-          fontSize: 13,
-          fontWeight: 500,
-          color: C.text,
-          whiteSpace: 'nowrap',
-          textOverflow: 'ellipsis',
-          minWidth: 0,
-          flexShrink: 1,
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 8,
+          height: TITLEBAR_HEIGHT,
+          flexShrink: 0,
+          paddingLeft: props.collapsed ? 0 : 14,
+          paddingRight: 14,
+          userSelect: 'none',
         }}
       >
-        {title}
-      </text>
-      {turnCount > TURNS.length && (
-        <text style={{ fontSize: 12, fontWeight: 500, color: C.tertiary, flexShrink: 0 }}>
-          {turnCount.toLocaleString('en-US')} messages
+        {props.collapsed && (
+          <>
+            <div style={{ width: TRAFFIC_LIGHT_CLEARANCE - 8, height: '100%', flexShrink: 0 }} />
+            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <IconButton icon="sidebar" testId="sidebar-expand" onClick={props.onExpand} />
+              <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
+                <IconButton icon="arrowLeft" dimmed />
+                <IconButton icon="arrowRight" dimmed />
+              </div>
+            </div>
+          </>
+        )}
+        <text
+          style={{
+            fontSize: 13,
+            fontWeight: 500,
+            color: C.text,
+            whiteSpace: 'nowrap',
+            textOverflow: 'ellipsis',
+            minWidth: 0,
+            flexShrink: 1,
+          }}
+        >
+          {props.title}
         </text>
-      )}
-      <div style={{ flexGrow: 1 }} />
-      <IconButton icon="panelRight" />
-    </div>
-  )
-}
+        {props.turnCount > TURNS.length && (
+          <text style={{ fontSize: 12, fontWeight: 500, color: C.tertiary, flexShrink: 0 }}>
+            {props.turnCount.toLocaleString('en-US')} messages
+          </text>
+        )}
+        <div style={{ flexGrow: 1 }} />
+        <IconButton icon="panelRight" />
+      </div>
+    )
+  },
+})
 
 const MENU = {
   minWidth: 220,
@@ -842,87 +889,347 @@ const MENU = {
   borderRadius: 12,
 } satisfies StyleDesc
 
-function MenuRow({
-  label,
-  description,
-  icon,
-  selected,
-  highlighted,
-  hint,
-}: {
-  label: string
-  description?: string
-  icon?: IconName
-  selected: boolean
-  highlighted: boolean
-  hint?: string
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        width: '100%',
-        paddingTop: description ? 6 : 5,
-        paddingBottom: description ? 6 : 5,
-        paddingLeft: 8,
-        paddingRight: 8,
-        borderRadius: 7,
-        backgroundColor: highlighted ? '#404040' : selected ? '#2C2C2C' : C.raised,
-        hover: { backgroundColor: '#404040' },
-      }}
-    >
-      {icon && <Icon name={icon} size={14} color={C.tertiary} />}
-      <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 }}>
-        <text
+const MenuRow = defineComponent({
+  props: {
+    label: { type: String, required: true },
+    description: { type: String, default: undefined },
+    icon: { type: String as PropType<IconName>, default: undefined },
+    selected: { type: Boolean, required: true },
+    highlighted: { type: Boolean, required: true },
+    hint: { type: String, default: undefined },
+  },
+  setup(props) {
+    return () => (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          gap: 10,
+          width: '100%',
+          paddingTop: props.description ? 6 : 5,
+          paddingBottom: props.description ? 6 : 5,
+          paddingLeft: 8,
+          paddingRight: 8,
+          borderRadius: 7,
+          backgroundColor: props.highlighted ? '#404040' : props.selected ? '#2C2C2C' : C.raised,
+          hover: { backgroundColor: '#404040' },
+        }}
+      >
+        {props.icon && <Icon name={props.icon} size={14} color={C.tertiary} />}
+        <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0 }}>
+          <text
+            style={{
+              fontSize: 12.5,
+              fontWeight: props.selected ? 600 : 500,
+              color: C.text,
+              whiteSpace: 'nowrap',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {props.label}
+          </text>
+          {props.description && (
+            <text style={{ fontSize: 12.5, lineHeight: 14, color: C.tertiary, paddingTop: 2 }}>
+              {props.description}
+            </text>
+          )}
+        </div>
+        {props.hint && <text style={{ fontSize: 11.5, color: C.ghost, flexShrink: 0 }}>{props.hint}</text>}
+        {props.selected && <Icon name="check" size={11} color={C.tertiary} />}
+      </div>
+    )
+  },
+})
+
+const ChipSelect = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+    icon: { type: String as PropType<IconName>, required: true },
+    label: { type: String, required: true },
+    caret: { type: Boolean, default: true },
+    accent: { type: Boolean, default: false },
+    menuWidth: { type: Number, default: undefined },
+  },
+  setup(props, { slots }) {
+    return () => (
+      <Select value={props.value} onValueChange={props.onChange} style={{ flexShrink: 0 }}>
+        <div style={{ position: 'relative', display: 'flex' }}>
+          <SelectTrigger
+            style={(state: SelectTriggerState) => ({
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              height: 26,
+              paddingLeft: 7,
+              paddingRight: 7,
+              borderRadius: 6,
+              cursor: 'pointer',
+              backgroundColor: state.open ? C.overlay : '#00000000',
+              hover: { backgroundColor: C.overlay },
+            })}
+          >
+            <Icon name={props.icon} size={12} color={props.accent ? C.accent : C.tertiary} />
+            <text
+              style={{
+                fontSize: 13,
+                lineHeight: 16,
+                color: props.accent ? C.accent : C.secondary,
+                whiteSpace: 'nowrap',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {props.label}
+            </text>
+            {props.caret && <Icon name="chevronDown" size={10.5} color={C.ghost} />}
+          </SelectTrigger>
+          <SelectContent side="top" sideOffset={4} style={{ ...MENU, minWidth: props.menuWidth ?? 220 }}>
+            {slots.default?.()}
+          </SelectContent>
+        </div>
+      </Select>
+    )
+  },
+})
+
+const ModelPicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    const selected = computed(() => MODELS.find((model) => model.id === props.value) ?? MODELS[0])
+    return () => (
+      <ChipSelect
+        value={props.value}
+        onChange={props.onChange}
+        icon={selected.value.icon}
+        label={selected.value.label}
+      >
+        {MODEL_GROUPS.map((group, index) => (
+          <div key={group.name} style={{ display: 'flex', flexDirection: 'column' }}>
+            {index > 0 && (
+              <div style={{ height: 1, backgroundColor: C.border, marginTop: 4, marginBottom: 4 }} />
+            )}
+            <SelectLabel
+              style={{
+                height: 22,
+                paddingLeft: 8,
+                paddingRight: 8,
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</text>
+            </SelectLabel>
+            {group.items.map((model) => (
+              <SelectItem key={model.id} value={model.id} textValue={model.label}>
+                {(state: SelectItemState) => (
+                  <MenuRow
+                    label={model.label}
+                    icon={model.icon}
+                    selected={state.selected}
+                    highlighted={state.highlighted}
+                  />
+                )}
+              </SelectItem>
+            ))}
+          </div>
+        ))}
+      </ChipSelect>
+    )
+  },
+})
+
+const ReasoningPicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    const selected = computed(() => REASONING.find((option) => option.id === props.value) ?? REASONING[0])
+    return () => (
+      <ChipSelect
+        value={props.value}
+        onChange={props.onChange}
+        icon={props.value === 'low' ? 'zap' : 'sparkle'}
+        label={selected.value.label}
+        caret={false}
+      >
+        <SelectLabel
           style={{
-            fontSize: 12.5,
-            fontWeight: selected ? 600 : 500,
-            color: C.text,
-            whiteSpace: 'nowrap',
-            textOverflow: 'ellipsis',
+            height: 22,
+            paddingLeft: 8,
+            display: 'flex',
+            alignItems: 'center',
           }}
         >
-          {label}
-        </text>
-        {description && (
-          <text style={{ fontSize: 12.5, lineHeight: 14, color: C.tertiary, paddingTop: 2 }}>
-            {description}
-          </text>
-        )}
-      </div>
-      {hint && <text style={{ fontSize: 11.5, color: C.ghost, flexShrink: 0 }}>{hint}</text>}
-      {selected && <Icon name="check" size={11} color={C.tertiary} />}
-    </div>
-  )
-}
+          <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</text>
+        </SelectLabel>
+        {REASONING.map((option) => (
+          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+            {(state: SelectItemState) => (
+              <MenuRow
+                label={option.label}
+                hint={option.hint}
+                selected={state.selected}
+                highlighted={state.highlighted}
+              />
+            )}
+          </SelectItem>
+        ))}
+      </ChipSelect>
+    )
+  },
+})
 
-function ChipSelect({
-  value,
-  onChange,
-  icon,
-  label,
-  caret = true,
-  accent,
-  menuWidth,
-  children,
-}: {
-  value: string
-  onChange: (next: string) => void
-  icon: IconName
-  label: string
-  caret?: boolean
-  accent?: boolean
-  menuWidth?: number
-  children: React.ReactNode
-}) {
-  return (
-    <Select value={value} onValueChange={onChange} style={{ flexShrink: 0 }}>
-      <div style={{ position: 'relative', display: 'flex' }}>
-        <SelectTrigger
-          style={(state) => ({
+const AccessPicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    const selected = computed(() => ACCESS.find((option) => option.id === props.value) ?? ACCESS[3])
+    return () => (
+      <ChipSelect
+        value={props.value}
+        onChange={props.onChange}
+        icon={selected.value.icon}
+        label={selected.value.label}
+        caret={false}
+        menuWidth={288}
+      >
+        {ACCESS.map((option) => (
+          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+            {(state: SelectItemState) => (
+              <MenuRow
+                label={option.label}
+                description={option.description}
+                icon={option.icon}
+                selected={state.selected}
+                highlighted={state.highlighted}
+              />
+            )}
+          </SelectItem>
+        ))}
+      </ChipSelect>
+    )
+  },
+})
+
+const ProjectPicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    const selected = computed(() => PROJECTS.find((option) => option.id === props.value) ?? PROJECTS[0])
+    return () => (
+      <ChipSelect
+        value={props.value}
+        onChange={props.onChange}
+        icon="folder"
+        label={selected.value.label}
+        caret={false}
+      >
+        {PROJECTS.map((option) => (
+          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+            {(state: SelectItemState) => (
+              <MenuRow
+                label={option.label}
+                icon="folder"
+                selected={state.selected}
+                highlighted={state.highlighted}
+              />
+            )}
+          </SelectItem>
+        ))}
+      </ChipSelect>
+    )
+  },
+})
+
+const WorkspacePicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    const selected = computed(() => WORKSPACES.find((option) => option.id === props.value) ?? WORKSPACES[0])
+    return () => (
+      <ChipSelect
+        value={props.value}
+        onChange={props.onChange}
+        icon={selected.value.icon}
+        label={selected.value.label}
+        caret={false}
+      >
+        <SelectLabel
+          style={{
+            height: 22,
+            paddingLeft: 8,
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</text>
+        </SelectLabel>
+        {WORKSPACES.map((option) => (
+          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+            {(state: SelectItemState) => (
+              <MenuRow
+                label={option.label}
+                icon={option.icon}
+                selected={state.selected}
+                highlighted={state.highlighted}
+              />
+            )}
+          </SelectItem>
+        ))}
+      </ChipSelect>
+    )
+  },
+})
+
+const BranchPicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    const selected = computed(() => BRANCHES.find((option) => option.id === props.value) ?? BRANCHES[0])
+    return () => (
+      <ChipSelect value={props.value} onChange={props.onChange} icon="gitBranch" label={selected.value.label}>
+        {BRANCHES.map((option) => (
+          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+            {(state: SelectItemState) => (
+              <MenuRow
+                label={option.label}
+                icon="gitBranch"
+                selected={state.selected}
+                highlighted={state.highlighted}
+              />
+            )}
+          </SelectItem>
+        ))}
+      </ChipSelect>
+    )
+  },
+})
+
+const ModeToggle = defineComponent({
+  props: {
+    value: { type: String as PropType<'build' | 'plan'>, required: true },
+    onChange: { type: Function as PropType<(next: 'build' | 'plan') => void>, required: true },
+  },
+  setup(props) {
+    return () => {
+      const plan = props.value === 'plan'
+      return (
+        <div
+          style={{
             display: 'flex',
             flexDirection: 'row',
             alignItems: 'center',
@@ -932,595 +1239,319 @@ function ChipSelect({
             paddingRight: 7,
             borderRadius: 6,
             cursor: 'pointer',
-            backgroundColor: state.open ? C.overlay : '#00000000',
             hover: { backgroundColor: C.overlay },
-          })}
+          }}
+          onClick={() => props.onChange(plan ? 'build' : 'plan')}
         >
-          <Icon name={icon} size={12} color={accent ? C.accent : C.tertiary} />
-          <text
-            style={{
-              fontSize: 13,
-              lineHeight: 16,
-              color: accent ? C.accent : C.secondary,
-              whiteSpace: 'nowrap',
-              textOverflow: 'ellipsis',
-            }}
-          >
-            {label}
+          <Icon name={plan ? 'list' : 'wrench'} size={12} color={plan ? C.accent : C.tertiary} />
+          <text style={{ fontSize: 13, lineHeight: 16, color: plan ? C.accent : C.secondary }}>
+            {plan ? 'Plan' : 'Build'}
           </text>
-          {caret && <Icon name="chevronDown" size={10.5} color={C.ghost} />}
-        </SelectTrigger>
-        <SelectContent side="top" sideOffset={4} style={{ ...MENU, minWidth: menuWidth ?? 220 }}>
-          {children}
-        </SelectContent>
-      </div>
-    </Select>
-  )
-}
-
-function ModelPicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
-  const selected = MODELS.find((model) => model.id === value) ?? MODELS[0]
-  const groups = useMemo(() => {
-    const out: { name: string; items: typeof MODELS }[] = []
-    for (const model of MODELS) {
-      const last = out[out.length - 1]
-      if (last && last.name === model.group) last.items.push(model)
-      else out.push({ name: model.group, items: [model] })
+        </div>
+      )
     }
-    return out
-  }, [])
+  },
+})
 
-  return (
-    <ChipSelect value={value} onChange={onChange} icon={selected.icon} label={selected.label}>
-      {groups.map((group, index) => (
-        <div key={group.name} style={{ display: 'flex', flexDirection: 'column' }}>
-          {index > 0 && (
-            <div style={{ height: 1, backgroundColor: C.border, marginTop: 4, marginBottom: 4 }} />
-          )}
-          <SelectLabel
+const Composer = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+    onSend: { type: Function as PropType<(text: string) => void>, required: true },
+    model: { type: String, required: true },
+    onModelChange: { type: Function as PropType<(next: string) => void>, required: true },
+    reasoning: { type: String, required: true },
+    onReasoningChange: { type: Function as PropType<(next: string) => void>, required: true },
+    access: { type: String, required: true },
+    onAccessChange: { type: Function as PropType<(next: string) => void>, required: true },
+    mode: { type: String as PropType<'build' | 'plan'>, required: true },
+    onModeChange: { type: Function as PropType<(next: 'build' | 'plan') => void>, required: true },
+  },
+  setup(props) {
+    const send = (text: string) => {
+      const next = text.trim()
+      if (!next) return
+      props.onSend(next)
+    }
+    return () => {
+      const ready = props.value.trim().length > 0
+      return (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            flexShrink: 0,
+            paddingLeft: 20,
+            paddingRight: 20,
+            overflow: 'visible',
+            userSelect: 'none',
+          }}
+        >
+          <div
             style={{
-              height: 22,
-              paddingLeft: 8,
-              paddingRight: 8,
               display: 'flex',
-              alignItems: 'center',
+              flexDirection: 'column',
+              width: '100%',
+              maxWidth: CONTENT_MAX_WIDTH,
+              overflow: 'visible',
+              backgroundColor: C.composer,
+              borderRadius: 13,
+              borderWidth: 1,
+              borderColor: C.border,
+              paddingTop: 10,
+              paddingBottom: 10,
             }}
           >
-            <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</text>
-          </SelectLabel>
-          {group.items.map((model) => (
-            <SelectItem key={model.id} value={model.id} textValue={model.label}>
-              {(state) => (
-                <MenuRow
-                  label={model.label}
-                  icon={model.icon}
-                  selected={state.selected}
-                  highlighted={state.highlighted}
-                />
-              )}
-            </SelectItem>
-          ))}
+            <textarea
+              testId="composer"
+              value={props.value}
+              placeholder="Do anything..."
+              minRows={1}
+              maxRows={3}
+              autoFocus
+              theme={CHAT_THEME}
+              style={{
+                width: '100%',
+                minWidth: 0,
+                fontSize: 14,
+                lineHeight: 20,
+                color: C.text,
+                backgroundColor: '#00000000',
+                borderWidth: 0,
+                paddingLeft: 10,
+                paddingRight: 10,
+              }}
+              onChange={(event: EventPayload) => props.onChange(event.value ?? '')}
+              onSubmit={(event: EventPayload) => send(event.value ?? props.value)}
+            />
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 4,
+                marginTop: 8,
+                paddingLeft: 10,
+                paddingRight: 10,
+              }}
+            >
+              <ModelPicker value={props.model} onChange={props.onModelChange} />
+              <ReasoningPicker value={props.reasoning} onChange={props.onReasoningChange} />
+              <AccessPicker value={props.access} onChange={props.onAccessChange} />
+              <ModeToggle value={props.mode} onChange={props.onModeChange} />
+              <div style={{ flexGrow: 1 }} />
+              <div
+                testId="send"
+                style={{
+                  width: 26,
+                  height: 26,
+                  borderRadius: 13,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: ready ? 'pointer' : undefined,
+                  backgroundColor: ready ? C.inverse : C.overlayStrong,
+                  hover: ready ? { opacity: 0.9 } : undefined,
+                }}
+                onClick={() => send(props.value)}
+              >
+                <Icon name="send" size={16} color={ready ? C.onInverse : C.ghost} />
+              </div>
+            </div>
+          </div>
         </div>
-      ))}
-    </ChipSelect>
-  )
-}
+      )
+    }
+  },
+})
 
-function ReasoningPicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
-  const selected = REASONING.find((option) => option.id === value) ?? REASONING[0]
-  return (
-    <ChipSelect
-      value={value}
-      onChange={onChange}
-      icon={value === 'low' ? 'zap' : 'sparkle'}
-      label={selected.label}
-      caret={false}
-    >
-      <SelectLabel
-        style={{
-          height: 22,
-          paddingLeft: 8,
-          display: 'flex',
-          alignItems: 'center',
-        }}
-      >
-        <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</text>
-      </SelectLabel>
-      {REASONING.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
-          {(state) => (
-            <MenuRow
-              label={option.label}
-              hint={option.hint}
-              selected={state.selected}
-              highlighted={state.highlighted}
-            />
-          )}
-        </SelectItem>
-      ))}
-    </ChipSelect>
-  )
-}
-
-function AccessPicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
-  const selected = ACCESS.find((option) => option.id === value) ?? ACCESS[3]
-  return (
-    <ChipSelect
-      value={value}
-      onChange={onChange}
-      icon={selected.icon}
-      label={selected.label}
-      caret={false}
-      menuWidth={288}
-    >
-      {ACCESS.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
-          {(state) => (
-            <MenuRow
-              label={option.label}
-              description={option.description}
-              icon={option.icon}
-              selected={state.selected}
-              highlighted={state.highlighted}
-            />
-          )}
-        </SelectItem>
-      ))}
-    </ChipSelect>
-  )
-}
-
-function ProjectPicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
-  const selected = PROJECTS.find((option) => option.id === value) ?? PROJECTS[0]
-  return (
-    <ChipSelect
-      value={value}
-      onChange={onChange}
-      icon="folder"
-      label={selected.label}
-      caret={false}
-    >
-      {PROJECTS.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
-          {(state) => (
-            <MenuRow
-              label={option.label}
-              icon="folder"
-              selected={state.selected}
-              highlighted={state.highlighted}
-            />
-          )}
-        </SelectItem>
-      ))}
-    </ChipSelect>
-  )
-}
-
-function WorkspacePicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
-  const selected = WORKSPACES.find((option) => option.id === value) ?? WORKSPACES[0]
-  return (
-    <ChipSelect
-      value={value}
-      onChange={onChange}
-      icon={selected.icon}
-      label={selected.label}
-      caret={false}
-    >
-      <SelectLabel
-        style={{
-          height: 22,
-          paddingLeft: 8,
-          display: 'flex',
-          alignItems: 'center',
-        }}
-      >
-        <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</text>
-      </SelectLabel>
-      {WORKSPACES.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
-          {(state) => (
-            <MenuRow
-              label={option.label}
-              icon={option.icon}
-              selected={state.selected}
-              highlighted={state.highlighted}
-            />
-          )}
-        </SelectItem>
-      ))}
-    </ChipSelect>
-  )
-}
-
-function BranchPicker({ value, onChange }: { value: string; onChange: (next: string) => void }) {
-  const selected = BRANCHES.find((option) => option.id === value) ?? BRANCHES[0]
-  return (
-    <ChipSelect value={value} onChange={onChange} icon="gitBranch" label={selected.label}>
-      {BRANCHES.map((option) => (
-        <SelectItem key={option.id} value={option.id} textValue={option.label}>
-          {(state) => (
-            <MenuRow
-              label={option.label}
-              icon="gitBranch"
-              selected={state.selected}
-              highlighted={state.highlighted}
-            />
-          )}
-        </SelectItem>
-      ))}
-    </ChipSelect>
-  )
-}
-
-function ModeToggle({
-  value,
-  onChange,
-}: {
-  value: 'build' | 'plan'
-  onChange: (next: 'build' | 'plan') => void
-}) {
-  const plan = value === 'plan'
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        height: 26,
-        paddingLeft: 7,
-        paddingRight: 7,
-        borderRadius: 6,
-        cursor: 'pointer',
-        hover: { backgroundColor: C.overlay },
-      }}
-      onClick={() => onChange(plan ? 'build' : 'plan')}
-    >
-      <Icon name={plan ? 'list' : 'wrench'} size={12} color={plan ? C.accent : C.tertiary} />
-      <text style={{ fontSize: 13, lineHeight: 16, color: plan ? C.accent : C.secondary }}>
-        {plan ? 'Plan' : 'Build'}
-      </text>
-    </div>
-  )
-}
-
-function Composer({
-  value,
-  onChange,
-  onSend,
-  model,
-  onModelChange,
-  reasoning,
-  onReasoningChange,
-  access,
-  onAccessChange,
-  mode,
-  onModeChange,
-}: {
-  value: string
-  onChange: (next: string) => void
-  onSend: (text: string) => void
-  model: string
-  onModelChange: (next: string) => void
-  reasoning: string
-  onReasoningChange: (next: string) => void
-  access: string
-  onAccessChange: (next: string) => void
-  mode: 'build' | 'plan'
-  onModeChange: (next: 'build' | 'plan') => void
-}) {
-  const ready = value.trim().length > 0
-  const send = (text: string) => {
-    const next = text.trim()
-    if (!next) return
-    onSend(next)
-  }
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        flexShrink: 0,
-        paddingLeft: 20,
-        paddingRight: 20,
-        overflow: 'visible',
-        userSelect: 'none',
-      }}
-    >
+const WorkspaceFooter = defineComponent({
+  props: {
+    project: { type: String, required: true },
+    onProjectChange: { type: Function as PropType<(next: string) => void>, required: true },
+    workspace: { type: String, required: true },
+    onWorkspaceChange: { type: Function as PropType<(next: string) => void>, required: true },
+    branch: { type: String, required: true },
+    onBranchChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    return () => (
       <div
         style={{
           display: 'flex',
           flexDirection: 'column',
-          width: '100%',
-          maxWidth: CONTENT_MAX_WIDTH,
-          overflow: 'visible',
-          backgroundColor: C.composer,
-          borderRadius: 13,
-          borderWidth: 1,
-          borderColor: C.border,
-          paddingTop: 10,
-          paddingBottom: 10,
+          alignItems: 'center',
+          flexShrink: 0,
+          paddingLeft: 20,
+          paddingRight: 20,
+          paddingTop: 4,
+          paddingBottom: 8,
+          userSelect: 'none',
         }}
       >
-        <textarea
-          testId="composer"
-          value={value}
-          placeholder="Do anything..."
-          minRows={1}
-          maxRows={3}
-          autoFocus
-          theme={CHAT_THEME}
-          style={{
-            width: '100%',
-            minWidth: 0,
-            fontSize: 14,
-            lineHeight: 20,
-            color: C.text,
-            backgroundColor: '#00000000',
-            borderWidth: 0,
-            paddingLeft: 10,
-            paddingRight: 10,
-          }}
-          onChange={(event) => onChange(event.value ?? '')}
-          onSubmit={(event) => send(event.value ?? value)}
-        />
         <div
           style={{
             display: 'flex',
             flexDirection: 'row',
             alignItems: 'center',
-            gap: 4,
-            marginTop: 8,
+            gap: 2,
+            width: '100%',
+            maxWidth: CONTENT_MAX_WIDTH,
+            height: 28,
             paddingLeft: 10,
             paddingRight: 10,
           }}
         >
-          <ModelPicker value={model} onChange={onModelChange} />
-          <ReasoningPicker value={reasoning} onChange={onReasoningChange} />
-          <AccessPicker value={access} onChange={onAccessChange} />
-          <ModeToggle value={mode} onChange={onModeChange} />
+          <ProjectPicker value={props.project} onChange={props.onProjectChange} />
+          <WorkspacePicker value={props.workspace} onChange={props.onWorkspaceChange} />
+          {props.project !== 'none' && <BranchPicker value={props.branch} onChange={props.onBranchChange} />}
           <div style={{ flexGrow: 1 }} />
           <div
-            testId="send"
             style={{
-              width: 26,
-              height: 26,
-              borderRadius: 13,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: ready ? 'pointer' : undefined,
-              backgroundColor: ready ? C.inverse : C.overlayStrong,
-              hover: ready ? { opacity: 0.9 } : undefined,
+              width: 8,
+              height: 8,
+              borderRadius: 4,
+              backgroundColor: '#3B82F6',
+              flexShrink: 0,
             }}
-            onClick={() => send(value)}
-          >
-            <Icon name="send" size={16} color={ready ? C.onInverse : C.ghost} />
-          </div>
+          />
         </div>
       </div>
-    </div>
-  )
-}
+    )
+  },
+})
 
-function WorkspaceFooter({
-  project,
-  onProjectChange,
-  workspace,
-  onWorkspaceChange,
-  branch,
-  onBranchChange,
-}: {
-  project: string
-  onProjectChange: (next: string) => void
-  workspace: string
-  onWorkspaceChange: (next: string) => void
-  branch: string
-  onBranchChange: (next: string) => void
-}) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        flexShrink: 0,
-        paddingLeft: 20,
-        paddingRight: 20,
-        paddingTop: 4,
-        paddingBottom: 8,
-        userSelect: 'none',
-      }}
-    >
+const GhostButton = defineComponent({
+  props: {
+    icon: { type: String as PropType<IconName>, required: true },
+    label: { type: String, default: undefined },
+    active: { type: Boolean, default: false },
+    onClick: { type: Function as PropType<() => void>, default: undefined },
+  },
+  setup(props) {
+    return () => {
+      const color = props.active ? C.text : C.ghost
+      return (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            height: 30,
+            paddingLeft: props.label ? 9 : 0,
+            paddingRight: props.label ? 11 : 0,
+            width: props.label ? undefined : 30,
+            justifyContent: 'center',
+            borderRadius: 10,
+            cursor: 'pointer',
+            backgroundColor: props.active ? C.overlayStrong : '#00000000',
+            hover: { backgroundColor: C.overlay },
+          }}
+          onClick={props.onClick}
+        >
+          <Icon name={props.icon} size={16} color={color} />
+          {props.label && <text style={{ fontSize: 12.5, color }}>{props.label}</text>}
+        </div>
+      )
+    }
+  },
+})
+
+const ActionBar = defineComponent({
+  setup() {
+    const copied = ref(false)
+    const feedback = ref<'up' | 'down' | null>(null)
+
+    return () => (
       <div
         style={{
           display: 'flex',
           flexDirection: 'row',
           alignItems: 'center',
-          gap: 2,
-          width: '100%',
-          maxWidth: CONTENT_MAX_WIDTH,
-          height: 28,
-          paddingLeft: 10,
-          paddingRight: 10,
+          gap: 4,
+          paddingTop: 6,
+          marginLeft: -7,
+          userSelect: 'none',
         }}
       >
-        <ProjectPicker value={project} onChange={onProjectChange} />
-        <WorkspacePicker value={workspace} onChange={onWorkspaceChange} />
-        {project !== 'none' && <BranchPicker value={branch} onChange={onBranchChange} />}
-        <div style={{ flexGrow: 1 }} />
-        <div
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            backgroundColor: '#3B82F6',
-            flexShrink: 0,
-          }}
+        <GhostButton
+          icon={copied.value ? 'check' : 'copy'}
+          active={copied.value}
+          onClick={() => (copied.value = !copied.value)}
         />
+        <GhostButton
+          icon="thumbsUp"
+          active={feedback.value === 'up'}
+          onClick={() => (feedback.value = feedback.value === 'up' ? null : 'up')}
+        />
+        <GhostButton
+          icon="thumbsDown"
+          active={feedback.value === 'down'}
+          onClick={() => (feedback.value = feedback.value === 'down' ? null : 'down')}
+        />
+        <GhostButton icon="retry" />
+        <GhostButton icon="share" />
+        <GhostButton icon="more" />
       </div>
-    </div>
-  )
+    )
+  },
+})
+
+// ── safe-mdx rendering ─────────────────────────────────────────────────
+// `SafeMdxRenderer` is a React component and cannot run inside the Vue
+// renderer, so the mdast tree is walked here with the same component map
+// and block structure. `mdxParse` (safe-mdx) still does the parsing.
+
+interface MdxComponentProps {
+  children?: VNodeChild
+  [key: string]: unknown
 }
 
-function GhostButton({
-  icon,
-  label,
-  active,
-  onClick,
-}: {
-  icon: IconName
-  label?: string
-  active?: boolean
-  onClick?: () => void
-}) {
-  const color = active ? C.text : C.ghost
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        height: 30,
-        paddingLeft: label ? 9 : 0,
-        paddingRight: label ? 11 : 0,
-        width: label ? undefined : 30,
-        justifyContent: 'center',
-        borderRadius: 10,
-        cursor: 'pointer',
-        backgroundColor: active ? C.overlayStrong : '#00000000',
-        hover: { backgroundColor: C.overlay },
-      }}
-      onClick={onClick}
-    >
-      <Icon name={icon} size={16} color={color} />
-      {label && <text style={{ fontSize: 12.5, color }}>{label}</text>}
-    </div>
-  )
-}
+const MdxCell = ({ children, header }: MdxComponentProps & { header?: boolean }) => (
+  <div
+    style={{
+      display: 'flex',
+      flexDirection: 'row',
+      flexWrap: 'nowrap',
+      padding: 8,
+      minWidth: 96,
+      flexShrink: 0,
+      whiteSpace: 'nowrap',
+      backgroundColor: C.canvas,
+      fontSize: 15,
+      lineHeight: 26,
+      fontWeight: header ? 700 : 400,
+      color: C.text,
+    }}
+  >
+    {children}
+  </div>
+)
 
-function ActionBar() {
-  const [copied, setCopied] = useState(false)
-  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null)
+const MdxBlock = ({ children }: MdxComponentProps) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>{children}</div>
+)
 
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 4,
-        paddingTop: 6,
-        marginLeft: -7,
-        userSelect: 'none',
-      }}
-    >
-      <GhostButton
-        icon={copied ? 'check' : 'copy'}
-        active={copied}
-        onClick={() => setCopied((was) => !was)}
-      />
-      <GhostButton
-        icon="thumbsUp"
-        active={feedback === 'up'}
-        onClick={() => setFeedback((value) => (value === 'up' ? null : 'up'))}
-      />
-      <GhostButton
-        icon="thumbsDown"
-        active={feedback === 'down'}
-        onClick={() => setFeedback((value) => (value === 'down' ? null : 'down'))}
-      />
-      <GhostButton icon="retry" />
-      <GhostButton icon="share" />
-      <GhostButton icon="more" />
-    </div>
-  )
-}
+const MdxInline = ({ children, style }: MdxComponentProps & { style?: StyleDesc }) => (
+  <text style={{ fontSize: 15, lineHeight: 26, color: C.text, ...style }}>{children}</text>
+)
 
-type MdxChildren = { children?: React.ReactNode }
-
-function flattenMdxTable(children: React.ReactNode): {
-  cols: number
-  cells: React.ReactElement[]
-} {
-  const rows: React.ReactElement[][] = []
-  React.Children.forEach(children, (section) => {
-    if (!React.isValidElement<{ children?: React.ReactNode }>(section)) return
-    React.Children.forEach(section.props.children, (row) => {
-      if (!React.isValidElement<{ children?: React.ReactNode }>(row)) return
-      const cells: React.ReactElement[] = []
-      React.Children.forEach(row.props.children, (cell) => {
-        if (React.isValidElement(cell)) cells.push(cell)
-      })
-      if (cells.length > 0) rows.push(cells)
-    })
-  })
-  const cols = rows.reduce((max, row) => Math.max(max, row.length), 0)
-  const cells: React.ReactElement[] = []
-  for (const [rowIndex, row] of rows.entries()) {
-    for (let col = 0; col < cols; col++) {
-      const cell = row[col]
-      cells.push(
-        cell
-          ? React.cloneElement(cell, { key: `${rowIndex}-${col}` })
-          : <div key={`pad-${rowIndex}-${col}`} />
-      )
-    }
-  }
-  return { cols, cells }
-}
-
-function MdxCell({ children, header }: MdxChildren & { header?: boolean }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        flexWrap: 'nowrap',
-        padding: 8,
-        minWidth: 96,
-        flexShrink: 0,
-        whiteSpace: 'nowrap',
-        backgroundColor: C.canvas,
-        fontSize: 15,
-        lineHeight: 26,
-        fontWeight: header ? 700 : 400,
-        color: C.text,
-      }}
-    >
-      {children}
-    </div>
-  )
-}
-
-function MdxBlock({ children }: MdxChildren) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%' }}>
-      {children}
-    </div>
-  )
-}
-
-function MdxInline({ children, style }: MdxChildren & { style?: StyleDesc }) {
-  return <text style={{ fontSize: 15, lineHeight: 26, color: C.text, ...style }}>{children}</text>
-}
-
-const SAFE_MDX_COMPONENTS = {
-  h1: ({ children }: MdxChildren) => (
+const SAFE_MDX_COMPONENTS: Record<string, (props: MdxComponentProps) => VNodeChild> = {
+  h1: ({ children }) => (
     <text style={{ fontSize: 22, lineHeight: 30, fontWeight: 700, color: C.text }}>{children}</text>
   ),
-  h2: ({ children }: MdxChildren) => (
+  h2: ({ children }) => (
     <text style={{ fontSize: 18, lineHeight: 26, fontWeight: 700, color: C.text }}>{children}</text>
   ),
-  h3: ({ children }: MdxChildren) => (
+  h3: ({ children }) => (
     <text style={{ fontSize: 16, lineHeight: 24, fontWeight: 700, color: C.text }}>{children}</text>
   ),
-  h4: MdxInline,
-  h5: MdxInline,
-  h6: MdxInline,
-  p: ({ children }: MdxChildren) => (
+  h4: ({ children }) => MdxInline({ children }),
+  h5: ({ children }) => MdxInline({ children }),
+  h6: ({ children }) => MdxInline({ children }),
+  p: ({ children }) => (
     <div
       style={{
         display: 'flex',
@@ -1536,7 +1567,7 @@ const SAFE_MDX_COMPONENTS = {
       {children}
     </div>
   ),
-  blockquote: ({ children }: MdxChildren) => (
+  blockquote: ({ children }) => (
     <div style={{ display: 'flex', flexDirection: 'row', gap: 12, width: '100%' }}>
       <div style={{ width: 3, flexShrink: 0, backgroundColor: C.accent }} />
       <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1, gap: 6, color: C.secondary }}>
@@ -1545,12 +1576,9 @@ const SAFE_MDX_COMPONENTS = {
     </div>
   ),
   hr: () => <div style={{ height: 1, width: '100%', backgroundColor: C.border }} />,
-  ul: MdxBlock,
-  ol: MdxBlock,
-  li: ({
-    children,
-    'data-checked': checked,
-  }: MdxChildren & { 'data-checked'?: boolean }) => (
+  ul: ({ children }) => MdxBlock({ children }),
+  ol: ({ children }) => MdxBlock({ children }),
+  li: ({ children, 'data-checked': checked }) => (
     <div style={{ display: 'flex', flexDirection: 'row', gap: 9, width: '100%' }}>
       <text style={{ fontSize: 15, lineHeight: 26, color: C.secondary }}>
         {checked === undefined ? '•' : checked ? '✓' : '○'}
@@ -1558,53 +1586,23 @@ const SAFE_MDX_COMPONENTS = {
       <div style={{ display: 'flex', flexDirection: 'column', flexGrow: 1 }}>{children}</div>
     </div>
   ),
-  strong: ({ children }: MdxChildren) => <MdxInline style={{ fontWeight: 700 }}>{children}</MdxInline>,
-  em: ({ children }: MdxChildren) => <MdxInline style={{ color: C.secondary }}>{children}</MdxInline>,
-  del: ({ children }: MdxChildren) => <MdxInline style={{ color: C.ghost }}>{children}</MdxInline>,
-  code: ({ children }: MdxChildren) => (
-    <MdxInline
-      style={{
+  strong: ({ children }) => MdxInline({ children, style: { fontWeight: 700 } }),
+  em: ({ children }) => MdxInline({ children, style: { color: C.secondary } }),
+  del: ({ children }) => MdxInline({ children, style: { color: C.ghost } }),
+  code: ({ children }) =>
+    MdxInline({
+      children,
+      style: {
         fontFamily: 'Menlo',
         fontSize: 13,
         backgroundColor: C.raised,
         borderRadius: 5,
         paddingLeft: 5,
         paddingRight: 5,
-      }}
-    >
-      {children}
-    </MdxInline>
-  ),
-  a: ({ children }: MdxChildren & { href?: string }) => (
-    <MdxInline style={{ color: C.accent }}>{children}</MdxInline>
-  ),
-  table: ({ children }: MdxChildren) => {
-    const { cols, cells } = flattenMdxTable(children)
-    if (cols === 0) return null
-    return (
-      <div style={{ display: 'flex', width: '100%', minWidth: 0, overflowX: 'scroll' }}>
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: cols,
-            gridColumnMin: 'max-content',
-            flexShrink: 0,
-            backgroundColor: C.border,
-            rowGap: 1,
-            columnGap: 1,
-          }}
-        >
-          {cells}
-        </div>
-      </div>
-    )
-  },
-  thead: MdxBlock,
-  tbody: MdxBlock,
-  tr: ({ children }: MdxChildren) => <>{children}</>,
-  th: ({ children }: MdxChildren) => <MdxCell header>{children}</MdxCell>,
-  td: ({ children }: MdxChildren) => <MdxCell>{children}</MdxCell>,
-  Callout: ({ children, title }: MdxChildren & { title?: string }) => (
+      },
+    }),
+  a: ({ children }) => MdxInline({ children, style: { color: C.accent } }),
+  Callout: ({ children, title }) => (
     <div
       style={{
         display: 'flex',
@@ -1624,9 +1622,165 @@ const SAFE_MDX_COMPONENTS = {
   ),
 }
 
+type MdxJsxAttribute = { type: 'mdxJsxAttribute'; name: string; value?: string | number | null }
+
+interface MdxJsxElement {
+  type: 'mdxJsxFlowElement' | 'mdxJsxTextElement'
+  name: string | null
+  attributes?: MdxJsxAttribute[]
+  children?: MdxNode[]
+}
+
+type MdxNode = RootContent | MdxJsxElement
+
+function mapMdxChildren(node: { children?: MdxNode[] }): VNodeChild {
+  const rendered = (node.children ?? []).flatMap((child) => {
+    const out = renderMdx(child)
+    return out == null || out === false ? [] : [out]
+  })
+  if (rendered.length === 0) return null
+  if (rendered.length === 1) return rendered[0]
+  return rendered.map((child, i) =>
+    typeof child === 'object' && child !== null && !Array.isArray(child)
+      ? cloneVNode(child, { key: i })
+      : child,
+  )
+}
+
+function renderMdxJsx(node: MdxJsxElement): VNodeChild {
+  if (!node.name) return mapMdxChildren(node)
+  const component = SAFE_MDX_COMPONENTS[node.name]
+  if (!component) return null
+  const props: MdxComponentProps = { children: mapMdxChildren(node) }
+  for (const attr of node.attributes ?? []) {
+    if (attr.type === 'mdxJsxAttribute') {
+      props[attr.name] = attr.value === null ? true : attr.value
+    }
+  }
+  return component(props)
+}
+
+function renderMdx(node: MdxNode): VNodeChild {
+  if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
+    return renderMdxJsx(node)
+  }
+  switch (node.type) {
+    case 'heading':
+      return SAFE_MDX_COMPONENTS[`h${node.depth}`]!({ children: mapMdxChildren(node) })
+    case 'paragraph':
+      return SAFE_MDX_COMPONENTS.p!({ children: mapMdxChildren(node) })
+    case 'blockquote':
+      return SAFE_MDX_COMPONENTS.blockquote!({ children: mapMdxChildren(node) })
+    case 'thematicBreak':
+      return SAFE_MDX_COMPONENTS.hr!({})
+    case 'code': {
+      if (!node.value) return null
+      return (
+        <code
+          code={node.value}
+          language={node.lang ?? undefined}
+          showLineNumbers
+          theme={CHAT_THEME}
+        />
+      )
+    }
+    case 'list': {
+      const component = node.ordered ? SAFE_MDX_COMPONENTS.ol! : SAFE_MDX_COMPONENTS.ul!
+      return component({ children: mapMdxChildren(node) })
+    }
+    case 'listItem':
+      return SAFE_MDX_COMPONENTS.li!({
+        children: mapMdxChildren(node),
+        ...(node.checked == null ? {} : { 'data-checked': node.checked }),
+      })
+    case 'table':
+      return renderMdxTable(node)
+    case 'text':
+      return node.value
+    case 'strong':
+      return SAFE_MDX_COMPONENTS.strong!({ children: mapMdxChildren(node) })
+    case 'emphasis':
+      return SAFE_MDX_COMPONENTS.em!({ children: mapMdxChildren(node) })
+    case 'delete':
+      return SAFE_MDX_COMPONENTS.del!({ children: mapMdxChildren(node) })
+    case 'inlineCode':
+      return SAFE_MDX_COMPONENTS.code!({ children: node.value })
+    case 'link':
+      return SAFE_MDX_COMPONENTS.a!({ children: mapMdxChildren(node) })
+    case 'break':
+      return SAFE_MDX_COMPONENTS.hr!({})
+    case 'definition':
+    case 'html':
+    case 'yaml':
+    case 'image':
+    case 'imageReference':
+    case 'linkReference':
+    case 'footnoteReference':
+    case 'footnoteDefinition':
+      return null
+    default:
+      return null
+  }
+}
+
+function renderMdxTable(node: Table): VNodeChild {
+  const rowsOut: VNodeChild[][] = []
+  let cols = 0
+  for (const [rowIndex, row] of node.children.entries()) {
+    const header = rowIndex === 0
+    const rowCells: VNodeChild[] = []
+    for (const [colIndex, cell] of row.children.entries()) {
+      rowCells.push(
+        cloneVNode(MdxCell({ header, children: mapMdxChildren(cell) }), {
+          key: `${rowIndex}-${colIndex}`,
+        }),
+      )
+    }
+    if (rowCells.length > 0) rowsOut.push(rowCells)
+    cols = Math.max(cols, rowCells.length)
+  }
+  if (cols === 0) return null
+  const cells: VNodeChild[] = []
+  for (const [rowIndex, row] of rowsOut.entries()) {
+    for (let col = 0; col < cols; col++) {
+      cells.push(row[col] ?? h('div', { key: `pad-${rowIndex}-${col}` }))
+    }
+  }
+  return (
+    <div style={{ display: 'flex', width: '100%', minWidth: 0, overflowX: 'scroll' }}>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: cols,
+          gridColumnMin: 'max-content',
+          flexShrink: 0,
+          backgroundColor: C.border,
+          rowGap: 1,
+          columnGap: 1,
+        }}
+      >
+        {cells}
+      </div>
+    </div>
+  )
+}
+
+function renderMdxTree(root: Root): VNodeChild {
+  const children = (root.children as MdxNode[]).flatMap((child) => {
+    const out = renderMdx(child)
+    return out == null || out === false ? [] : [out]
+  })
+  if (children.length === 1) return children[0]
+  return children.map((child, i) =>
+    typeof child === 'object' && child !== null && !Array.isArray(child)
+      ? cloneVNode(child, { key: i })
+      : child,
+  )
+}
+
 const mdxCache = new Map<string, Root>()
 
-function parseMdx(source: string) {
+function parseMdx(source: string): Root {
   const cached = mdxCache.get(source)
   if (cached) return cached
   const tree = mdxParse(source)
@@ -1634,152 +1788,155 @@ function parseMdx(source: string) {
   return tree
 }
 
-function SafeMdxContent({ source }: { source: string }) {
-  const mdast = useMemo(() => parseMdx(source), [source])
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
-      <SafeMdxRenderer
-        markdown={source}
-        mdast={mdast}
-        components={SAFE_MDX_COMPONENTS}
-        renderNode={(node) => {
-          if (node.type !== 'code') return undefined
-          return (
-            <code
-              code={node.value}
-              language={node.lang ?? undefined}
-              showLineNumbers
-              theme={CHAT_THEME}
-            />
-          )
-        }}
-      />
-    </div>
-  )
-}
-
-export function SafeMdxTranscript() {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 30, width: 748 }}>
-      <UserTurn text="Can Markdown be composed as normal React elements instead?" />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <SafeMdxContent source={SAFE_MDX_STRESS} />
-        <ActionBar />
+const SafeMdxContent = defineComponent({
+  props: { source: { type: String, required: true } },
+  setup(props) {
+    return () => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
+        {renderMdxTree(parseMdx(props.source))}
       </div>
-    </div>
-  )
-}
+    )
+  },
+})
 
-export function ChatApp({
-  turnCount = TURNS.length,
-  includeSafeMdx = false,
-}: {
-  turnCount?: number
-  includeSafeMdx?: boolean
-} = {}) {
-  const [activeId, setActiveId] = useState('c1')
-  const [collapsed, setCollapsed] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [model, setModel] = useState('deepseek-v4-flash')
-  const [reasoning, setReasoning] = useState('high')
-  const [access, setAccess] = useState('full')
-  const [mode, setMode] = useState<'build' | 'plan'>('build')
-  const [project, setProject] = useState('waku')
-  const [workspace, setWorkspace] = useState('local')
-  const [branch, setBranch] = useState('main')
+export const SafeMdxTranscript = defineComponent({
+  setup() {
+    return () => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 30, width: 748 }}>
+        <UserTurn text="Can Markdown be composed as normal React elements instead?" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <SafeMdxContent source={SAFE_MDX_STRESS} />
+          <ActionBar />
+        </div>
+      </div>
+    )
+  },
+})
 
-  const [turns, setTurns] = useState(() => expandTurns(turnCount))
-  const listRef = useRef<{ id: number } | null>(null)
-  const skipScroll = useRef(true)
-  const { renderer } = useGpuix()
-  const title = CONVERSATIONS.find((conversation) => conversation.id === activeId)?.title ?? ''
-  const rowCount = turns.length + (includeSafeMdx ? 1 : 0)
+export const ChatApp = defineComponent({
+  name: 'ChatApp',
+  props: {
+    turnCount: { type: Number, default: TURNS.length },
+    includeSafeMdx: { type: Boolean, default: false },
+  },
+  setup(props) {
+    const activeId = ref('c1')
+    const collapsed = ref(false)
+    const draft = ref('')
+    const model = ref('deepseek-v4-flash')
+    const reasoning = ref('high')
+    const access = ref('full')
+    const mode = ref<'build' | 'plan'>('build')
+    const project = ref('waku')
+    const workspace = ref('local')
+    const branch = ref('main')
 
-  useEffect(() => {
-    if (skipScroll.current) {
-      skipScroll.current = false
-      return
+    const turns = ref(expandTurns(props.turnCount))
+    const listRef = ref<ListHandle | null>(null)
+    const { renderer } = useGpuix()
+    const rowCount = computed(() => turns.value.length + (props.includeSafeMdx ? 1 : 0))
+
+    // React ran this in an effect that skipped the first run and scrolled on
+    // rowCount changes. A `flush: 'post'` watcher fires only on changes, and
+    // the microtask defers the scroll until the mutation batch reached Rust.
+    watch(
+      rowCount,
+      (count) => {
+        queueMicrotask(() => {
+          const id = listRef.value?.$el?.id
+          if (id == null || !renderer?.scrollToItem) return
+          renderer.scrollToItem(id, count - 1)
+        })
+      },
+      { flush: 'post' },
+    )
+
+    const onSend = (text: string) => {
+      turns.value = [...turns.value, { kind: 'user', text }]
+      draft.value = ''
     }
-    const id = listRef.current?.id
-    if (id == null || !renderer?.scrollToItem) return
-    renderer.scrollToItem(id, rowCount - 1)
-  }, [renderer, rowCount])
 
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        width: '100%',
-        height: '100%',
-        fontFamily: '.SystemUIFont',
-        color: C.text,
-      }}
-    >
-      <motion.div
-        initial={false}
-        animate={{ width: collapsed ? 0 : SIDEBAR_WIDTH + 1 }}
-        transition={{ duration: 0.2, ease: 'easeOut' }}
-        style={{
-          display: 'flex',
-          flexDirection: 'row',
-          height: '100%',
-          flexShrink: 0,
-          overflow: 'hidden',
-        }}
-      >
-        <Sidebar
-          activeId={activeId}
-          onSelect={setActiveId}
-          onCollapse={() => setCollapsed(true)}
-        />
-        <div style={{ width: 1, height: '100%', flexShrink: 0, backgroundColor: C.sidebarBorder }} />
-      </motion.div>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          flexGrow: 1,
-          minWidth: 0,
-          height: '100%',
-          backgroundColor: C.canvas,
-        }}
-      >
-        <Header
-          collapsed={collapsed}
-          onExpand={() => setCollapsed(false)}
-          title={title}
-          turnCount={turns.length}
-        />
-        <Transcript turns={turns} includeSafeMdx={includeSafeMdx} listRef={listRef} />
-        <Composer
-          value={draft}
-          onChange={setDraft}
-          onSend={(text) => {
-            setTurns((current) => [...current, { kind: 'user', text }])
-            setDraft('')
+    return () => {
+      const title =
+        CONVERSATIONS.find((conversation) => conversation.id === activeId.value)?.title ?? ''
+      return (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            width: '100%',
+            height: '100%',
+            fontFamily: '.SystemUIFont',
+            color: C.text,
           }}
-          model={model}
-          onModelChange={setModel}
-          reasoning={reasoning}
-          onReasoningChange={setReasoning}
-          access={access}
-          onAccessChange={setAccess}
-          mode={mode}
-          onModeChange={setMode}
-        />
-        <WorkspaceFooter
-          project={project}
-          onProjectChange={setProject}
-          workspace={workspace}
-          onWorkspaceChange={setWorkspace}
-          branch={branch}
-          onBranchChange={setBranch}
-        />
-      </div>
-    </div>
-  )
-}
+        >
+          <motion.div
+            initial={false}
+            animate={{ width: collapsed.value ? 0 : SIDEBAR_WIDTH + 1 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+            style={{
+              display: 'flex',
+              flexDirection: 'row',
+              height: '100%',
+              flexShrink: 0,
+              overflow: 'hidden',
+            }}
+          >
+            <Sidebar
+              activeId={activeId.value}
+              onSelect={(id) => (activeId.value = id)}
+              onCollapse={() => (collapsed.value = true)}
+            />
+            <div style={{ width: 1, height: '100%', flexShrink: 0, backgroundColor: C.sidebarBorder }} />
+          </motion.div>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              flexGrow: 1,
+              minWidth: 0,
+              height: '100%',
+              backgroundColor: C.canvas,
+            }}
+          >
+            <Header
+              collapsed={collapsed.value}
+              onExpand={() => (collapsed.value = false)}
+              title={title}
+              turnCount={turns.value.length}
+            />
+            <Transcript
+              turns={turns.value}
+              includeSafeMdx={props.includeSafeMdx}
+              listRef={listRef}
+            />
+            <Composer
+              value={draft.value}
+              onChange={(next) => (draft.value = next)}
+              onSend={onSend}
+              model={model.value}
+              onModelChange={(next) => (model.value = next)}
+              reasoning={reasoning.value}
+              onReasoningChange={(next) => (reasoning.value = next)}
+              access={access.value}
+              onAccessChange={(next) => (access.value = next)}
+              mode={mode.value}
+              onModeChange={(next) => (mode.value = next)}
+            />
+            <WorkspaceFooter
+              project={project.value}
+              onProjectChange={(next) => (project.value = next)}
+              workspace={workspace.value}
+              onWorkspaceChange={(next) => (workspace.value = next)}
+              branch={branch.value}
+              onBranchChange={(next) => (branch.value = next)}
+            />
+          </div>
+        </div>
+      )
+    }
+  },
+})
 
 const isEntryPoint =
   typeof Bun !== 'undefined'
@@ -1788,7 +1945,12 @@ const isEntryPoint =
 
 if (isEntryPoint) {
   applyMacCpuThrottleFromEnv()
-  render(<ChatApp turnCount={1_000} includeSafeMdx />, {
+  const Entry = defineComponent({
+    setup() {
+      return () => <ChatApp turnCount={1_000} includeSafeMdx />
+    },
+  })
+  createApp(Entry, {
     title: 'Waku · 1,000 messages',
     width: 1180,
     height: 820,

@@ -1,23 +1,19 @@
 {
-  "name": "gpuix",
+  "name": "gpuiv",
   "private": true,
   "workspaces": [
     "packages/*",
     "examples"
   ],
   "scripts": {
-    "build": "bun run build:native && bun run build:react",
+    "build": "bun run build:native && bun run build:vue",
     "build:native": "cd packages/native && bun run build",
-    "build:react": "cd packages/react && bun run build",
+    "build:vue": "cd packages/vue && bun run build",
     "example:counter": "cd examples && bun --hot counter.tsx",
     "dev": "bun scripts/dev.ts"
   },
   "devDependencies": {
     "tsx": "^4.19.0",
     "typescript": "^5.3.0"
-  },
-  "dependencies": {
-    "react": "^19.2.4",
-    "react-reconciler": "^0.33.0"
   }
 }

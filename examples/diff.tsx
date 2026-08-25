@@ -1,25 +1,17 @@
 /**
- * GPUIX Diff Viewer Example
+ * GPUIX Vue Diff Viewer Example
  *
  * Ported from: https://github.com/remorses/critique/blob/87fba2b/src/diff.tsx
  *
- * Port of critique's diff.tsx from opentui to GPUIX.
  * Renders unified or split diff views with syntax highlighting (shiki)
  * and word-level diff highlights inside a scrollable container.
- *
- * Key differences from opentui version:
- *   opentui <box>        → GPUIX <div>
- *   opentui <span fg>    → GPUIX <text style={{ color }}>  (inside flex-row div)
- *   opentui <span bg>    → GPUIX <text style={{ backgroundColor }}>
- *   opentui RGBA.fromInts → hex string "#RRGGBBAA"
- *   opentui onMouse       → GPUIX onClick
  *
  * Run with:  cd examples && bun run diff
  * Test with: cd examples && bun run test
  */
 
-import React, { useState } from "react"
-import { render } from "@gpuix/react"
+import { defineComponent, Fragment, type VNodeChild } from "vue"
+import { createApp } from "@gpuiv/vue"
 import { diffWords } from "diff"
 import {
   createHighlighter,
@@ -47,7 +39,6 @@ const WORD_REMOVED_BG = "rgba(255, 50, 50, 0.39)"
 const WORD_ADDED_BG = "rgba(0, 200, 0, 0.39)"
 
 // Default code foreground — matches github-dark-default theme.
-// Used for text that doesn't have syntax highlighting (word diff, fallbacks).
 const CODE_FG = "#e6edf3"
 
 // Hunk separator
@@ -176,115 +167,118 @@ function calculateSimilarity(str1: string, str2: string): number {
 
 // ── Token rendering ──────────────────────────────────────────────────
 // In GPUIX, each token is a <text> with its own color inside a flex-row <div>.
-// This replaces opentui's <text><span fg={color}>...</span></text> pattern.
 
-function HighlightedTokens({ tokens }: { tokens: ThemedToken[] }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "row" }}>
-      {tokens.map((token, i) => (
-        <text
-          key={i}
-          style={{
-            color: token.color || "#e6edf3",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {token.content}
-        </text>
-      ))}
-    </div>
-  )
-}
+const HighlightedTokens = defineComponent({
+  props: { tokens: { type: Array as () => ThemedToken[], required: true } },
+  setup(props) {
+    return () => (
+      <div style={{ display: "flex", flexDirection: "row" }}>
+        {props.tokens.map((token, i) => (
+          <text
+            key={i}
+            style={{
+              color: token.color || "#e6edf3",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {token.content}
+          </text>
+        ))}
+      </div>
+    )
+  },
+})
 
 // Word-diff tokens — shows which words changed within a line.
 // Changed words get a background highlight (red for removed, green for added).
 
-function WordDiffTokens({
-  parts,
-  mode,
-}: {
-  parts: ReturnType<typeof diffWords>
-  mode: "remove" | "add"
-}) {
-  const highlightBg = mode === "remove" ? WORD_REMOVED_BG : WORD_ADDED_BG
-  return (
-    <div style={{ display: "flex", flexDirection: "row" }}>
-      {parts.map((part, i) => {
-        // Show removed parts only in remove mode, added parts only in add mode
-        if (mode === "remove" && part.added) return null
-        if (mode === "add" && part.removed) return null
+const WordDiffTokens = defineComponent({
+  props: {
+    parts: { type: Array as () => ReturnType<typeof diffWords>, required: true },
+    mode: { type: String as () => "remove" | "add", required: true },
+  },
+  setup(props) {
+    return () => {
+      const highlightBg = props.mode === "remove" ? WORD_REMOVED_BG : WORD_ADDED_BG
+      return (
+        <div style={{ display: "flex", flexDirection: "row" }}>
+          {props.parts.map((part, i) => {
+            // Show removed parts only in remove mode, added parts only in add mode
+            if (props.mode === "remove" && part.added) return null
+            if (props.mode === "add" && part.removed) return null
 
-        const isHighlighted =
-          (mode === "remove" && part.removed) ||
-          (mode === "add" && part.added)
+            const isHighlighted =
+              (props.mode === "remove" && part.removed) ||
+              (props.mode === "add" && part.added)
 
-        return (
-          <text
-            key={i}
-            style={{
-              color: CODE_FG,
-              whiteSpace: "nowrap",
-              ...(isHighlighted ? { backgroundColor: highlightBg } : {}),
-            }}
-          >
-            {part.value}
-          </text>
-        )
-      })}
-    </div>
-  )
-}
+            return (
+              <text
+                key={i}
+                style={{
+                  color: CODE_FG,
+                  whiteSpace: "nowrap",
+                  ...(isHighlighted ? { backgroundColor: highlightBg } : {}),
+                }}
+              >
+                {part.value}
+              </text>
+            )
+          })}
+        </div>
+      )
+    }
+  },
+})
 
 // ── Line number gutter ───────────────────────────────────────────────
 
-function LineNumberGutter({
-  lineNumber,
-  type,
-  maxWidth,
-}: {
-  lineNumber: string
-  type: string
-  maxWidth: number
-}) {
-  const bg =
-    type === "add"
-      ? ADDED_LINE_NUMBER_BG
-      : type === "remove"
-        ? REMOVED_LINE_NUMBER_BG
-        : LINE_NUMBER_BG
+const LineNumberGutter = defineComponent({
+  props: {
+    lineNumber: { type: String, required: true },
+    type: { type: String, required: true },
+    maxWidth: { type: Number, required: true },
+  },
+  setup(props) {
+    return () => {
+      const bg =
+        props.type === "add"
+          ? ADDED_LINE_NUMBER_BG
+          : props.type === "remove"
+            ? REMOVED_LINE_NUMBER_BG
+            : LINE_NUMBER_BG
 
-  const fg =
-    type === "add" || type === "remove"
-      ? LINE_NUMBER_FG_BRIGHT
-      : LINE_NUMBER_FG_DIM
+      const fg =
+        props.type === "add" || props.type === "remove"
+          ? LINE_NUMBER_FG_BRIGHT
+          : LINE_NUMBER_FG_DIM
 
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        alignSelf: "stretch",
-        backgroundColor: bg,
-      }}
-    >
-      <text
-        style={{
-          color: fg,
-          whiteSpace: "nowrap",
-          fontSize: 13,
-        }}
-      >
-        {` ${lineNumber.padStart(maxWidth)} `}
-      </text>
-    </div>
-  )
-}
+      return (
+        <div
+          style={{
+            flexShrink: 0,
+            alignSelf: "stretch",
+            backgroundColor: bg,
+          }}
+        >
+          <text
+            style={{
+              color: fg,
+              whiteSpace: "nowrap",
+              fontSize: 13,
+            }}
+          >
+            {` ${props.lineNumber.padStart(props.maxWidth)} `}
+          </text>
+        </div>
+      )
+    }
+  },
+})
 
 // ── Structured diff processing ───────────────────────────────────────
-// Processes raw diff lines into renderable elements with syntax highlighting,
-// line pairing, and word-level diff when lines are similar enough.
 
 interface DiffLineData {
-  code: React.ReactNode
+  code: VNodeChild
   type: string
   oldLineNumber: string
   newLineNumber: string
@@ -378,8 +372,16 @@ function processHunkLines(
   // Build result lines with syntax highlighting and word diff
   let oldLineNumber = oldStart
   let newLineNumber = oldStart
+
+  const wrapTokens = (tokens: ThemedToken[] | null, fallback: string): VNodeChild =>
+    tokens && tokens.length > 0 ? (
+      <HighlightedTokens tokens={tokens} />
+    ) : (
+      <text style={{ color: CODE_FG, whiteSpace: "nowrap" }}>{fallback}</text>
+    )
+
   const result: Array<{
-    code: React.ReactNode
+    code: VNodeChild
     type: string
     oldLineNumber: number
     newLineNumber: number
@@ -401,10 +403,8 @@ function processHunkLines(
 
       const similarity = calculateSimilarity(removedText, addedLine.code)
       if (similarity < 0.5) {
-        // Too different — just use syntax highlighting
-        const tokens = beforeTokens[i]
         result.push({
-          code: tokens ? <HighlightedTokens tokens={tokens} /> : <text style={{ color: CODE_FG, whiteSpace: "nowrap" }}>{removedText}</text>,
+          code: wrapTokens(beforeTokens[i], removedText),
           type,
           oldLineNumber,
           newLineNumber,
@@ -429,9 +429,8 @@ function processHunkLines(
 
       const similarity = calculateSimilarity(removedLine.code, addedLine.code)
       if (similarity < 0.5) {
-        const tokens = afterTokens[i]
         result.push({
-          code: tokens ? <HighlightedTokens tokens={tokens} /> : <text style={{ color: CODE_FG, whiteSpace: "nowrap" }}>{addedLine.code}</text>,
+          code: wrapTokens(afterTokens[i], addedLine.code),
           type,
           oldLineNumber,
           newLineNumber,
@@ -458,12 +457,7 @@ function processHunkLines(
             : beforeTokens[i] || afterTokens[i]
 
       result.push({
-        code:
-          tokens && tokens.length > 0 ? (
-            <HighlightedTokens tokens={tokens} />
-          ) : (
-            <text style={{ color: CODE_FG, whiteSpace: "nowrap" }}>{code}</text>
-          ),
+        code: wrapTokens(tokens, code),
         type,
         oldLineNumber,
         newLineNumber,
@@ -492,50 +486,50 @@ function processHunkLines(
 
 // ── Unified view ─────────────────────────────────────────────────────
 
-function UnifiedView({
-  diff,
-  maxWidth,
-}: {
-  diff: DiffLineData[]
-  maxWidth: number
-}) {
-  return (
-    <>
-      {diff.map(({ code, type, key, newLineNumber }) => {
-        const lineNumber =
-          newLineNumber && newLineNumber !== "0"
-            ? newLineNumber.padStart(maxWidth)
-            : " ".repeat(maxWidth)
+const UnifiedView = defineComponent({
+  props: {
+    diff: { type: Array as () => DiffLineData[], required: true },
+    maxWidth: { type: Number, required: true },
+  },
+  setup(props) {
+    return () => (
+      <>
+        {props.diff.map(({ code, type, key, newLineNumber }) => {
+          const lineNumber =
+            newLineNumber && newLineNumber !== "0"
+              ? newLineNumber.padStart(props.maxWidth)
+              : " ".repeat(props.maxWidth)
 
-        const codeBg =
-          type === "add"
-            ? ADDED_BG
-            : type === "remove"
-              ? REMOVED_BG
-              : UNCHANGED_CODE_BG
+          const codeBg =
+            type === "add"
+              ? ADDED_BG
+              : type === "remove"
+                ? REMOVED_BG
+                : UNCHANGED_CODE_BG
 
-        return (
-          <div key={key} style={{ display: "flex", flexDirection: "row" }}>
-            <LineNumberGutter
-              lineNumber={lineNumber}
-              type={type}
-              maxWidth={maxWidth}
-            />
-            <div
-              style={{
-                flexGrow: 1,
-                paddingLeft: 4,
-                backgroundColor: codeBg,
-              }}
-            >
-              {code}
+          return (
+            <div key={key} style={{ display: "flex", flexDirection: "row" }}>
+              <LineNumberGutter
+                lineNumber={lineNumber}
+                type={type}
+                maxWidth={props.maxWidth}
+              />
+              <div
+                style={{
+                  flexGrow: 1,
+                  paddingLeft: 4,
+                  backgroundColor: codeBg,
+                }}
+              >
+                {code}
+              </div>
             </div>
-          </div>
-        )
-      })}
-    </>
-  )
-}
+          )
+        })}
+      </>
+    )
+  },
+})
 
 // ── Split view ───────────────────────────────────────────────────────
 
@@ -551,6 +545,7 @@ function buildSplitLines(
 ): SplitLine[] {
   const splitLines: SplitLine[] = []
   const processedIndices = new Set<number>()
+  const emptyCode = (): VNodeChild => <text>{""}</text>
 
   for (let i = 0; i < diff.length; i++) {
     if (processedIndices.has(i)) continue
@@ -574,7 +569,7 @@ function buildSplitLines(
         left: { ...line, lineNumber: line.oldLineNumber.padStart(leftMaxWidth) },
         right: {
           lineNumber: " ".repeat(rightMaxWidth),
-          code: <text>{""}</text>,
+          code: emptyCode(),
           type: "empty",
           oldLineNumber: "",
           newLineNumber: "",
@@ -586,7 +581,7 @@ function buildSplitLines(
       splitLines.push({
         left: {
           lineNumber: " ".repeat(leftMaxWidth),
-          code: <text>{""}</text>,
+          code: emptyCode(),
           type: "empty",
           oldLineNumber: "",
           newLineNumber: "",
@@ -607,108 +602,108 @@ function buildSplitLines(
   return splitLines
 }
 
-function SplitSideGutter({
-  lineNumber,
-  type,
-  maxWidth,
-}: {
-  lineNumber: string
-  type: string
-  maxWidth: number
-}) {
-  const bg =
-    type === "remove"
-      ? REMOVED_LINE_NUMBER_BG
-      : type === "add"
-        ? ADDED_LINE_NUMBER_BG
-        : LINE_NUMBER_BG
-  const fg =
-    type === "remove" || type === "add"
-      ? LINE_NUMBER_FG_BRIGHT
-      : LINE_NUMBER_FG_DIM
+const SplitSideGutter = defineComponent({
+  props: {
+    lineNumber: { type: String, required: true },
+    type: { type: String, required: true },
+    maxWidth: { type: Number, required: true },
+  },
+  setup(props) {
+    return () => {
+      const bg =
+        props.type === "remove"
+          ? REMOVED_LINE_NUMBER_BG
+          : props.type === "add"
+            ? ADDED_LINE_NUMBER_BG
+            : LINE_NUMBER_BG
+      const fg =
+        props.type === "remove" || props.type === "add"
+          ? LINE_NUMBER_FG_BRIGHT
+          : LINE_NUMBER_FG_DIM
 
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        alignSelf: "stretch",
-        backgroundColor: bg,
-      }}
-    >
-      <text style={{ color: fg, whiteSpace: "nowrap", fontSize: 13 }}>
-        {` ${lineNumber} `}
-      </text>
-    </div>
-  )
-}
-
-function SplitSideCode({
-  code,
-  type,
-}: {
-  code: React.ReactNode
-  type: string
-}) {
-  const bg =
-    type === "remove"
-      ? REMOVED_BG
-      : type === "add"
-        ? ADDED_BG
-        : UNCHANGED_CODE_BG
-
-  return (
-    <div
-      style={{
-        flexGrow: 1,
-        paddingLeft: 4,
-        minWidth: 0,
-        backgroundColor: bg,
-      }}
-    >
-      {code}
-    </div>
-  )
-}
-
-function SplitView({
-  diff,
-  leftMaxWidth,
-  rightMaxWidth,
-}: {
-  diff: DiffLineData[]
-  leftMaxWidth: number
-  rightMaxWidth: number
-}) {
-  const splitLines = buildSplitLines(diff, leftMaxWidth, rightMaxWidth)
-
-  return (
-    <>
-      {splitLines.map(({ left, right }) => (
-        <div key={left.key} style={{ display: "flex", flexDirection: "row" }}>
-          {/* Left side (removals / old) */}
-          <div style={{ display: "flex", flexDirection: "row", width: "50%" }}>
-            <SplitSideGutter
-              lineNumber={left.lineNumber}
-              type={left.type}
-              maxWidth={leftMaxWidth}
-            />
-            <SplitSideCode code={left.code} type={left.type} />
-          </div>
-
-          {/* Right side (additions / new) */}
-          <div style={{ display: "flex", flexDirection: "row", width: "50%" }}>
-            <SplitSideGutter
-              lineNumber={right.lineNumber}
-              type={right.type}
-              maxWidth={rightMaxWidth}
-            />
-            <SplitSideCode code={right.code} type={right.type} />
-          </div>
+      return (
+        <div
+          style={{
+            flexShrink: 0,
+            alignSelf: "stretch",
+            backgroundColor: bg,
+          }}
+        >
+          <text style={{ color: fg, whiteSpace: "nowrap", fontSize: 13 }}>
+            {` ${props.lineNumber} `}
+          </text>
         </div>
-      ))}
-    </>
-  )
-}
+      )
+    }
+  },
+})
+
+const SplitSideCode = defineComponent({
+  props: {
+    code: { type: [Object, Array, String] as never, required: true },
+    type: { type: String, required: true },
+  },
+  setup(props) {
+    return () => {
+      const bg =
+        props.type === "remove"
+          ? REMOVED_BG
+          : props.type === "add"
+            ? ADDED_BG
+            : UNCHANGED_CODE_BG
+
+      return (
+        <div
+          style={{
+            flexGrow: 1,
+            paddingLeft: 4,
+            minWidth: 0,
+            backgroundColor: bg,
+          }}
+        >
+          {props.code as VNodeChild}
+        </div>
+      )
+    }
+  },
+})
+
+const SplitView = defineComponent({
+  props: {
+    diff: { type: Array as () => DiffLineData[], required: true },
+    leftMaxWidth: { type: Number, required: true },
+    rightMaxWidth: { type: Number, required: true },
+  },
+  setup(props) {
+    return () => {
+      const splitLines = buildSplitLines(props.diff, props.leftMaxWidth, props.rightMaxWidth)
+      return (
+        <>
+          {splitLines.map(({ left, right }) => (
+            <div key={left.key} style={{ display: "flex", flexDirection: "row" }}>
+              <div style={{ display: "flex", flexDirection: "row", width: "50%" }}>
+                <SplitSideGutter
+                  lineNumber={left.lineNumber}
+                  type={left.type}
+                  maxWidth={props.leftMaxWidth}
+                />
+                <SplitSideCode code={left.code} type={left.type} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "row", width: "50%" }}>
+                <SplitSideGutter
+                  lineNumber={right.lineNumber}
+                  type={right.type}
+                  maxWidth={props.rightMaxWidth}
+                />
+                <SplitSideCode code={right.code} type={right.type} />
+              </div>
+            </div>
+          ))}
+        </>
+      )
+    }
+  },
+})
 
 // ── DiffViewer (main export) ─────────────────────────────────────────
 
@@ -718,85 +713,87 @@ export interface DiffViewerProps {
   splitView?: boolean
 }
 
-export function DiffViewer({
-  hunks,
-  filePath = "",
-  splitView = false,
-}: DiffViewerProps) {
-  if (hunks.length === 0) {
-    return (
-      <div style={{ padding: 16 }}>
-        <text style={{ color: LINE_NUMBER_FG_DIM }}>No changes</text>
-      </div>
-    )
-  }
-
-  // Calculate max line number widths across all hunks
-  const allLines = hunks.flatMap((h) => h.lines)
-  let oldLineNum = hunks[0]?.oldStart || 1
-  let newLineNum = hunks[0]?.newStart || 1
-
-  // Count to find max old line
-  let tempOld = oldLineNum
-  let tempNew = newLineNum
-  for (const line of allLines) {
-    if (line.startsWith("-")) tempOld++
-    else if (line.startsWith("+")) tempNew++
-    else {
-      tempOld++
-      tempNew++
-    }
-  }
-  const leftMaxWidth = Math.max(tempOld.toString().length, 2)
-  const rightMaxWidth = Math.max(tempNew.toString().length, 2)
-  const maxWidth = Math.max(leftMaxWidth, rightMaxWidth)
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "Menlo",
-        fontSize: 13,
-      }}
-    >
-      {hunks.map((hunk, hunkIdx) => {
-        const diff = processHunkLines(hunk.lines, hunk.oldStart, filePath)
-
+export const DiffViewer = defineComponent({
+  props: {
+    hunks: { type: Array as () => Hunk[], required: true },
+    filePath: { type: String, default: "" },
+    splitView: { type: Boolean, default: false },
+  },
+  setup(props) {
+    return () => {
+      if (props.hunks.length === 0) {
         return (
-          <React.Fragment key={hunk.newStart}>
-            {splitView ? (
-              <SplitView
-                diff={diff}
-                leftMaxWidth={leftMaxWidth}
-                rightMaxWidth={rightMaxWidth}
-              />
-            ) : (
-              <UnifiedView diff={diff} maxWidth={maxWidth} />
-            )}
-            {hunkIdx < hunks.length - 1 && (
-              <div style={{ paddingLeft: 4 }}>
-                <text
-                  style={{
-                    color: SEPARATOR_FG,
-                    whiteSpace: "nowrap",
-                    fontSize: 13,
-                  }}
-                >
-                  {`${" ".repeat(maxWidth + 2)}...`}
-                </text>
-              </div>
-            )}
-          </React.Fragment>
+          <div style={{ padding: 16 }}>
+            <text style={{ color: LINE_NUMBER_FG_DIM }}>No changes</text>
+          </div>
         )
-      })}
-    </div>
-  )
-}
+      }
+
+      const allLines = props.hunks.flatMap((h) => h.lines)
+      let oldLineNum = props.hunks[0]?.oldStart || 1
+      let newLineNum = props.hunks[0]?.newStart || 1
+
+      let tempOld = oldLineNum
+      let tempNew = newLineNum
+      for (const line of allLines) {
+        if (line.startsWith("-")) tempOld++
+        else if (line.startsWith("+")) tempNew++
+        else {
+          tempOld++
+          tempNew++
+        }
+      }
+      const leftMaxWidth = Math.max(tempOld.toString().length, 2)
+      const rightMaxWidth = Math.max(tempNew.toString().length, 2)
+      const maxWidth = Math.max(leftMaxWidth, rightMaxWidth)
+
+      return (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            fontFamily: "Menlo",
+            fontSize: 13,
+          }}
+        >
+          {props.hunks.map((hunk, hunkIdx) => {
+            const diff = processHunkLines(hunk.lines, hunk.oldStart, props.filePath)
+
+            return (
+              <Fragment key={hunk.newStart}>
+                {props.splitView ? (
+                  <SplitView
+                    diff={diff}
+                    leftMaxWidth={leftMaxWidth}
+                    rightMaxWidth={rightMaxWidth}
+                  />
+                ) : (
+                  <UnifiedView diff={diff} maxWidth={maxWidth} />
+                )}
+                {hunkIdx < props.hunks.length - 1 && (
+                  <div style={{ paddingLeft: 4 }}>
+                    <text
+                      style={{
+                        color: SEPARATOR_FG,
+                        whiteSpace: "nowrap",
+                        fontSize: 13,
+                      }}
+                    >
+                      {`${" ".repeat(maxWidth + 2)}...`}
+                    </text>
+                  </div>
+                )}
+              </Fragment>
+            )
+          })}
+        </div>
+      )
+    }
+  },
+})
 
 // ── Example app ──────────────────────────────────────────────────────
 
-// Hardcoded example patch — a realistic TypeScript file change
 const exampleHunks: Hunk[] = [
   {
     oldStart: 1,
@@ -842,49 +839,45 @@ const exampleHunks: Hunk[] = [
   },
 ]
 
-function App() {
-  return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        width: "100%",
-        height: "100%",
-        backgroundColor: "#11111b",
-      }}
-    >
-      {/* Title bar */}
+const App = defineComponent({
+  setup() {
+    return () => (
       <div
         style={{
-          padding: 12,
-          paddingLeft: 16,
-          backgroundColor: "#1e1e2e",
+          display: "flex",
+          flexDirection: "column",
+          width: "100%",
+          height: "100%",
+          backgroundColor: "#11111b",
         }}
       >
-        <text style={{ color: "#cdd6f4", fontSize: 14, fontWeight: "bold" }}>
-          counter.tsx
-        </text>
-      </div>
+        <div
+          style={{
+            padding: 12,
+            paddingLeft: 16,
+            backgroundColor: "#1e1e2e",
+          }}
+        >
+          <text style={{ color: "#cdd6f4", fontSize: 14, fontWeight: "bold" }}>
+            counter.tsx
+          </text>
+        </div>
 
-      {/* Scrollable diff — bg matches unchanged code so empty area below
-           content doesn't look different (minHeight: 100% doesn't work
-           inside scroll containers in GPUI) */}
-      <div
-        style={{
-          flexGrow: 1,
-          overflow: "scroll",
-          backgroundColor: UNCHANGED_CODE_BG,
-        }}
-      >
-        <DiffViewer
-          hunks={exampleHunks}
-          filePath="counter.tsx"
-          splitView={false}
-        />
+        <div
+          style={{
+            flexGrow: 1,
+            overflow: "scroll",
+            backgroundColor: UNCHANGED_CODE_BG,
+          }}
+        >
+          <DiffViewer hunks={exampleHunks} filePath="counter.tsx" splitView={false} />
+        </div>
       </div>
-    </div>
-  )
-}
+    )
+  },
+})
+
+export { App }
 
 // ── Main ─────────────────────────────────────────────────────────────
 // Only runs when executed directly (not when imported by tests).
@@ -895,5 +888,5 @@ const isEntryPoint =
     : process.argv[1]?.endsWith("diff.tsx") || process.argv[1]?.endsWith("diff.js")
 
 if (isEntryPoint) {
-  render(<App />, { title: "GPUIX Diff Viewer", width: 900, height: 600 })
+  createApp(App, { title: "GPUIX Vue Diff Viewer", width: 900, height: 600 })
 }

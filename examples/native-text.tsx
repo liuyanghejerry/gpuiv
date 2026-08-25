@@ -1,5 +1,5 @@
 /**
- * GPUIX native text components.
+ * GPUIX Vue native text components.
  *
  * Shows `<markdown>`, `<code>` and `<diff>` — three elements that render text
  * with Tree-sitter syntax highlighting inside Rust, and stay selectable and
@@ -12,12 +12,12 @@
  * Run with:  cd examples && bun run native-text
  */
 
-import React, { useState } from 'react'
-import { render } from '@gpuix/react'
+import { defineComponent, ref } from "vue"
+import { createApp } from "@gpuiv/vue"
 
 const README = `# GPUIX
 
-Build **native** desktop apps with *React*, rendered on the \`GPU\`.
+Build **native** desktop apps with *Vue 3*, rendered on the \`GPU\`.
 
 ## Why
 
@@ -25,9 +25,9 @@ Build **native** desktop apps with *React*, rendered on the \`GPU\`.
 - Tree-sitter highlighting computed in Rust
 - Diffs virtualized with GPUI's \`list()\`
 
-> Immediate mode aligns with React's model: rebuild every frame.
+> Immediate mode aligns with Vue's reactive model: rebuild every frame.
 
-See https://github.com/remorses/gpuix for more.
+See https://github.com/liuyanghejerry/gpuiv for more.
 `
 
 const SAMPLE = `export function greet(user: User): string {
@@ -50,103 +50,125 @@ const PATCH = [
   '-  return createServer().listen(port)',
   '+  return createServer().listen(port, host)',
   ' }',
-].join('\n')
+].join("\n")
 
-const TABS = ['markdown', 'code', 'diff'] as const
+const TABS = ["markdown", "code", "diff"] as const
 type Tab = (typeof TABS)[number]
 
-function Tabs({ active, onSelect }: { active: Tab; onSelect: (tab: Tab) => void }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        gap: 4,
-        padding: 8,
-        // Chrome must never start a text drag, or clicking a tab selects it.
-        userSelect: 'none',
-      }}
-    >
-      {TABS.map((tab) => (
+const Tabs = defineComponent({
+  props: {
+    active: { type: String, required: true },
+    onSelect: { type: Function, required: true },
+  },
+  setup(props) {
+    return () => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "row",
+          gap: 4,
+          padding: 8,
+          // Chrome must never start a text drag, or clicking a tab selects it.
+          userSelect: "none",
+        }}
+      >
+        {TABS.map((tab) => (
+          <div
+            key={tab}
+            style={{
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 6,
+              fontSize: 12,
+              cursor: "pointer",
+              color: tab === props.active ? "#ebebeb" : "#b4b4b4",
+              backgroundColor: tab === props.active ? "#ffffff14" : "#00000000",
+              hover: { backgroundColor: "#ffffff0d" },
+            }}
+            onClick={() => props.onSelect(tab)}
+          >
+            {tab}
+          </div>
+        ))}
+      </div>
+    )
+  },
+})
+
+const App = defineComponent({
+  setup() {
+    const tab = ref<Tab>("markdown")
+    const status = ref("drag across blocks, then press Cmd+C")
+
+    return () => (
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          width: "100%",
+          height: "100%",
+          backgroundColor: "#060606",
+        }}
+      >
+        <Tabs active={tab.value} onSelect={(t: Tab) => (tab.value = t)} />
+
         <div
-          key={tab}
           style={{
-            paddingTop: 6,
-            paddingBottom: 6,
-            paddingLeft: 12,
-            paddingRight: 12,
-            borderRadius: 6,
-            fontSize: 12,
-            cursor: 'pointer',
-            color: tab === active ? '#ebebeb' : '#b4b4b4',
-            backgroundColor: tab === active ? '#ffffff14' : '#00000000',
-            hover: { backgroundColor: '#ffffff0d' },
+            display: "flex",
+            flexDirection: "column",
+            flexGrow: 1,
+            minHeight: 0,
+            padding: 24,
+            overflowY: tab.value === "diff" ? undefined : "scroll",
           }}
-          onClick={() => onSelect(tab)}
         >
-          {tab}
+          {tab.value === "markdown" && (
+            <markdown
+              source={README}
+              onLinkClick={(e) => (status.value = `link: ${e.value}`)}
+            />
+          )}
+          {tab.value === "code" && (
+            <code code={SAMPLE} language="typescript" showLineNumbers />
+          )}
+          {tab.value === "diff" && (
+            <diff
+              scroll
+              patch={PATCH}
+              wordDiff
+              style={{ flexGrow: 1, minHeight: 0 }}
+              onLineClick={(e) =>
+                (status.value = `line ${e.newLine ?? e.oldLine}: ${e.value}`)
+              }
+              onToggleFile={(e) => (status.value = `toggle: ${e.value}`)}
+            />
+          )}
         </div>
-      ))}
-    </div>
-  )
-}
 
-function App() {
-  const [tab, setTab] = useState<Tab>('markdown')
-  const [status, setStatus] = useState('drag across blocks, then press Cmd+C')
-
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        width: '100%',
-        height: '100%',
-        backgroundColor: '#060606',
-      }}
-    >
-      <Tabs active={tab} onSelect={setTab} />
-
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          flexGrow: 1,
-          minHeight: 0,
-          padding: 24,
-          overflowY: tab === 'diff' ? undefined : 'scroll',
-        }}
-      >
-        {tab === 'markdown' && (
-          <markdown source={README} onLinkClick={(e) => setStatus(`link: ${e.value}`)} />
-        )}
-        {tab === 'code' && (
-          <code code={SAMPLE} language="typescript" showLineNumbers />
-        )}
-        {tab === 'diff' && (
-          <diff
-            scroll
-            patch={PATCH}
-            wordDiff
-            style={{ flexGrow: 1, minHeight: 0 }}
-            onLineClick={(e) => setStatus(`line ${e.newLine ?? e.oldLine}: ${e.value}`)}
-            onToggleFile={(e) => setStatus(`toggle: ${e.value}`)}
-          />
-        )}
+        <div
+          style={{
+            padding: 10,
+            fontSize: 11,
+            color: "#8d8d8d",
+            userSelect: "none",
+          }}
+        >
+          {status.value}
+        </div>
       </div>
+    )
+  },
+})
 
-      <div
-        style={{
-          padding: 10,
-          fontSize: 11,
-          color: '#8d8d8d',
-          userSelect: 'none',
-        }}
-      >
-        {status}
-      </div>
-    </div>
-  )
+export { App }
+
+const isEntryPoint =
+  typeof Bun !== "undefined"
+    ? Bun.main === import.meta.path
+    : process.argv[1]?.endsWith("native-text.tsx")
+
+if (isEntryPoint) {
+  createApp(App, { title: "GPUIX Vue Native Text", width: 900, height: 700 })
 }
-
-render(<App />, { title: 'GPUIX Native Text', width: 900, height: 700 })

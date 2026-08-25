@@ -1,6 +1,6 @@
 name: CI
 env:
-  APP_NAME: gpuix-native
+  APP_NAME: gpuiv-native
   MACOSX_DEPLOYMENT_TARGET: "10.13"
 "on":
   push:
@@ -141,13 +141,13 @@ jobs:
           name: bindings-aarch64-apple-darwin
           path: packages/native/
 
-      - name: Run React tests
+      - name: Run Vue tests
         run: bun run test
-        working-directory: packages/react
+        working-directory: packages/vue
 
-      - name: Build React package
+      - name: Build Vue package
         run: bun run build
-        working-directory: packages/react
+        working-directory: packages/vue
 
       - name: Run example tests
         run: bun run test
@@ -221,43 +221,43 @@ jobs:
 
       # NPM_TOKEN lives in Sigillo (npm/tokens, prod). CI only stores
       # SIGILLO_TOKEN. Rotate the npm token in one place.
-      - name: Publish @gpuix/native
+      - name: Publish @gpuiv/native
         env:
           SIGILLO_TOKEN: ${{ secrets.SIGILLO_TOKEN }}
           SIGILLO_PROJECT: ${{ vars.SIGILLO_PROJECT }}
           SIGILLO_ENVIRONMENT: prod
         run: |
           CURRENT_VERSION=$(node -p "require('./packages/native/package.json').version")
-          if npm view "@gpuix/native@${CURRENT_VERSION}" version 2>/dev/null; then
-            echo "@gpuix/native@${CURRENT_VERSION} already published, skipping"
+          if npm view "@gpuiv/native@${CURRENT_VERSION}" version 2>/dev/null; then
+            echo "@gpuiv/native@${CURRENT_VERSION} already published, skipping"
           else
-            echo "Publishing @gpuix/native@${CURRENT_VERSION}"
+            echo "Publishing @gpuiv/native@${CURRENT_VERSION}"
             cd packages/native
-            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuix-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuix-npmrc npm publish --access public --provenance'
+            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuiv-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuiv-npmrc npm publish --access public --provenance'
           fi
 
-      - name: Build @gpuix/react
+      - name: Build @gpuiv/vue
         run: bun run build
-        working-directory: packages/react
+        working-directory: packages/vue
 
-      - name: Publish @gpuix/react
+      - name: Publish @gpuiv/vue
         env:
           SIGILLO_TOKEN: ${{ secrets.SIGILLO_TOKEN }}
           SIGILLO_PROJECT: ${{ vars.SIGILLO_PROJECT }}
           SIGILLO_ENVIRONMENT: prod
         run: |
-          CURRENT_VERSION=$(node -p "require('./packages/react/package.json').version")
-          if npm view "@gpuix/react@${CURRENT_VERSION}" version 2>/dev/null; then
-            echo "@gpuix/react@${CURRENT_VERSION} already published, skipping"
+          CURRENT_VERSION=$(node -p "require('./packages/vue/package.json').version")
+          if npm view "@gpuiv/vue@${CURRENT_VERSION}" version 2>/dev/null; then
+            echo "@gpuiv/vue@${CURRENT_VERSION} already published, skipping"
           else
-            echo "Publishing @gpuix/react@${CURRENT_VERSION}"
-            cd packages/react
+            echo "Publishing @gpuiv/vue@${CURRENT_VERSION}"
+            cd packages/vue
             node -e "
               const fs = require('fs')
               const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
               const native = require('../native/package.json').version
-              pkg.dependencies['@gpuix/native'] = '^' + native
+              pkg.dependencies['@gpuiv/native'] = '^' + native
               fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
             "
-            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuix-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuix-npmrc npm publish --access public --provenance'
+            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuiv-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuiv-npmrc npm publish --access public --provenance'
           fi

@@ -1,0 +1,56 @@
+{
+  "name": "@gpuiv/vue",
+  "version": "0.4.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js",
+      "default": "./dist/testing.js"
+    },
+    "./automation": {
+      "types": "./dist/automation/index.d.ts",
+      "import": "./dist/automation/index.js",
+      "default": "./dist/automation/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liuyanghejerry/gpuiv"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuiv/vue locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
+    "build": "rm -rf dist *.tsbuildinfo && tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@gpuiv/native": "workspace:^",
+    "eventsource-parser": "^4.1.0",
+    "zod": "^4.4.3"
+  },
+  "peerDependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "typescript": "^5.3.0",
+    "vitest": "^4.0.18",
+    "vue": "^3.5.13"
+  }
+}

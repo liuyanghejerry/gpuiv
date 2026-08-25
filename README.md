@@ -1,13 +1,13 @@
 # GPUIX
 
-React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
+Vue 3 bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
-Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
+Build native GPU-accelerated desktop apps with Vue 3 and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
 
 ![A Waku-style app built with GPUIX](docs/images/chat-app.png)
 
 Everything above is GPUIX: the sidebar, the scrolling list, the composer,
-and native `<markdown>`. Start it with **`bun --hot`** so a save remounts React
+and native `<markdown>`. Start it with **`bun --hot`** so a save remounts Vue
 on the same window:
 
 ```bash
@@ -31,22 +31,24 @@ Markdown, code and a virtualized diff in one frame:
 
 ## Architecture
 
-GPUIX bridges React to GPUI using a **mutation-based protocol** over napi-rs FFI. React's reconciler sends individual DOM-like mutations (`createElement`, `appendChild`, `setStyle`, etc.) directly to Rust — no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
+GPUIX bridges Vue to GPUI using a **mutation-based protocol** over napi-rs FFI. Vue's custom renderer (`createRenderer` from `vue`) sends individual DOM-like mutations (`createElement`, `appendChild`, `setStyle`, etc.) directly to Rust — no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  React (JavaScript)                                             │
+│  Vue 3 (JavaScript)                                             │
 │                                                                 │
-│  function App() {                                               │
-│    const [count, setCount] = useState(0)                        │
-│    return (                                                     │
-│      <div style={{ display: 'flex', gap: 8 }}>                  │
-│        <div onClick={() => setCount(c => c + 1)}>               │
-│          Count: {count}                                         │
+│  import { defineComponent, ref } from 'vue'                     │
+│                                                                 │
+│  const Counter = defineComponent({                              │
+│    setup() {                                                    │
+│      const count = ref(0)                                       │
+│      return () => (                                             │
+│        <div style={{ display: 'flex', gap: 8 }}>                │
+│          <div onClick={() => count.value++}>+</div>             │
 │        </div>                                                   │
-│      </div>                                                     │
-│    )                                                            │
-│  }                                                              │
+│      )                                                          │
+│    },                                                           │
+│  })                                                             │
 └─────────────────────────────────────────────────────────────────┘
                     │ napi FFI mutations
                     │ createElement(1, "div")
@@ -76,13 +78,13 @@ GPUIX bridges React to GPUI using a **mutation-based protocol** over napi-rs FFI
 
 GPUI is an **immediate-mode** UI framework — it rebuilds the entire element tree every frame. Instead of fighting this, GPUIX embraces it:
 
-1. React reconciler detects a state change and calls napi mutations (`createElement`, `setStyle`, `appendChild`, etc.)
+1. Vue's custom renderer detects a state change and calls napi mutations (`createElement`, `setStyle`, `appendChild`, etc.)
 2. Each mutation updates a **RetainedTree** on the Rust side — a HashMap of element nodes with styles, children, and event flags
 3. On each GPUI frame, `GpuixView::render()` walks the RetainedTree and calls `build_element()` to produce ephemeral GPUI elements
 4. GPUI lays them out (Taffy flexbox) and renders to the GPU
-5. Only **changed elements** cross the FFI boundary — React's reconciler diffs the virtual tree and sends minimal mutations
+5. Only **changed elements** cross the FFI boundary — Vue's patch diffs the vnode tree and sends minimal mutations
 
-This is the same protocol React uses for the DOM (`createElement`, `appendChild`, `removeChild`, `commitUpdate`), but targeting a GPU renderer instead of a browser.
+This is the same protocol other custom renderers use for the DOM (`createElement`, `appendChild`, `removeChild`, `commitUpdate`), but targeting a GPU renderer instead of a browser.
 
 ## Mutation API
 
@@ -103,11 +105,11 @@ interface NativeRenderer {
 }
 ```
 
-Element IDs are plain numbers generated by an incrementing counter in JS. React may abandon work in concurrent render mode, so GPUIX keeps new host nodes in JS until React places the accepted subtree during commit. Only then are its mutations added to the batch. `commitMutations()` flushes that accepted commit and marks the Rust view dirty for the next frame.
+Element IDs are plain numbers generated by an incrementing counter in JS. Vue's renderer patches synchronously within a component update, but the update itself is scheduled on a microtask, so host ops are queued by the `BatchingRenderer` and flushed with one `applyBatch()` on a microtask after Vue's scheduler has finished its jobs. `flushMutations()` drains that queue synchronously for callers that need the Rust tree current right away (mount, tests, clock-pinned frames). `commitMutations()` marks the Rust view dirty for the next frame.
 
 ## Event Flow
 
-Events travel from GPUI back to React through a `ThreadsafeFunction` callback:
+Events travel from GPUI back to Vue through a `ThreadsafeFunction` callback:
 
 ```
 User clicks element id=3
@@ -125,18 +127,18 @@ ThreadsafeFunction queues EventPayload on Node.js event loop
 JS event registry: eventHandlers.get(3)?.get("click")?.(payload)
        │
        ▼
-React handler runs: onClick={() => setCount(c => c + 1)}
+Vue handler runs: onClick={() => count.value++}
        │
        ▼
-State update triggers re-render → reconciler sends mutations back to Rust
+State update triggers re-render → patch sends mutations back to Rust
 ```
 
 Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)`. Rust only knows **whether** an element has a listener (via `setEventListener`), not the closure itself — the actual handler lives in JS.
 
 ## Packages
 
-- **`@gpuix/native`** — Rust/napi-rs bindings to GPUI. Contains `GpuixRenderer`, `RetainedTree`, `build_element()`, `apply_styles()`, and the event wiring.
-- **`@gpuix/react`** — React reconciler, event registry, and TypeScript types. Implements the `react-reconciler` host config using the mutation API.
+- **`@gpuiv/native`** — Rust/napi-rs bindings to GPUI. Contains `GpuixRenderer`, `RetainedTree`, `build_element()`, `apply_styles()`, and the event wiring.
+- **`@gpuiv/vue`** — Vue 3 custom renderer (`createRenderer` from `vue`), event registry, components, and TypeScript types. Implements the mutation API as the host config.
 
 ## Building
 
@@ -156,15 +158,17 @@ bun install
 # Check out the pinned GPUI fork
 git submodule update --init --recursive
 
-# Build native package
+# Build everything (native + vue)
+bun run build
+
+# Or build each package separately
 cd packages/native
 bun run build
 
-# Build React package
-cd ../react
+cd ../vue
 bun run build
 
-# Run example (use tmux for long-running sessions)
+# Run an example (use tmux for long-running sessions)
 cd ../../examples
 bun --hot counter.tsx
 ```
@@ -172,24 +176,26 @@ bun --hot counter.tsx
 ## Usage
 
 ```tsx
-import React, { useState } from 'react'
-import { render } from '@gpuix/react'
+import { defineComponent, ref } from 'vue'
+import { createApp } from '@gpuiv/vue'
 
-function App() {
-  const [count, setCount] = useState(0)
-  return (
-    <div style={{ display: 'flex', gap: 8, padding: 16 }}>
-      <div
-        style={{ backgroundColor: '#3b82f6', borderRadius: 8, padding: 12, cursor: 'pointer' }}
-        onClick={() => setCount(c => c + 1)}
-      >
-        <div style={{ color: '#ffffff' }}>Count: {count}</div>
+const App = defineComponent({
+  setup() {
+    const count = ref(0)
+    return () => (
+      <div style={{ display: 'flex', gap: 8, padding: 16 }}>
+        <div
+          style={{ backgroundColor: '#3b82f6', borderRadius: 8, padding: 12, cursor: 'pointer' }}
+          onClick={() => count.value++}
+        >
+          <div style={{ color: '#ffffff' }}>Count: {count.value}</div>
+        </div>
       </div>
-    </div>
-  )
-}
+    )
+  },
+})
 
-render(<App />, {
+createApp(App, {
   title: 'My App',
   width: 800,
   height: 600,
@@ -200,34 +206,46 @@ render(<App />, {
 })
 ```
 
-`render()` creates the native window, mounts React, and starts the frame loop.
+`createApp()` creates the native window, mounts the Vue app, and starts the frame loop.
 The red traffic-light button quits the process. Start the app again from the
 terminal.
 
 | Option | Values | Purpose |
 |---|---|---|
+| `title` | string | Window title |
+| `width` / `height` | pixels | Initial window size (default 800×600) |
+| `minWidth` / `minHeight` | pixels | Minimum window size |
+| `resizable` | boolean (default `true`) | Allow the window to be resized |
+| `fullscreen` | boolean | Start fullscreen |
+| `transparent` | boolean | Plain alpha transparency. Prefer `windowBackground` when you need blur |
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |
 | `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. Waku uses `(16, 17)` |
-| `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
+| `debugFrameOverlay` | `"hidden"` \| `"minimal"` \| `"full"` | Frame-time overlay (see below) |
+
+`createApp()` also accepts `{ renderer }` to mount on an existing renderer and
+`{ onEvent }` to observe every event before the handler registry runs. The
+returned handle exposes `{ app, container, renderer, unmount }`.
+
 Call it again after a save and it remounts the tree on the same window.
 
-Use **`render()`**, not `createRenderer()`, in the app entry. `bun --hot`
-re-runs the whole file on save. `createRenderer()` plus `init()` would then
-build a second host. `render()` is idempotent: the first call owns the window,
-later calls only remount React.
+Use **`createApp()`**, not `createNativeRenderer()` plus `renderer.init()`, in
+the app entry. `bun --hot` re-runs the whole file on save.
+`createNativeRenderer()` plus `init()` would then build a second host.
+`createApp()` is idempotent: the first call owns the window, later calls only
+remount the Vue app.
 
-`createRenderer()`, `createRoot()`, and `startFrameLoop()` stay public for
-tests and custom hosts. Pass `{ renderer }` into `render()` when you already
+`createNativeRenderer()`, `resetApp()`, and `startFrameLoop()` stay public for
+tests and custom hosts. Pass `{ renderer }` into `createApp()` when you already
 have one.
 
 ## Debug frame overlay
 
 GPUI paints frame-time stats into the window after layout. The overlay is not
-a React element. A React FPS label would update every frame and cause more work.
+a Vue element. A Vue FPS label would update every frame and cause more work.
 
 ```tsx
-render(<App />, { title: 'My App', debugFrameOverlay: 'full' })
+createApp(App, { title: 'My App', debugFrameOverlay: 'full' })
 ```
 
 | Mode | What you see |
@@ -263,25 +281,28 @@ THROTTLE=utility bun --hot chat.tsx
 
 ## Hot reload
 
-### 1. End the file with `render()`
+### 1. End the file with `createApp()`
 
 ```tsx
-import { render } from '@gpuix/react'
+import { defineComponent } from 'vue'
+import { createApp } from '@gpuiv/vue'
 
-function App() {
-  return <div style={{ padding: 16 }}>hello</div>
-}
+const App = defineComponent({
+  setup() {
+    return () => <div style={{ padding: 16 }}>hello</div>
+  },
+})
 
-render(<App />, { title: 'My App', width: 800, height: 600 })
+createApp(App, { title: 'My App', width: 800, height: 600 })
 ```
 
-Do **not** call `createRenderer()` or `init()` in this file. `bun --hot` re-runs
-the whole entry on save. A second `init()` would open a second window.
+Do **not** call `createNativeRenderer()` or `init()` in this file. `bun --hot`
+re-runs the whole entry on save. A second `init()` would open a second window.
 
 ### 2. Start the app with `bun --hot`
 
 Prefer **`bun --hot`** over a plain `bun` or `tsx` run. Without `--hot`, a
-save starts a second process. With it, `render()` remounts React on the same
+save starts a second process. With it, `createApp()` remounts Vue on the same
 window.
 
 ```bash
@@ -292,21 +313,21 @@ cd examples && bun --hot chat.tsx
 ### 3. Save the file
 
 ```
-save .tsx  ►  bun re-evaluates the entry  ►  render() remounts React
+save .tsx  ►  bun re-evaluates the entry  ►  createApp() remounts Vue
                      │
                      ▼
               GpuixRenderer, window, GPU stay
 ```
 
-The first `render()` creates the native host and stores it on `globalThis`.
-Each save unmounts the React tree and mounts a new one on that same host.
+The first `createApp()` creates the native host and stores it on `globalThis`.
+Each save unmounts the Vue app and mounts a new one on that same host.
 
 **Stays:** window, GPU device, native `.node` addon, GPUI scroll physics.
 
-**Resets:** `useState`, focus, React event handlers.
+**Resets:** `ref` state, focus, Vue event listeners.
 
-This is a remount, not React Refresh. Keeping hook state needs Bun to inject
-`$RefreshReg$` during `--hot`. That transform exists on
+This is a remount, not Vue HMR. Keeping ref state needs Bun to inject a
+Fast Refresh-style transform during `--hot`. The transform that exists today is
 `bun build --react-fast-refresh` only. Tracked in
 [oven-sh/bun#40179](https://github.com/oven-sh/bun/issues/40179).
 
@@ -321,7 +342,7 @@ dedicated Rust UI thread. Node sends in-process commands to that thread, so
 `startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
-extension comes from the pinned GPUIX fork. Windows runtime validation is pending.
+extension comes from the pinned GPUI fork. Windows runtime validation is pending.
 
 > [!IMPORTANT]
 > On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of
@@ -330,28 +351,30 @@ extension comes from the pinned GPUIX fork. Windows runtime validation is pendin
 
 ## Native animations
 
-Use **`motion.div`** to animate from an initial style to a target style. React
+Use **`motion.div`** to animate from an initial style to a target style. Vue
 sends the target once. Rust calculates intermediate values and requests GPUI
-frames until the transition finishes, without a React render or N-API call for
+frames until the transition finishes, without a Vue render or N-API call for
 each frame.
 
 ### Animate a target
 
 ```tsx
-import { motion } from '@gpuix/react'
+import { motion } from '@gpuiv/vue'
 
-function WelcomeCard() {
-  return (
-    <motion.div
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width: 320, opacity: 1 }}
-      transition={{ duration: 0.25, ease: 'easeOut' }}
-      style={{ overflow: 'hidden' }}
-    >
-      <text style={{ color: '#ffffff' }}>Welcome</text>
-    </motion.div>
-  )
-}
+const WelcomeCard = defineComponent({
+  setup() {
+    return () => (
+      <motion.div
+        initial={{ width: 0, opacity: 0 }}
+        animate={{ width: 320, opacity: 1 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        style={{ overflow: 'hidden' }}
+      >
+        <text style={{ color: '#ffffff' }}>Welcome</text>
+      </motion.div>
+    )
+  },
+})
 ```
 
 Set **`initial={false}`** when the element must mount at its first `animate`
@@ -370,7 +393,7 @@ Motion currently accepts these **numeric targets**:
 | `opacity` | `0` through `1` |
 | `borderRadius` | pixels, zero or greater |
 
-The **transition** uses seconds, like Motion for React:
+The **transition** uses seconds, like Motion for Vue:
 
 | Option | Default | Values |
 |---|---:|---|
@@ -388,39 +411,35 @@ width. This reveals or hides the content without reflowing its text on every
 frame.
 
 ```tsx
-import { motion } from '@gpuix/react'
-import type { ReactNode } from 'react'
+import { motion } from '@gpuiv/vue'
 
-function SidebarFrame({
-  collapsed,
-  children,
-}: {
-  collapsed: boolean
-  children: ReactNode
-}) {
-  const sidebarWidth = 252
-  const dividerWidth = 1
+const SidebarFrame = defineComponent({
+  props: { collapsed: { type: Boolean, required: true } },
+  setup(props, { slots }) {
+    const sidebarWidth = 252
+    const dividerWidth = 1
 
-  return (
-    <motion.div
-      initial={false}
-      animate={{ width: collapsed ? 0 : sidebarWidth + dividerWidth }}
-      transition={{ duration: 0.2, ease: 'easeOut' }}
-      style={{
-        display: 'flex',
-        flexDirection: 'row',
-        height: '100%',
-        flexShrink: 0,
-        overflow: 'hidden',
-      }}
-    >
-      <div style={{ width: sidebarWidth, height: '100%', flexShrink: 0 }}>
-        {children}
-      </div>
-      <div style={{ width: dividerWidth, height: '100%', flexShrink: 0 }} />
-    </motion.div>
-  )
-}
+    return () => (
+      <motion.div
+        initial={false}
+        animate={{ width: props.collapsed ? 0 : sidebarWidth + dividerWidth }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          height: '100%',
+          flexShrink: 0,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ width: sidebarWidth, height: '100%', flexShrink: 0 }}>
+          {slots.default?.()}
+        </div>
+        <div style={{ width: dividerWidth, height: '100%', flexShrink: 0 }} />
+      </motion.div>
+    )
+  },
+})
 ```
 
 The **chat example** uses this pattern. The sidebar remains mounted while its
@@ -433,18 +452,17 @@ specific timestamps. This avoids timer sleeps and gives CI the same frames on
 every run.
 
 ```tsx
-import { connectTest } from '@gpuix/react/automation'
-import { createTestRoot } from '@gpuix/react/testing'
+import { connectTest } from '@gpuiv/vue/automation'
+import { createTestApp } from '@gpuiv/vue/testing'
 import { ChatApp } from './chat'
 
-const { render, renderer } = createTestRoot()
-render(<ChatApp />)
-const app = await connectTest(renderer)
+const app = createTestApp(ChatApp)
+const automation = await connectTest(app.renderer, app.settle)
 
-const startedAt = await app.clock.pause()
-await app.getByTestId('sidebar-collapse').click()
+const startedAt = await automation.clock.pause()
+await automation.getByTestId('sidebar-collapse').click()
 
-await app.captureFrames('review/sidebar', [
+await automation.captureFrames('review/sidebar', [
   startedAt,
   startedAt + 50,
   startedAt + 100,
@@ -452,7 +470,7 @@ await app.captureFrames('review/sidebar', [
   startedAt + 200,
 ])
 
-await app.clock.resume()
+await automation.clock.resume()
 ```
 
 ## Scrolling
@@ -476,86 +494,99 @@ Plain scroll containers still build every child. Use `<virtual-list>` below when
 > A vertical wheel stays on the parent.
 
 ```tsx
-function Expandable({
-  preview,
-  children,
-}: {
-  preview: React.ReactNode
-  children: React.ReactNode
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {open ? children : preview}
-      {!open && <div onClick={() => setOpen(true)}>Show more</div>}
-    </div>
-  )
-}
+const Expandable = defineComponent({
+  props: { preview: { type: String, default: undefined } },
+  setup(props, { slots }) {
+    const open = ref(false)
+    return () => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {open.value ? slots.default?.() : props.preview}
+        {!open.value && <div onClick={() => (open.value = true)}>Show more</div>}
+      </div>
+    )
+  },
+})
 ```
 
 ```tsx
-function ScrollableList() {
-  return (
-    <div style={{ height: 300, overflow: 'scroll' }}>
-      {items.map((item, i) => (
-        <div key={i} style={{ height: 60, padding: 12 }}>
-          {item.name}
-        </div>
-      ))}
-    </div>
-  )
-}
+const ScrollableList = defineComponent({
+  setup() {
+    return () => (
+      <div style={{ height: 300, overflow: 'scroll' }}>
+        {items.map((item, i) => (
+          <div key={i} style={{ height: 60, padding: 12 }}>
+            {item.name}
+          </div>
+        ))}
+      </div>
+    )
+  },
+})
 ```
 
 Per-axis scrolling: use `overflowX: "scroll"` or `overflowY: "scroll"`.
 
-For programmatic scroll control, use a React ref to get the element's numeric ID, then call the renderer's scroll methods:
+For programmatic scroll control, capture an element's numeric ID with a Vue
+ref, then call the renderer's scroll methods:
 
 ```tsx
-function ProgrammaticScroll() {
-  const listRef = useRef<any>(null)
+const ProgrammaticScroll = defineComponent({
+  setup() {
+    const { renderer } = useGpuix()
+    const listRef = ref<{ id: number } | null>(null)
 
-  const jumpToBottom = () => {
-    if (listRef.current) {
-      renderer.scrollTo(listRef.current.id, 0, -999)
+    const jumpToBottom = () => {
+      if (listRef.value) {
+        renderer?.scrollTo?.(listRef.value.id, 0, -999)
+      }
     }
-  }
 
-  return (
-    <>
-      <div ref={listRef} style={{ height: 200, overflow: 'scroll' }}>
-        {items.map((item, i) => <div key={i}>{item}</div>)}
-      </div>
-      <div onClick={jumpToBottom}>Jump to bottom</div>
-    </>
-  )
-}
+    return () => (
+      <>
+        <div ref={listRef} style={{ height: 200, overflow: 'scroll' }}>
+          {items.map((item, i) => <div key={i}>{item}</div>)}
+        </div>
+        <div onClick={jumpToBottom}>Jump to bottom</div>
+      </>
+    )
+  },
+})
+```
 
+A `ref` on a host element (`div`, `virtual-list`) receives the host node itself,
+whose `id` is the element ID. Components are not ref-forwarded to host ids: read
+the id through the component's `$el` (the chat example does
+`listRef.value?.$el?.id`), or pass the ref down to a host element.
+
+```ts
 // Available scroll methods on the renderer:
-renderer.scrollTo(elementId, x, y)        // set offset directly
-renderer.scrollToItem(elementId, index)   // scroll child into view
-renderer.getScrollOffset(elementId)       // returns [x, y] or null
+renderer.scrollTo?(elementId, x, y)        // set offset directly
+renderer.scrollToItem?(elementId, index)   // scroll child into view
+renderer.getScrollOffset?(elementId)       // returns [x, y] or null
 ```
 
 ## Virtual lists
 
-Use `<virtual-list>` for **long, variable-height collections** such as message lists. React and Rust retain every row, but GPUI only builds, lays out, and paints rows near the viewport.
+Use `<virtual-list>` for **long, variable-height collections** such as message lists. Vue and Rust retain every row, but GPUI only builds, lays out, and paints rows near the viewport.
 
 ```tsx
-function MessageList({ messages }: { messages: Message[] }) {
-  return (
-    <virtual-list
-      alignment="bottom"
-      followTail
-      estimatedItemHeight={180}
-      style={{ flexGrow: 1, minHeight: 0 }}
-    >
-      {messages.map((message) => (
-        <Message key={message.id} message={message} />
-      ))}
-    </virtual-list>
-  )
-}
+const MessageList = defineComponent({
+  props: { messages: { type: Array as () => Message[], required: true } },
+  setup(props) {
+    return () => (
+      <virtual-list
+        alignment="bottom"
+        followTail
+        estimatedItemHeight={180}
+        style={{ flexGrow: 1, minHeight: 0 }}
+      >
+        {props.messages.map((message) => (
+          <Message key={message.id} message={message} />
+        ))}
+      </virtual-list>
+    )
+  },
+})
 ```
 
 The list needs a **bounded height** or bounded flex space. Its direct children are rows and can contain any GPUIX host or custom element.
@@ -569,10 +600,10 @@ The list needs a **bounded height** or bounded flex space. Its direct children a
 
 ### How virtualization works
 
-**React reconciliation stays normal.** The complete keyed child list crosses the mutation protocol and remains in Rust's retained tree. GPUIX defers only the expensive GPUI element construction, layout, and paint work.
+**Vue reconciliation stays normal.** The complete keyed child list crosses the mutation protocol and remains in Rust's retained tree. GPUIX defers only the expensive GPUI element construction, layout, and paint work.
 
 ```text
-React Fiber + Rust RetainedTree    all row IDs, props, text, and events
+Vue vnode diff + Rust RetainedTree     all row IDs, props, text, and events
                  │
                  ▼
           GPUI ListState          row count and measured height cache
@@ -581,7 +612,7 @@ React Fiber + Rust RetainedTree    all row IDs, props, text, and events
           cx.processor            re-enters GpuixView after root render
                  │
                  ▼
-          fresh BuildCtx          builds only the requested React subtree
+          fresh BuildCtx          builds only the requested subtree
                  │
                  ▼
        GPUI layout and paint      visible rows only
@@ -593,7 +624,7 @@ When a retained descendant changes, GPUIX marks its direct row for remeasurement
 
 ### Row boundaries
 
-Each **direct host child** is one virtual row. Give every row a stable React key and one host root:
+Each **direct host child** is one virtual row. Give every row a stable key and one host root:
 
 ```tsx
 <virtual-list style={{ height: 500 }}>
@@ -631,27 +662,32 @@ The list follows new rows while the user is at the bottom. Scrolling upward paus
 Use a ref to call the same renderer scroll methods as a plain scroll container:
 
 ```tsx
-function Results({ rows }: { rows: Result[] }) {
-  const renderer = useGpuixRequired()
-  const listRef = useRef<{ id: number } | null>(null)
-
-  const reveal = (index: number) => {
-    if (listRef.current) {
-      renderer.scrollToItem?.(listRef.current.id, index)
-    }
-  }
-
-  return (
-    <>
-      <virtual-list ref={listRef} style={{ height: 400 }}>
-        {rows.map((row) => (
-          <ResultRow key={row.id} row={row} />
-        ))}
-      </virtual-list>
-      <div onClick={() => reveal(rows.length - 1)}>Reveal latest</div>
-    </>
-  )
+interface ListHandle {
+  /** The mounted host element (the native `virtual-list` node). */
+  $el: { id: number }
 }
+
+const Results = defineComponent({
+  props: { rows: { type: Array as () => Result[], required: true } },
+  setup(props) {
+    const { renderer } = useGpuix()
+    const listRef = ref<ListHandle | null>(null)
+
+    const reveal = (index: number) => {
+      const id = listRef.value?.$el?.id
+      if (id != null) {
+        renderer?.scrollToItem?.(id, index)
+      }
+    }
+
+    return () => (
+      <>
+        <VirtualList ref={listRef} style={{ height: 400 }} itemCount={props.rows.length} renderItem={(index) => <ResultRow key={props.rows[index]!.id} row={props.rows[index]!} />} />
+        <div onClick={() => reveal(props.rows.length - 1)}>Reveal latest</div>
+      </>
+    )
+  },
+})
 ```
 
 `scrollTo`, `scrollToItem`, and `getScrollOffset` all support virtual lists.
@@ -660,13 +696,13 @@ function Results({ rows }: { rows: Result[] }) {
 
 | Work | Plain scroll container | `<virtual-list>` children | `VirtualList` + `itemCount` |
 |---|---|---|---|
-| React Fiber nodes | All rows | All rows | Visible window |
+| Vue subtree | All rows | All rows | Visible window |
 | Rust retained nodes | All rows | All rows | Visible window |
 | GPUI row construction | All rows | Visible rows plus overdraw | Visible rows plus overdraw |
 | Layout and paint | All rows | Visible rows plus overdraw | Visible rows plus overdraw |
 | Height metadata | None | One lightweight entry per row | One lightweight entry per logical row |
 
-`VirtualList` with `itemCount` and `renderItem` mounts only the visible window. Use that for long transcripts. A 10,000-row `turns.map` still creates every React child. Collections with millions of rows still need application-level paging or a data-owning native element.
+`VirtualList` with `itemCount` and `renderItem` mounts only the visible window. Use that for long transcripts. A 10,000-row `turns.map` still creates every child. Collections with millions of rows still need application-level paging or a data-owning native element.
 
 ### Keep scroll fast
 
@@ -676,40 +712,32 @@ the length of the list.
 
 Put a long list on `<virtual-list>`. Keep `overdraw` near one extra
 viewport. Put fat content in one native node (`<markdown>`, `<code>`, `<diff>`),
-not a tree of React spans.
+not a tree of Vue components.
 
-The host `<virtual-list>` still retains every React child. Pass `itemCount`
+The host `<virtual-list>` still retains every child. Pass `itemCount`
 and `renderItem` through `VirtualList` so mount only creates the window.
 
 ```tsx
-import { VirtualList } from '@gpuix/react'
+import { VirtualList } from '@gpuiv/vue'
 
-const Transcript = memo(function Transcript({ turns }: { turns: Turn[] }) {
-  return (
-    <VirtualList
-      itemCount={turns.length}
-      estimatedItemHeight={220}
-      style={{ flexGrow: 1, minHeight: 0 }}
-      renderItem={(index) => <ChatTurn key={turns[index].id} turn={turns[index]} />}
-    />
-  )
+const Transcript = defineComponent({
+  props: { turns: { type: Array as () => Turn[], required: true } },
+  setup(props) {
+    return () => (
+      <VirtualList
+        itemCount={props.turns.length}
+        estimatedItemHeight={220}
+        style={{ flexGrow: 1, minHeight: 0 }}
+        renderItem={(index) => <ChatTurn key={props.turns[index]!.id} turn={props.turns[index]!} />}
+      />
+    )
+  },
 })
-
-function ChatApp() {
-  const [collapsed, setCollapsed] = useState(false)
-  const [turns, setTurns] = useState(initialTurns)
-  return (
-    <div style={{ display: 'flex', flexDirection: 'row', height: '100%' }}>
-      <Sidebar collapsed={collapsed} onCollapse={() => setCollapsed(true)} />
-      <Transcript turns={turns} />
-      <Composer onSend={(text) => setTurns((current) => [...current, { text }])} />
-    </div>
-  )
-}
 ```
 
 `turns` is a new array only when a message arrives. Sidebar and draft updates
-leave that reference alone, so `memo` skips the map. The chat example uses
+leave that reference alone, so the component's prop comparison skips the map —
+exactly what `memo` did in the React binding. The chat example uses
 this pattern.
 
 `overflowX: "scroll"` on a wide child must not steal the vertical wheel.
@@ -726,20 +754,31 @@ native caret, text selection, IME composition, clipboard actions, undo/redo,
 grapheme-safe deletion and mouse positioning.
 
 ```tsx
-<textarea
-  value={draft}
-  placeholder="Ask anything"
-  minRows={1}
-  maxRows={8}
-  onChange={(event) => setDraft(event.value ?? '')}
-  onSubmit={send}
-/>
+const Composer = defineComponent({
+  setup() {
+    const draft = ref('')
+    return () => (
+      <textarea
+        value={draft.value}
+        placeholder="Ask anything"
+        minRows={1}
+        maxRows={8}
+        onChange={(event) => (draft.value = event.value ?? '')}
+        onSubmit={send}
+      />
+    )
+  },
+})
 ```
 
 `Enter` emits `onSubmit`. In a `<textarea>`, `Shift+Enter` inserts a newline.
-The editor updates natively first, then reports the complete value to React.
+The editor updates natively first, then reports the complete value to Vue.
 `value` changes can replace the native content, but keeping the same prop value
 does not reject an edit like a browser-controlled input.
+
+> **`v-model` is not supported on host elements.** `modelValue` is a reserved
+> prop and never reaches Rust. Use `:value` + `@change` (`value` + `onChange`
+> in TSX). `onInput` is accepted as an alias for `change`.
 
 The focused caret stays solid during edits and then blinks every 500ms while
 idle. It stops scheduling repaint frames on blur or while the window is
@@ -751,17 +790,17 @@ inactive. Override its colour through the shared native theme:
 
 ## Focus and keyboard navigation
 
-Focus is a **native GPUI concept**. GPUIX connects stable React element IDs to
-persistent `gpui::FocusHandle` values, so focus survives React rerenders:
+Focus is a **native GPUI concept**. GPUIX connects stable element IDs to
+persistent `gpui::FocusHandle` values, so focus survives Vue re-renders:
 
 ```text
-React <div tabIndex={0}>
-            │
-            ▼
+<div tabIndex={0}>
+        │
+        ▼
 Retained element ID ► persistent gpui::FocusHandle ► keyboard/action dispatch
-            ▲
-            │
-      React rerenders
+        ▲
+        │
+  Vue re-renders
 ```
 
 Inputs and textareas join the normal tab order automatically. Add `tabIndex` to
@@ -770,8 +809,8 @@ a `div` when it should receive keyboard focus:
 ```tsx
 <div
   tabIndex={0}
-  onFocus={() => setActive(true)}
-  onBlur={() => setActive(false)}
+  onFocus={() => (active.value = true)}
+  onBlur={() => (active.value = false)}
   onKeyDown={(event) => {
     if (event.key === 'enter') submit()
   }}
@@ -794,10 +833,10 @@ JavaScript round trip.
 Use a ref for imperative focus:
 
 ```tsx
-const buttonRef = useRef<{ id: number }>(null)
+const buttonRef = ref<{ id: number } | null>(null)
 
 function focusButton() {
-  if (buttonRef.current) renderer.focusElement(buttonRef.current.id)
+  if (buttonRef.value) renderer.focusElement?.(buttonRef.value.id)
 }
 
 <div ref={buttonRef} tabIndex={-1}>Focused on demand</div>
@@ -810,98 +849,31 @@ Removing `tabIndex` removes the element from the tab order.
 ## Headless controls
 
 The built-in controls are **unstyled primitives**, not a fixed component
-library. Use them like Radix primitives in shadcn: import a primitive namespace,
-wrap and style it in a local file, then import those local components throughout
-the app.
+library. Wrap and style them in a local file, then import those local components
+throughout the app.
 
 ```text
-@gpuix/react/select ► components/ui/select.tsx ► application screens
-  native behavior       local styles/variants       product-specific use
+@gpuiv/vue ► components/ui/*.tsx ► application screens
+ native behavior   local styles/variants   product-specific use
 ```
 
-Each primitive has a dedicated namespace entry point:
+All control components come from the main package:
 
 | Import | Main parts |
 |---|---|
-| `@gpuix/react/select` | `Root`, `Trigger`, `Value`, `Content`, `Item` |
-| `@gpuix/react/combobox` | `Root`, `Input`, `Content`, `List`, `Item`, `Empty` |
-| `@gpuix/react/tooltip` | `Provider`, `Root`, `Trigger`, `Content` |
+| `@gpuiv/vue` | `Select` (Root), `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, plus `SelectGroup`, `SelectLabel`, `SelectSeparator`, `SelectScrollUpButton`, `SelectScrollDownButton` |
+| `@gpuiv/vue` | `FloatingLayer` — the positioned layer behind `SelectContent`, usable directly |
+
+There is **no Combobox or Tooltip in the Vue binding yet**, and no `asChild`.
+Style the existing primitives and compose them yourself.
 
 ### Build a local Select
 
-Create `components/ui/select.tsx`. This file is application code, so it can be
+Create `components/ui/model-picker.tsx`. This file is application code, so it can be
 copied and changed without waiting for GPUIX to add a theme option:
 
 ```tsx
-import * as React from 'react'
-import * as SelectPrimitive from '@gpuix/react/select'
-
-export const Select = SelectPrimitive.Root
-export const SelectValue = SelectPrimitive.Value
-export const SelectGroup = SelectPrimitive.Group
-
-export const SelectTrigger = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Trigger>,
-  SelectPrimitive.SelectTriggerProps
->(({ style, ...props }, ref) => (
-  <SelectPrimitive.Trigger
-    ref={ref}
-    {...props}
-    style={(state) => ({
-      width: 220,
-      height: 36,
-      padding: 8,
-      backgroundColor: state.open ? '#334155' : '#1e293b',
-      borderRadius: 8,
-      ...(typeof style === 'function' ? style(state) : style),
-    })}
-  />
-))
-
-export const SelectContent = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Content>,
-  SelectPrimitive.SelectContentProps
->(({ style, ...props }, ref) => (
-  <SelectPrimitive.Content
-    ref={ref}
-    sideOffset={6}
-    {...props}
-    style={{
-      width: 220,
-      maxHeight: 240,
-      overflowY: 'scroll',
-      padding: 4,
-      backgroundColor: '#0f172a',
-      borderRadius: 8,
-      ...style,
-    }}
-  />
-))
-
-export const SelectItem = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Item>,
-  SelectPrimitive.SelectItemProps
->(({ style, ...props }, ref) => (
-  <SelectPrimitive.Item
-    ref={ref}
-    {...props}
-    style={(state) => ({
-      padding: 8,
-      opacity: state.disabled ? 0.4 : 1,
-      backgroundColor: state.highlighted
-        ? '#334155'
-        : state.selected
-          ? '#1e3a5f'
-          : '#0f172a',
-      ...(typeof style === 'function' ? style(state) : style),
-    })}
-  />
-))
-```
-
-Use the styled local file with the familiar shadcn shape:
-
-```tsx
+import { defineComponent, type PropType } from 'vue'
 import {
   Select,
   SelectContent,
@@ -909,77 +881,98 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from './components/ui/select'
+  type SelectItemState,
+  type SelectTriggerState,
+} from '@gpuiv/vue'
 
-<Select value={model} onValueChange={setModel}>
-  <SelectTrigger>
-    <SelectValue placeholder="Select a model" />
-  </SelectTrigger>
-  <SelectContent>
-    <SelectGroup>
-      <SelectItem value="sonnet">Sonnet</SelectItem>
-      <SelectItem value="opus">Opus</SelectItem>
-    </SelectGroup>
-  </SelectContent>
-</Select>
+const MODELS = [
+  { id: 'sonnet', label: 'Sonnet' },
+  { id: 'opus', label: 'Opus' },
+]
+
+export const ModelPicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    return () => (
+      <Select value={props.value} onValueChange={props.onChange}>
+        <div style={{ position: 'relative', display: 'flex' }}>
+          <SelectTrigger
+            style={(state: SelectTriggerState) => ({
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              width: 220,
+              height: 36,
+              padding: 8,
+              borderRadius: 8,
+              backgroundColor: state.open ? '#334155' : '#1e293b',
+              hover: { backgroundColor: '#334155' },
+            })}
+          >
+            <SelectValue placeholder="Select a model" />
+          </SelectTrigger>
+          <SelectContent
+            side="top"
+            sideOffset={6}
+            style={{
+              width: 220,
+              maxHeight: 240,
+              overflowY: 'scroll',
+              padding: 4,
+              backgroundColor: '#0f172a',
+              borderRadius: 8,
+            }}
+          >
+            <SelectGroup>
+              {MODELS.map((model) => (
+                <SelectItem key={model.id} value={model.id} textValue={model.label}>
+                  {(state: SelectItemState) => (
+                    <div
+                      style={{
+                        padding: 8,
+                        backgroundColor: state.highlighted
+                          ? '#334155'
+                          : state.selected
+                            ? '#1e3a5f'
+                            : '#0f172a',
+                      }}
+                    >
+                      <text style={{ fontSize: 13, color: '#cdd6f4' }}>{model.label}</text>
+                    </div>
+                  )}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </div>
+      </Select>
+    )
+  },
+})
+```
+
+`SelectTrigger` and `SelectItem` take a **style function** of their current
+state (`open`, `selected`, `highlighted`, `disabled`, `placeholder`), and
+`SelectItem`'s default slot is a render function of the same state. Use the
+styled local file with the familiar compound shape:
+
+```tsx
+<ModelPicker
+  value={model.value}
+  onChange={(next) => (model.value = next)}
+/>
 ```
 
 The trigger participates in normal tab navigation. Opening the Select focuses
 its content. `Up`, `Down`, `Ctrl+P`, `Ctrl+N`, `Enter`, and `Escape` control the
 menu. Closing it restores focus to the trigger. Disabled items are skipped.
 
-### Style Combobox and Tooltip the same way
-
-Start their local files from namespace imports too:
-
-```tsx
-// components/ui/combobox.tsx
-import * as ComboboxPrimitive from '@gpuix/react/combobox'
-
-// components/ui/tooltip.tsx
-import * as TooltipPrimitive from '@gpuix/react/tooltip'
-```
-
-The application still uses compound components, not one large configuration
-object:
-
-```tsx
-<ComboboxPrimitive.Root items={['Next.js', 'SvelteKit', 'Astro']}>
-  <ComboboxPrimitive.Input style={{ width: 220, height: 36, padding: 8 }} />
-  <ComboboxPrimitive.Content style={{ width: 220 }}>
-    <ComboboxPrimitive.Empty>No frameworks found.</ComboboxPrimitive.Empty>
-    <ComboboxPrimitive.List>
-      {(item) => (
-        <ComboboxPrimitive.Item key={item} value={item}>
-          {item}
-        </ComboboxPrimitive.Item>
-      )}
-    </ComboboxPrimitive.List>
-  </ComboboxPrimitive.Content>
-</ComboboxPrimitive.Root>
-```
-
-```tsx
-<TooltipPrimitive.Provider delayDuration={350}>
-  <TooltipPrimitive.Root>
-    <TooltipPrimitive.Trigger asChild>
-      <div tabIndex={0} style={{ padding: 8 }}>Copy</div>
-    </TooltipPrimitive.Trigger>
-    <TooltipPrimitive.Content side="top" sideOffset={6}>
-      Copy message
-    </TooltipPrimitive.Content>
-  </TooltipPrimitive.Root>
-</TooltipPrimitive.Provider>
-```
-
-Combobox uses the native input for text editing, IME, clipboard, and focus.
-Tooltip `asChild` preserves the child ref and merges trigger behavior into that
-host element. All floating content uses GPUI's deferred `anchored()` layer,
-snaps inside the window, and occludes controls behind it.
-
 ### Overlay menus
 
-Menus, tooltips, and dialogs must use **`SelectContent`**, **`ComboboxContent`**,
+Menus, tooltips, and dialogs must use **`SelectContent`**, **`FloatingLayer`**,
 or `<anchored deferred>`. Those paint in a later pass, on top of
 `<virtual-list>` and the rest of the page.
 
@@ -988,7 +981,7 @@ the virtual list. The list paints after the composer, so you still see the
 markdown through the menu, and clicks hit the text behind it.
 
 ```tsx
-<Select value={model} onValueChange={setModel}>
+<Select value={model.value} onValueChange={setModel}>
   <div style={{ position: 'relative' }}>
     <SelectTrigger>
       <SelectValue />
@@ -1031,8 +1024,8 @@ gutters — set `userSelect: "none"`, which inherits like the CSS property:
 Read the selection from the renderer:
 
 ```tsx
-renderer.getSelectedText()   // joined text, or null
-renderer.clearSelection()
+renderer.getSelectedText?.()   // joined text, or null
+renderer.clearSelection?.()
 ```
 
 Selection works because each painted text element registers itself into a
@@ -1128,7 +1121,7 @@ built-in dark theme, so overriding one token leaves the rest alone.
 
 **Layout numbers live in the theme too**, under `metrics`. Row heights, gutter
 widths, paddings and the heading scale are props, not Rust constants, so tuning
-the design is a React re-render and never a native rebuild.
+the design is a Vue re-render and never a native rebuild.
 
 ```tsx
 <diff
@@ -1261,6 +1254,9 @@ CSS-like styling via the `style` prop:
 </div>
 ```
 
+Style objects follow the standard Vue shape: plain camelCase objects, kebab-case
+keys are camelized, and CSS strings and arrays of objects are accepted too.
+
 **Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
 
 **Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
@@ -1326,7 +1322,7 @@ Limited relative-color forms can derive a new color from a base value:
     boxShadow: {
       offsetX: 0,
       offsetY: 4,
-      blurRadius: 12,
+      blurRadius: 8,
       spreadRadius: 0,
       color: '#00000033',
     },
@@ -1363,7 +1359,7 @@ JavaScript round trip.
 Nesting is one level deep. A `hover` object cannot contain another `hover` or
 `active`.
 
-> **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
+> **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in your component and render each line as a separate `<text>` element in a flex column:
 >
 > ```tsx
 > <div style={{ display: 'flex', flexDirection: 'column', fontFamily: 'Menlo' }}>
@@ -1382,42 +1378,46 @@ client works in vitest and against a child process.
 
 ```tsx
 <div testId="sidebar-collapse" onClick={onCollapse}>‹</div>
-<textarea testId="composer" value={draft} onChange={...} />
+<textarea testId="composer" value={draft.value} onChange={...} />
 <div testId="send" onClick={onSend}>↑</div>
 ```
 
 ```ts
-import { createTestRoot } from '@gpuix/react'
-import { connectTest } from '@gpuix/react/automation'
+import { createTestApp } from '@gpuiv/vue/testing'
+import { connectTest } from '@gpuiv/vue/automation'
 import { ChatApp } from './chat'
 
-const { render, renderer } = createTestRoot()
-render(<ChatApp />)
-const app = await connectTest(renderer)
+const app = createTestApp(ChatApp)
+const automation = await connectTest(app.renderer, app.settle)
 
-await app.screenshot({ path: 'open.png' })
+await automation.screenshot({ path: 'open.png' })
 
-await app.clock.pause()
-await app.getByTestId('sidebar-collapse').click()
-await app.clock.fastForward(200)
-await app.screenshot({ path: 'collapsed.png' })
+await automation.clock.pause()
+await automation.getByTestId('sidebar-collapse').click()
+await automation.clock.fastForward(200)
+await automation.screenshot({ path: 'collapsed.png' })
 
-await app.getByTestId('composer').fill('hello gpuix')
-await app.getByTestId('send').click()
-await app.screenshot({ path: 'sent.png' })
+await automation.getByTestId('composer').fill('hello gpuix')
+await automation.getByTestId('send').click()
+await automation.screenshot({ path: 'sent.png' })
 ```
+
+Locator actions settle internally (`connectTest` receives `app.settle`, so every
+click, fill, and keystroke awaits the flush). When you call the renderer's
+`nativeSimulate*` methods directly, await `app.settle()` yourself after each —
+Vue updates are microtask-based, so the tree is not current until it flushes.
 
 That is the chat example. The real test lives in
 [`examples/chat.test.tsx`](./examples/chat.test.tsx).
 
 ```
-createTestRoot()                 launch({ command, args })
-       │                                    │
-       ▼                                    ▼
- connectTest(renderer)              child stdin / stdout
-       │                                    │
-       └────────── App / Locator ───────────┘
-                    click, fill, screenshot
+createTestApp()              launch({ command, args })
+       │                              │
+       ▼                              ▼
+ connectTest(renderer, settle)  child stdin / stdout
+       │                              │
+       └────────── App / Locator ─────┘
+                  click, fill, screenshot
 ```
 
 ### Locators
@@ -1441,9 +1441,9 @@ exactly one match exists.
 Use that to capture a sidebar animation at known timestamps:
 
 ```ts
-const startedAt = await app.clock.pause()
-await app.getByTestId('sidebar-collapse').click()
-await app.captureFrames('review/sidebar', [
+const startedAt = await automation.clock.pause()
+await automation.getByTestId('sidebar-collapse').click()
+await automation.captureFrames('review/sidebar', [
   startedAt,
   startedAt + 100,
   startedAt + 200,
@@ -1458,7 +1458,7 @@ so a normal terminal run is unchanged. Lines without a `data:` prefix are
 ignored; `console.log` cannot break a message.
 
 ```ts
-import { launch } from '@gpuix/react/automation'
+import { launch } from '@gpuiv/vue/automation'
 
 const app = await launch({ command: 'bun', args: ['examples/chat.tsx'] })
 await app.getByTestId('composer').fill('hello')
@@ -1474,22 +1474,26 @@ handlers as production. Windows are positioned offscreen but fully rendered by
 Metal. The methods below are the lower-level API when a locator is not enough.
 
 ```ts
-import { createTestRoot } from '@gpuix/react/testing'
+import { createTestApp } from '@gpuiv/vue/testing'
 
-const { root, renderer } = createTestRoot()
-
-root.render(<MyComponent />)
-renderer.flush()  // triggers GpuixView::render() via Metal
+const app = createTestApp(MyComponent)
+app.renderer.flush()  // triggers GpuixView::render() via Metal
 
 // Simulate events through GPUI's native input pipeline
-renderer.nativeSimulateClick(50, 50)
-renderer.nativeSimulateKeystrokes('enter')
+app.renderer.nativeSimulateClick(50, 50)
+app.renderer.nativeSimulateKeystrokes('enter')
+await app.settle()    // flush Vue's scheduler + mutations + repaint
 
 // Inspect results
-const events = renderer.drainNativeEvents()
-const screenshot = renderer.captureScreenshot('/tmp/test.png')
-const text = renderer.getAllText()
+const events = app.renderer.drainEvents()
+const screenshot = app.renderer.captureScreenshot('/tmp/test.png')
+const text = app.renderer.getAllText()
 ```
+
+`createTestApp()` returns `{ app, container, renderer, settle, unmount }`.
+**`settle()` is required after any input simulation you drive yourself**: Vue
+updates flush on a microtask, so without it the Rust tree still has the old
+state. `unmount()` tears the app down.
 
 ### Testing native elements
 
@@ -1498,8 +1502,8 @@ and `<markdown>` paint their text inside GPUI, so use `getPaintedText()`, which
 returns every string painted in the last frame in paint order:
 
 ```ts
-root.render(<code code={'a\nb'} language="ts" showHeader={false} />)
-expect(renderer.getPaintedText()).toEqual(['a', 'b'])
+const app = createTestApp(CodeCase)
+expect(app.renderer.getPaintedText()).toEqual(['a', 'b'])
 ```
 
 Selection has its own helper. Listeners are registered during **paint**, so
@@ -1507,10 +1511,10 @@ Selection has its own helper. Listeners are registered during **paint**, so
 `Up` by hand without those flushes selects nothing:
 
 ```ts
-expect(renderer.dragSelect(20, 30, 900, 300)).toBe('first line\nsecond line')
+expect(app.renderer.dragSelect(20, 30, 900, 300)).toBe('first line\nsecond line')
 ```
 
-Screenshots land in `packages/react/screenshots/` and `examples/screenshots/`,
+Screenshots land in `packages/vue/screenshots/` and `examples/screenshots/`,
 both gitignored, so they can be inspected after a run without adding a binary
 diff to every commit. The curated set the README links to lives in
 `docs/images/` and is regenerated with:
@@ -1549,7 +1553,7 @@ bun scripts/dev.ts --app native-text   # rebuild, restart an example app
 ```
 
 Screenshot mode is the better default. Open
-`packages/react/screenshots/showcase.png` in Preview.app, which reloads on
+`packages/vue/screenshots/showcase.png` in Preview.app, which reloads on
 write, and unlike a live window the PNG can also be read by an agent.
 
 Two things avoid the rebuild entirely:
@@ -1557,13 +1561,13 @@ Two things avoid the rebuild entirely:
 - **Content** already lives in props. Change `patch` or `source` and the next
   frame shows it.
 - **Design numbers** live in `theme.metrics`. Tuning a row height or heading
-  scale is a React re-render.
+  scale is a Vue re-render.
 
 The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for deterministic scheduling. Event simulation goes through GPUI's coordinate-based hit testing and dispatch — not synthetic JS events.
 
 ## Status
 
-- [x] React reconciler with mutation-based protocol
+- [x] Vue 3 custom renderer (`createRenderer` from `vue`) with mutation-based protocol
 - [x] napi-rs FFI bindings (createElement, appendChild, setStyle, etc.)
 - [x] RetainedTree (Rust-side element storage)
 - [x] Style mapping (CSS properties → GPUI style methods)
@@ -1581,7 +1585,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>`)
 - [x] Cross-element text selection
-- [x] Headless Select, Combobox, and Tooltip
+- [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
@@ -1589,8 +1593,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
 - [ ] Multiple windows
-- [x] JS remount under `bun --hot` (`render()` keeps the native window)
-- [ ] React Refresh during `bun --hot` (needs a Bun runtime transform)
+- [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
+- [ ] Vue HMR during `bun --hot` (ref state across saves; needs a Bun Fast Refresh-style runtime transform)
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
 

@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url"
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 const NATIVE_SRC = path.join(ROOT, "packages", "native", "src")
-const SHOTS = path.join(ROOT, "packages", "react", "screenshots")
+const SHOTS = path.join(ROOT, "packages", "vue", "screenshots")
 
 /** Coalesce the burst of events an editor emits when it saves a file. */
 const DEBOUNCE_MS = 120
@@ -112,7 +112,7 @@ async function main() {
         startApp(mode.script)
       } else {
         log(`rendering "${mode.pattern}" screenshots`)
-        await run("bun", ["run", "test", mode.pattern], path.join(ROOT, "packages", "react"))
+        await run("bun", ["run", "test", mode.pattern], path.join(ROOT, "packages", "vue"))
         log(`screenshots in ${path.relative(ROOT, SHOTS)}`)
       }
     } finally {

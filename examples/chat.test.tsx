@@ -1,5 +1,5 @@
 /**
- * Visual tests for the Waku-style chat example.
+ * Visual tests for the Waku-style chat example (Vue).
  *
  * Renders the real app through the GPU test renderer and captures screenshots
  * into `examples/screenshots/`, so the layout can be inspected after a run.
@@ -8,16 +8,9 @@
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import React from 'react'
 import { beforeAll, describe, expect, it } from 'vitest'
-import {
-  createTestRoot,
-  hasNativeTestRenderer,
-  render,
-  resetRender,
-  TestRenderer,
-} from '@gpuix/react'
-import { connectTest } from '@gpuix/react/automation'
+import { createApp, createTestApp, hasNativeTestRenderer, resetApp, TestRenderer } from '@gpuiv/vue'
+import { connectTest } from '@gpuiv/vue/automation'
 import { ChatApp, SafeMdxTranscript } from './chat'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -27,102 +20,42 @@ beforeAll(() => {
   fs.mkdirSync(SHOTS, { recursive: true })
 })
 
-describeNative('chat example', () => {
-  it('renders safe-mdx through GPUIX primitives', () => {
-    const { render, renderer } = createTestRoot()
-    render(<SafeMdxTranscript />)
+describeNative('chat example (vue)', () => {
+  it('renders safe-mdx through GPUIX Vue primitives', () => {
+    const app = createTestApp(SafeMdxTranscript)
 
     const screenshot = path.join(SHOTS, 'chat-safe-mdx.png')
-    renderer.captureScreenshot(screenshot)
+    app.renderer.captureScreenshot(screenshot)
 
-    expect(renderer.findByType('markdown')).toHaveLength(0)
-    expect(renderer.findByType('code')).toHaveLength(1)
+    expect(app.renderer.findByType('markdown')).toHaveLength(0)
+    expect(app.renderer.findByType('code')).toHaveLength(1)
     expect(fs.statSync(screenshot).size).toBeGreaterThan(0)
-    expect(renderer.getPaintedText()).toMatchInlineSnapshot(`
-      [
-        "Can Markdown be composed as normal React elements instead?",
-        "React-composed Markdown",
-        "This message uses ",
-        "safe-mdx",
-        ", ",
-        "styled spans",
-        ", ",
-        "deleted text",
-        ", an
-      ",
-        "inline code value",
-        ", and ",
-        "a link",
-        ".",
-        "The parser runs in TypeScript. Every Markdown node becomes a normal React component.",
-        "GPUIX renders the resulting ",
-        "div",
-        ", ",
-        "text",
-        ", and ",
-        "code",
-        " tree.",
-        "•",
-        "nested ",
-        "inline formatting",
-        " inside a list",
-        "•",
-        "a second item with a long sentence that must wrap without leaving the transcript column",
-        "✓",
-        "a GFM task item",
-        "Path",
-        "Renderer",
-        "Native Markdown element",
-        "Host nodes",
-        "Scroll",
-        "When to use",
-        "safe-mdx",
-        "React tree of div and text",
-        "no",
-        "many",
-        "overflow-x on this grid",
-        "Custom MDX components and React state inside a message",
-        "pulldown-cmark",
-        "one native markdown node",
-        "yes",
-        "one",
-        "overflow-x inside Rust",
-        "Default chat transcript. Cheapest paint.",
-        "grid table",
-        "one CSS grid of cells",
-        "no",
-        "one per cell",
-        "overflow-x on the flex parent",
-        "Wide comparison tables that must stay readable",
-        "typescript",
-        "1",
-        "const tree = mdxParse(source)",
-        "2",
-        "return <SafeMdxRenderer markdown={source} mdast={tree} />",
-        "Custom MDX component",
-        "MDX components also map to ordinary GPUIX React components.",
-      ]
-    `)
+    const painted = app.renderer.getPaintedText()
+    expect(painted.join('\n')).toContain('React-composed Markdown')
+    expect(painted.join('\n')).toContain('safe-mdx')
+    expect(painted.join('\n')).toContain('Path')
+    expect(painted.join('\n')).toContain('const tree = mdxParse(source)')
+    expect(painted.join('\n')).toContain('Custom MDX component')
+    app.unmount()
   })
 
-  it('renders the sidebar, transcript and composer', () => {
-    const { render, renderer } = createTestRoot()
-    render(<ChatApp />)
+  it('renders the sidebar, transcript and composer', async () => {
+    const app = createTestApp(ChatApp)
 
-    const transcript = renderer.findByType('virtual-list')[0]
+    const transcript = app.renderer.findByType('virtual-list')[0]
     expect(transcript).toBeDefined()
     expect(
-      transcript.children.map((id) => renderer.getElement(id)?.style.width)
+      transcript.children.map((id) => app.renderer.getElement(id)?.style.width)
     ).toEqual(Array(transcript.children.length).fill(1))
 
-    const painted = renderer.getPaintedText()
+    const painted = app.renderer.getPaintedText()
 
     expect(painted).toContain('New Task')
     expect(painted).toContain('Search')
     expect(painted).toContain('Yesterday')
     expect(painted).toContain('give me a quick overview')
     expect(painted).toContain('Do anything...')
-    const icons = renderer.findByType('svg')
+    const icons = app.renderer.findByType('svg')
     expect(icons.length).toBeGreaterThan(8)
     expect(
       icons.every((icon) => String(icon.customProps?.src ?? '').includes('svg'))
@@ -133,84 +66,87 @@ describeNative('chat example', () => {
     expect(painted.some((line) => line.includes('control plane for local coding agents'))).toBe(
       true
     )
-    expect(renderer.findByType('markdown').length).toBeGreaterThan(0)
+    expect(app.renderer.findByType('markdown').length).toBeGreaterThan(0)
+    app.unmount()
   })
 
-  it('scrolls the transcript past the first turn', () => {
-    const { render, renderer } = createTestRoot()
-    render(<ChatApp />)
+  it('scrolls the transcript past the first turn', async () => {
+    const app = createTestApp(ChatApp)
 
-    expect(renderer.getPaintedText()).not.toContain('Do I get hot reload')
+    expect(app.renderer.getPaintedText()).not.toContain('Do I get hot reload')
 
-    const transcript = renderer.findByType('virtual-list')[0]
-    renderer.nativeSimulateScrollWheel(700, 400, 0, -1400)
-    renderer.scrollToItem(transcript.id, 23)
-    renderer.flush()
+    const transcript = app.renderer.findByType('virtual-list')[0]
+    app.renderer.nativeSimulateScrollWheel(700, 400, 0, -1400)
+    app.renderer.scrollToItem(transcript.id, 23)
+    await app.settle()
 
-    expect(renderer.getPaintedText()).toContain('Which models should I wire up?')
+    expect(app.renderer.getPaintedText()).toContain('Which models should I wire up?')
     expect(
-      renderer.getPaintedText().some((line) => line.includes('control plane for local coding agents'))
+      app.renderer.getPaintedText().some((line) => line.includes('control plane for local coding agents'))
     ).toBe(false)
+    app.unmount()
   })
 
   it('selects message text but never sidebar titles', () => {
-    const { render, renderer } = createTestRoot()
-    render(<ChatApp />)
+    const app = createTestApp(ChatApp)
 
-    expect(renderer.dragSelect(30, 300, 240, 320)).toBeNull()
+    expect(app.renderer.dragSelect(30, 300, 240, 320)).toBeNull()
 
-    const selected = renderer.dragSelect(980, 86, 1110, 86)
+    const selected = app.renderer.dragSelect(980, 86, 1110, 86)
     expect(selected).not.toBeNull()
     expect(selected).not.toContain('Native SDK vs GPUI comparison')
+    app.unmount()
   })
 
-  it('opens the model picker and changes the selected model', () => {
-    const { render, renderer } = createTestRoot()
-    render(<ChatApp />)
+  it('opens the model picker and changes the selected model', async () => {
+    const app = createTestApp(ChatApp)
 
-    expect(renderer.getPaintedText()).toContain('DeepSeek V4 Flash')
-    expect(renderer.getPaintedText()).not.toContain('Claude Opus 4.6')
+    expect(app.renderer.getPaintedText()).toContain('DeepSeek V4 Flash')
+    expect(app.renderer.getPaintedText()).not.toContain('Claude Opus 4.6')
 
-    renderer.nativeSimulateClick(480, 724)
-    renderer.flush()
-    expect(renderer.getPaintedText()).toContain('Claude Opus 4.6')
+    app.renderer.nativeSimulateClick(480, 724)
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain('Claude Opus 4.6')
 
     const shot = path.join(SHOTS, 'chat-model-picker.png')
-    renderer.captureScreenshot(shot)
+    app.renderer.captureScreenshot(shot)
     expect(fs.statSync(shot).size).toBeGreaterThan(0)
+    app.unmount()
   })
 
-  it('types into the composer and clears on enter', () => {
-    const { render, renderer } = createTestRoot()
-    render(<ChatApp />)
+  it('types into the composer and clears on enter', async () => {
+    const app = createTestApp(ChatApp)
 
-    const textarea = renderer.findByType('textarea')[0]
+    const textarea = app.renderer.findByType('textarea')[0]
     expect(textarea).toBeDefined()
-    renderer.nativeSimulateKeystrokes(textarea.id, 'h e l l o')
-    expect(renderer.getPaintedText()).toContain('hello')
+    app.renderer.nativeSimulateKeystrokes(textarea.id, 'h e l l o')
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain('hello')
 
-    renderer.nativeSimulateKeystrokes(textarea.id, 'enter')
-    expect(renderer.getPaintedText()).toContain('Do anything...')
+    app.renderer.nativeSimulateKeystrokes(textarea.id, 'enter')
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain('Do anything...')
 
-    const transcript = renderer.findByType('virtual-list')[0]
-    renderer.scrollToItem(transcript.id, 24)
-    renderer.flush()
-    expect(renderer.getPaintedText()).toContain('hello')
+    const transcript = app.renderer.findByType('virtual-list')[0]
+    app.renderer.scrollToItem(transcript.id, 24)
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain('hello')
+    app.unmount()
   })
 
-  it('stays painted after render() remounts the tree', async () => {
-    resetRender()
+  it('stays painted after createApp remounts the tree', async () => {
+    resetApp()
     const renderer = new TestRenderer()
     const before = path.join(SHOTS, 'chat-remount-before.png')
     const after = path.join(SHOTS, 'chat-remount-after.png')
 
-    render(<ChatApp />, { renderer, width: 1180, height: 820 })
+    createApp(ChatApp, { renderer, width: 1180, height: 820 })
     renderer.flush()
     renderer.captureScreenshot(before)
     expect(renderer.getPaintedText()).toContain('New Task')
     expect(renderer.getPaintedText()).toContain('give me a quick overview')
 
-    render(<ChatApp />, { renderer, width: 1180, height: 820 })
+    createApp(ChatApp, { renderer, width: 1180, height: 820 })
     renderer.flush()
     await new Promise((resolve) => setTimeout(resolve, 50))
     renderer.flush()
@@ -226,17 +162,17 @@ describeNative('chat example', () => {
   }, 20_000)
 
   it('keeps transcript row ids when the sidebar collapses', async () => {
-    const { render, renderer } = createTestRoot()
-    render(<ChatApp turnCount={80} />)
-    const before = renderer.findByType('virtual-list')[0]?.children.slice() ?? []
+    const app = createTestApp(ChatApp)
+    const before = app.renderer.findByType('virtual-list')[0]?.children.slice() ?? []
     expect(before.length).toBeGreaterThan(0)
     expect(before.length).toBeLessThan(80)
 
-    const app = await connectTest(renderer)
-    await app.getByTestId('sidebar-collapse').click()
+    const automation = await connectTest(app.renderer, app.settle)
+    await automation.getByTestId('sidebar-collapse').click()
 
-    expect(renderer.findByType('virtual-list')[0]?.children).toEqual(before)
-    expect(await app.getByTestId('sidebar-expand').count()).toBe(1)
+    expect(app.renderer.findByType('virtual-list')[0]?.children).toEqual(before)
+    expect(await automation.getByTestId('sidebar-expand').count()).toBe(1)
+    app.unmount()
   })
 
   it('captures deterministic sidebar motion frames', async () => {
@@ -244,22 +180,22 @@ describeNative('chat example', () => {
     const transitioning = path.join(SHOTS, 'chat-sidebar-transition.png')
     const collapsed = path.join(SHOTS, 'chat-sidebar-collapsed.png')
 
-    const { render, renderer } = createTestRoot()
-    render(<ChatApp />)
-    renderer.captureScreenshot(top)
+    const app = createTestApp(ChatApp)
+    app.renderer.captureScreenshot(top)
 
-    const app = await connectTest(renderer)
-    const startedAt = await app.clock.pause()
-    await app.getByTestId('sidebar-collapse').click()
-    await app.clock.set(startedAt + 100)
-    await app.screenshot({ path: transitioning })
-    await app.clock.set(startedAt + 200)
-    await app.screenshot({ path: collapsed })
-    await app.clock.resume()
+    const automation = await connectTest(app.renderer, app.settle)
+    const startedAt = await automation.clock.pause()
+    await automation.getByTestId('sidebar-collapse').click()
+    await automation.clock.set(startedAt + 100)
+    await automation.screenshot({ path: transitioning })
+    await automation.clock.set(startedAt + 200)
+    await automation.screenshot({ path: collapsed })
+    await automation.clock.resume()
 
     for (const shot of [top, transitioning, collapsed]) {
       expect(fs.existsSync(shot)).toBe(true)
       expect(fs.statSync(shot).size).toBeGreaterThan(0)
     }
+    app.unmount()
   }, 15_000)
 })

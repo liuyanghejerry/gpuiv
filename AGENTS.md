@@ -4,12 +4,12 @@
 
 ## Project Goal
 
-GPUIX enables building **native GPU-accelerated desktop applications** using **React and TypeScript**, powered by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's rendering framework).
+GPUIX enables building **native GPU-accelerated desktop applications** using **Vue 3 and TypeScript**, powered by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's rendering framework).
 
-Instead of Electron/web rendering, your React components render directly to the GPU via Metal/Vulkan.
+Instead of Electron/web rendering, your Vue components render directly to the GPU via Metal/Vulkan.
 
 ```
-React (TypeScript)  →  napi-rs  →  GPUI (Rust)  →  GPU
+Vue 3 (TypeScript)  →  napi-rs  →  GPUI (Rust)  →  GPU
      Your code         Bridge      Native render    Metal/Vulkan
 ```
 
@@ -20,37 +20,39 @@ React (TypeScript)  →  napi-rs  →  GPUI (Rust)  →  GPU
 │  JavaScript / TypeScript                                        │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │  Your React App                                          │   │
+│  │  Your Vue App                                           │   │
 │  │                                                          │   │
-│  │  function App() {                                        │   │
-│  │    const [count, setCount] = useState(0)                 │   │
-│  │    return (                                              │   │
-│  │      <div style={{ display: 'flex', bg: '#1e1e2e' }}>    │   │
-│  │        <div onClick={() => setCount(c => c + 1)}>+</div> │   │
-│  │      </div>                                              │   │
-│  │    )                                                     │   │
-│  │  }                                                       │   │
+│  │  const Counter = defineComponent({                      │   │
+│  │    setup() {                                            │   │
+│  │      const count = ref(0)                               │   │
+│  │      return () => (                                     │   │
+│  │        <div style={{ display: 'flex', gap: 8 }}>        │   │
+│  │          <div onClick={() => count.value++}>+</div>     │   │
+│  │        </div>                                           │   │
+│  │      )                                                  │   │
+│  │    },                                                   │   │
+│  │  })                                                     │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                              ↓                                  │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │  @gpuix/react (packages/react)                           │   │
+│  │  @gpuiv/vue (packages/vue)                              │   │
 │  │                                                          │   │
-│  │  - React Reconciler (react-reconciler)                   │   │
-│  │  - Builds element tree from React components             │   │
-│  │  - Serializes to JSON ElementDesc                        │   │
-│  │  - Manages event handler registry                        │   │
+│  │  - Vue 3 custom renderer (createRenderer from vue)      │   │
+│  │  - Host config emits DOM-like mutations                 │   │
+│  │  - BatchingRenderer: one applyBatch() per flush         │   │
+│  │  - Event handler registry keyed by (id, eventType)      │   │
 │  └─────────────────────────────────────────────────────────┘   │
-│                              ↓ JSON                             │
+│                     ↓ mutations (batched JSON)                  │
 └─────────────────────────────────────────────────────────────────┘
                                ↓ napi-rs FFI
 ┌─────────────────────────────────────────────────────────────────┐
 │  Rust / Native                                                  │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐   │
-│  │  @gpuix/native (packages/native)                         │   │
+│  │  @gpuiv/native (packages/native)                        │   │
 │  │                                                          │   │
-│  │  - GpuixRenderer: receives JSON, triggers re-render      │   │
-│  │  - build_element(): ElementDesc → GPUI elements          │   │
+│  │  - RetainedTree: applies mutations, stores the UI        │   │
+│  │  - GpuixView::render() → build_element() → GPUI         │   │
 │  │  - apply_styles(): StyleDesc → GPUI style methods        │   │
 │  │  - Event handlers → ThreadsafeFunction callbacks to JS   │   │
 │  └─────────────────────────────────────────────────────────┘   │
@@ -68,58 +70,148 @@ React (TypeScript)  →  napi-rs  →  GPUI (Rust)  →  GPU
 
 ## Key Insight: Immediate Mode Alignment
 
-GPUI is **immediate-mode** - it rebuilds the entire UI tree every frame. This actually aligns perfectly with React's model:
+GPUI is **immediate-mode** - it rebuilds the entire UI tree every frame. This actually aligns perfectly with Vue's reactive model:
 
 | Traditional DOM Renderer | GPUIX |
 |--------------------------|-------|
-| `appendChild(node)` | Rebuild tree each render |
-| `node.style.color = x` | Send full tree description |
-| Mutation-based | Description-based |
+| `appendChild(node)` | Mutation applied to the Rust RetainedTree |
+| `node.style.color = x` | `setStyle` mutation, then rebuild next frame |
+| Mutation-based | Mutation protocol + retained tree |
 
-We don't fight GPUI's architecture - we embrace it by sending a complete element description on every React render.
+We don't fight GPUI's architecture - we embrace it. Mutations update the retained tree; `GpuixView::render()` walks it every frame to produce ephemeral GPUI elements. Only **changed elements** cross the FFI boundary — Vue's patch diffs the vnode tree and sends minimal mutations.
 
 ## Package Structure
 
 ```
-gpuix/
+gpuiv/
 ├── packages/
-│   ├── native/                 # Rust napi-rs bindings
+│   ├── native/                 # Rust napi-rs bindings (@gpuiv/native)
 │   │   ├── src/
-│   │   │   ├── lib.rs          # Module exports
-│   │   │   ├── renderer.rs     # GpuixRenderer, GpuixView, build_element()
-│   │   │   ├── element_tree.rs # ElementDesc, EventPayload types
-│   │   │   ├── style.rs        # StyleDesc, color parsing
-│   │   │   ├── theme.rs        # Comet palette, oklch helpers, JS overrides
-│   │   │   ├── text/           # Selection: state, paint registry, TextRuns
-│   │   │   ├── syntax/         # Tree-sitter highlighting + bounded cache
-│   │   │   ├── markdown/       # pulldown-cmark parser + gpui renderer
-│   │   │   ├── diff/           # Unified-patch parser + row flattening
-│   │   │   └── custom_elements/# input, img, svg, anchored, code, diff, markdown
+│   │   │   ├── lib.rs           # Module exports
+│   │   │   ├── renderer.rs      # GpuixRenderer, GpuixView, build_element()
+│   │   │   ├── retained_tree.rs # RetainedTree, RetainedElement (Rust-side source of truth)
+│   │   │   ├── element_tree.rs  # EventPayload type (Rust → JS)
+│   │   │   ├── style.rs         # StyleDesc, should_occlude() hitbox policy
+│   │   │   ├── color.rs         # Color parsing (csscolorparser 0.8.3)
+│   │   │   ├── theme.rs         # Comet palette, oklch helpers, Metrics, JS overrides
+│   │   │   ├── motion.rs        # Native motion.div transitions
+│   │   │   ├── automation.rs    # Test automation command protocol (native side)
+│   │   │   ├── test_renderer.rs # TestGpuixRenderer (test-support feature, macOS)
+│   │   │   ├── text/            # Selection: state, paint registry, TextRuns
+│   │   │   ├── syntax/          # Tree-sitter highlighting + bounded cache
+│   │   │   ├── markdown/        # pulldown-cmark parser + gpui renderer
+│   │   │   ├── diff/            # Unified-patch parser + row flattening
+│   │   │   └── custom_elements/ # input, img, svg, anchored, code, diff, markdown
 │   │   ├── examples/
-│   │   │   └── hello.rs        # Pure GPUI test (no JS)
+│   │   │   └── hello.rs         # Pure GPUI test (no JS)
 │   │   ├── Cargo.toml
 │   │   └── build.rs
 │   │
-│   └── react/                  # React reconciler
+│   └── vue/                     # Vue 3 custom renderer (@gpuiv/vue)
 │       ├── src/
-│       │   ├── index.ts        # Public exports
+│       │   ├── index.ts          # Public exports
+│       │   ├── testing.ts        # createTestApp(), TestRenderer
 │       │   ├── reconciler/
-│       │   │   ├── host-config.ts  # React reconciler implementation
-│       │   │   ├── reconciler.ts   # ReactReconciler instance
-│       │   │   └── renderer.ts     # createRoot(), event bridge
-│       │   ├── hooks/
-│       │   │   ├── use-gpuix.ts    # Context access
-│       │   │   └── use-window-size.ts
-│       │   └── types/
-│       │       └── host.ts     # TypeScript types
+│       │   │   ├── vue-renderer.ts    # Vue createRenderer host config (mutation protocol)
+│       │   │   ├── batch-renderer.ts  # BatchingRenderer: queues ops, one applyBatch() per flush
+│       │   │   └── event-registry.ts  # (id, eventType) → handler map
+│       │   ├── components/       # motion, VirtualList, Select, FloatingLayer
+│       │   ├── automation/       # connectTest/launch client, stdio protocol
+│       │   ├── hooks/            # use-gpuix, use-window-size
+│       │   ├── types.ts          # NativeRenderer interface, StyleDesc TS types
+│       │   └── __tests__/        # vitest suites (GPU-backed)
 │       └── package.json
 │
-├── examples/
-│   ├── package.json            # Workspace package for examples
-│   └── counter.tsx             # Example React app
+├── examples/                    # Example apps (private workspace)
+│   ├── chat.tsx                 # Waku-style app (the flagship example)
+│   ├── chat.test.tsx            # Automation-driven UI test
+│   ├── chat.perf.test.tsx       # Draw / chrome perf regression test
+│   ├── counter.tsx, diff.tsx, native-text.tsx
+│   ├── profile-chat-scroll.tsx  # Manual profiling entry
+│   └── compile-chat.ts          # bun compile bundle script
 │
-└── AGENTS.md                   # This file
+├── scripts/
+│   ├── dev.ts                   # Watch Rust src, rebuild, re-render screenshots
+│   └── screenshots.ts           # Regenerate docs/images/
+│
+├── docs/                        # Design plans + curated images
+├── zed/                         # Pinned GPUI fork submodule (gpui-macos-embedded)
+└── .changeset/                  # Pending release notes
 ```
+
+## The Mutation Protocol (JS → Rust)
+
+The FFI surface is a set of direct napi calls — the `NativeRenderer` interface (`packages/vue/src/types.ts`):
+
+```ts
+interface NativeRenderer {
+  createElement(id: number, elementType: string): void
+  destroyElement(id: number): Array<number>
+  appendChild(parentId: number, childId: number): void
+  removeChild(parentId: number, childId: number): void
+  insertBefore(parentId: number, childId: number, beforeId: number): void
+  setStyle(id: number, styleJson: string): void
+  setText(id: number, content: string): void
+  setEventListener(id: number, eventType: string, hasHandler: boolean): void
+  setRoot(id: number): void
+  commitMutations(): void
+}
+```
+
+Element IDs are plain numbers from a JS incrementing counter (u64 in Rust, f64-safe across napi).
+
+`BatchingRenderer` (`packages/vue/src/reconciler/batch-renderer.ts`) wraps this in a Proxy: mutation calls are captured as `["methodName", ...args]` tuples, and `commitMutations()` — invoked on a microtask after Vue's scheduler has run its component update jobs, or synchronously via `flushMutations()` — flushes the whole queue in **one `applyBatch(json)` FFI call**.
+
+- Queue **raw objects** for `setStyle` / `setCustomProp`. Do not `JSON.stringify` them first — the outer applyBatch stringify would escape that string again and Rust would parse twice. A 10k-row mount spent 626ms in `applyBatch` that way.
+- Opcode `setCustomPropValue` carries a raw JSON value; `setCustomProp` still means a JSON **string** (legacy). A raw `"top"` on `setCustomProp` is parsed as JSON and throws — that once killed the composer Selects.
+- Adding a new mutation method means adding it to `BATCHED_METHODS` in `batch-renderer.ts` — nothing else.
+- Vue's renderer patches synchronously within a component update, but the update itself is scheduled on a microtask. Host nodes are materialized into the queue during patch, then the batch is flushed on the microtask after the scheduler finishes. `flushMutations()` drains it synchronously for callers that need the Rust tree current (mount, tests, clock-pinned frames).
+
+Rust applies the batch to `RetainedTree` and invalidates the view. Each GPUI frame, `GpuixView::render()` walks the retained tree and calls `build_element()` to produce ephemeral GPUI elements; Taffy lays them out and the GPU paints.
+
+### Event Flow (Rust → JS)
+
+```
+1. User clicks element id=3
+2. GPUI fires on_click on the element
+3. Rust closure calls emit_event_full(callback, 3, "click", {x, y, ...})
+4. ThreadsafeFunction queues EventPayload on the Node.js event loop
+5. JS event registry: eventHandlers.get(3)?.get("click")?.(payload)
+6. Vue handler runs: onClick={() => count.value++}
+7. State update → Vue scheduler → patch sends mutations → applyBatch back to Rust
+```
+
+Rust only knows **whether** an element has a listener (via `setEventListener`), never the closure — handlers live in JS.
+
+## Key Types
+
+### RetainedElement (Rust, `retained_tree.rs`)
+
+```rust
+pub struct RetainedElement {
+    pub id: u64,
+    pub element_type: String,                    // "div", "text", "input", "diff", ...
+    pub style: Option<StyleDesc>,
+    pub content: Option<String>,                 // text content
+    pub events: HashSet<String>,
+    pub children: Vec<u64>,
+    pub parent: Option<u64>,
+    pub custom_props: HashMap<String, serde_json::Value>, // input, diff, etc.
+    pub auto_focus: bool,
+    pub subtree_revision: u64,                   // bumped on any descendant mutation
+    pub test_id: Option<String>,                 // from the testId prop
+}
+```
+
+### StyleDesc (`style.rs`, camelCase serde)
+
+CSS-like, deserialized from the JS `style` object. Groups: display/flexbox/grid, sizing (`DimensionValue`: pixels | percentage | auto), per-side padding/margin, position, colors, per-side borders + radius + `BoxShadowValue`, text, overflow, cursor, `pointerEvents`, `userSelect`/`selectionColor`, and one-level `hover`/`active` nested `StyleDesc`s applied natively by GPUI (no JS round trip).
+
+`should_occlude()` decides the hitbox policy: `pointerEvents: "none"` never blocks; `"auto"` always does; unset follows the painted surface (a fill or absolute/fixed position blocks, with in-flow fills using BlockMouseExceptScroll).
+
+### EventPayload (`element_tree.rs`, Rust → JS)
+
+One napi struct for all events; fields are optional and only the relevant ones are populated: `element_id: f64`, `event_type: String`, mouse (`x`, `y`, `button`, `click_count`, `is_right_click`, `pressed_button`), keyboard (`key`, `key_char`, `is_held`), scroll (`delta_x`, `delta_y`, `precise`, `touch_phase`), `hovered`, plus modifiers.
 
 ## Text rendering: one funnel, no exceptions
 
@@ -147,7 +239,7 @@ fields on `crate::theme::Metrics`, reachable from JS as `theme.metrics`.
 **Do not add a new `const` for anything that decides layout.** Put it on
 `Metrics`, give it a default, add it to `MetricsOverride`, `hash_into`, and the
 `GpuixMetrics` TypeScript interface. The whole point is that a design tweak is a
-React re-render, not a native rebuild.
+Vue re-render, not a native rebuild.
 
 Two things stay constant, because they are paint geometry and cannot move a
 glyph: the table hairline, and the inline-code wash overhang.
@@ -166,7 +258,13 @@ selection registry all live in thread-locals of the loaded library.
 Use `bun run dev` (see `scripts/dev.ts`). It watches `packages/native/src`,
 rebuilds, and re-renders the screenshot tests. **A Rust edit reaches fresh PNGs
 in about 4 seconds.** Prefer screenshot mode over `--app`: PNGs in
-`packages/react/screenshots/` can be read by an agent, a live window cannot.
+`packages/vue/screenshots/` can be read by an agent, a live window cannot.
+
+```bash
+bun run dev                      # rebuild, re-render the showcase screenshots
+bun scripts/dev.ts --shots diff  # only tests matching "diff"
+bun scripts/dev.ts --app native-text   # rebuild, restart an example app
+```
 
 **Never ship or start the app on a debug native build.** `bun run build:debug`
 and `cargo build` without `--release` produce an unoptimized `.node`. GPUI
@@ -176,7 +274,14 @@ the user asks, or when a debug-only tool (lldb, sanitizers) cannot run on
 release. After any debug build, rebuild release before starting `chat.tsx`
 or judging frame time.
 
-## Virtualized React children re-enter through `cx.processor`
+Two things avoid the rebuild entirely:
+
+- **Content** already lives in props. Change `patch` or `source` and the next
+  frame shows it.
+- **Design numbers** live in `theme.metrics`. Tuning a row height or heading
+  scale is a Vue re-render.
+
+## Virtualized Vue children re-enter through `cx.processor`
 
 `<virtual-list>` does not build its retained children during `GpuixView::render`.
 Its `gpui::list()` callback uses `cx.processor` to re-enter the `GpuixView`
@@ -185,7 +290,10 @@ only the rows GPUI requests. Never capture the root render's tree guard or
 `BuildCtx` in that callback.
 
 `<diff>` still owns its parsed Rust data because one native diff node is much
-cheaper than retaining one React node per line.
+cheaper than retaining one Vue node per line.
+
+`VirtualList` (the Vue wrapper with `itemCount` + `renderItem`) mounts only the
+visible window in Vue itself — use it for long transcripts.
 
 ## Nested scrolling is not supported
 
@@ -231,16 +339,17 @@ Keep `<virtual-list>` `overdraw` modest. 820px on a short chat kept almost
 every row live. Profile with `debugFrameOverlay: 'full'`. The overlay is
 draw time, not FPS. `8.3 MS` is about 120 Hz.
 
-A long `{rows.map(...)}` is slow **at start**. `createInstance` runs in the
-render phase. Use `VirtualList` with `itemCount` and `renderItem` so React
-only mounts the visible window. The host `<virtual-list>` children API still
+A long `{rows.map(...)}` is slow **at start**. Mounting creates every child in
+the patch. Use `VirtualList` with `itemCount` and `renderItem` so Vue only
+mounts the visible window. The host `<virtual-list>` children API still
 retains every child. After mount, scroll cost is visible Taffy only.
 
-Keep chrome state out of the component that maps the list. `memo(Transcript)`
-so a sidebar click or composer keystroke does not remap every row. A 5k-row
-chat paid 250ms per click before that. Profile that path with
-`INTERACT=1 bun profile-chat-scroll.tsx`. Do not treat a fast wheel flush as
-proof that chrome updates are cheap.
+Keep chrome state out of the component that maps the list. Keep the list prop
+reference stable — replace the `turns` array only when a message arrives, and
+the component's prop comparison skips the update, which is exactly what `memo`
+did in the React binding. A 5k-row chat paid 250ms per click before that.
+Profile that path with `INTERACT=1 bun profile-chat-scroll.tsx`. Do not treat a
+fast wheel flush as proof that chrome updates are cheap.
 
 ## Profiling and optimizing
 
@@ -251,8 +360,8 @@ different paths.
 
 ```
 first mount
-  React maps every child
-    ►  createInstance / setStyle / setCustomProp  (queued)
+  Vue maps every child
+    ►  createElement / setStyle / setCustomProp  (queued)
     ►  one applyBatch JSON
     ►  Rust RetainedTree
     ►  first paint (list builds visible rows only)
@@ -263,23 +372,21 @@ scroll
 chrome setState
   sidebar click / composer key
     ►  parent re-render
-    ►  {rows.map(...)} again unless memo(list)
+    ►  {rows.map(...)} again unless the list props stay stable
     ►  same JS cost as mount if you forget
 ```
 
 ### JS / mount
 
-Write a short script that mounts through `createTestRoot()` and exits. Profile
+Write a short script that mounts through `createTestApp()` and exits. Profile
 that, not the live window. The tick loop will drown the mount.
 
 ```ts
-import React from 'react'
-import { createTestRoot } from '@gpuix/react'
+import { createTestApp } from '@gpuiv/vue/testing'
 import { ChatApp } from './chat'
 
-const root = createTestRoot()
 const start = performance.now()
-root.render(<ChatApp turnCount={10_000} />)
+const app = createTestApp(ChatApp)
 console.log(`mount ${(performance.now() - start).toFixed(1)}ms`)
 ```
 
@@ -298,30 +405,20 @@ The 10k chat mount was 850ms. profano said:
 | Function | Self | What it was |
 |---|---|---|
 | `applyBatch` | 626ms | Rust parsing the mutation JSON |
-| `FiberNode` | 31ms | React |
+| (renderer scheduler) | 31ms | Vue |
 | `stringify` | 26ms | `JSON.stringify(queue)` |
 
-React was not the problem. The batch **stringified every style and theme**, then
-stringified the queue, then Rust parsed each escaped string again.
+Vue was not the problem. The batch **stringified every style and theme**, then
+stringified the queue, then Rust parsed each escaped string again. Fix: queue
+raw objects (see "The Mutation Protocol" above).
 
-Queue **raw objects**. Opcode `setCustomPropValue` carries a raw JSON value.
-`setCustomProp` still means a JSON **string** (legacy). A raw `"top"` or
-`"true"` on `setCustomProp` is parsed as JSON and throws. That is why the
-composer Selects died after the first applyBatch change: `<anchored side="top">`
-never committed.
-
-```ts
-queue.push(['setStyle', id, styleObject])
-queue.push(['setCustomPropValue', id, 'side', 'top'])
-```
-
-After a JS reconciler change, **build `@gpuix/react`**. `examples/` and
-`bun --hot chat.tsx` load `packages/react/dist`, not `src`. packages/react
+After a renderer change, **build `@gpuiv/vue`**. `examples/` and
+`bun --hot chat.tsx` load `packages/vue/dist`, not `src`. packages/vue
 vitest uses `src`. You will think the fix works in one suite and fail in the
 app.
 
 ```bash
-cd packages/react && bun run build
+cd packages/vue && bun run build
 ```
 
 ### Scroll / paint
@@ -344,11 +441,11 @@ For Rust time, `sample` the bun/node pid, or `samply`. GPUI also has
 `ZED_MEASUREMENTS=1`. That is Zed's frame log, not our overlay.
 
 A `.node` cannot unload. After a native rebuild, restart the app. `bun --hot`
-only remounts React.
+only remounts Vue.
 
 ## Overlays and icons
 
-Menus, tooltips, and dialogs go through **`SelectContent` / `ComboboxContent` /
+Menus, tooltips, and dialogs go through **`SelectContent` / `FloatingLayer` /
 `<anchored deferred>`**. Never overflow a `position: "absolute"` card out of the
 composer into a `<virtual-list>`. The list paints after the composer, so the
 list shows through the menu and clicks hit the text behind it.
@@ -398,129 +495,32 @@ To update the TypeScript API surface, edit the Rust source files in `packages/na
 
 **Always** add a `.changeset/*.md` file after a user-facing fix or feature. Do this before you consider the work done. Never skip it. Never edit CHANGELOG.md. Never bump `package.json` version by hand.
 
-Load the `changesets` skill for format and rules. If the change fixes a GitHub issue or should close a PR, put `Fixes #N` / `Closes #N` on its own line. changepub copies those onto the release commit.
+Format (see `.changeset/readme.md`): one kebab-case `.md` file per logical change, `patch` for fixes and `minor` for features, present tense, focused on what users see. Front-matter lists the affected packages:
+
+```md
+---
+'@gpuiv/native': minor
+'@gpuiv/vue': minor
+---
+
+Description of the user-facing change.
+```
+
+If the change fixes a GitHub issue or should close a PR, put `Fixes #N` / `Closes #N` on its own line. changepub copies those onto the release commit. Do not run the interactive changeset CLI, and do not add vague entries like "misc improvements".
 
 ## Publishing
 
-**Never publish from a local machine.** CI is the only release path.
+**Never publish from a local machine.** CI is the only release path. Both packages' `prepublishOnly` scripts exit if `CI` is unset.
 
-`.github/workflows/ci.yml` builds `@gpuix/native` for every napi target (macOS arm64/x64, Linux x64/arm64, Windows x64/arm64), uploads the `.node` artifacts, then the `publish` job downloads them, runs `napi create-npm-dirs` + `napi artifacts`, and publishes `@gpuix/native` and `@gpuix/react`.
+`.github/workflows/ci.yml` builds `@gpuiv/native` for every napi target (macOS arm64/x64, Linux x64/arm64, Windows x64/arm64), uploads the `.node` artifacts, then the `publish` job downloads them, runs `napi create-npm-dirs` + `napi artifacts`, and publishes `@gpuiv/native` and `@gpuiv/vue`. Linux and Windows build with `build:release` (no `test-support` feature, which pulls the macOS-only `gpui_macos`).
 
-Publish order is required. `@gpuix/react` depends on `@gpuix/native` (`workspace:^`). If React publishes first, an install in that window cannot resolve native.
+Publish order is required. `@gpuiv/vue` depends on `@gpuiv/native` (`workspace:^`, rewritten to the exact published version in CI). If Vue publishes first, an install in that window cannot resolve native.
 
 1. `napi pre-publish` publishes the per-platform packages (`darwin-arm64`, `linux-x64-gnu`, …)
-2. `npm publish` publishes `@gpuix/native`
-3. `npm publish` publishes `@gpuix/react`
+2. `npm publish` publishes `@gpuiv/native`
+3. `npm publish` publishes `@gpuiv/vue`
 
-A local `npm publish` / `bun publish` would ship only the host binary and break every other platform. `prepublishOnly` exits if `CI` is unset.
-
-To release: bump versions via changesets, push to `main`. The publish job skips versions already on npm.
-
-## Communication Flow
-
-### Render Flow (JS → Rust)
-
-```
-1. React state changes
-         ↓
-2. React reconciler builds Instance tree
-         ↓
-3. instanceToElementDesc() converts to JSON-serializable format:
-   {
-     type: "div",
-     id: "btn-1", 
-     style: { display: "flex", backgroundColor: "#ff0000" },
-     events: ["click", "mouseEnter"],
-     children: [...]
-   }
-         ↓
-4. renderer.render(JSON.stringify(tree))
-         ↓
-5. Rust parses JSON into ElementDesc structs
-         ↓
-6. build_element() recursively builds GPUI elements:
-   div().id("btn-1").flex().bg(rgba(0xff0000ff)).on_click(...)
-         ↓
-7. GPUI renders to GPU
-```
-
-### Event Flow (Rust → JS)
-
-```
-1. User clicks element with id="btn-1"
-         ↓
-2. GPUI fires click event on element
-         ↓
-3. Rust closure calls emit_event("btn-1", "click", position)
-         ↓
-4. ThreadsafeFunction calls into JS with EventPayload
-         ↓
-5. JS event registry looks up handler:
-   eventHandlers.get("btn-1")?.click?.(event)
-         ↓
-6. React handler runs: onClick={() => setCount(c => c + 1)}
-         ↓
-7. State update triggers re-render → back to Render Flow
-```
-
-## Key Types
-
-### ElementDesc (Rust ↔ JS)
-
-```rust
-pub struct ElementDesc {
-    pub element_type: String,      // "div", "text", "img"
-    pub id: Option<String>,        // For event handling
-    pub style: Option<StyleDesc>,  // CSS-like styles
-    pub content: Option<String>,   // Text content
-    pub events: Option<Vec<String>>, // ["click", "mouseEnter"]
-    pub children: Option<Vec<ElementDesc>>,
-}
-```
-
-### StyleDesc (CSS-like properties)
-
-```rust
-pub struct StyleDesc {
-    // Flexbox
-    pub display: Option<String>,        // "flex"
-    pub flex_direction: Option<String>, // "row", "column"
-    pub align_items: Option<String>,    // "center", "start", "end"
-    pub justify_content: Option<String>,
-    pub gap: Option<f64>,
-    
-    // Sizing
-    pub width: Option<DimensionValue>,
-    pub height: Option<DimensionValue>,
-    
-    // Spacing
-    pub padding: Option<f64>,
-    pub margin: Option<f64>,
-    
-    // Colors (parsed centrally in src/color.rs with csscolorparser 0.8.3;
-    // parser-version changes require running both absolute and relative matrices)
-    pub background_color: Option<String>,
-    pub color: Option<String>,
-    
-    // Border
-    pub border_radius: Option<f64>,
-    pub border_width: Option<f64>,
-    pub border_color: Option<String>,
-}
-```
-
-### EventPayload (Rust → JS)
-
-```rust
-pub struct EventPayload {
-    pub element_id: String,
-    pub event_type: String,  // "click", "mouseEnter", etc.
-    pub x: Option<f64>,
-    pub y: Option<f64>,
-    pub key: Option<String>,
-    pub modifiers: Option<EventModifiers>,
-}
-```
+NPM tokens are fetched through Sigillo (`SIGILLO_TOKEN` secret); CI never stores the npm token directly. The publish steps skip versions already on npm. To release: bump versions via changesets, push to `main`.
 
 ## Building
 
@@ -537,9 +537,19 @@ compile from the same source:
 
 These avoid the core-graphics 0.24 vs 0.25 conflict between `core-text` and Zed's `font-kit` fork.
 
+First-time setup:
+
+```bash
+bun install
+git submodule update --init --recursive
+xcodebuild -downloadComponent MetalToolchain   # macOS, Xcode 26+
+```
+
+The default cargo feature is `test-support`, so published binaries include `TestGpuixRenderer` and users can write GPU-backed tests for their own apps.
+
 ### Rust toolchain
 
-`rust-toolchain.toml` pins the same channel as `zed/rust-toolchain.toml`. When the
+`rust-toolchain.toml` pins the same channel as `zed/rust-toolchain.toml` (currently `1.97.1`). When the
 submodule moves, update ours to match or GPUI may not compile.
 
 ### Metal toolchain (macOS)
@@ -570,7 +580,7 @@ That submodule is what GPUIX builds against. A dirty or switched `zed/` breaks
 the native addon and the test renderer.
 
 ```bash
-# from gpuixlocal/zed. leaves this submodule on its current commit
+# from gpuivlocal/zed. leaves this submodule on its current commit
 git remote add upstream https://github.com/zed-industries/zed.git  # once
 git fetch upstream
 git worktree add /Users/morse/Documents/GitHub/zed-<branch-name> -b <branch-name> upstream/main
@@ -583,7 +593,7 @@ here. Never run `git reset` in `zed/` to "undo" PR work.
 
 ### PRs to GPUIX
 
-When you open a PR with `gh pr create` against **this repo** (`remorses/gpuix`),
+When you open a PR with `gh pr create` against **this repo** (`remorses/gpuiv`),
 the body must name the **harness**, **agent**, and **model** that wrote the
 change. Then put **every user prompt** from the session in a collapsed
 `<details>` block. Reviewers use that to judge prompt quality and how much
@@ -624,7 +634,7 @@ belong in README. This list is only the remaining engineering work.
 
 ### Completed
 
-- [x] React reconciler with mutation-based protocol
+- [x] Vue 3 custom renderer (`createRenderer` from `vue`) with mutation-based protocol
 - [x] napi-rs FFI bindings and RetainedTree
 - [x] Style mapping, including native `hover` / `active`
 - [x] Mouse, keyboard, focus, scroll, and click-outside events
@@ -635,11 +645,12 @@ belong in README. This list is only the remaining engineering work.
 - [x] `<virtual-list>`
 - [x] `<code>`, `<diff>`, `<markdown>` with Tree-sitter
 - [x] Cross-element text selection
-- [x] Headless Select, Combobox, Tooltip
+- [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
 - [x] `setWindowTitle`
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`setDebugFrameOverlay`)
+- [x] Native `motion.div` transitions with deterministic frame capture
 
 ### TODO
 
@@ -656,11 +667,10 @@ belong in README. This list is only the remaining engineering work.
 
 - [ ] **Window controls** - resize, minimize (title already works)
 - [ ] **Multiple windows** - Support multiple GPUI windows
-- [x] **JS remount** - `render()` plus `bun --hot` remounts the React tree on the same window
-- [ ] **React Refresh** - keep `useState` across saves. Needs Bun to run the Fast Refresh transform during `bun --hot`
+- [x] **JS remount** - `createApp()` plus `bun --hot` remounts the Vue tree on the same window
+- [ ] **Vue HMR** - keep `ref` state across saves. Needs Bun to run the Fast Refresh transform during `bun --hot`
 - [ ] **Native hot reload** - cannot unload a `.node`. `bun run dev` rebuilds and restarts
-- [ ] **DevTools** - React DevTools integration
-- [ ] **Animations** - Interpolated style transitions
+- [ ] **DevTools** - Vue DevTools integration
 
 ## Testing
 
@@ -670,8 +680,8 @@ belong in README. This list is only the remaining engineering work.
 # Rust unit tests (selection, syntax, diff parser, markdown parser, theme)
 cd packages/native && cargo test --lib
 
-# React reconciler + GPU-backed test renderer
-cd packages/react && bun run test
+# Vue custom renderer + GPU-backed test renderer
+cd packages/vue && bun run test
 
 # Example app tests
 cd examples && bun run test
@@ -685,7 +695,7 @@ THROTTLE=utility bun profile-chat-scroll.tsx
 THROTTLE=utility bun --hot chat.tsx
 ```
 
-`examples/chat.perf.test.tsx` is the automated profile. It uses `createTestRoot()`,
+`examples/chat.perf.test.tsx` is the automated profile. It uses `createTestApp()`,
 not the live window. Assert **p95 draw / flush ms**, not a per-frame FPS floor.
 
 `THROTTLE` re-execs under `taskpolicy -c`. `utility` is an M1/M2 Air CPU proxy.
@@ -708,7 +718,11 @@ wrong runner and fails on the `vitest` imports.
 calling `simulateMouseDown` / `Move` / `Up` by hand without a flush between each
 step silently selects nothing.
 
-Screenshots go to `packages/react/screenshots/` (gitignored), not `/tmp`, so they
+Vue updates flush on a **microtask**, not synchronously. After simulating input,
+`await app.settle()` before asserting on the tree — it flushes Vue's scheduler,
+applies pending mutations, and repaints.
+
+Screenshots go to `packages/vue/screenshots/` (gitignored), not `/tmp`, so they
 can be inspected after a run.
 
 ### Integration Test
@@ -727,12 +741,12 @@ section.
 
 Mark targets with `testId`. Then either:
 
-- `connectTest(renderer)` against `createTestRoot()` in vitest
+- `connectTest(app.renderer, app.settle)` against `createTestApp()` in vitest
 - `launch({ command, args })` against a child process. The app serves commands
   on stdin only when stdin is a **pipe**
 
 ```ts
-import { launch } from '@gpuix/react/automation'
+import { launch } from '@gpuiv/vue/automation'
 
 const app = await launch({ command: 'bun', args: ['chat.tsx'], cwd: 'examples' })
 await app.getByTestId('sidebar-collapse').waitFor({ timeoutMs: 30_000 })
@@ -752,16 +766,15 @@ you record a sidebar open/close, not a screen recorder.
 ## Related Projects
 
 - [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU UI framework
-- [opentui](https://github.com/anomalyco/opentui) - Terminal UI with React (reconciler reference)
+- [Vue custom renderer API](https://vuejs.org/api/custom-renderer.html) - `createRenderer` reference
+- [opentui](https://github.com/anomalyco/opentui) - Terminal UI with a custom renderer (host-config reference)
 - [create-gpui-app](https://github.com/zed-industries/create-gpui-app) - Official GPUI starter template
-- [react-reconciler](https://github.com/facebook/react/tree/main/packages/react-reconciler) - React's custom renderer API
 
 ## Contributing
 
 1. For Rust changes, work in `zed/crates/gpuix` (easier to build)
-2. Copy changes to `gpuix/packages/native/src/` when ready
-3. TypeScript changes can be made directly in `packages/react/`
-
+2. Copy changes to `gpuiv/packages/native/src/` when ready
+3. TypeScript changes can be made directly in `packages/vue/`
 
 ## Examples using same tech as ours. To unblock on issues and compare to our code
 
@@ -771,4 +784,4 @@ For examples of NAPI rs native packages: https://github.com/napi-rs/package-temp
 
 For reading gpui source code: https://github.com/zed-industries/sed inside crates/gpui
 
-For examples of a custom React renderer: https://github.com/anomalyco/opentui inside packages/react
+For examples of a custom Vue renderer (the `createRenderer` host-config approach we use): https://vuejs.org/api/custom-renderer.html
