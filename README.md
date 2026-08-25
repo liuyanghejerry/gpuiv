@@ -1,8 +1,14 @@
-# GPUIX
+# GPUIV
 
 Vue 3 bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) - Zed's GPU-accelerated UI framework.
 
 Build native GPU-accelerated desktop apps with Vue 3 and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
+
+## Relationship to upstream GPUIX
+
+GPUIV is a personal fork of [remorses/gpuix](https://github.com/remorses/gpuix), created for experimentation and learning. The upstream GPUIX project provides Node.js and **React** bindings for GPUI; this fork replaces the React-facing package with a **Vue 3** custom renderer and publishes the result as `@gpuiv/vue` plus the native package `@gpuiv/native`.
+
+Most of the underlying architecture — including the Rust/napi-rs native layer, retained tree, mutation protocol, GPUI integration, native elements, and testing approach — comes from upstream GPUIX. Unless a change is specifically noted in this repository's history, implementation details and ongoing maintenance should first be checked against [upstream GPUIX](https://github.com/remorses/gpuix). This fork may diverge as the Vue binding evolves.
 
 ![A Waku-style app built with GPUIX](docs/images/chat-app.png)
 
