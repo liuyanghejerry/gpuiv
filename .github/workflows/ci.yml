@@ -14,6 +14,7 @@ env:
       - "**/*.gitignore"
       - docs/**
   pull_request: null
+  workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -182,6 +183,9 @@ jobs:
 
   publish:
     name: publish
+    # Publishing needs SIGILLO_TOKEN + npm rights that only the upstream
+    # repo (remorses/gpuix) has. Skip on forks so CI stays green there.
+    if: github.repository == 'remorses/gpuix'
     runs-on: ubuntu-latest
     needs:
       - build
