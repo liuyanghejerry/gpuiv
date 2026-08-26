@@ -951,12 +951,14 @@ const ChipSelect = defineComponent({
     caret: { type: Boolean, default: true },
     accent: { type: Boolean, default: false },
     menuWidth: { type: Number, default: undefined },
+    testId: { type: String, default: undefined },
   },
   setup(props, { slots }) {
     return () => (
       <Select value={props.value} onValueChange={props.onChange} style={{ flexShrink: 0 }}>
         <div style={{ position: 'relative', display: 'flex' }}>
           <SelectTrigger
+            testId={props.testId}
             style={(state: SelectTriggerState) => ({
               display: 'flex',
               flexDirection: 'row',
@@ -1007,6 +1009,7 @@ const ModelPicker = defineComponent({
         onChange={props.onChange}
         icon={selected.value.icon}
         label={selected.value.label}
+        testId="model-picker-trigger"
       >
         {MODEL_GROUPS.map((group, index) => (
           <div key={group.name} style={{ display: 'flex', flexDirection: 'column' }}>

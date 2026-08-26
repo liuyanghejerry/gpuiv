@@ -104,7 +104,16 @@ describeNative('chat example (vue)', () => {
     expect(app.renderer.getPaintedText()).toContain('DeepSeek V4 Flash')
     expect(app.renderer.getPaintedText()).not.toContain('Claude Opus 4.6')
 
-    app.renderer.nativeSimulateClick(480, 724)
+    // Click the painted trigger center: composer layout depends on text
+    // metrics, so fixed window coordinates miss on other machines.
+    const trigger = app.renderer.findByTestId('model-picker-trigger')
+    expect(trigger).toBeDefined()
+    const bounds = app.renderer.getElementBounds(trigger!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(
+      bounds![0]! + bounds![2]! / 2,
+      bounds![1]! + bounds![3]! / 2
+    )
     await app.settle()
     expect(app.renderer.getPaintedText()).toContain('Claude Opus 4.6')
 

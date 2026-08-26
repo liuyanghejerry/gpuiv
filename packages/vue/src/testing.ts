@@ -140,6 +140,7 @@ export interface TestElement {
   children: number[]
   parentId: number | null
   customProps?: Record<string, unknown>
+  testId?: string | null
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────
@@ -360,6 +361,7 @@ export class TestRenderer implements NativeRenderer {
         children: (node.children ?? []).map((c: any) => c.id),
         parentId,
         ...(node.customProps ? { customProps: node.customProps } : {}),
+        testId: node.testId ?? null,
       })
       for (const child of node.children ?? []) {
         walk(child, node.id)
@@ -391,6 +393,11 @@ export class TestRenderer implements NativeRenderer {
     return [...this.buildElementMap().values()].find(
       (el) => el.text != null && el.text.includes(text)
     )
+  }
+
+  /** Find the first element with the given testId. */
+  findByTestId(testId: string): TestElement | undefined {
+    return [...this.buildElementMap().values()].find((el) => el.testId === testId)
   }
 
   /** Get all text content in the tree (depth-first). */

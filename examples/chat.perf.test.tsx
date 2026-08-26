@@ -28,17 +28,22 @@ const WHEEL_SAMPLES = 40
 const WHEEL_X = 700
 const WHEEL_Y = 400
 
+// GitHub macOS runners are M1-class, roughly 1.5x slower than the M3 Pro
+// the budgets were tuned on. Keep the strict gate locally; CI still catches
+// gross regressions at the scaled bar.
+const CI_SCALE = process.env.CI ? 1.5 : 1
+
 const BUDGET = {
   // Vue mounts the app tree through createRenderer and a single applyBatch;
   // the 1000-turn window mount runs ~160ms on an M3 Pro — leave headroom.
-  mountMs: 300,
-  idleP95Ms: 8,
-  idleMaxMs: 16,
-  wheelP95Ms: 8,
-  wheelMaxMs: 16,
+  mountMs: 300 * CI_SCALE,
+  idleP95Ms: 8 * CI_SCALE,
+  idleMaxMs: 16 * CI_SCALE,
+  wheelP95Ms: 8 * CI_SCALE,
+  wheelMaxMs: 16 * CI_SCALE,
   // Parallel vitest workers can delay the 8 automation clicks; 80 leaves
   // headroom while still catching real regressions (idle ~14ms).
-  sidebarMs: 80,
+  sidebarMs: 80 * CI_SCALE,
 }
 
 function percentile(sorted: number[], p: number): number {
