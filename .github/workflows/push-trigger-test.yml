@@ -1,5 +1,17 @@
 name: push-trigger-test
-on: push
+"on":
+  push:
+    branches:
+      - ci-push-test
+    tags-ignore:
+      - "**"
+    paths-ignore:
+      - "**/*.md"
+      - LICENSE
+      - "**/*.gitignore"
+      - docs/**
+  pull_request: null
+  workflow_dispatch:
 jobs:
   ping:
     runs-on: ubuntu-latest
