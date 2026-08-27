@@ -20,7 +20,13 @@ import {
 import { connectTest } from '@gpuiv/vue/automation'
 import { ChatApp } from './chat'
 
-const describeNative = hasNativeTestRenderer ? describe : describe.skip
+// Budgets are calibrated on M-series macOS runners (AGENTS.md). A Windows GPU
+// runner mounts 1000 turns several times slower — DirectWrite font loads and
+// the offscreen DirectX window dominate — so the numbers there would only add
+// noise. Correctness suites still run everywhere; this is the perf regression
+// guard, and it runs where its budgets mean something.
+const describeNative =
+  hasNativeTestRenderer && process.platform !== "win32" ? describe : describe.skip
 const throttle = readMacCpuThrottle()
 const TURNS = 1_000
 const WARMUP = 10

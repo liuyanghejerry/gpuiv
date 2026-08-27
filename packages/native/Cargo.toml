@@ -42,7 +42,7 @@ gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, f
 # test-support is default so published binaries include TestGpuixRenderer,
 # letting users write GPU-backed tests for their apps.
 default = ["test-support"]
-test-support = ["gpui/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
+test-support = ["gpui/test-support", "gpui_platform/test-support", "gpui_macos/test-support", "gpui_macos/font-kit"]
 
 [build-dependencies]
 napi-build = "2"

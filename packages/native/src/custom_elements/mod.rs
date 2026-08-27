@@ -262,6 +262,19 @@ impl CustomElementRegistry {
         }
     }
 
+    /// Destroy every live instance. Only for app teardown.
+    ///
+    /// An instance can hold a `gpui::Entity` handle: `<input>` keeps an
+    /// `Entity<TextEditorState>`. gpui's leak detector panics if any handle is
+    /// still alive when the `App` drops, so the registry has to be emptied
+    /// while the `App` is still there.
+    pub fn destroy_all(&mut self) {
+        let ids: Vec<u64> = self.instances.keys().copied().collect();
+        for id in ids {
+            self.destroy(id);
+        }
+    }
+
     /// Remove and destroy instances whose IDs no longer exist in the tree.
     pub fn prune_missing<F>(&mut self, mut is_live: F)
     where

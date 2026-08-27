@@ -52,7 +52,7 @@ Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
 | Virtual-list pinning / anchoring | `01f5788` `ae4766f` `a8f302a` `c8a96b8` | pending | top pin on prepend, followTail hole, anchoring-by-index docs; touches the same native list code we synced in PR #6 |
 | Mutation wire format / retained-tree perf | `230400e` `2daf988` `fd06111` `f948f50` | pending | typed batch ops, styles shared by content, style-table reclaim; core `retained_tree.rs` we have modified — port carefully |
 | Automation API expansion | `c2b60e8` `ff6daf5` `5805701` `64241ce` | pending | drag/wheel/hover/modifiers, `<input>`/`<textarea>` reachability, live keyboard; large and useful for our tests |
-| Test renderer hardening | `3505f68` `20483dd` `5719d7f` `3cb50c2` `6ad8f83` `bde0ca7` `f93e891` `d1d58e0` `e4fb1c3` | pending | screenshots in repo, host-derived geometry/fonts, entity-handle release, Windows GPU renderer |
+| Test renderer hardening | `3505f68` `20483dd` `5719d7f` `3cb50c2` `6ad8f83` `bde0ca7` `f93e891` `d1d58e0` `e4fb1c3` | synced | PR #15 — Windows DirectX suite in CI, constructor window sizing, real `getWindowSize`, teardown Drop; test-file-only parts (screenshots-in-repo, wrap literals, word chord) moot for our corpus |
 | `onAuxClick` + click button | `280d6ec` | synced | PR #11 |
 | Window size polling | `f587575` | synced | PR #12 |
 | `<code>` as bare surface | `5033808` `f81e087` | synced | PR #14 — breaking: `showHeader` gone, `codePaddingX`→`mdCodePaddingX` etc.; card moved into app code (chat `CodeBlock`) |
@@ -79,6 +79,7 @@ from upstream through `367ef48`:
 | #12 | `useWindowSize` polls with `intervalMs` instead of reading once — upstream `f587575` |
 | #13 | `<code>` CRLF normalize + regression test, `*.tsbuildinfo` ignored, vue `build`/`clean` split — upstream `f921bec` `d1e4c98` `a9cda59` |
 | #14 | `<code>` bare surface: glyphs only, `style` is the surface, `showHeader` removed, `code*` card metrics → `mdCode*`; card moved into app code — upstream `5033808` `f81e087` |
+| #15 | Test renderer hardening: Windows DirectX + full CI suite, `new TestGpuixRenderer(w, h)` / `createTestApp` sizing, real `getWindowSize`, Drop teardown, `build:release --no-default-features` for Linux — upstream `3505f68`…`e4fb1c3` (9 commits) |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)

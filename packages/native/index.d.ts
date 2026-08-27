@@ -117,7 +117,7 @@ export declare class GpuixRenderer {
  *   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
  */
 export declare class TestGpuixRenderer {
-  constructor()
+  constructor(width?: number | undefined | null, height?: number | undefined | null)
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns destroyed IDs
@@ -267,7 +267,7 @@ export declare class TestGpuixRenderer {
   getScrollOffset(elementId: number): Array<number> | null
   /**
    * Capture a screenshot of the current rendered state and save as PNG.
-   * macOS only — requires Metal GPU rendering via VisualTestAppContext.
+   * Metal on macOS, DirectX readback on Windows.
    */
   captureScreenshot(path: string): void
   /**

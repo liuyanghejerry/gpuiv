@@ -25,7 +25,7 @@
   "scripts": {
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release --features test-support",
-    "build:release": "napi build --platform --release",
+    "build:release": "napi build --platform --release --no-default-features",
     "build:debug": "napi build --platform --features test-support",
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuiv/native locally. CI builds all platform binaries. See AGENTS.md.'); process.exit(1) }\" && napi pre-publish -t npm --no-gh-release",
     "universal": "napi universal",

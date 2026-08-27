@@ -348,7 +348,8 @@ dedicated Rust UI thread. Node sends in-process commands to that thread, so
 `startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
-extension comes from the pinned GPUI fork. Windows runtime validation is pending.
+extension comes from the pinned GPUI fork. CI runs the full Vue and example
+test suites through DirectX on Windows.
 
 > [!IMPORTANT]
 > On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of
@@ -1508,14 +1509,21 @@ await app.close()
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).
 It runs the same `GpuixView`, `build_element()`, `apply_styles()`, and event
-handlers as production. Windows are positioned offscreen but fully rendered by
-Metal. The methods below are the lower-level API when a locator is not enough.
+handlers as production. Test windows are positioned offscreen and rendered by
+Metal on macOS or DirectX on Windows. The methods below are the lower-level API
+when a locator is not enough.
+
+| Platform | Test renderer | PNG capture |
+|---|---|---|
+| macOS | Metal | Yes |
+| Windows | DirectX | Yes |
+| Linux | Not yet | Waiting for GPUI's wgpu headless renderer |
 
 ```ts
 import { createTestApp } from '@gpuiv/vue/testing'
 
 const app = createTestApp(MyComponent)
-app.renderer.flush()  // triggers GpuixView::render() via Metal
+app.renderer.flush()  // triggers GpuixView::render() on the native GPU
 
 // Simulate events through GPUI's native input pipeline
 app.renderer.nativeSimulateClick(50, 50)
@@ -1524,7 +1532,7 @@ await app.settle()    // flush Vue's scheduler + mutations + repaint
 
 // Inspect results
 const events = app.renderer.drainEvents()
-const screenshot = app.renderer.captureScreenshot('/tmp/test.png')
+app.renderer.captureScreenshot('/tmp/test.png')
 const text = app.renderer.getAllText()
 ```
 
