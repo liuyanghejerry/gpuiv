@@ -69,7 +69,7 @@ interface NativeTestRendererConstructor {
   new (width?: number, height?: number): NativeTestRendererApi
 }
 
-// The native test renderer is currently exported only by macOS builds.
+// Exported by every test-support build: Metal on macOS, DirectX on Windows.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports

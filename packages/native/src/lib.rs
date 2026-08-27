@@ -14,7 +14,7 @@ mod syntax;
 mod text;
 mod theme;
 
-#[cfg(all(feature = "test-support", target_os = "macos"))]
+#[cfg(feature = "test-support")]
 mod test_renderer;
 
 pub use element_tree::*;

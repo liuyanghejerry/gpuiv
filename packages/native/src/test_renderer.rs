@@ -727,7 +727,7 @@ impl TestGpuixRenderer {
     }
 
     /// Capture a screenshot of the current rendered state and save as PNG.
-    /// macOS only — requires Metal GPU rendering via VisualTestAppContext.
+    /// Metal on macOS, DirectX readback on Windows.
     #[napi]
     pub fn capture_screenshot(&self, path: String) -> Result<()> {
         with_test_state(|cx, window, view| {
