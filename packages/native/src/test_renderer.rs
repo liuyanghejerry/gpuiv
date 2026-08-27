@@ -101,6 +101,9 @@ pub struct TestGpuixRenderer {
 impl TestGpuixRenderer {
     #[napi(constructor)]
     pub fn new() -> Result<Self> {
+        // Same reason as GpuixRenderer::new — pay the one-time Syntect
+        // grammar-set load here instead of inside the first test frame.
+        crate::syntax::warmup();
         let tree = Arc::new(Mutex::new(RetainedTree::new()));
         let events: Arc<Mutex<Vec<EventPayload>>> = Arc::new(Mutex::new(Vec::new()));
 

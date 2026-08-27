@@ -110,6 +110,22 @@ function mountChat(): TestApp {
   return createTestApp(Wrapped)
 }
 
+/// Mount a minimal tree with one code fence before any timed mount. Syntect
+/// loads and compiles its grammar set on the first highlight (a one-time
+/// process cost, hundreds of ms on CI runners); the mount budget exists to
+/// catch per-mount regressions, not that init.
+function primeSyntaxOnce(): void {
+  if (primed) return
+  const app = createTestApp(
+    defineComponent({
+      setup: () => () => <code code={'const x = 1'} language="typescript" />,
+    }),
+  )
+  app.unmount()
+  primed = true
+}
+let primed = false
+
 it('rejects an unknown THROTTLE value', () => {
   const previous = process.env.THROTTLE
   process.env.THROTTLE = 'nope'
@@ -123,6 +139,7 @@ it('rejects an unknown THROTTLE value', () => {
 
 describeNative('chat performance (vue)', () => {
   it('mounts 1000 turns under budget', () => {
+    primeSyntaxOnce()
     const start = performance.now()
     const app = mountChat()
     const mountMs = performance.now() - start
