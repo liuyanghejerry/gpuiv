@@ -3,7 +3,7 @@ export { createApp, createNativeRenderer, resetApp, startFrameLoop } from "./ren
 export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
 export { GPUIV_CONTEXT, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowSize, useWindowInsets } from "./hooks/use-window-size.js"
-export type { WindowSize, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"
+export type { WindowSize, WindowSizeOptions, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"
 
 // Components
 export { motion } from "./components/motion.js"
