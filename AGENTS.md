@@ -2,6 +2,29 @@
 
 **Read [README.md](./README.md) first** to understand what GPUIX is, the architecture, mutation API, event flow, supported elements/events/styles, and the test renderer.
 
+## GPUIV is a thin layer on GPUI
+
+**Read the GPUI docs and the GPUI source before you write native code.** `zed/crates/gpui`
+is checked out in this repository. `gpui::ListState`, `gpui::div`, `gpui::Window` and the
+rest are the real API; GPUIV only translates a Vue tree into calls on them.
+
+Do not invent behaviour on top of GPUI. If a GPUIV element needs something GPUI does not
+do, the order is:
+
+1. Find the GPUI API that already does it. Search `zed/crates/gpui` for the symbol
+2. Search `zed-industries/zed` issues and PRs. Someone may have shipped it already
+3. Fix it in the `remorses/zed` fork as a normal GPUI change, and bump the submodule
+4. Only then, add GPUIV code
+
+**Never paper over GPUI in `packages/native`.** A workaround that re-applies state after
+GPUI computed it, patches a value GPUI owns, or reaches around a GPUI invariant will break
+on the next submodule bump and is very hard to debug. When such a change is unavoidable,
+it must state in a comment what GPUI does, why that is not what GPUIV needs, and which
+GPUI call makes it safe.
+
+Prefer the smallest translation. Fewer moving parts is more important than matching any
+other framework's behaviour.
+
 ## Project Goal
 
 GPUIX enables building **native GPU-accelerated desktop applications** using **Vue 3 and TypeScript**, powered by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's rendering framework).
@@ -183,6 +206,12 @@ Rust applies the batch to `RetainedTree` and invalidates the view. Each GPUI fra
 
 Rust only knows **whether** an element has a listener (via `setEventListener`), never the closure — handlers live in JS.
 
+### Mouse capture is armed by the press
+
+A `div` with `onMouseDown`, `onMouseMove`, and `onMouseUp` keeps receiving move and up after the pointer leaves the hitbox, matching HTML `setPointerCapture`. GPUIV arms that automatically when the same node listens for both `mouseDown` and `mouseMove`: `build_element` calls GPUI's `el.capture_pointer()` on it.
+
+Put all three on the element the user grabs — a clip handle, a resizer, a slider. Capture is armed by the **press**, so an overlay mounted during that press never arms it, and a release past the window edge is lost. A node with only `onMouseDown` / `onMouseUp` does not capture, and a release outside still cancels the click, as in the DOM.
+
 ## Key Types
 
 ### RetainedElement (Rust, `retained_tree.rs`)
@@ -230,6 +259,21 @@ The registry is rebuilt during **paint**, not during build, because paint order
 is the only place document order is guaranteed: a `list()` decides at paint time
 which rows exist. `selection_frame_reset()` must stay the first child of the
 root, or stale entries from the previous frame leak into the next drag.
+
+## Custom elements are invisible to automation unless they say otherwise
+
+`automation::bounds_tracker` is what puts an element in the bounds registry, and
+`build_element` only attaches it for `<div>` and `<text>`. A custom element that
+paints itself has **no bounds**, so `getByTestId(..).click()` throws
+`Element has no painted bounds`. `<code>` attaches its own. `<input>` /
+`<textarea>` record a selection-start region instead. `<img>`, `<svg>`,
+`<anchored>`, `<diff>` and `<markdown>` do not — `getByTestId` on them returns
+null.
+
+Add `el.child(crate::automation::bounds_tracker(ctx.id, None))` to any new custom
+element whose root is a `relative()` div. The tracker is `absolute().size_full()`,
+so it needs a positioned parent. Pass `Some(selectable)` instead of `None` when
+the element also owns a selection-start region.
 
 ## Layout numbers live in `Theme::metrics`, not in Rust constants
 
@@ -454,10 +498,31 @@ Do not paint `#00000000` over a blurred window. A transparent GPUI quad punches
 through Metal to the desktop. Omit the fill, or use the parent color. Overlay
 rows need a **solid** fill too, not a transparent idle state.
 
-A filled in-flow `div` uses **BlockMouseExceptScroll**. Clicks and hovers stop.
-The parent scroller still gets the wheel. `position: "absolute"` / `"fixed"`
-or `pointerEvents: "auto"` uses **BlockMouse** and steals the wheel too.
-`pointerEvents: "none"` opts out.
+A filled in-flow `div` uses **BlockMouseExceptScroll**. Clicks and hovers stop,
+the wheel still reaches the scroller behind it. `position: "absolute"` /
+`"fixed"` or `pointerEvents: "auto"` uses **BlockMouse** and steals the wheel
+too. `pointerEvents: "none"` opts out.
+
+That is not DOM bubbling. GPUI hitboxes are one flat painted list, so the wheel
+reaches **any** scroller behind the element, not only an ancestor. An absolute
+card over an unrelated scroller would scroll it, which is why absolute steals
+the wheel here. Give a pannable surface under absolute children
+`pointerEvents: "none"` wrappers.
+
+`pointerEvents: "none"` means this element inserts **no hitbox**, so nothing
+behind it is blocked. It does not disable the listeners on the element itself,
+and it does not inherit.
+
+An absolutely positioned wrapper with **no** fill still takes hits, like an
+empty positioned `div` in a browser. A wrapper that only carries a scroll
+translation must set `pointerEvents: "none"`, or it swallows every press meant
+for the surface behind it. Its children keep their own hitboxes:
+`pointerEvents` does not inherit.
+
+(Upstream has since moved to BlockMouseExceptScroll for absolute as well —
+`occlude()` reserved for `pointerEvents: "auto"` — to make pannable canvases
+possible. Our `renderer.rs` still steals for absolute/fixed; if you need that
+behaviour, sync the upstream change instead of working around it.)
 
 Text **selection** still uses window mouse events and text bounds, not hitboxes.
 A drag on a menu over markdown can still start a selection. Do not skip
@@ -530,6 +595,11 @@ The `zed/` submodule tracks the `gpuix` branch of `remorses/zed`. Cargo uses pat
 dependencies from that submodule so the native addon and native platforms always
 compile from the same source:
 
+**Always keep `zed/` checked out on the local `gpuix` branch. Never leave the
+submodule in detached HEAD state**, including after `git submodule update` or a
+pointer update. If Git detaches it, switch back to `gpuix` before doing any
+other work.
+
 - macOS uses `MacPlatform::new_embedded()` and pumps AppKit on Node's main thread
 - Windows and Linux run `gpui_platform::application().run()` on a dedicated UI thread
 - `gpui_macos` is a direct macOS dependency for production and the GPU-backed test renderer
@@ -569,6 +639,83 @@ xcodebuild -downloadComponent MetalToolchain
 3. Fast-forward the `zed/` submodule to the updated `gpuix` branch.
 4. Match `rust-toolchain.toml` to `zed/rust-toolchain.toml`.
 5. Run `cargo check --all-targets`, `bun run build`, and the test suites.
+
+### Search Zed before you touch GPUI
+
+Before you debug a GPUI behaviour, add a GPUIV feature that needs a new GPUI
+API, or patch the fork, **search `zed-industries/zed` first**. Zed is a large
+project with an active roadmap. The answer is often one of:
+
+- someone already reported the same bug
+- an open PR already implements the API, so **wait and bump the submodule**
+- a merged PR already added it, so **bump the submodule** instead of writing code
+- a closed issue says the Zed team declined it, so plan a fork-only fix
+
+Search issues and PRs together, then search code:
+
+```bash
+# issues + PRs, full text
+gh search issues --repo zed-industries/zed --include-prs --limit 30 'TransformationMatrix' \
+  --json number,title,url,state,isPullRequest \
+  --jq '.[] | [.number, .isPullRequest, .state, .title, .url] | @tsv'
+
+# title only, to find the feature rather than every mention
+gh search issues --repo zed-industries/zed --include-prs --match title --limit 30 'transform'
+
+# where the API already exists in the tree
+gh search code --repo zed-industries/zed --language Rust --limit 30 'TransformationMatrix'
+```
+
+Then read the promising ones in full. A closed issue is the important signal, and
+its `stateReason` and comments explain whether the idea was rejected or shipped:
+
+```bash
+gh issue view 53303 -R zed-industries/zed --json number,title,state,stateReason,body,comments
+gh pr view 59413 -R zed-industries/zed --json title,state,body,files,comments,reviews
+```
+
+**Use the `--repo` and `--match` flags. Do not put `repo:` or `in:title` inside the
+query string.** `gh search` mangles the inline form: `repo:` first fails with
+`Invalid search query`, and `in:title ... repo:owner/name` silently drops the repo
+filter and returns results from unrelated repositories.
+
+Search the real symbol names, not concepts. `TransformationMatrix`,
+`with_element_offset`, and `request_animation_frame` find the discussion.
+"animation is slow" does not.
+
+Record the outcome in the changeset or PR body, with issue and PR URLs, so the
+next session does not repeat the search.
+
+### Fixing GPUI for GPUIV
+
+The `remorses/zed` fork is part of GPUIV's implementation boundary. Fix GPUI in
+the fork when a reusable GPUI API or platform correction keeps GPUIV simpler and
+avoids embedded-platform or event-routing workarounds. Do not keep a hack in
+`packages/native` only because the required API is missing upstream.
+
+Fork-only fixes must be normal commits on a `gpuix`-based branch and must be
+pushed to a **reachable remote branch** before this submodule points at them.
+Never pin GPUIV to a detached commit. This checkout tracks `remorses/zed`; if
+you cannot push there (no write access), fork `remorses/zed` under your account,
+branch from `gpuix`, and repoint `.gitmodules` at your fork. Use a separate Zed
+worktree for the change; do not develop or commit inside the `zed/` build
+checkout.
+
+```bash
+# from a local clone of remorses/zed (or your fork)
+git fetch origin gpuix
+git worktree add ../zed-gpuix-<change> -b gpuix-<change> origin/gpuix
+
+# from the Zed worktree, after review
+git push origin HEAD:gpuix   # or HEAD:gpuix-<change> on your own fork
+
+# then update this repository to that reachable commit
+git -C zed fetch origin gpuix && git -C zed switch gpuix
+git -C zed merge --ff-only origin/gpuix
+```
+
+Commit the resulting `zed` submodule pointer in GPUIV with the code that uses
+the new API. The `.gitmodules` branch stays `gpuix` (or your fork's equivalent).
 
 ### PRs to Zed
 
