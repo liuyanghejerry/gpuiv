@@ -59,7 +59,7 @@ abstract class ValidatedAutomationBackend implements AutomationBackend {
 }
 
 export interface TestAutomationRenderer {
-  nativeSimulateClick(x: number, y: number): void
+  nativeSimulateClick(x: number, y: number, button?: number): void
   nativeSimulateMouseDown(x: number, y: number, button?: number): void
   nativeSimulateMouseUp(x: number, y: number, button?: number): void
   nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void
@@ -126,7 +126,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     }),
     cancel: () => ({ ok: true as const }),
     click: async (params) => {
-      this.renderer.nativeSimulateClick(params.x, params.y)
+      this.renderer.nativeSimulateClick(params.x, params.y, params.button)
       await this.settle?.()
       return { ok: true as const }
     },
@@ -400,11 +400,12 @@ export class Locator {
     return bounds
   }
 
-  async click(): Promise<void> {
+  async click(options: { button?: number } = {}): Promise<void> {
     const bounds = await this.bounds()
     await this.app.call("click", {
       x: bounds.x + bounds.width / 2,
       y: bounds.y + bounds.height / 2,
+      button: options.button,
     })
   }
 
@@ -541,8 +542,8 @@ export function liveRendererAsTest(
     renderer.tick?.()
   }
   return {
-    nativeSimulateClick(x, y) {
-      renderer.simulateClick(x, y)
+    nativeSimulateClick(x, y, button) {
+      renderer.simulateClick(x, y, button)
       afterInput()
     },
     nativeSimulateMouseDown(x, y, button) {

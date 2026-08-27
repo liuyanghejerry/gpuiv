@@ -39,6 +39,44 @@ describeNative("events (vue)", () => {
     app.unmount()
   })
 
+  it("routes a non-primary click to onAuxClick, not onClick", async () => {
+    const log = ref<string[]>([])
+    const aux = ref<EventPayload | null>(null)
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div
+            style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", justifyContent: "center" }}
+          >
+            <div
+              testId="target"
+              style={{ padding: 20, backgroundColor: "#333" }}
+              onClick={() => log.value.push("click")}
+              onAuxClick={(event) => {
+                log.value.push("auxClick")
+                aux.value = event
+              }}
+            >
+              <text>target</text>
+            </div>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const target = app.renderer.findByText("target")!
+    const bounds = app.renderer.getElementBounds(target.id)!
+    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5, 2)
+    await app.settle()
+    expect(log.value).toEqual(["auxClick"])
+    expect(aux.value?.isRightClick).toBe(true)
+    // A left click still goes to onClick only.
+    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5)
+    await app.settle()
+    expect(log.value).toEqual(["auxClick", "click"])
+    app.unmount()
+  })
+
   it("fires mouseEnter and mouseLeave on hover moves", async () => {
     const hovered = ref<string>("none")
     const App = defineComponent({

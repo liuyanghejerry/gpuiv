@@ -45,6 +45,7 @@ const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId"])
 /// Event names the native side knows. `onInput` is an alias for `change`.
 const EVENT_TYPES = new Set([
   "click",
+  "auxClick",
   "mouseDown",
   "mouseUp",
   "mouseEnter",

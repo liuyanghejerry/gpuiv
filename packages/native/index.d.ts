@@ -158,9 +158,11 @@ export declare class TestGpuixRenderer {
    * Simulate a click at the given window coordinates.
    * Dispatches MouseDown + MouseUp through GPUI's input pipeline,
    * which triggers the same event handlers as production.
+   * Button: 0=left, 1=middle, 2=right. A non-left button fires `auxClick`
+   * on the element, not `click`.
    * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
    */
-  simulateClick(x: number, y: number): void
+  simulateClick(x: number, y: number, button?: number | undefined | null): void
   /**
    * Simulate key strokes through GPUI's input pipeline.
    * Format: space-separated keys, e.g. "a", "enter", "cmd-shift-p".
