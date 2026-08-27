@@ -446,6 +446,11 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
+  /**
+   * The name macOS shows in the application menu, and in its "Hide" and
+   * "Quit" items. Defaults to `title`.
+   */
+  appName?: string
 }
 
 export interface WindowSize {

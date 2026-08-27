@@ -227,7 +227,34 @@ terminal.
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |
 | `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. Waku uses `(16, 17)` |
+| `appName` | string | Name inside the macOS application menu, in `Hide X` and `Quit X`. Defaults to `title` |
 | `debugFrameOverlay` | `"hidden"` \| `"minimal"` \| `"full"` | Frame-time overlay (see below) |
+
+### The macOS menu bar
+
+GPUIV installs the application menu bar for you, so a fresh app already answers
+`⌘Q`, `⌘H`, `⌥⌘H`, `⌘M`, and `⌘W`. Without it `NSApp.mainMenu` is nil, macOS
+paints an empty menu bar, and those shortcuts do not exist at all: AppKit only
+provides them through menu items.
+
+```
+Apple    <appName>                Window
+         ├ Services               ├ (AppKit window tiling)
+         ├ Hide <appName>   ⌘H    ├ Minimize          ⌘M
+         ├ Hide Others     ⌥⌘H    ├ Zoom
+         ├ Show All               ├ Close Window      ⌘W
+         └ Quit <appName>   ⌘Q    └ (open windows)
+```
+
+The **title of the application menu comes from the executable**, not from
+`appName`. macOS reads it from the running binary, so `bun app.tsx` shows `bun`
+during development and a `bun build --compile` binary shows its own file name.
+Only a real `.app` bundle can change it. The items inside the menu do use
+`appName`.
+
+There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
+AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
+would take the keystroke away from text selection and from `<input>`.
 
 `createApp()` also accepts `{ renderer }` to mount on an existing renderer and
 `{ onEvent }` to observe every event before the handler registry runs. The

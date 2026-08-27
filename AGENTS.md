@@ -315,6 +315,31 @@ bun scripts/dev.ts --shots diff  # only tests matching "diff"
 bun scripts/dev.ts --app native-text   # rebuild, restart an example app
 ```
 
+## A macOS menu item owns its shortcut, so the window never sees it
+
+`crate::app_menu` installs the App and Window menus during renderer init. GPUI
+does not do this on its own: `NSApp.mainMenu` stays nil, macOS paints an empty
+menu bar, and `⌘Q`, `⌘H`, `⌘M` and `⌘W` do not exist, because AppKit only
+provides them through menu items.
+
+**Never add an Edit menu carrying `⌘C` / `⌘V` / `⌘X` / `⌘A`.** AppKit consumes a
+key equivalent before the window sees the key event, so those items would take
+the keystroke away from the selection listener in `text::paint` and from the
+per-focus clipboard handling in `custom_elements::input`. An Edit menu needs
+those handlers moved into GPUI actions first.
+
+`gpui::App::set_menus` reads each shortcut out of the keymap, so bind the keys
+**before** you call it. Window-level items (`MinimizeWindow`, `ZoomWindow`,
+`CloseWindow`) go through `with_window_menu_actions` on the root element in
+`GpuixView::render`, because a `Window` exists nowhere else; app-level ones
+(`Quit`, `Hide`, `HideOthers`, `ShowAll`) are `cx.on_action` globals.
+
+Two things real AppKit decides for you. The **title of the application menu is
+the executable name**, not the `Menu` name you pass, so `bun app.tsx` shows
+`bun`; only a `.app` bundle changes it. And the menu named `Window` is handed to
+`setWindowsMenu:`, which prepends AppKit's own tiling items, `Enter Full Screen`
+included. Do not add that item yourself.
+
 **Never ship or start the app on a debug native build.** `bun run build:debug`
 and `cargo build` without `--release` produce an unoptimized `.node`. GPUI
 paint is then many times slower, and that looks like an app bug. Always use
@@ -810,6 +835,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] Cross-element text selection
 - [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
 - [x] `setWindowTitle`
+- [x] macOS menu bar with the standard shortcuts (`appName`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`setDebugFrameOverlay`)
