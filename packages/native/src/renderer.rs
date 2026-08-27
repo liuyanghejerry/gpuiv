@@ -198,6 +198,28 @@ fn update_window<R>(
 }
 
 #[cfg(target_os = "macos")]
+// Keyboard handlers can update GpuixView, so dispatch without leasing the root view.
+fn update_window_without_view<R>(
+    update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
+) -> Result<R> {
+    let window = GPUI_WINDOW
+        .with(|window| *window.borrow())
+        .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))?;
+
+    GPUI_APP.with(|app| {
+        let app = app.borrow();
+        let app = app
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+        app.update(|cx| {
+            gpui::AnyWindowHandle::from(window)
+                .update(cx, move |_view, window, cx| update(window, cx))
+                .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    })
+}
+
+#[cfg(target_os = "macos")]
 fn invalidate_window() -> Result<()> {
     update_window(|_view, window, cx| {
         cx.notify();
@@ -211,22 +233,40 @@ enum MouseInput {
         x: f64,
         y: f64,
         button: u32,
+        modifiers: gpui::Modifiers,
     },
     Down {
         x: f64,
         y: f64,
         button: u32,
+        modifiers: gpui::Modifiers,
     },
     Up {
         x: f64,
         y: f64,
         button: u32,
+        modifiers: gpui::Modifiers,
     },
     Move {
         x: f64,
         y: f64,
         pressed_button: Option<u32>,
+        modifiers: gpui::Modifiers,
     },
+    Wheel {
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: gpui::Modifiers,
+    },
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+enum KeyInput {
+    Keystrokes(String),
+    Down { keystroke: String, is_held: bool },
+    Up(String),
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -282,6 +322,10 @@ enum UiCommand {
     },
     DispatchMouse {
         input: MouseInput,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    DispatchKey {
+        input: KeyInput,
         response: SyncSender<std::result::Result<(), String>>,
     },
     Blur,
@@ -461,23 +505,76 @@ async fn run_ui_commands(
             }
             UiCommand::DispatchMouse { input, response } => {
                 let result = window.update(cx, move |_view, window, cx| match input {
-                    MouseInput::Click { x, y, button } => {
-                        crate::automation::dispatch_click(window, cx, x, y, button);
+                    MouseInput::Click {
+                        x,
+                        y,
+                        button,
+                        modifiers,
+                    } => {
+                        crate::automation::dispatch_click(window, cx, x, y, button, modifiers);
                     }
-                    MouseInput::Down { x, y, button } => {
-                        crate::automation::dispatch_mouse_down(window, cx, x, y, button);
+                    MouseInput::Down {
+                        x,
+                        y,
+                        button,
+                        modifiers,
+                    } => {
+                        crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers);
                     }
-                    MouseInput::Up { x, y, button } => {
-                        crate::automation::dispatch_mouse_up(window, cx, x, y, button);
+                    MouseInput::Up {
+                        x,
+                        y,
+                        button,
+                        modifiers,
+                    } => {
+                        crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers);
                     }
                     MouseInput::Move {
                         x,
                         y,
                         pressed_button,
+                        modifiers,
                     } => {
-                        crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button);
+                        crate::automation::dispatch_mouse_move(
+                            window, cx, x, y, pressed_button, modifiers,
+                        );
+                    }
+                    MouseInput::Wheel {
+                        x,
+                        y,
+                        delta_x,
+                        delta_y,
+                        modifiers,
+                    } => {
+                        crate::automation::dispatch_scroll_wheel(
+                            window, cx, x, y, delta_x, delta_y, modifiers,
+                        );
                     }
                 });
+                response
+                    .send(
+                        result
+                            .as_ref()
+                            .map(|_| ())
+                            .map_err(|error| format!("{error:#}")),
+                    )
+                    .ok();
+                result
+            }
+            UiCommand::DispatchKey { input, response } => {
+                let result = gpui::AnyWindowHandle::from(window)
+                    .update(cx, move |_view, window, cx| match input {
+                        KeyInput::Keystrokes(keystrokes) => {
+                            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
+                        }
+                        KeyInput::Down { keystroke, is_held } => {
+                            crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
+                        }
+                        KeyInput::Up(keystroke) => {
+                            crate::automation::dispatch_key_up(window, cx, &keystroke)
+                        }
+                    })
+                    .and_then(|result| result.map_err(anyhow::Error::msg));
                 response
                     .send(
                         result
@@ -1444,16 +1541,28 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn simulate_click(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_click(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
         let button = button.unwrap_or(0);
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
         return update_window(move |_view, window, cx| {
-            crate::automation::dispatch_click(window, cx, x, y, button);
+            crate::automation::dispatch_click(window, cx, x, y, button, modifiers);
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.dispatch_mouse_input(MouseInput::Click { x, y, button });
+        return self.dispatch_mouse_input(MouseInput::Click {
+            x,
+            y,
+            button,
+            modifiers,
+        });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1462,7 +1571,7 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
-            let _ = (x, y, button);
+            let _ = (x, y, button, modifiers);
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))
@@ -1470,16 +1579,28 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn simulate_mouse_down(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_down(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
         let button = button.unwrap_or(0);
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
         return update_window(move |_view, window, cx| {
-            crate::automation::dispatch_mouse_down(window, cx, x, y, button);
+            crate::automation::dispatch_mouse_down(window, cx, x, y, button, modifiers);
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.dispatch_mouse_input(MouseInput::Down { x, y, button });
+        return self.dispatch_mouse_input(MouseInput::Down {
+            x,
+            y,
+            button,
+            modifiers,
+        });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1488,7 +1609,7 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
-            let _ = (x, y, button);
+            let _ = (x, y, button, modifiers);
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))
@@ -1496,16 +1617,28 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn simulate_mouse_up(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_up(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
         let button = button.unwrap_or(0);
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
 
         #[cfg(target_os = "macos")]
         return update_window(move |_view, window, cx| {
-            crate::automation::dispatch_mouse_up(window, cx, x, y, button);
+            crate::automation::dispatch_mouse_up(window, cx, x, y, button, modifiers);
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.dispatch_mouse_input(MouseInput::Up { x, y, button });
+        return self.dispatch_mouse_input(MouseInput::Up {
+            x,
+            y,
+            button,
+            modifiers,
+        });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1514,7 +1647,7 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
-            let _ = (x, y, button);
+            let _ = (x, y, button, modifiers);
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))
@@ -1522,10 +1655,18 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn simulate_mouse_move(&self, x: f64, y: f64, pressed_button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_move(
+        &self,
+        x: f64,
+        y: f64,
+        pressed_button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+
         #[cfg(target_os = "macos")]
         return update_window(move |_view, window, cx| {
-            crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button);
+            crate::automation::dispatch_mouse_move(window, cx, x, y, pressed_button, modifiers);
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1533,6 +1674,7 @@ impl GpuixRenderer {
             x,
             y,
             pressed_button,
+            modifiers,
         });
 
         #[cfg(not(any(
@@ -1542,10 +1684,133 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
-            let _ = (x, y, pressed_button);
+            let _ = (x, y, pressed_button, modifiers);
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))
+        }
+    }
+
+    #[napi]
+    pub fn simulate_scroll_wheel(
+        &self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+
+        #[cfg(target_os = "macos")]
+        return update_window(move |_view, window, cx| {
+            crate::automation::dispatch_scroll_wheel(window, cx, x, y, delta_x, delta_y, modifiers);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_mouse_input(MouseInput::Wheel {
+            x,
+            y,
+            delta_x,
+            delta_y,
+            modifiers,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (x, y, delta_x, delta_y, modifiers);
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    fn dispatch_key_input(&self, input: KeyInput) -> Result<()> {
+        let (response_sender, response_receiver) = sync_channel(1);
+        self.send_ui_command(UiCommand::DispatchKey {
+            input,
+            response: response_sender,
+        })?;
+        recv_ui_response(response_receiver, "the GPUI key command")?.map_err(Error::from_reason)
+    }
+
+    /// Simulate space-separated keystrokes through the focused element's input pipeline.
+    #[napi]
+    pub fn simulate_keystrokes(&self, keystrokes: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_key_input(KeyInput::Keystrokes(keystrokes));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = keystrokes;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    /// Simulate a single key down through the focused element's input pipeline.
+    #[napi]
+    pub fn simulate_key_down(&self, keystroke: String, is_held: Option<bool>) -> Result<()> {
+        let is_held = is_held.unwrap_or(false);
+
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_key_input(KeyInput::Down { keystroke, is_held });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (keystroke, is_held);
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    /// Simulate a single key up through the focused element's input pipeline.
+    #[napi]
+    pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::automation::dispatch_key_up(window, cx, &keystroke)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_key_input(KeyInput::Up(keystroke));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = keystroke;
+            Err(Error::from_reason("Unsupported operating system"))
         }
     }
 

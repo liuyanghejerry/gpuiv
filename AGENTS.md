@@ -304,6 +304,11 @@ rebuilds, and re-renders the screenshot tests. **A Rust edit reaches fresh PNGs
 in about 4 seconds.** Prefer screenshot mode over `--app`: PNGs in
 `packages/vue/screenshots/` can be read by an agent, a live window cannot.
 
+**Never run `bun run clean` in `packages/vue` while `bun --hot chat.tsx` is
+up.** `packages/vue/dist` is inside the app's module graph, so deleting it
+under a running watcher breaks every subsequent load until the process is
+restarted. Build first, then start the app.
+
 ```bash
 bun run dev                      # rebuild, re-render the showcase screenshots
 bun scripts/dev.ts --shots diff  # only tests matching "diff"

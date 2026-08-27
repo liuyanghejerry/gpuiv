@@ -90,10 +90,17 @@ export declare class GpuixRenderer {
   getElementBounds(id: number): Array<number> | null
   getAllText(): Array<string>
   getPaintedText(): Array<string>
-  simulateClick(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
+  /** Simulate space-separated keystrokes through the focused element's input pipeline. */
+  simulateKeystrokes(keystrokes: string): void
+  /** Simulate a single key down through the focused element's input pipeline. */
+  simulateKeyDown(keystroke: string, isHeld?: boolean | undefined | null): void
+  /** Simulate a single key up through the focused element's input pipeline. */
+  simulateKeyUp(keystroke: string): void
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -162,7 +169,7 @@ export declare class TestGpuixRenderer {
    * on the element, not `click`.
    * IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
    */
-  simulateClick(x: number, y: number, button?: number | undefined | null): void
+  simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Simulate key strokes through GPUI's input pipeline.
    * Format: space-separated keys, e.g. "a", "enter", "cmd-shift-p".
@@ -188,7 +195,7 @@ export declare class TestGpuixRenderer {
    * pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
    * Used to simulate drag events.
    */
-  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Focus an element by its numeric ID.
    * The element must have a FocusHandle (created by sync_focus_handles when
@@ -200,17 +207,17 @@ export declare class TestGpuixRenderer {
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
    */
-  simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
+  simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Simulate a mouse up event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
    */
-  simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
+  simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Simulate a scroll wheel event at the given position.
    * delta_x and delta_y are in pixels (negative = scroll up/left).
    */
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection. */
