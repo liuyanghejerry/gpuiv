@@ -26,6 +26,7 @@ gpui_platform = { path = "../../zed/crates/gpui_platform", default-features = fa
 thiserror = "2"
 syntect = { version = "5.3", default-features = false, features = ["regex-fancy"] }
 two-face = { version = "0.5.2", default-features = false, features = ["syntect-fancy"] }
+web-time = "1"
 pulldown-cmark = { version = "0.12", default-features = false }
 unicode-segmentation = "1"
 

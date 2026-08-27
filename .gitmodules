@@ -1,4 +1,4 @@
 [submodule "zed"]
 	path = zed
 	url = https://github.com/remorses/zed.git
-	branch = gpui-macos-embedded
+	branch = gpuix

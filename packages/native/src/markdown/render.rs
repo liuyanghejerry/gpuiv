@@ -342,6 +342,8 @@ fn text_element(
     let flat = flatten_runs(runs, &ctx.theme, weight);
     let inner = flat_text_element(&flat, ctx);
     div()
+        .w_full()
+        .min_w_0()
         .text_size(px(size))
         .line_height(px(line_height))
         .child(inner)
@@ -400,15 +402,20 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     let mono = font(theme.font_mono.clone());
     let highlight = highlight_cached(code, None, language);
 
-    let mut body = div()
+    // overflow-x only works as a flex *row* viewport. A flex_col scroller
+    // stretches each nowrap row to the card width, so the line never overflows
+    // and a horizontal wheel does nothing. Same pattern as host overflowX.
+    let scroll_sub = ctx.take_sub();
+    let mut lines = div()
+        .flex_none()
+        .flex()
+        .flex_col()
         .px(px(m.code_padding_x))
         .py(px(m.code_padding_y))
         .font_family(theme.font_mono.clone())
         .text_size(px(m.code_text_size))
         .line_height(px(m.code_line_height))
-        .whitespace_nowrap()
-        .flex()
-        .flex_col();
+        .whitespace_nowrap();
 
     for (line_ix, line) in code.split('\n').enumerate() {
         let spans: Vec<(Range<usize>, Hsla)> = highlight
@@ -434,10 +441,23 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
         } else {
             crate::text::chrome_text(SharedString::from(line.to_string()), Some(runs))
         };
-        body = body.child(div().h(px(m.code_line_height)).flex_none().child(text));
+        lines = lines.child(div().h(px(m.code_line_height)).flex_none().child(text));
     }
 
+    let body = div()
+        .id(SharedString::from(format!(
+            "__gpuix_md_code_{}_{scroll_sub}",
+            ctx.element_id
+        )))
+        .flex()
+        .min_w_0()
+        .overflow_x_scroll()
+        .restrict_scroll_to_axis()
+        .child(lines);
+
     let mut block = div()
+        .w_full()
+        .min_w_0()
         .rounded(px(m.code_radius))
         .bg(ink(&theme, 0.035))
         .border_1()
