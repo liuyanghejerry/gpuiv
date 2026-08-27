@@ -922,6 +922,9 @@ impl TextEditorState {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if !self.read_only {
+            window.request_text_input();
+        }
         window.focus(&self.focus_handle, cx);
         self.is_selecting = true;
         let index = self.index_for_mouse_position(event.position);

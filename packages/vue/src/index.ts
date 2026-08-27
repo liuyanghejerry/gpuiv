@@ -2,8 +2,8 @@
 export { createApp, createNativeRenderer, resetApp, startFrameLoop } from "./renderer.js"
 export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
 export { GPUIV_CONTEXT, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
-export { useWindowSize } from "./hooks/use-window-size.js"
-export type { WindowSize } from "./hooks/use-window-size.js"
+export { useWindowSize, useWindowInsets } from "./hooks/use-window-size.js"
+export type { WindowSize, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"
 
 // Components
 export { motion } from "./components/motion.js"
@@ -75,6 +75,7 @@ export type {
   SelectValueProps,
 } from "./components/select.js"
 export type { WindowedVirtualListProps } from "./components/virtual-list.js"
+export type { VirtualListProps } from "./types.js"
 
 export { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
 export type { GpuivRendererHost } from "./reconciler/vue-renderer.js"
@@ -86,6 +87,7 @@ export type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   DimensionValue,
+  EdgeInsets,
   ElementProps,
   ElementType,
   GpuixMetrics,
@@ -96,6 +98,7 @@ export type {
   MotionStyle,
   MotionTransition,
   NativeRenderer,
+  NativeWindowInsets,
   StyleDesc,
   SyntaxTheme,
 } from "./types.js"

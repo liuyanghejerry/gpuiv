@@ -302,6 +302,33 @@ export interface ElementProps {
   motion?: MotionProps
 }
 
+// ── Virtual list props ───────────────────────────────────────────────
+
+type VirtualListShared = {
+  style?: StyleDesc | Record<string, unknown>
+  children?: unknown
+  alignment?: "top" | "bottom"
+  followTail?: boolean
+  overdraw?: number
+  onVisibleRange?: (event: EventPayload) => void
+}
+
+/** A variable-height list that builds only rows near its viewport.
+ * `estimatedItemHeight` is required with `itemCount`: windowed mode needs a
+ * height hint for rows Vue has not mounted. Native ignores `itemCount` when
+ * the estimate is missing, so the list stays on mounted children only. */
+export type VirtualListProps =
+  | (VirtualListShared & {
+      estimatedItemHeight?: number
+      itemCount?: never
+      windowStart?: never
+    })
+  | (VirtualListShared & {
+      itemCount: number
+      estimatedItemHeight: number
+      windowStart?: number
+    })
+
 // ── Host node type ───────────────────────────────────────────────────
 
 /**
@@ -362,6 +389,7 @@ export interface NativeRenderer {
 
   // ── Window API ─────────────────────────────────────────────────
   getWindowSize?(): { width: number; height: number }
+  getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
@@ -371,6 +399,19 @@ export interface NativeRenderer {
 }
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
+
+export interface EdgeInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+export interface NativeWindowInsets {
+  safeArea: EdgeInsets
+  ime: EdgeInsets
+  effective: EdgeInsets
+}
 
 export interface DebugFrameOverlayStats {
   currentMs?: number

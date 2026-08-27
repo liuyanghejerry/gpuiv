@@ -157,4 +157,67 @@ describeNative("events (vue)", () => {
     expect(all).toContain("focus")
     app.unmount()
   })
+
+  it("keeps mouseMove and mouseUp after the pointer leaves the hitbox", async () => {
+    const received = ref<string[]>([])
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: "100%", height: "100%", padding: 30 }}>
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => received.value.push("down")}
+              onMouseMove={(e: EventPayload) =>
+                received.value.push(`move:${Math.round(e.x ?? 0)},${e.pressedButton}`)
+              }
+              onMouseUp={() => received.value.push("up")}
+            >
+              <text>handle</text>
+            </div>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const handle = app.renderer.findByText("handle")!
+    const bounds = app.renderer.getElementBounds(handle.id)!
+
+    app.renderer.nativeSimulateMouseDown(bounds[0] + 20, bounds[1] + 20)
+    await app.settle()
+    app.renderer.nativeSimulateMouseMove(bounds[0] + 200, bounds[1] + 20, 0)
+    await app.settle()
+    app.renderer.nativeSimulateMouseUp(bounds[0] + 200, bounds[1] + 20, 0)
+    await app.settle()
+    expect(received.value).toEqual(["down", `move:${Math.round(bounds[0] + 200)},0`, "up"])
+    app.unmount()
+  })
+
+  it("does not capture when the element only listens for mouseDown and mouseUp", async () => {
+    const received = ref<string[]>([])
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: "100%", height: "100%", padding: 30 }}>
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => received.value.push("down")}
+              onMouseUp={() => received.value.push("up")}
+            >
+              <text>press</text>
+            </div>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const press = app.renderer.findByText("press")!
+    const bounds = app.renderer.getElementBounds(press.id)!
+
+    app.renderer.nativeSimulateMouseDown(bounds[0] + 20, bounds[1] + 20)
+    await app.settle()
+    app.renderer.nativeSimulateMouseUp(bounds[0] + 200, bounds[1] + 20, 0)
+    await app.settle()
+    expect(received.value).toEqual(["down"])
+    app.unmount()
+  })
 })

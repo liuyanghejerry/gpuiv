@@ -10,6 +10,7 @@ import type { NativeRenderer } from "../types.js"
 import { createGpuivRendererHost } from "../reconciler/vue-renderer.js"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
 import { VirtualList } from "../components/virtual-list.js"
+import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 
 type Op = unknown[]
 
@@ -170,3 +171,76 @@ describe("virtual-list windowing", () => {
     expect(windowStart(mock.applied)).toBe(75)
   })
 })
+
+/// GPU-backed tests for the native windowed-mode contract: unmounted rows
+/// keep estimatedItemHeight, and itemCount without an estimate is ignored.
+const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+describeNative("virtual-list native windowing", () => {
+  it("keeps estimated height for rows Vue has not mounted", async () => {
+    const startAt = (start: number) =>
+      defineComponent({
+        setup: () => () =>
+          h(
+            "virtual-list",
+            {
+              itemCount: 1000,
+              windowStart: start,
+              overdraw: 0,
+              estimatedItemHeight: 40,
+              style: { width: 400, height: 160 },
+            },
+            Array.from({ length: 8 }, (_, offset) =>
+              h(
+                "div",
+                {
+                  key: start + offset,
+                  style: { display: "flex", height: 40, flexShrink: 0, alignItems: "center" },
+                },
+                `row-${start + offset}`,
+              ),
+            ),
+          ),
+      })
+    const app = createTestApp(startAt(0))
+    const list = app.renderer.findByType("virtual-list")[0]!
+    app.renderer.scrollToItem(list.id, 50)
+    app.renderer.scrollToItem(list.id, 80)
+    await app.settle()
+
+    const offset = app.renderer.getScrollOffset(list.id)?.[1] ?? 0
+    expect(offset).toBeCloseTo(-80 * 40, 0)
+    app.unmount()
+  })
+
+  it("ignores itemCount when estimatedItemHeight is missing", async () => {
+    const App = defineComponent({
+      setup: () => () =>
+        h(
+          "virtual-list",
+          { itemCount: 1000, windowStart: 0, style: { width: 400, height: 160 } },
+          Array.from({ length: 8 }, (_, index) =>
+            h(
+              "div",
+              {
+                key: index,
+                style: { display: "flex", height: 40, flexShrink: 0, alignItems: "center" },
+              },
+              `row-${index}`,
+            ),
+          ),
+        ),
+    })
+    const app = createTestApp(App)
+    const list = app.renderer.findByType("virtual-list")[0]!
+    app.renderer.scrollToItem(list.id, 80)
+    await app.settle()
+
+    // Without the estimate, itemCount is ignored: the list stays on its 8
+    // mounted children and the scroll clamps to their extent.
+    expect(app.renderer.getAllText()).toHaveLength(8)
+    expect(app.renderer.getPaintedText().some((line) => line.startsWith("row-"))).toBe(true)
+    app.unmount()
+  })
+})
+

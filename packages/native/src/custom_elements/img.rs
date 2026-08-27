@@ -149,6 +149,7 @@ impl CustomElement for ImgElement {
 pub struct SvgElement {
     src: String,
     bytes: Option<std::sync::Arc<[u8]>>,
+    source: String,
 }
 
 impl SvgElement {
@@ -166,6 +167,9 @@ fn svg_bytes(src: &str) -> Option<Vec<u8>> {
         }
         return Some(percent_decode(data));
     }
+    #[cfg(target_family = "wasm")]
+    return None;
+    #[cfg(not(target_family = "wasm"))]
     std::fs::read(src).ok()
 }
 
@@ -199,7 +203,12 @@ impl CustomElement for SvgElement {
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
-        let Some(bytes) = self.bytes.as_deref() else {
+        let bytes = if self.source.trim().is_empty() {
+            self.bytes.as_deref()
+        } else {
+            Some(self.source.as_bytes())
+        };
+        let Some(bytes) = bytes else {
             let mut empty = gpui::div();
             if let Some(style) = ctx.style {
                 empty = crate::renderer::apply_styles(empty, style);
@@ -220,13 +229,15 @@ impl CustomElement for SvgElement {
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
-        if key == "src" {
-            self.load_src(value.as_str().unwrap_or_default().to_string());
+        match key {
+            "src" => self.load_src(value.as_str().unwrap_or_default().to_string()),
+            "source" => self.source = value.as_str().unwrap_or_default().to_string(),
+            _ => {}
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["src"]
+        &["src", "source"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {

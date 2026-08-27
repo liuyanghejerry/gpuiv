@@ -2,15 +2,11 @@
 
 import { defineComponent, h, ref, type PropType, type VNodeChild } from "vue"
 import type { EventPayload } from "@gpuiv/native"
+import type { VirtualListProps } from "../types.js"
 
-export interface WindowedVirtualListProps {
-  itemCount: number
+/** Windowed mode: `itemCount` requires `estimatedItemHeight` for unmounted rows. */
+export type WindowedVirtualListProps = Extract<VirtualListProps, { itemCount: number }> & {
   renderItem: (index: number) => unknown
-  estimatedItemHeight?: number
-  overdraw?: number
-  alignment?: "top" | "bottom"
-  followTail?: boolean
-  onVisibleRange?: (event: EventPayload) => void
 }
 
 function computePad(overdraw: number | undefined, estimatedItemHeight: number | undefined): number {
@@ -37,7 +33,7 @@ export const VirtualList = defineComponent({
   props: {
     itemCount: { type: Number, required: true },
     renderItem: { type: Function as PropType<(index: number) => unknown>, required: true },
-    estimatedItemHeight: { type: Number, default: 48 },
+    estimatedItemHeight: { type: Number, required: true },
     overdraw: { type: Number, default: 240 },
     alignment: { type: String as PropType<"top" | "bottom">, default: undefined },
     followTail: { type: Boolean, default: undefined },
