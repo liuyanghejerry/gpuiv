@@ -66,7 +66,7 @@ interface NativeTestRendererApi extends NativeRenderer {
 }
 
 interface NativeTestRendererConstructor {
-  new (): NativeTestRendererApi
+  new (width?: number, height?: number): NativeTestRendererApi
 }
 
 // The native test renderer is currently exported only by macOS builds.
@@ -145,19 +145,25 @@ export interface TestElement {
 
 // ── TestRenderer ─────────────────────────────────────────────────────
 
+/** Offscreen window size for a test renderer. Defaults to 1280x800 in native. */
+export interface TestWindowOptions {
+  width?: number
+  height?: number
+}
+
 export class TestRenderer implements NativeRenderer {
   commitCount = 0
 
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
 
-  constructor() {
+  constructor(options: TestWindowOptions = {}) {
     if (!NativeTestRenderer) {
       throw new Error(
         "Native TestGpuixRenderer not available. Build with test-support to run tests."
       )
     }
-    this.native = new NativeTestRenderer()
+    this.native = new NativeTestRenderer(options.width, options.height)
   }
 
   // ── NativeRenderer interface (all mutations delegate to native) ──
@@ -557,9 +563,16 @@ export interface TestApp {
 /**
  * Create a test app for rendering Vue components on the native
  * TestGpuixRenderer. All mutations go to the real GPUI pipeline.
+ *
+ * Pass `width` / `height` to size the offscreen window. The 1280x800 default
+ * is wide enough to keep a centered max-width column capped, so a layout test
+ * that needs to observe re-wrapping must ask for a narrower window.
  */
-export function createTestApp(rootComponent: Component): TestApp {
-  const renderer = new TestRenderer()
+export function createTestApp(
+  rootComponent: Component,
+  options: TestWindowOptions = {},
+): TestApp {
+  const renderer = new TestRenderer(options)
   const gpuivHost = createGpuivRendererHost(renderer, { nextElementId: 0 })
   const app = gpuivHost.vue.createApp(rootComponent)
   app.provide(GPUIV_CONTEXT, { renderer: gpuivHost.renderer })

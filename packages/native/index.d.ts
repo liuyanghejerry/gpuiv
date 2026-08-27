@@ -117,7 +117,7 @@ export declare class GpuixRenderer {
  *   r.captureScreenshot("/tmp/test.png")  // saves rendered UI as PNG
  */
 export declare class TestGpuixRenderer {
-  constructor()
+  constructor(width?: number | undefined | null, height?: number | undefined | null)
   createElement(id: number, elementType: string): void
   /**
    * Destroy an element and all descendants. Returns destroyed IDs

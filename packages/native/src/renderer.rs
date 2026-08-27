@@ -241,6 +241,9 @@ enum ClockControl {
 enum UiCommand {
     Invalidate,
     SetWindowTitle(String),
+    GetWindowSize {
+        response: SyncSender<WindowSize>,
+    },
     SetDebugFrameOverlay(gpui::DebugFrameOverlayMode),
     CycleDebugFrameOverlay {
         response: SyncSender<String>,
@@ -304,6 +307,17 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::GetWindowSize { response } => {
+                window.update(cx, move |_view, window, _cx| {
+                    let size = window.viewport_size();
+                    response
+                        .send(WindowSize {
+                            width: f32::from(size.width) as f64,
+                            height: f32::from(size.height) as f64,
+                        })
+                        .ok();
+                })
+            }
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
                 cx.notify();
@@ -1019,10 +1033,34 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn get_window_size(&self) -> Result<WindowSize> {
-        Ok(WindowSize {
-            width: 800.0,
-            height: 600.0,
-        })
+        // The paintable size of the window in logical pixels, excluding any
+        // platform title bar. This used to answer a hardcoded 800x600, so
+        // anything that turned a mouse position into layout coordinates
+        // pointed at the wrong place on every window that was not exactly that
+        // size.
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| {
+            let size = window.viewport_size();
+            WindowSize {
+                width: f32::from(size.width) as f64,
+                height: f32::from(size.height) as f64,
+            }
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetWindowSize { response })?;
+            return recv_ui_response(receiver, "the window size query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     #[napi]

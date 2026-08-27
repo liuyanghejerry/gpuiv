@@ -34,20 +34,22 @@ jobs:
             target: x86_64-apple-darwin
             build: bun run build --target x86_64-apple-darwin
           # ── Linux (Vulkan/wgpu) ────────────────────────────────────
-          # build:release skips test-support (pulls gpui_macos, macOS-only)
+          # build:release disables test-support until wgpu image readback
+          # lands, so a published Linux binary cannot capture screenshots.
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             build: bun run build:release --target x86_64-unknown-linux-gnu
           - host: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             build: bun run build:release --target aarch64-unknown-linux-gnu
-          # ── Windows (Direct3D/wgpu) ────────────────────────────────
+          # ── Windows (Direct3D) ─────────────────────────────────────
+          # Test support includes TestGpuixRenderer and render_to_image.
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            build: bun run build:release --target x86_64-pc-windows-msvc
+            build: bun run build --target x86_64-pc-windows-msvc
           - host: windows-latest
             target: aarch64-pc-windows-msvc
-            build: bun run build:release --target aarch64-pc-windows-msvc
+            build: bun run build --target aarch64-pc-windows-msvc
     name: build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     defaults:
@@ -155,7 +157,7 @@ jobs:
         working-directory: examples
 
   test-windows:
-    name: test-windows-load
+    name: test-windows
     needs: build
     runs-on: windows-latest
     steps:
@@ -175,11 +177,30 @@ jobs:
           name: bindings-x86_64-pc-windows-msvc
           path: packages/native/
 
+      - name: Install dependencies
+        run: bun install
+
+      - name: Verify Windows test renderer
+        shell: bash
+        run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.createElement(1, 'text'); renderer.setText(1, 'Windows test renderer'); renderer.setRoot(1); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
+
       - name: Load native binding with Bun
         run: bun -e "require('./packages/native'); console.log('Windows native binding OK (bun)')"
 
       - name: Load native binding with Node
         run: node -e "require('./packages/native'); console.log('Windows native binding OK (node)')"
+
+      - name: Run Vue package tests
+        run: bun run test
+        working-directory: packages/vue
+
+      - name: Build Vue package
+        run: bun run build
+        working-directory: packages/vue
+
+      - name: Run example tests
+        run: bun run test
+        working-directory: examples
 
   publish:
     name: publish
