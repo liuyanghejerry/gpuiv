@@ -12,6 +12,9 @@ per-diff. The zed submodule protocol is in the root
 
 ## The process
 
+An agent skill wrapping this loop (including this machine's build quirks)
+lives at `.agents/skills/upstream-sync/SKILL.md`.
+
 1. **Inventory** — `git fetch upstream`, then
    `git log --oneline <last-inventoried>..upstream/main`. Group commits by
    topic (a topic is anything that would be ported or refused as a unit).

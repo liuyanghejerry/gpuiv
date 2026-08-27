@@ -544,7 +544,8 @@ The status of every upstream topic (synced / pending / declined / diverged)
 lives in [`docs/upstream/README.md`](docs/upstream/README.md). Update that
 ledger in the same PR whenever you port, decline, or deliberately diverge from
 an upstream change. A declined topic needs its own file under `docs/upstream/`
-recording the reason and the revisit triggers.
+recording the reason and the revisit triggers. An agent skill driving this
+loop lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ported code
 
