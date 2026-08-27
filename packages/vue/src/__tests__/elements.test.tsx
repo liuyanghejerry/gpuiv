@@ -68,7 +68,7 @@ describeNative("native text elements (vue)", () => {
       setup() {
         return () => (
           <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-            <code code={"// one\r\n// two\r\n"} language="ts" showHeader={false} />
+            <code code={"// one\r\n// two\r\n"} language="ts" />
           </div>
         )
       },
@@ -76,7 +76,80 @@ describeNative("native text elements (vue)", () => {
     const app = createTestApp(App)
     // The trailing newline still produces the final empty row.
     expect(app.renderer.getPaintedText()).toEqual(["// one", "// two", ""])
-    expect(app.renderer.dragSelect(22, 35, 900, 60)).toBe("// one\n// two")
+    expect(app.renderer.dragSelect(22, 25, 900, 42)).toBe("// one\n// two")
+    app.unmount()
+  })
+
+  it("paints no surface of its own and never paints the language header", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", padding: 24, backgroundColor: "#060606" }}>
+            <code code={"a\nb\nc"} language="ts" />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    // Only the rows paint: no language tag, no header strip, no chrome.
+    expect(app.renderer.getPaintedText()).toEqual(["a", "b", "c"])
+    const node = app.renderer.findByType("code")[0]!
+    const bounds = app.renderer.getElementBounds(node.id)!
+    // Exactly three rows at the default line height: no padding of its own.
+    expect(bounds[3]).toBe(3 * 18)
+    app.unmount()
+  })
+
+  it("grows by the padding from the style prop", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", padding: 24, backgroundColor: "#060606" }}>
+            <code code={"a\nb\nc"} language="ts" style={{ padding: 20 }} />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const node = app.renderer.findByType("code")[0]!
+    const bounds = app.renderer.getElementBounds(node.id)!
+    expect(bounds[3]).toBe(3 * 18 + 40)
+    app.unmount()
+  })
+
+  it("takes the line height and font size from the style prop", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", padding: 24, backgroundColor: "#060606" }}>
+            <code code={"a\nb\nc"} language="ts" style={{ fontSize: 20, lineHeight: 30 }} />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const node = app.renderer.findByType("code")[0]!
+    const bounds = app.renderer.getElementBounds(node.id)!
+    // The row height follows style.lineHeight, so tall glyphs are never clipped.
+    expect(bounds[3]).toBe(3 * 30)
+    app.unmount()
+  })
+
+  it("scales the rows when only fontSize is given", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", padding: 24, backgroundColor: "#060606" }}>
+            <code code={"a\nb\nc"} language="ts" style={{ fontSize: 25 }} />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const node = app.renderer.findByType("code")[0]!
+    const bounds = app.renderer.getElementBounds(node.id)!
+    // Double the glyphs and the rows must double too, or the lines overlap.
+    expect(bounds[3]).toBe(3 * 2 * 18)
     app.unmount()
   })
 

@@ -1059,16 +1059,47 @@ without ever changing layout.
 A syntax-highlighted code block. One row per line at an exact line height, so the
 block's height is known before highlighting runs.
 
+It paints **no surface of its own**: no fill, border, radius, padding or language
+header. `style` is the surface, so the card look is yours.
+
 ```tsx
 <code
   code={source}
   language="typescript"        // or path="src/app.ts" to detect from extension
   showLineNumbers
-  showHeader={false}
+  style={{
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ffffff1f',
+    backgroundColor: '#ffffff09',
+  }}
 />
 ```
 
 ![A syntax-highlighted code block](docs/images/code.png)
+
+`fontFamily`, `fontSize`, `fontWeight`, `lineHeight` and `color` in `style` beat
+the theme. Rows are a fixed height, so `fontSize` alone scales that height by the
+theme's ratio; pass `lineHeight` to set it exactly.
+
+Two things stay owned by the element: lines **never wrap**, and the block is its
+own horizontal scroller. A long line pans on a horizontal wheel inside it, so
+`whiteSpace` and `overflowX` in `style` do nothing.
+
+For a language header, or any other chrome, wrap it in a `<div>` you own:
+
+```tsx
+<div style={{ display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden' }}>
+  <div style={{ padding: 6, backgroundColor: '#ffffff09' }}>
+    <text style={{ fontSize: 12, color: '#a3a3a3' }}>{language}</text>
+  </div>
+  <code code={source} language={language} style={{ padding: 12, minWidth: 0 }} />
+</div>
+```
+
+`<markdown>` is different: it keeps its own fenced-block card, because a document
+renderer owns its layout. Tune that card with the `mdCode*` metrics.
 
 ### `<diff>`
 
