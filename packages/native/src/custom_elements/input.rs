@@ -319,7 +319,9 @@ impl CustomElement for TextEditorElement {
         {
             editor = editor.relative();
         }
-        editor = editor.child(crate::text::selection_start_region(false));
+        // selection-start region: a drag inside an editor must move the caret,
+        // not start a document selection. The tracker overlays both roles.
+        editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false)));
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;

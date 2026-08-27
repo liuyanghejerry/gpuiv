@@ -1565,6 +1565,18 @@ impl GpuixRenderer {
         crate::text::painted_text()
     }
 
+    /// Every highlight wash painted in the last frame, in paint order.
+    ///
+    /// Test-facing: the washes live in gpui paint state, so a test cannot
+    /// assert on `highlight` without a screenshot.
+    #[napi]
+    pub fn get_painted_highlights(&self) -> Vec<crate::element_tree::HighlightMatch> {
+        crate::text::painted_highlights()
+            .into_iter()
+            .map(Into::into)
+            .collect()
+    }
+
     #[napi]
     pub fn simulate_click(
         &self,
@@ -2621,6 +2633,9 @@ pub(crate) struct GpuixView {
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Motion / review clock. Live wall time unless automation freezes it.
     pub(crate) clock: crate::automation::AutomationClock,
+    /// Resolved `highlight` state, keyed by the element that declared it.
+    /// Empty in every app that does not use search.
+    highlights: HashMap<u64, HighlightCacheEntry>,
 }
 
 impl GpuixView {
@@ -2642,6 +2657,7 @@ impl GpuixView {
             selection,
             virtual_lists: HashMap::new(),
             clock: crate::automation::AutomationClock::new(),
+            highlights: HashMap::new(),
         }
     }
 
@@ -2692,6 +2708,32 @@ impl GpuixView {
         let callback = self.event_callback.clone();
         let now = self.clock.now();
         let mut motion_active = false;
+        let mut highlight_events = Vec::new();
+
+        // Re-resolve against the tree as it is NOW. gpui calls this during
+        // layout and prepaint, after the root render returned, and on Windows
+        // and Linux the Node thread can commit new text in between. Reusing the
+        // captured ranges would paint a wash over the wrong glyphs, or at a byte
+        // offset that is no longer a character boundary.
+        let mut inherited = inherited;
+        if let Some(declaration) = inherited.highlight.as_ref().map(|ctx| ctx.declaration) {
+            inherited.highlight = tree
+                .elements
+                .get(&declaration)
+                .and_then(|element| element.custom_props.get("highlight"))
+                .and_then(|value| {
+                    resolve_highlight(
+                        &mut self.highlights,
+                        &tree,
+                        declaration,
+                        value,
+                        &Theme::dark(),
+                        false,
+                    )
+                })
+                .map(|(context, _)| context);
+        }
+
         let mut build_ctx = BuildCtx {
             tree: &tree,
             event_callback: &callback,
@@ -2704,8 +2746,11 @@ impl GpuixView {
             motion_active: &mut motion_active,
             selection: self.selection.clone(),
             inherited,
+            highlights: &mut self.highlights,
+            highlight_events: &mut highlight_events,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
+        emit_highlight_events(&callback, &highlight_events);
         if motion_active {
             window.request_animation_frame();
         }
@@ -2795,6 +2840,112 @@ impl GpuixView {
 /// Split into a struct because the recursion needs eight-plus shared references
 /// and adding one more to every call site is how this file rots. `window` and
 /// `cx` stay separate parameters: they are `&mut` and gpui reborrows them.
+/// Two-level cache for one element's `highlight`.
+///
+/// The group list is keyed by `search_revision`, which a query change does NOT
+/// move, so typing in a find bar never re-walks or re-folds text. The matches
+/// are additionally keyed by the matcher hash, which excludes `activeIndex` and
+/// the colours, so moving the find cursor only re-colours what it already found.
+///
+/// Do not key the group list on `subtree_revision`: `highlight` is a custom
+/// prop, so every keystroke moves that revision and the cache would do nothing.
+struct HighlightCacheEntry {
+    revision: u64,
+    groups: Arc<crate::text::GroupList>,
+    matcher_hash: u64,
+    /// The spec plus the located matches. Ordinals and colours are decided at
+    /// paint, so a colour or `activeIndex` change reuses this whole value.
+    context: Arc<crate::text::HighlightContext>,
+    /// Last identity delivered through `onHighlight`. Only written once an
+    /// event is really queued, so adding the listener later still reports.
+    reported: Option<u64>,
+}
+
+fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
+    for &(id, total) in events {
+        emit_event_full(callback, id, "highlight", |payload| {
+            payload.match_count = Some(total as f64);
+        });
+    }
+}
+
+/// Resolve one element's `highlight` prop, reusing both cache levels.
+///
+/// Returns the context, plus the match count when `has_listener` and the result
+/// differs from the last one this element reported. Identity, not count:
+/// swapping a query for a different one with the same number of hits is still a
+/// new result.
+fn resolve_highlight(
+    cache: &mut HashMap<u64, HighlightCacheEntry>,
+    tree: &RetainedTree,
+    id: u64,
+    value: &serde_json::Value,
+    theme: &Theme,
+    has_listener: bool,
+) -> Option<(Arc<crate::text::HighlightContext>, Option<usize>)> {
+    let set = crate::text::HighlightSet::parse(value, theme)?;
+    // `search_revision`, NOT `subtree_revision`: `highlight` is a custom prop,
+    // so the general revision moves on every keystroke and this cache would
+    // never hit for the one case it exists for.
+    let revision = tree.elements.get(&id)?.search_revision;
+    let matcher_hash = set.matcher_hash();
+
+    let cached = cache
+        .get(&id)
+        .filter(|entry| entry.revision == revision && entry.matcher_hash == matcher_hash);
+    let context = match cached {
+        // Nothing moved at all. Returning the same `Arc` keeps the whole
+        // subtree's inherited value identical, which the cache tests assert.
+        Some(entry) if entry.context.set == set => entry.context.clone(),
+        // Same matches, different colours or find cursor: reuse the located
+        // matches and swap only the spec. No text is scanned.
+        Some(entry) => {
+            let context = Arc::new(crate::text::HighlightContext {
+                declaration: id,
+                set,
+                matches: entry.context.matches.clone(),
+            });
+            cache.get_mut(&id)?.context = context.clone();
+            context
+        }
+        None => {
+            let groups = match cache.get(&id) {
+                Some(entry) if entry.revision == revision => entry.groups.clone(),
+                _ => Arc::new(crate::text::GroupList::collect(tree, id)),
+            };
+            let context = Arc::new(crate::text::HighlightContext {
+                declaration: id,
+                matches: Arc::new(crate::text::search::resolve(&groups, &set)),
+                set,
+            });
+            let reported = cache.get(&id).and_then(|entry| entry.reported);
+            cache.insert(
+                id,
+                HighlightCacheEntry {
+                    revision,
+                    groups,
+                    matcher_hash,
+                    context: context.clone(),
+                    reported,
+                },
+            );
+            context
+        }
+    };
+
+    if !has_listener {
+        return Some((context, None));
+    }
+    let identity = context.matches.identity();
+    let entry = cache.get_mut(&id)?;
+    if entry.reported == Some(identity) {
+        return Some((context, None));
+    }
+    entry.reported = Some(identity);
+    let total = context.matches.total;
+    Some((context, Some(total)))
+}
+
 pub(crate) struct BuildCtx<'a> {
     pub tree: &'a RetainedTree,
     pub event_callback: &'a Option<EventCallback>,
@@ -2810,15 +2961,33 @@ pub(crate) struct BuildCtx<'a> {
     /// own theme only seeds the root selection wash; custom elements resolve
     /// their own theme from their `theme` prop.
     pub inherited: Inherited,
+    /// Persistent `highlight` caches, keyed by the declaring element.
+    highlights: &'a mut HashMap<u64, HighlightCacheEntry>,
+    /// `onHighlight` payloads queued during the build.
+    ///
+    /// Never emitted inline: a handler that calls `setState` repaints, which
+    /// would re-enter the build and emit again. They are flushed once the root
+    /// build has returned.
+    highlight_events: &'a mut Vec<(u64, usize)>,
 }
 
 /// Style properties that cascade into descendants.
-#[derive(Clone, Copy)]
+///
+/// Not `Copy`: `highlight` holds an `Arc`. Every call site must clone
+/// explicitly, including the deferred `build_virtual_child` callback, which gpui
+/// may run more than once per frame.
+#[derive(Clone)]
 pub(crate) struct Inherited {
     /// False once an ancestor sets `userSelect: "none"`.
     pub selectable: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
+    /// The nearest ancestor's `highlight`, resolved. `None` in every app that
+    /// does not use search. It carries the declaring element id, which is what
+    /// a virtual-list row re-resolves against: that row is built after the root
+    /// render returns, and on Windows and Linux the Node thread can edit text
+    /// in between, so a stale range would paint over the wrong glyphs.
+    pub highlight: Option<Arc<crate::text::HighlightContext>>,
 }
 
 impl Inherited {
@@ -2828,6 +2997,7 @@ impl Inherited {
         Self {
             selectable: true,
             selection_wash: wash,
+            highlight: None,
         }
     }
 
@@ -3274,6 +3444,7 @@ impl gpui::Render for GpuixView {
         let theme = Theme::dark();
         let now = self.clock.now();
         let mut motion_active = false;
+        let mut highlight_events = Vec::new();
         let result = match tree.root_id {
             Some(root_id) => {
                 let mut ctx = BuildCtx {
@@ -3288,8 +3459,12 @@ impl gpui::Render for GpuixView {
                     motion_active: &mut motion_active,
                     selection: self.selection.clone(),
                     inherited: Inherited::root(&theme),
+                    highlights: &mut self.highlights,
+                    highlight_events: &mut highlight_events,
                 };
-                build_element(root_id, &mut ctx, window, cx)
+                let built = build_element(root_id, &mut ctx, window, cx);
+                emit_highlight_events(&callback, &highlight_events);
+                built
             }
             None => gpui::Empty.into_any_element(),
         };
@@ -3381,8 +3556,21 @@ pub(crate) fn build_element(
 
     // Inheritable style resolves once here so both built-ins and custom
     // elements see the same cascade.
-    let parent_inherited = ctx.inherited;
-    ctx.inherited = parent_inherited.descend(style);
+    let parent_inherited = ctx.inherited.clone();
+    ctx.inherited = parent_inherited.clone().descend(style);
+
+    // A `highlight` here replaces any ancestor's: the nearest declaration wins,
+    // and `GroupList::collect` skips nested declarations so an ancestor never
+    // resolves or counts matches that will not paint.
+    if let Some(value) = element.custom_props.get("highlight") {
+        let has_listener = element.events.contains("highlight");
+        let resolved =
+            resolve_highlight(ctx.highlights, ctx.tree, id, value, &Theme::dark(), has_listener);
+        if let Some((_, Some(total))) = &resolved {
+            ctx.highlight_events.push((id, *total));
+        }
+        ctx.inherited.highlight = resolved.map(|(context, _)| context);
+    }
 
     let built = match element.element_type.as_str() {
         "div" => {
@@ -3407,7 +3595,7 @@ pub(crate) fn build_element(
                 .filter(|child_id| ctx.tree.elements.contains_key(child_id))
                 .map(|child_id| build_element(child_id, ctx, window, cx))
                 .collect();
-            let inherited = ctx.inherited;
+            let inherited = ctx.inherited.clone();
             let render_ctx = CustomRenderContext {
                 id,
                 events: &element.events,
@@ -3418,6 +3606,7 @@ pub(crate) fn build_element(
                 selection: ctx.selection.clone(),
                 selectable: inherited.selectable,
                 selection_wash: inherited.selection_wash,
+                highlight_set: inherited.highlight.clone(),
             };
             ctx.custom_registry
                 .render(custom_type, &element.custom_props, render_ctx, window, cx)
@@ -3538,7 +3727,7 @@ fn build_virtual_list(
     }
 
     let list_id = element.id;
-    let inherited = ctx.inherited;
+    let inherited = ctx.inherited.clone();
     let render_item = cx.processor(move |view, index: usize, window, cx| {
         let Some(entry) = view.virtual_lists.get(&list_id) else {
             return unmounted_virtual_row(1.0);
@@ -3547,7 +3736,7 @@ fn build_virtual_list(
             // Empty measures as 0 and poisons ListState. Keep the estimate.
             return unmounted_virtual_row(entry.config.estimated_item_height.unwrap_or(1.0));
         };
-        view.build_virtual_child(list_id, index, child_id, inherited, window, cx)
+        view.build_virtual_child(list_id, index, child_id, inherited.clone(), window, cx)
     });
     let mut list =
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
@@ -3928,13 +4117,21 @@ fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElem
         // `userSelect: "none"` label is exactly the chrome tests want to assert.
         return crate::text::chrome_text(gpui::SharedString::from(content.to_string()), None);
     }
-    selectable_text(crate::text::SelectableText::new(
-        gpui::SharedString::from(content.to_string()),
-        None,
-        selection_key(element_id, 0),
-        ctx.selection.clone(),
-        ctx.inherited.selection_wash,
-    ))
+    selectable_text(crate::text::SelectableText {
+        highlight: ctx
+            .inherited
+            .highlight
+            .clone()
+            .map(crate::text::HighlightSource::Resolved),
+        ..crate::text::SelectableText::new(
+            element_id,
+            0,
+            gpui::SharedString::from(content.to_string()),
+            None,
+            ctx.selection.clone(),
+            ctx.inherited.selection_wash,
+        )
+    })
 }
 
 pub(crate) fn build_text(

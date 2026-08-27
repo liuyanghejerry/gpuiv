@@ -34,6 +34,24 @@ pub struct Span {
     /// The element's full flat text. Snapshotted at drag time so copy still
     /// works after the element scrolls out of the registry.
     pub text: String,
+    /// See [`RegisteredText::group`].
+    pub group: Option<u64>,
+}
+
+/// One painted text element as the frame registry sees it.
+#[derive(Clone, Copy, Debug)]
+pub struct RegisteredText<'a> {
+    pub key: &'a str,
+    pub text: &'a str,
+    /// Id of the host element whose primitive text children this run belongs
+    /// to, or `None` for a run that never merges with a neighbour.
+    ///
+    /// React makes a separate host node for every interpolated string
+    /// (`shouldSetTextContent` is false), so `<text>Hello {name}!</text>` is
+    /// three painted runs of one logical line. They share a group, and copy
+    /// must join them with nothing. Anything else is a separate line and joins
+    /// with a newline.
+    pub group: Option<u64>,
 }
 
 /// Live selection for one renderer.
@@ -96,6 +114,7 @@ impl SelectionState {
             key: key.to_string(),
             range,
             text: text.to_string(),
+            group: None,
         }];
     }
 
@@ -155,24 +174,30 @@ impl SelectionState {
 }
 
 /// Resolve the spans for a selection between `a` and `b`, each an
-/// `(element index, byte offset)` into `elements` (document-ordered
-/// `(key, text)` pairs). Handles either direction; empty slices are skipped.
-pub fn resolve_spans(elements: &[(&str, &str)], a: (usize, usize), b: (usize, usize)) -> Vec<Span> {
+/// `(element index, byte offset)` into `elements` (document-ordered painted
+/// runs). Handles either direction; empty slices are skipped.
+pub fn resolve_spans(
+    elements: &[RegisteredText],
+    a: (usize, usize),
+    b: (usize, usize),
+) -> Vec<Span> {
     let (start, end) = if (a.0, a.1) <= (b.0, b.1) {
         (a, b)
     } else {
         (b, a)
     };
     let mut spans = Vec::new();
-    for (ei, (key, text)) in elements.iter().enumerate().take(end.0 + 1).skip(start.0) {
+    for (ei, entry) in elements.iter().enumerate().take(end.0 + 1).skip(start.0) {
+        let text = entry.text;
         let from = if ei == start.0 { start.1 } else { 0 };
         let to = if ei == end.0 { end.1 } else { text.len() };
         let (from, to) = (clamp_boundary(text, from), clamp_boundary(text, to));
         if from < to {
             spans.push(Span {
-                key: (*key).to_string(),
+                key: entry.key.to_string(),
                 range: from..to,
-                text: (*text).to_string(),
+                text: text.to_string(),
+                group: entry.group,
             });
         }
     }
@@ -190,13 +215,25 @@ fn clamp_boundary(text: &str, mut ix: usize) -> usize {
     ix
 }
 
+/// Join spans in document order, with a newline between logical lines and
+/// nothing between runs of the same group.
+///
+/// Without the group check, copying `<text>Hello {name}!</text>` yields
+/// `"Hello\nTommy\n!"`, because React split one line into three host nodes.
 fn join_spans(spans: &[Span]) -> String {
-    spans
-        .iter()
-        .filter(|s| !s.range.is_empty())
-        .map(|s| &s.text[s.range.clone()])
-        .collect::<Vec<_>>()
-        .join("\n")
+    let mut out = String::new();
+    let mut previous: Option<Option<u64>> = None;
+    for span in spans.iter().filter(|s| !s.range.is_empty()) {
+        if let Some(previous) = previous {
+            let same_group = span.group.is_some() && span.group == previous;
+            if !same_group {
+                out.push('\n');
+            }
+        }
+        out.push_str(&span.text[span.range.clone()]);
+        previous = Some(span.group);
+    }
+    out
 }
 
 /// Word range around `ix` for double-click selection: an alphanumeric/`_` run,
@@ -232,11 +269,24 @@ pub fn word_range(text: &str, ix: usize) -> Range<usize> {
 mod tests {
     use super::*;
 
-    fn elems<'a>() -> Vec<(&'a str, &'a str)> {
+    fn reg<'a>(key: &'a str, text: &'a str, group: Option<u64>) -> RegisteredText<'a> {
+        RegisteredText { key, text, group }
+    }
+
+    fn elems<'a>() -> Vec<RegisteredText<'a>> {
         vec![
-            ("p1", "first paragraph"),
-            ("p2", "second"),
-            ("p3", "third one"),
+            reg("p1", "first paragraph", None),
+            reg("p2", "second", None),
+            reg("p3", "third one", None),
+        ]
+    }
+
+    /// `<text>Hello {name}!</text>`: one line, three host nodes, one group.
+    fn interpolated<'a>() -> Vec<RegisteredText<'a>> {
+        vec![
+            reg("2:0", "Hello ", Some(1)),
+            reg("3:0", "Tommy", Some(1)),
+            reg("4:0", "!", Some(1)),
         ]
     }
 
@@ -336,7 +386,51 @@ mod tests {
     /// A stale index past a shrunk element's text must clamp, not panic.
     #[test]
     fn resolve_spans_clamps_out_of_range_offsets() {
-        let spans = resolve_spans(&[("a", "hé")], (0, 0), (0, 99));
+        let spans = resolve_spans(&[reg("a", "hé", None)], (0, 0), (0, 99));
         assert_eq!(&spans[0].text[spans[0].range.clone()], "hé");
+    }
+
+    /// React splits one line into three host nodes. Copy must not insert
+    /// newlines between them.
+    #[test]
+    fn copy_joins_one_group_without_newlines() {
+        let mut sel = SelectionState::default();
+        sel.arm("2:0", 0);
+        assert!(sel.promote_pending_for("2:0"));
+        let spans = resolve_spans(&interpolated(), (0, 0), (2, 1));
+        assert!(sel.update_spans(spans));
+        assert_eq!(sel.selected_text().as_deref(), Some("Hello Tommy!"));
+    }
+
+    #[test]
+    fn copy_separates_groups_with_newlines() {
+        let elements = vec![
+            reg("2:0", "Hello ", Some(1)),
+            reg("3:0", "Tommy", Some(1)),
+            reg("5:0", "second line", Some(4)),
+        ];
+        let mut sel = SelectionState::default();
+        sel.arm("2:0", 0);
+        assert!(sel.promote_pending_for("2:0"));
+        assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (2, 11))));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("Hello Tommy\nsecond line")
+        );
+    }
+
+    /// `<code>` and `<diff>` register their runs without a group, so every
+    /// line stays a line even though one element painted them all.
+    #[test]
+    fn ungrouped_runs_always_separate() {
+        let elements = vec![reg("7:0", "let a = 1;", None), reg("7:1", "let b = 2;", None)];
+        let mut sel = SelectionState::default();
+        sel.arm("7:0", 0);
+        assert!(sel.promote_pending_for("7:0"));
+        assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (1, 10))));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("let a = 1;\nlet b = 2;")
+        );
     }
 }

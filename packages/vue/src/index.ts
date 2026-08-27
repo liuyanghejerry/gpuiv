@@ -4,6 +4,9 @@ export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
 export { GPUIV_CONTEXT, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowSize, useWindowInsets } from "./hooks/use-window-size.js"
 export type { WindowSize, WindowSizeOptions, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"
+export { findRanges, useTextSearch } from "./hooks/use-text-search.js"
+export type { FindRangesOptions, TextSearch, TextSearchOptions } from "./hooks/use-text-search.js"
+export type { HighlightSpec } from "./types.js"
 
 // Components
 export { motion } from "./components/motion.js"

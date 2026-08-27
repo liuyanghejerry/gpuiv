@@ -97,6 +97,7 @@ impl CustomElement for MarkdownElement {
             ctx.selection_wash,
             theme.clone(),
             on_link,
+            ctx.highlight_set.clone(),
         );
         let body = render_tree(&tree, &mut md, window);
 

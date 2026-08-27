@@ -254,6 +254,55 @@ export interface GpuixTheme {
   metrics?: GpuixMetrics
 }
 
+// ── Text search highlight ────────────────────────────────────────────
+
+/** One `highlight` entry. Spread from `useTextSearch().props` or hand-written. */
+export interface HighlightSpec {
+  /**
+   * Substring to match. Case-insensitive unless `caseSensitive` is set.
+   *
+   * A match never crosses a line, exactly like browser find. It DOES cross the
+   * several host nodes the renderer makes for one interpolated line, so
+   * `<text>Hello {name}!</text>` matches `Hello Tommy`.
+   */
+  query?: string
+  caseSensitive?: boolean
+  /** Only match when neither neighbour is alphanumeric or `_`. */
+  wholeWord?: boolean
+  /**
+   * Explicit `[start, end)` pairs in UTF-16 code units, the units `indexOf` and
+   * `RegExp.exec` return. They index the declaring subtree's text, with a
+   * newline between lines.
+   *
+   * A pair that splits a surrogate pair is rejected, not snapped. Native text
+   * (`<code>`, `<markdown>`, `<diff>`) is not part of that text; use `query`.
+   */
+  ranges?: Array<[number, number]>
+  /** Any CSS colour. Defaults to the theme accent at 30% alpha. */
+  color?: string
+  /** Colour for the match at `activeIndex`. Defaults to accent at 65%. */
+  activeColor?: string
+  /** Index of the match to highlight differently, for a find-bar cursor. */
+  activeIndex?: number
+  /**
+   * How many MATCHES come before this subtree in your document, so `activeIndex`
+   * is compared against `matchIndexOffset + n` for the nth match here.
+   *
+   * It is a match count, not a row index. Rows hold different numbers of
+   * matches, so a row index cannot stand in for it.
+   *
+   * Only needed for virtualized content: a `<virtual-list>` mounts a window of
+   * its rows, so native can only number what that window contains. Sum
+   * `findRanges` over the rows before `windowStart`. Defaults to 0.
+   *
+   * A negative or fractional value is refused and the whole spec is dropped,
+   * because a bad offset silently marks the wrong match.
+   */
+  matchIndexOffset?: number
+  /** Corner radius of the wash. Defaults to 2. */
+  radius?: number
+}
+
 // ── Element props ────────────────────────────────────────────────────
 
 // Props that are handled by the renderer directly (not forwarded as custom props).
@@ -273,6 +322,16 @@ export interface ElementProps {
   onMouseMove?: (event: EventPayload) => void
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
   onMouseDownOutside?: (event: EventPayload) => void
+
+  // ── Text search ────────────────────────────────────────────────────
+  /**
+   * Wash matches under this subtree. Scoped by tree position: the nearest
+   * declaration wins and nested declarations are skipped by the resolver.
+   * Usually spread from `useTextSearch().props`.
+   */
+  highlight?: HighlightSpec | null
+  /** Fires after the build that resolved `highlight`, with `matchCount`. */
+  onHighlight?: (event: EventPayload) => void
 
   // ── Keyboard events (need focus: autoFocus, or a click on the element) ──
   onKeyDown?: (event: EventPayload) => void
