@@ -34,7 +34,8 @@
   },
   "scripts": {
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuiv/vue locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\"",
-    "build": "rm -rf dist *.tsbuildinfo && tsc",
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest"
