@@ -16,6 +16,7 @@ mod theme;
 
 #[cfg(feature = "test-support")]
 mod test_renderer;
+mod app_menu;
 
 pub use element_tree::*;
 pub use renderer::*;
