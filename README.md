@@ -1050,7 +1050,7 @@ rebuilds that continuity at paint time instead. The mechanism is ported from
 
 ## Native text components
 
-Three elements render text with Tree-sitter syntax highlighting computed in
+Three elements render text with Syntect syntax highlighting computed in
 Rust. Colours come from a theme prop, so a late-arriving highlight recolours runs
 without ever changing layout.
 
