@@ -362,6 +362,12 @@ fn syntax_set() -> &'static SyntaxSet {
     SET.get_or_init(two_face::syntax::extra_newlines)
 }
 
+/// Force syntax-set construction off the caller's critical path. The first
+/// `highlight()` call would otherwise pay it inside a paint budget.
+pub(crate) fn warmup() {
+    let _ = syntax_set();
+}
+
 fn syntax_for_language(language: LanguageId) -> Result<&'static SyntaxReference, HighlightError> {
     let set = syntax_set();
     let (names, extensions): (&[&str], &[&str]) = match language {

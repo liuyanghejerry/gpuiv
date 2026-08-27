@@ -609,6 +609,11 @@ impl GpuixRenderer {
     #[napi(constructor)]
     pub fn new(event_callback: Option<ThreadsafeFunction<EventPayload>>) -> Self {
         let _ = env_logger::try_init();
+        // Syntect's first highlight loads and compiles the full two-face
+        // grammar set (hundreds of ms on slow machines). Initialize here,
+        // before the first paint can race a background thread for the
+        // OnceLock and stall inside a frame budget.
+        crate::syntax::warmup();
         Self {
             event_callback: Mutex::new(event_callback.map(Arc::new)),
             tree: Arc::new(Mutex::new(RetainedTree::new())),
