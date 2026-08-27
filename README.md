@@ -1037,6 +1037,81 @@ scroller still gets the wheel. `position: "absolute"` / `"fixed"` or
 `pointerEvents: "auto"` also steals the wheel. Set `pointerEvents: "none"`
 to pass hits through.
 
+## Text search
+
+`highlight` paints a wash under every match in a subtree, like browser find.
+Declare it on any element — the nearest declaration wins, nested declarations
+are skipped — and `onHighlight` reports the match count after the build that
+resolved it.
+
+### A find bar
+
+`useTextSearch` owns the cursor and the count. Spread its `props` onto the
+container to search; `next` and `previous` move the cursor.
+
+```tsx
+import { useTextSearch } from '@gpuiv/vue'
+
+function Find() {
+  const query = ref('')
+  const search = useTextSearch({ query: query.value })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input value={query.value} onChange={(e) => (query.value = e.value ?? '')} />
+        <text>{search.total.value === 0 ? 'No results' : `${search.active.value + 1}/${search.total.value}`}</text>
+        <div onClick={search.previous}><text>↑</text></div>
+        <div onClick={search.next}><text>↓</text></div>
+      </div>
+
+      <div {...search.props.value} style={{ flex: 1 }}>
+        <Transcript />
+      </div>
+    </div>
+  )
+}
+```
+
+A match never crosses a line. It does cross the host nodes the renderer makes
+for one interpolated line, so `<text>Hello {name}!</text>` matches
+`Hello Tommy`. Matches are numbered in **paint order**, so `activeIndex` means
+"the nth match in the document" no matter which kind of element painted it —
+`<text>` and `<code>` interleave correctly.
+
+### Explicit ranges
+
+When you already have offsets, from an LSP range or your own model, pass them
+instead of a query. They are `[start, end)` in **UTF-16 code units**, the units
+`indexOf` and `RegExp.exec` return.
+
+```tsx
+<div highlight={{ ranges: [[6, 11]], color: '#f43f5e55' }}>
+  <text>Hello {name}!</text>
+</div>
+```
+
+### Virtualized content
+
+A `<virtual-list>` mounts a window of its rows, so native can only count and
+number that window. Tell it the rest yourself, with `findRanges` — the same
+matcher, in JS:
+
+```tsx
+import { findRanges, useTextSearch } from '@gpuiv/vue'
+
+// One entry per row, so a prefix sum gives both numbers.
+const perRow = computed(() => rows.value.map((row) => findRanges({ text: row.text, query }).length))
+const before = (index: number) => perRow.value.slice(0, index).reduce((a, b) => a + b, 0)
+const total = perRow.value.reduce((a, b) => a + b, 0)
+
+const search = useTextSearch({ query, matches: { total, indexOffset: before(windowStart) } })
+```
+
+`total` and `indexOffset` travel together because supplying one without the
+other is always wrong: the count native reports covers the window only, and
+`next()` needs the offset to land on the right row.
+
 ## Text selection
 
 Every text GPUIX paints is **selectable and copyable**, including text inside

@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process"
 import type { Component } from "vue"
 import type { App } from "vue"
 import { nextTick } from "vue"
-import type { EventPayload } from "@gpuiv/native"
+import type { EventPayload, HighlightMatch } from "@gpuiv/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
@@ -66,6 +66,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
   getPaintedText(): string[]
+  getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -531,6 +532,12 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getPaintedText()
   }
 
+  /** Every highlight wash painted in the last frame, in paint order. The only
+   *  way to assert on `highlight` without a screenshot. */
+  getPaintedHighlights(): HighlightMatch[] {
+    return this.native.getPaintedHighlights()
+  }
+
   /** Syntax-cache counters as `[hits, misses, documents]`. */
   getSyntaxCacheStats(): [number, number, number] {
     const [hits, misses, documents] = this.native.getSyntaxCacheStats()
@@ -618,6 +625,10 @@ export function createTestApp(
       await nextTick()
       gpuivHost.flushMutations()
       renderer.flush()
+      // The flush can itself produce events — a `highlight` resolve reports
+      // its match count during the build — so deliver them before the caller
+      // asserts. Idempotent when the queue is empty.
+      renderer.dispatchNativeEvents()
     },
     unmount: () => {
       app.unmount()

@@ -2540,6 +2540,7 @@ dependencies = [
  "napi-derive",
  "parking_lot",
  "pulldown-cmark",
+ "rustc-hash 2.1.1",
  "serde",
  "serde_json",
  "syntect",

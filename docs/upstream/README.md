@@ -48,7 +48,7 @@ Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
 | Occlude semantics relaxation | `d96413d` | diverged | upstream lets the wheel pass under absolutely positioned items; we keep absolute/fixed occluding (documented in root AGENTS.md). Revisit if it causes real scroll bugs |
 | VirtualList wrapper removal | `3d759b2` | diverged | upstream deleted the React wrapper ("there must not be one"); we keep the Vue wrapper — `chat.tsx` depends on it. Revisit if windowed mounting moves fully native |
 | macOS application menu bar | `7baa36f` `d804d93` | synced | PR #17 — `app_menu.rs`, `appName` window option (TS type comes free via native d.ts), AGENTS + README docs; no Edit menu on purpose |
-| Text-search highlight | `bb138ba` `9a18172` `c444c28` `8aef438` `12fb344` `848c617` | pending | `<text>`/`<code>` highlight prop + paint-order match numbering; React prop API must be redesigned for Vue |
+| Text-search highlight | `bb138ba` `9a18172` `c444c28` `8aef438` `12fb344` `848c617` | synced | PR #18 — `text/search.rs`, two-level resolve cache on `searchRevision`, `Inherited.highlight` cascade, paint-order numbering incl. `<code>`/`<markdown>`/`<diff>`, Vue `useTextSearch` + `findRanges`, `getPaintedHighlights`; virtual-list offset is app-supplied (`matches: { total, indexOffset }`) |
 | Virtual-list pinning / anchoring | `01f5788` `ae4766f` `a8f302a` `c8a96b8` | pending | top pin on prepend, followTail hole, anchoring-by-index docs; touches the same native list code we synced in PR #6 |
 | Mutation wire format / retained-tree perf | `230400e` `2daf988` `fd06111` `f948f50` | pending | typed batch ops, styles shared by content, style-table reclaim; core `retained_tree.rs` we have modified — port carefully |
 | Automation API expansion | `c2b60e8` `ff6daf5` `5805701` `64241ce` | synced | PR #16 — Locator hover/wheel/dragTo/dragBy/center, `app.mouse.*`, modifiers everywhere, live scroll+keyboard, `<input>` bounds_tracker, `textContent` descendants; browser-input docs from `5805701` skipped (web topic) |
@@ -82,6 +82,7 @@ from upstream through `367ef48`:
 | #15 | Test renderer hardening: Windows DirectX + full CI suite, `new TestGpuixRenderer(w, h)` / `createTestApp` sizing, real `getWindowSize`, Drop teardown, `build:release --no-default-features` for Linux — upstream `3505f68`…`e4fb1c3` (9 commits) |
 | #16 | Automation expansion: drag/hover/wheel/modifiers, `app.mouse`, live scroll+keyboard, `<input>` locatable, `textContent` descendants — upstream `c2b60e8` `ff6daf5` `5805701` `64241ce` |
 | #17 | macOS application menu bar: `app_menu.rs` + `with_window_menu_actions`, `appName` window option — upstream `7baa36f` `d804d93` |
+| #18 | Text-search highlight: `search.rs` + paint/selection integration (3-way merged over our fork's selection work), `searchRevision` + two-level cache, `Inherited.highlight` cascade, paint-order ordinals, `useTextSearch`/`findRanges` (Vue: refs + JSX spread), `getPaintedHighlights`, `settle()` now dispatches build-time events — upstream `bb138ba`…`848c617` (6 commits) |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)

@@ -40,12 +40,22 @@ const RESERVED_PROPS = new Set([
 const BUILT_IN_TYPES = new Set(["div", "text"])
 
 /// Props that reach Rust on EVERY element type, including div and text.
-const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId"])
+const UNIVERSAL_PROPS = new Set([
+  "autoFocus",
+  "tabIndex",
+  "motion",
+  "testId",
+  // `highlight` is scoped by where it sits in the tree, so it has to reach a
+  // plain `div`. Without it here, custom props are dropped for built-ins and
+  // the prop silently never arrives in Rust.
+  "highlight",
+])
 
 /// Event names the native side knows. `onInput` is an alias for `change`.
 const EVENT_TYPES = new Set([
   "click",
   "auxClick",
+  "highlight",
   "mouseDown",
   "mouseUp",
   "mouseEnter",

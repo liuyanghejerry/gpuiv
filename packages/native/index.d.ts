@@ -90,6 +90,13 @@ export declare class GpuixRenderer {
   getElementBounds(id: number): Array<number> | null
   getAllText(): Array<string>
   getPaintedText(): Array<string>
+  /**
+   * Every highlight wash painted in the last frame, in paint order.
+   *
+   * Test-facing: the washes live in gpui paint state, so a test cannot
+   * assert on `highlight` without a screenshot.
+   */
+  getPaintedHighlights(): Array<HighlightMatch>
   simulateClick(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   simulateMouseDown(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
@@ -238,6 +245,8 @@ export declare class TestGpuixRenderer {
    * this is the only way to assert on what they actually rendered.
    */
   getPaintedText(): Array<string>
+  /** Every highlight wash painted in the last frame, in paint order. */
+  getPaintedHighlights(): Array<HighlightMatch>
   /**
    * Drag-select from one point to another: mouse down, move, up.
    *
@@ -418,7 +427,42 @@ export interface EventPayload {
   startIndex?: number
   /** Exclusive end of the visible logical range. Populated for: visibleRange. */
   endIndex?: number
+  /**
+   * Matches found by this element's `highlight` prop. Counted once per match
+   * even when it is split across several painted runs, and it counts every
+   * retained match, not only the ones currently on screen.
+   * Populated for: highlight.
+   */
+  matchCount?: number
   modifiers?: EventModifiers
+}
+
+/**
+ * One highlight wash painted in the last frame, with the boxes it drew.
+ *
+ * The rects matter: a quad never lands in `getPaintedText()`, and a match that
+ * soft-wraps must produce one box per visual row. Without the geometry the only
+ * way to assert either is a screenshot.
+ */
+export interface HighlightMatch {
+  /** Numeric id of the element that painted the run. */
+  elementId: number
+  /** Index of the run within that element. 0 for a plain `<text>`. */
+  sub: number
+  /** The full string of the run, so `text.slice(start, end)` is the match. */
+  text: string
+  /** UTF-16 code-unit offsets into `text`, the units JS strings use. */
+  start: number
+  end: number
+  active: boolean
+  rects: Array<HighlightRect>
+}
+
+export interface HighlightRect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface WindowInsets {

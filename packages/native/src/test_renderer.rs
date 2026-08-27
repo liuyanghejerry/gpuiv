@@ -610,6 +610,16 @@ impl TestGpuixRenderer {
         Ok(crate::text::painted_text())
     }
 
+    /// Every highlight wash painted in the last frame, in paint order.
+    #[napi]
+    pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
+        self.flush()?;
+        Ok(crate::text::painted_highlights()
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
     /// Drag-select from one point to another: mouse down, move, up.
     ///
     /// A single helper rather than three calls because the listeners that drive

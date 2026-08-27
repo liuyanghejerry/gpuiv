@@ -270,6 +270,7 @@ impl CustomElement for DiffElement {
         let selection = ctx.selection.clone();
         let selectable = ctx.selectable;
         let wash = ctx.selection_wash;
+        let highlight_set = ctx.highlight_set.clone();
         let callback = ctx.event_callback.clone();
         let wants_toggle = ctx.events.contains("toggleFile");
         let wants_line_click = ctx.events.contains("lineClick");
@@ -327,6 +328,7 @@ impl CustomElement for DiffElement {
                         selection: &selection,
                         selectable,
                         wash,
+                        highlight_set: highlight_set.clone(),
                         callback: &callback,
                         wants_toggle,
                         wants_line_click,
@@ -352,6 +354,7 @@ impl CustomElement for DiffElement {
                         selection: &selection,
                         selectable,
                         wash,
+                        highlight_set: highlight_set.clone(),
                         callback: &callback,
                         wants_toggle,
                         wants_line_click,
@@ -441,6 +444,7 @@ struct RowContext<'a> {
     selection: &'a SharedSelection,
     selectable: bool,
     wash: Hsla,
+    highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
     callback: &'a Option<crate::renderer::EventCallback>,
     wants_toggle: bool,
     wants_line_click: bool,
@@ -473,10 +477,15 @@ impl RowContext<'_> {
         }
         crate::text::selectable_text(crate::text::SelectableText {
             extra_wash,
+            highlight: self
+                .highlight_set
+                .clone()
+                .map(crate::text::HighlightSource::Native),
             ..crate::text::SelectableText::new(
+                self.element_id,
+                sub,
                 SharedString::from(text),
                 runs,
-                crate::text::selection_key(self.element_id, sub),
                 self.selection.clone(),
                 self.wash,
             )

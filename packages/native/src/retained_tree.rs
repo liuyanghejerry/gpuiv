@@ -26,6 +26,15 @@ pub struct RetainedElement {
     pub auto_focus: bool,
     /// Last mutation applied to this element or one of its descendants.
     pub subtree_revision: u64,
+    /// Last change to the searchable TEXT of this subtree: content, structure,
+    /// or the set of nested `highlight` declarations.
+    ///
+    /// Separate from `subtree_revision` because `highlight` is itself a custom
+    /// prop: keying the group cache on the general revision means every find-bar
+    /// keystroke re-walks and re-folds the whole subtree, which is the one case
+    /// the cache exists for. Style, `activeIndex`, colours and a native
+    /// element's own props never move this.
+    pub search_revision: u64,
     /// Stable locator id from the React `testId` prop.
     pub test_id: Option<String>,
 }
@@ -42,6 +51,7 @@ impl RetainedElement {
             parent: None,
             auto_focus: false,
             subtree_revision: revision,
+            search_revision: revision,
             test_id: None,
             custom_props: HashMap::new(),
         }
@@ -76,7 +86,19 @@ impl RetainedTree {
         revision
     }
 
+    /// Invalidate `id` and its ancestors, including their searchable text.
     fn mark_changed(&mut self, id: u64) {
+        self.mark_changed_detail(id, true);
+    }
+
+    /// Invalidate for rendering only. Use for changes that cannot move a glyph
+    /// into or out of the searchable text: style, and a native element's own
+    /// props, whose text is matched at paint and never enters a `GroupList`.
+    fn mark_render_changed(&mut self, id: u64) {
+        self.mark_changed_detail(id, false);
+    }
+
+    fn mark_changed_detail(&mut self, id: u64, search: bool) {
         let revision = self.take_revision();
         let mut current = Some(id);
         while let Some(current_id) = current {
@@ -84,6 +106,9 @@ impl RetainedTree {
                 break;
             };
             element.subtree_revision = revision;
+            if search {
+                element.search_revision = revision;
+            }
             current = element.parent;
         }
     }
@@ -176,7 +201,8 @@ impl RetainedTree {
             }
         }
         if changed {
-            self.mark_changed(id);
+            // Style cannot move a glyph into or out of the searchable text.
+            self.mark_render_changed(id);
         }
     }
 
@@ -206,6 +232,11 @@ impl RetainedTree {
     /// Set a custom prop on an element (for non-div/text elements).
     pub fn set_custom_prop(&mut self, id: u64, key: String, value: serde_json::Value) {
         let mut changed = false;
+        let is_highlight = key == "highlight";
+        let was_declaration = self
+            .elements
+            .get(&id)
+            .is_some_and(|element| element.custom_props.contains_key("highlight"));
         if let Some(element) = self.elements.get_mut(&id) {
             // `autoFocus` applies to every element type, so it is lifted out of
             // the custom-prop map that only custom elements read.
@@ -226,9 +257,15 @@ impl RetainedTree {
                 }
             }
         }
-        if changed {
-            self.mark_changed(id);
+        if !changed {
+            return;
         }
+        // Custom props never change the searchable text of a subtree: a native
+        // element's strings are matched at paint, not collected into a group.
+        // The one exception is `highlight` itself appearing or disappearing,
+        // which changes which subtrees an ancestor skips.
+        let search_moved = is_highlight != was_declaration;
+        self.mark_changed_detail(id, search_moved);
     }
 
     /// Read a custom prop value from an element.
