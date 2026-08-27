@@ -170,6 +170,60 @@ describeNative('chat example (vue)', () => {
     expect(fs.statSync(after).size).toBeGreaterThan(0)
   }, 20_000)
 
+  it('switches the active conversation from the sidebar', async () => {
+    const app = createTestApp(ChatApp)
+
+    // The row div owns at fontSize 13.5 the title text; the header title is
+    // fontSize 13, so the two occurrences of a title are distinguishable.
+    const rowOf = (title: string) => {
+      const titleEl = app.renderer
+        .findByType('text')
+        .find((el) => el.text === title && el.style.fontSize === 13.5)
+      return titleEl ? app.renderer.getElement(titleEl.parentId!) : undefined
+    }
+    const headerTitle = () =>
+      app.renderer
+        .findByType('text')
+        .find((el) => el.text === 'Native SDK vs GPUI comparison' && el.style.fontSize === 13)
+
+    // c1 starts active: its row carries the C.item fill, the header shows its title.
+    const c1Row = rowOf('give me a quick overview')
+    expect(c1Row).toBeDefined()
+    const activeFill = c1Row!.style.backgroundColor
+    expect(activeFill).toBeDefined()
+    expect(activeFill).not.toBe('#00000000')
+    expect(headerTitle()).toBeUndefined()
+
+    // Click the c2 row through the row div's own hitbox while it is
+    // transparent. Use the recorded corner: before the bounds-origin fix the
+    // recorded box was the content box, so a corner click landed outside the
+    // real hitbox and was silently lost.
+    const c2Row = rowOf('Native SDK vs GPUI comparison')
+    const bounds = app.renderer.getElementBounds(c2Row!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(bounds![0]! + 3, bounds![1]! + bounds![3]! - 3)
+    await app.settle()
+
+    // The highlight moves to c2, c1 loses it, and the header follows.
+    expect(rowOf('Native SDK vs GPUI comparison')!.style.backgroundColor).toBe(activeFill)
+    expect(rowOf('give me a quick overview')!.style.backgroundColor).not.toBe(activeFill)
+    expect(headerTitle()).toBeDefined()
+
+    // Clicking back to c1 restores the original state.
+    const c1Title = app.renderer
+      .findByType('text')
+      .find((el) => el.text === 'give me a quick overview' && el.style.fontSize === 13.5)
+    const c1Bounds = app.renderer.getElementBounds(c1Title!.id)
+    app.renderer.nativeSimulateClick(
+      c1Bounds![0]! + c1Bounds![2]! / 2,
+      c1Bounds![1]! + c1Bounds![3]! / 2,
+    )
+    await app.settle()
+    expect(rowOf('give me a quick overview')!.style.backgroundColor).toBe(activeFill)
+    expect(rowOf('Native SDK vs GPUI comparison')!.style.backgroundColor).not.toBe(activeFill)
+    app.unmount()
+  })
+
   it('keeps transcript row ids when the sidebar collapses', async () => {
     const app = createTestApp(ChatApp)
     const before = app.renderer.findByType('virtual-list')[0]?.children.slice() ?? []
