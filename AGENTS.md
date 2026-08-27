@@ -536,6 +536,16 @@ a temp-file workaround. Prefer `fill="#000"` / `stroke="#000"` plus
 macOS traffic-light clearance is **86px**. The test renderer does not draw
 traffic lights, so that gap looks empty in PNGs.
 
+## Upstream tracking
+
+This fork tracks `remorses/gpuix` (the React binding), which shares no git
+history with us — never `git merge upstream/main`; port per-file or per-diff.
+The status of every upstream topic (synced / pending / declined / diverged)
+lives in [`docs/upstream/README.md`](docs/upstream/README.md). Update that
+ledger in the same PR whenever you port, decline, or deliberately diverge from
+an upstream change. A declined topic needs its own file under `docs/upstream/`
+recording the reason and the revisit triggers.
+
 ## Ported code
 
 `text/`, `syntax/`, `markdown/`, `diff/`, `theme.rs`, `custom_elements/code.rs`,
