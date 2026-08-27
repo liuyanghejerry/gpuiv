@@ -2,6 +2,7 @@ node_modules/
 target/
 dist/
 *.node
+*.tsbuildinfo
 .DS_Store
 opensrc
 tmp/

@@ -56,7 +56,7 @@ Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
 | `onAuxClick` + click button | `280d6ec` | synced | PR #11 |
 | Window size polling | `f587575` | synced | PR #12 |
 | `<code>` as bare surface | `5033808` `f81e087` | pending | native `<code>` stops painting chrome, styled via style prop; changes default appearance — needs a look before porting |
-| Hygiene | `f921bec` `d1e4c98` `a9cda59` | pending | CRLF normalize in `<code>` sources, ignore tsbuildinfo, split dist wipe out of build |
+| Hygiene | `f921bec` `d1e4c98` `a9cda59` | synced | PR #13 |
 
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8.
@@ -77,6 +77,7 @@ from upstream through `367ef48`:
 | #8 | AGENTS.md guidance port for synced code + framework-agnostic workflow |
 | #11 | `onAuxClick` (gpui `on_aux_click`), `simulateClick` button param, automation `click({ button })` — upstream `280d6ec` |
 | #12 | `useWindowSize` polls with `intervalMs` instead of reading once — upstream `f587575` |
+| #13 | `<code>` CRLF normalize + regression test, `*.tsbuildinfo` ignored, vue `build`/`clean` split — upstream `f921bec` `d1e4c98` `a9cda59` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)

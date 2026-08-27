@@ -63,6 +63,23 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("normalizes CRLF source lines", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+            <code code={"// one\r\n// two\r\n"} language="ts" showHeader={false} />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    // The trailing newline still produces the final empty row.
+    expect(app.renderer.getPaintedText()).toEqual(["// one", "// two", ""])
+    expect(app.renderer.dragSelect(22, 35, 900, 60)).toBe("// one\n// two")
+    app.unmount()
+  })
+
   it("renders diff file headers and hunks", () => {
     const App = defineComponent({
       setup() {

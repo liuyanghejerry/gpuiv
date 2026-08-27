@@ -203,7 +203,9 @@ impl CustomElement for CodeElement {
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "code" => self.code = value.as_str().unwrap_or("").to_string(),
+            // Normalize at the boundary so highlighting, painting, selection,
+            // and clipboard output all share one LF-only source.
+            "code" => self.code = value.as_str().unwrap_or("").replace("\r\n", "\n"),
             "language" => self.language = value.as_str().map(str::to_string),
             "path" => self.path = value.as_str().map(str::to_string),
             "showLineNumbers" => self.show_line_numbers = value.as_bool().unwrap_or(false),
