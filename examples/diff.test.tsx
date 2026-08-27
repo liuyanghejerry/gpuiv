@@ -12,6 +12,9 @@
 
 import fs from "fs"
 import { beforeAll, describe, it, expect, beforeEach } from "vitest"
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { defineComponent } from "vue"
 import { createTestApp, hasNativeTestRenderer } from "@gpuiv/vue"
 import type { StructuredPatchHunk as Hunk } from "diff"
@@ -19,7 +22,15 @@ import { DiffViewer } from "./diff"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
-const SCREENSHOT_DIR = "/tmp"
+// Screenshots land in the repo, not /tmp: /tmp does not exist on Windows, and
+// a repo-local folder survives the run for inspection (gitignored).
+const SCREENSHOT_DIR = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "screenshots",
+)
+beforeAll(() => {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true })
+})
 
 // Background for the scroll container — matches the diff viewer's unchanged line bg
 // so the area below content doesn't look different.
