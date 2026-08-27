@@ -35,7 +35,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusElement(elementId: number): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
-  simulateClick(x: number, y: number): void
+  simulateClick(x: number, y: number, button?: number): void
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
   simulateMouseMove(x: number, y: number, pressedButton?: number): void
   simulateMouseDown(x: number, y: number, button: number): void
@@ -280,10 +280,12 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate a click through GPUI hit testing →
-   *  dispatch resulting events to the registry. */
-  nativeSimulateClick(x: number, y: number): void {
+   *  dispatch resulting events to the registry.
+   *  @param button - 0=left (default), 1=middle, 2=right. Non-left fires
+   *  `auxClick` on the element, not `click`. */
+  nativeSimulateClick(x: number, y: number, button?: number): void {
     this.native.flush()
-    this.native.simulateClick(x, y)
+    this.native.simulateClick(x, y, button)
     this.dispatchNativeEvents()
     // Flush again after Rust ops (queued by Vue) have been applied by the
     // microtask batch flush — repaint the current tree before any screenshot.

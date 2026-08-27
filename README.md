@@ -1219,6 +1219,7 @@ The chat example builds every sidebar and composer icon this way.
 | Event | Props | Payload fields |
 |-------|-------|----------------|
 | Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` |
+| Aux click | `onAuxClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` |
 | Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse enter | `onMouseEnter` | `hovered` |

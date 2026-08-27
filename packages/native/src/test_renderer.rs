@@ -305,15 +305,18 @@ impl TestGpuixRenderer {
     /// Simulate a click at the given window coordinates.
     /// Dispatches MouseDown + MouseUp through GPUI's input pipeline,
     /// which triggers the same event handlers as production.
+    /// Button: 0=left, 1=middle, 2=right. A non-left button fires `auxClick`
+    /// on the element, not `click`.
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
     #[napi]
-    pub fn simulate_click(&self, x: f64, y: f64) -> Result<()> {
+    pub fn simulate_click(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
         with_test_state(|cx, window, _view| {
-            cx.simulate_click(
-                window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                gpui::Modifiers::default(),
-            );
+            // Not `cx.simulate_click`: that helper hard-codes the left button,
+            // so a right click silently became a left click.
+            let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+            let button = u32_to_mouse_button(button.unwrap_or(0));
+            cx.simulate_mouse_down(window, position, button, gpui::Modifiers::default());
+            cx.simulate_mouse_up(window, position, button, gpui::Modifiers::default());
             Ok(())
         })
     }

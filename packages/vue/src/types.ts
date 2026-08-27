@@ -257,7 +257,10 @@ export interface ElementProps {
   children?: unknown
 
   // ── Mouse events ───────────────────────────────────────────────
+  /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
   onClick?: (event: EventPayload) => void
+  /** Non-primary click, like the DOM `auxclick`. `isRightClick` says which. */
+  onAuxClick?: (event: EventPayload) => void
   onMouseDown?: (event: EventPayload) => void
   onMouseUp?: (event: EventPayload) => void
   onMouseEnter?: (event: EventPayload) => void
