@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    canvas, point, px, App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
-    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Styled, Window,
+    canvas, point, px, size, App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent,
+    Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
+    Styled, Window,
 };
 use web_time::Instant;
 
@@ -69,13 +70,40 @@ pub fn all_bounds() -> HashMap<u64, ElementBounds> {
     BOUNDS.with(|cell| cell.borrow().clone())
 }
 
-pub fn bounds_tracker(id: u64, selection_start: Option<bool>) -> impl IntoElement {
+pub fn bounds_tracker(
+    id: u64,
+    selection_start: Option<bool>,
+    insets: crate::style::BoundsInsets,
+) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,
         move |bounds, _, _, _| {
-            record_bounds(id, bounds);
+            // The canvas is absolute at the parent's content-box origin
+            // (border + padding inside) with the padding-box size (border box
+            // minus border). Convert back to the border box — the box GPUI's
+            // hit test uses — so `getElementBounds` and automation locators
+            // agree with what is clickable.
+            let real = Bounds::new(
+                point(
+                    Pixels::from(
+                        f32::from(bounds.origin.x) - insets.padding.left - insets.border.left,
+                    ),
+                    Pixels::from(
+                        f32::from(bounds.origin.y) - insets.padding.top - insets.border.top,
+                    ),
+                ),
+                size(
+                    Pixels::from(
+                        f32::from(bounds.size.width) + insets.border.left + insets.border.right,
+                    ),
+                    Pixels::from(
+                        f32::from(bounds.size.height) + insets.border.top + insets.border.bottom,
+                    ),
+                ),
+            );
+            record_bounds(id, real);
             if let Some(selectable) = selection_start {
-                crate::text::record_start_region(bounds, selectable);
+                crate::text::record_start_region(real, selectable);
             }
         },
     )

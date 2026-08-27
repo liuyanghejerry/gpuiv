@@ -321,7 +321,13 @@ impl CustomElement for TextEditorElement {
         }
         // selection-start region: a drag inside an editor must move the caret,
         // not start a document selection. The tracker overlays both roles.
-        editor = editor.child(crate::automation::bounds_tracker(ctx.id, Some(false)));
+        editor = editor.child(crate::automation::bounds_tracker(
+            ctx.id,
+            Some(false),
+            ctx.style
+                .map(crate::style::bounds_insets)
+                .unwrap_or_default(),
+        ));
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;
@@ -338,7 +344,13 @@ impl CustomElement for TextEditorElement {
         // automation unless the builder does it. Without this, a locator on an
         // editor fails with "Element has no painted bounds" and `click()` has
         // no target. `<div>` and `<text>` get this from `build_element`.
-        editor = editor.child(crate::automation::bounds_tracker(ctx.id, None));
+        editor = editor.child(crate::automation::bounds_tracker(
+            ctx.id,
+            None,
+            ctx.style
+                .map(crate::style::bounds_insets)
+                .unwrap_or_default(),
+        ));
         editor.into_any_element()
     }
 
