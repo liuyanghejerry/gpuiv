@@ -410,8 +410,8 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
         .flex_none()
         .flex()
         .flex_col()
-        .px(px(m.code_padding_x))
-        .py(px(m.code_padding_y))
+        .px(px(m.md_code_padding_x))
+        .py(px(m.md_code_padding_y))
         .font_family(theme.font_mono.clone())
         .text_size(px(m.code_text_size))
         .line_height(px(m.code_line_height))
@@ -458,7 +458,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     let mut block = div()
         .w_full()
         .min_w_0()
-        .rounded(px(m.code_radius))
+        .rounded(px(m.md_code_radius))
         .bg(ink(&theme, 0.035))
         .border_1()
         .border_color(theme.border)
@@ -467,12 +467,12 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
     if let Some(language) = language {
         block = block.child(
             div()
-                .px(px(m.code_padding_x))
-                .py(px(m.code_header_padding_y))
+                .px(px(m.md_code_padding_x))
+                .py(px(m.md_code_header_padding_y))
                 .border_b_1()
                 .border_color(theme.border)
                 .bg(ink(&theme, 0.02))
-                .text_size(px(m.code_header_text_size))
+                .text_size(px(m.md_code_header_text_size))
                 .text_color(theme.text_muted)
                 .child(crate::text::chrome_text(
                     SharedString::from(language.to_string()),

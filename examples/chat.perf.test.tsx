@@ -37,10 +37,13 @@ const BUDGET = {
   // Vue mounts the app tree through createRenderer and a single applyBatch;
   // the 1000-turn window mount runs ~160ms on an M3 Pro — leave headroom.
   mountMs: 300 * CI_SCALE,
-  idleP95Ms: 8 * CI_SCALE,
-  idleMaxMs: 16 * CI_SCALE,
-  wheelP95Ms: 8 * CI_SCALE,
-  wheelMaxMs: 16 * CI_SCALE,
+  // `<code>` paints no card, so every code turn carries its own wrapper div,
+  // header div and language text: idle flushes walk a deeper tree per frame.
+  // Chrome costs host nodes now; that is the whole point of the bare surface.
+  idleP95Ms: 10 * CI_SCALE,
+  idleMaxMs: 20 * CI_SCALE,
+  wheelP95Ms: 10 * CI_SCALE,
+  wheelMaxMs: 20 * CI_SCALE,
   // Parallel vitest workers can delay the 8 automation clicks; 80 leaves
   // headroom while still catching real regressions (idle ~14ms).
   sidebarMs: 80 * CI_SCALE,

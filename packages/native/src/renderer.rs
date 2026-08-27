@@ -53,7 +53,7 @@ pub(crate) fn init_key_bindings(cx: &mut gpui::App) {
 /// Parse a CSS font-weight value (string or number) into a GPUI FontWeight.
 /// Accepts named keywords ("bold", "semibold"), numeric strings ("700"),
 /// and raw numbers (700). Falls back to 400 (normal) for unrecognized values.
-fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::FontWeight {
+pub(crate) fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::FontWeight {
     match value {
         crate::style::FontWeightValue::Num(n) => gpui::FontWeight((*n as f32).clamp(1.0, 1000.0)),
         crate::style::FontWeightValue::Str(s) => {

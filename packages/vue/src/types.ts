@@ -187,17 +187,22 @@ export interface SyntaxTheme {
  * heading scale is a re-render and needs no native rebuild.
  */
 export interface GpuixMetrics {
-  // Code blocks
+  // Code blocks. Shared by <code> and the markdown fenced block.
   codeTextSize?: number
   codeLineHeight?: number
-  codePaddingX?: number
-  codePaddingY?: number
-  codeRadius?: number
-  codeHeaderPaddingY?: number
-  codeHeaderTextSize?: number
   codeGutterDigitWidth?: number
   codeGutterPaddingRight?: number
   codeGutterMinWidth?: number
+
+  /**
+   * The fenced-block card. `<code>` paints no card, so these are
+   * markdown-only: style a `<code>` block with its own `style` prop instead.
+   */
+  mdCodePaddingX?: number
+  mdCodePaddingY?: number
+  mdCodeRadius?: number
+  mdCodeHeaderPaddingY?: number
+  mdCodeHeaderTextSize?: number
 
   // Diffs
   diffTextSize?: number

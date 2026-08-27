@@ -151,7 +151,7 @@ describeNative("native text showcase (vue)", () => {
             }}
           >
             <markdown source="heading text" />
-            <code code={"code line one"} language="ts" showHeader={false} />
+            <code code={"code line one"} language="ts" />
           </div>
         )
       },

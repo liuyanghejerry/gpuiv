@@ -55,7 +55,7 @@ Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
 | Test renderer hardening | `3505f68` `20483dd` `5719d7f` `3cb50c2` `6ad8f83` `bde0ca7` `f93e891` `d1d58e0` `e4fb1c3` | pending | screenshots in repo, host-derived geometry/fonts, entity-handle release, Windows GPU renderer |
 | `onAuxClick` + click button | `280d6ec` | synced | PR #11 |
 | Window size polling | `f587575` | synced | PR #12 |
-| `<code>` as bare surface | `5033808` `f81e087` | pending | native `<code>` stops painting chrome, styled via style prop; changes default appearance — needs a look before porting |
+| `<code>` as bare surface | `5033808` `f81e087` | synced | PR #14 — breaking: `showHeader` gone, `codePaddingX`→`mdCodePaddingX` etc.; card moved into app code (chat `CodeBlock`) |
 | Hygiene | `f921bec` `d1e4c98` `a9cda59` | synced | PR #13 |
 
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
@@ -78,6 +78,7 @@ from upstream through `367ef48`:
 | #11 | `onAuxClick` (gpui `on_aux_click`), `simulateClick` button param, automation `click({ button })` — upstream `280d6ec` |
 | #12 | `useWindowSize` polls with `intervalMs` instead of reading once — upstream `f587575` |
 | #13 | `<code>` CRLF normalize + regression test, `*.tsbuildinfo` ignored, vue `build`/`clean` split — upstream `f921bec` `d1e4c98` `a9cda59` |
+| #14 | `<code>` bare surface: glyphs only, `style` is the surface, `showHeader` removed, `code*` card metrics → `mdCode*`; card moved into app code — upstream `5033808` `f81e087` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)

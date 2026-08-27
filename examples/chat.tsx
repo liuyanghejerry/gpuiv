@@ -174,11 +174,69 @@ const CHAT_THEME = {
     mdHeadingLineHeights: [28, 24, 22, 22],
     codeTextSize: 12.5,
     codeLineHeight: 20,
-    codeRadius: 10,
-    codeHeaderTextSize: 12,
     diffLineHeight: 20,
     diffFileHeaderHeight: 34,
   },
+}
+
+const CODE_CARD_STYLE = {
+  display: 'flex',
+  flexDirection: 'column',
+  width: '100%',
+  minWidth: 0,
+  borderRadius: 10,
+  borderWidth: 1,
+  borderColor: C.border,
+  backgroundColor: '#FFFFFF09',
+  overflow: 'hidden',
+} as const
+const CODE_HEADER_STYLE = {
+  paddingLeft: 12,
+  paddingRight: 12,
+  paddingTop: 5,
+  paddingBottom: 5,
+  borderBottomWidth: 1,
+  borderColor: C.border,
+  backgroundColor: '#FFFFFF05',
+} as const
+const CODE_BODY_STYLE = {
+  minWidth: 0,
+  paddingLeft: 12,
+  paddingRight: 12,
+  paddingTop: 10,
+  paddingBottom: 10,
+} as const
+
+/**
+ * The card `<code>` used to paint for you. The native element is a bare
+ * surface now, so the roundness, the fill and the language header live here,
+ * in app code, where they can match the rest of the design.
+ */
+function CodeBlock({
+  code,
+  language,
+  showLineNumbers,
+}: {
+  code: string
+  language?: string
+  showLineNumbers?: boolean
+}) {
+  return (
+    <div style={CODE_CARD_STYLE}>
+      {language && (
+        <div style={CODE_HEADER_STYLE}>
+          <text style={{ fontSize: 12, color: C.secondary }}>{language}</text>
+        </div>
+      )}
+      <code
+        code={code}
+        language={language}
+        showLineNumbers={showLineNumbers}
+        theme={CHAT_THEME}
+        style={CODE_BODY_STYLE}
+      />
+    </div>
+  )
 }
 
 interface Conversation {
@@ -806,7 +864,7 @@ const Transcript = defineComponent({
                 {turn.kind === 'fold' && <WorkedFor duration={turn.duration} />}
                 {turn.kind === 'markdown' && <markdown source={turn.source} theme={CHAT_THEME} />}
                 {turn.kind === 'code' && (
-                  <code code={turn.source} language={turn.language} showLineNumbers theme={CHAT_THEME} />
+                  <CodeBlock code={turn.source} language={turn.language} showLineNumbers />
                 )}
                 {turn.kind === 'diff' && <diff patch={turn.patch} wordDiff theme={CHAT_THEME} />}
               </TranscriptRow>
@@ -1678,14 +1736,7 @@ function renderMdx(node: MdxNode): VNodeChild {
       return SAFE_MDX_COMPONENTS.hr!({})
     case 'code': {
       if (!node.value) return null
-      return (
-        <code
-          code={node.value}
-          language={node.lang ?? undefined}
-          showLineNumbers
-          theme={CHAT_THEME}
-        />
-      )
+      return <CodeBlock code={node.value} language={node.lang ?? undefined} showLineNumbers />
     }
     case 'list': {
       const component = node.ordered ? SAFE_MDX_COMPONENTS.ol! : SAFE_MDX_COMPONENTS.ul!

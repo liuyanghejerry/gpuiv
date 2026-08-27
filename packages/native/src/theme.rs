@@ -204,14 +204,9 @@ impl SyntaxPalette {
 /// height up front.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Metrics {
-    // Code blocks.
+    // Code blocks. Shared by `<code>` and the markdown fenced block.
     pub code_text_size: f32,
     pub code_line_height: f32,
-    pub code_padding_x: f32,
-    pub code_padding_y: f32,
-    pub code_radius: f32,
-    pub code_header_padding_y: f32,
-    pub code_header_text_size: f32,
     /// Gutter width per line-number digit.
     pub code_gutter_digit_width: f32,
     pub code_gutter_padding_right: f32,
@@ -246,6 +241,13 @@ pub struct Metrics {
     /// column keeps a readable width.
     pub md_table_min_column_content: f32,
     pub md_inline_code_radius: f32,
+    // The fenced-block card. `<code>` paints no card of its own, so these are
+    // markdown-only: a document renderer owns its layout, a primitive does not.
+    pub md_code_padding_x: f32,
+    pub md_code_padding_y: f32,
+    pub md_code_radius: f32,
+    pub md_code_header_padding_y: f32,
+    pub md_code_header_text_size: f32,
 }
 
 impl Metrics {
@@ -271,11 +273,17 @@ impl Metrics {
         };
         set(&mut self.code_text_size, o.code_text_size);
         set(&mut self.code_line_height, o.code_line_height);
-        set(&mut self.code_padding_x, o.code_padding_x);
-        set(&mut self.code_padding_y, o.code_padding_y);
-        set(&mut self.code_radius, o.code_radius);
-        set(&mut self.code_header_padding_y, o.code_header_padding_y);
-        set(&mut self.code_header_text_size, o.code_header_text_size);
+        set(&mut self.md_code_padding_x, o.md_code_padding_x);
+        set(&mut self.md_code_padding_y, o.md_code_padding_y);
+        set(&mut self.md_code_radius, o.md_code_radius);
+        set(
+            &mut self.md_code_header_padding_y,
+            o.md_code_header_padding_y,
+        );
+        set(
+            &mut self.md_code_header_text_size,
+            o.md_code_header_text_size,
+        );
         set(&mut self.code_gutter_digit_width, o.code_gutter_digit_width);
         set(
             &mut self.code_gutter_padding_right,
@@ -345,11 +353,11 @@ impl Metrics {
         for value in [
             self.code_text_size,
             self.code_line_height,
-            self.code_padding_x,
-            self.code_padding_y,
-            self.code_radius,
-            self.code_header_padding_y,
-            self.code_header_text_size,
+            self.md_code_padding_x,
+            self.md_code_padding_y,
+            self.md_code_radius,
+            self.md_code_header_padding_y,
+            self.md_code_header_text_size,
             self.code_gutter_digit_width,
             self.code_gutter_padding_right,
             self.code_gutter_min_width,
@@ -387,11 +395,6 @@ impl Default for Metrics {
         Self {
             code_text_size: 12.5,
             code_line_height: 18.0,
-            code_padding_x: 12.0,
-            code_padding_y: 10.0,
-            code_radius: 10.0,
-            code_header_padding_y: 5.0,
-            code_header_text_size: 11.0,
             code_gutter_digit_width: 7.0,
             code_gutter_padding_right: 12.0,
             code_gutter_min_width: 28.0,
@@ -418,6 +421,11 @@ impl Default for Metrics {
             md_table_min_column_width: 96.0,
             md_table_min_column_content: 48.0,
             md_inline_code_radius: 4.5,
+            md_code_padding_x: 12.0,
+            md_code_padding_y: 10.0,
+            md_code_radius: 10.0,
+            md_code_header_padding_y: 5.0,
+            md_code_header_text_size: 11.0,
         }
     }
 }
@@ -661,11 +669,6 @@ pub struct ThemeOverride {
 pub struct MetricsOverride {
     pub code_text_size: Option<f64>,
     pub code_line_height: Option<f64>,
-    pub code_padding_x: Option<f64>,
-    pub code_padding_y: Option<f64>,
-    pub code_radius: Option<f64>,
-    pub code_header_padding_y: Option<f64>,
-    pub code_header_text_size: Option<f64>,
     pub code_gutter_digit_width: Option<f64>,
     pub code_gutter_padding_right: Option<f64>,
     pub code_gutter_min_width: Option<f64>,
@@ -691,6 +694,11 @@ pub struct MetricsOverride {
     pub md_table_min_column_width: Option<f64>,
     pub md_table_min_column_content: Option<f64>,
     pub md_inline_code_radius: Option<f64>,
+    pub md_code_padding_x: Option<f64>,
+    pub md_code_padding_y: Option<f64>,
+    pub md_code_radius: Option<f64>,
+    pub md_code_header_padding_y: Option<f64>,
+    pub md_code_header_text_size: Option<f64>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
