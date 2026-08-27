@@ -47,16 +47,42 @@ pub struct SelectionState {
     /// Resolved spans in document order. Empty while a click has not moved.
     spans: Vec<Span>,
     active: bool,
+    /// Mouse-down hit that has not become a drag yet. A tap must not select
+    /// or blur; iOS treats that tap as scroll or focus. Promoted on the first
+    /// dragging move, or replaced by `begin_with_span` for double-click.
+    pending: bool,
 }
 
 impl SelectionState {
-    /// Begin a drag anchored at `(key, ix)`.
-    pub fn begin(&mut self, key: &str, ix: usize) {
+    /// Remember a press without selecting. The next dragging move promotes it.
+    pub fn arm(&mut self, key: &str, ix: usize) {
         self.anchor_key = key.to_string();
         self.anchor_ix = ix;
+        self.dragging = false;
+        self.active = false;
+        self.pending = true;
+        self.spans.clear();
+    }
+
+    /// Turn a pending press into a live drag. True when this call started it.
+    pub fn promote_pending_for(&mut self, key: &str) -> bool {
+        if !self.pending || self.anchor_key != key {
+            return false;
+        }
+        self.pending = false;
         self.dragging = true;
         self.active = true;
-        self.spans.clear();
+        true
+    }
+
+    pub fn cancel_pending(&mut self) {
+        if self.pending {
+            *self = SelectionState::default();
+        }
+    }
+
+    pub fn is_pending(&self) -> bool {
+        self.pending
     }
 
     /// Begin with an immediate span — double or triple click inside one element.
@@ -65,6 +91,7 @@ impl SelectionState {
         self.anchor_ix = range.start;
         self.dragging = true;
         self.active = true;
+        self.pending = false;
         self.spans = vec![Span {
             key: key.to_string(),
             range,
@@ -235,7 +262,8 @@ mod tests {
     #[test]
     fn drag_lifecycle_and_copy_joins() {
         let mut sel = SelectionState::default();
-        sel.begin("p1", 6);
+        sel.arm("p1", 6);
+        assert!(sel.promote_pending_for("p1"));
         assert_eq!(sel.drag_anchor("p1"), Some(6));
         assert_eq!(sel.drag_anchor("p2"), None);
         let spans = resolve_spans(&elems(), (0, 6), (1, 6));
@@ -253,9 +281,35 @@ mod tests {
     #[test]
     fn empty_click_clears_on_release() {
         let mut sel = SelectionState::default();
-        sel.begin("p1", 3);
+        sel.arm("p1", 3);
+        assert!(sel.promote_pending_for("p1"));
         assert_eq!(sel.end_drag("p1"), None);
         assert_eq!(sel.selected_text(), None);
+    }
+
+    #[test]
+    fn tap_does_not_select_until_drag() {
+        let mut sel = SelectionState::default();
+        sel.arm("p1", 3);
+        assert!(sel.is_pending());
+        assert!(!sel.is_active());
+        assert_eq!(sel.drag_anchor("p1"), None);
+        sel.cancel_pending();
+        assert!(!sel.is_pending());
+        assert_eq!(sel.selected_text(), None);
+    }
+
+    #[test]
+    fn pending_press_promotes_on_drag() {
+        let mut sel = SelectionState::default();
+        sel.arm("p1", 6);
+        assert!(!sel.promote_pending_for("p2"));
+        assert!(sel.promote_pending_for("p1"));
+        assert!(!sel.promote_pending_for("p1"));
+        assert_eq!(sel.drag_anchor("p1"), Some(6));
+        let spans = resolve_spans(&elems(), (0, 6), (0, 15));
+        assert!(sel.update_spans(spans));
+        assert_eq!(sel.end_drag("p1").as_deref(), Some("paragraph"));
     }
 
     #[test]

@@ -22,8 +22,8 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
-    parse_debug_frame_overlay_mode, DebugFrameOverlayStats,
-    to_element_id, EventCallback, GpuixView,
+    parse_debug_frame_overlay_mode, to_element_id, DebugFrameOverlayStats, EventCallback,
+    GpuixView,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -274,7 +274,7 @@ impl TestGpuixRenderer {
         let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
             .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
-        apply_batch_to_tree(&mut tree, &ops)
+        apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)
     }
 
     // ── Test-specific methods ────────────────────────────────────────

@@ -105,19 +105,19 @@ impl CustomElement for CodeElement {
         let lines: Vec<&str> = self.code.split('\n').collect();
         let gutter_width = gutter_width(lines.len(), m);
 
-        let mut body = gpui::div()
-            .id(SharedString::from(format!("__gpuix_code_body_{}", ctx.id)))
-            .overflow_x_scroll()
-            .restrict_scroll_to_axis()
-            .min_w_0()
+        // overflow-x only works as a flex row viewport. A flex_col scroller
+        // stretches nowrap rows to the card width, so a horizontal wheel
+        // does nothing. Same pattern as host overflowX.
+        let mut content = gpui::div()
+            .flex_none()
+            .flex()
+            .flex_col()
             .px(px(m.code_padding_x))
             .py(px(m.code_padding_y))
             .font_family(theme.font_mono.clone())
             .text_size(px(m.code_text_size))
             .line_height(px(m.code_line_height))
-            .whitespace_nowrap()
-            .flex()
-            .flex_col();
+            .whitespace_nowrap();
 
         for (line_ix, line) in lines.iter().enumerate() {
             let spans: Vec<(std::ops::Range<usize>, gpui::Hsla)> = highlight
@@ -156,8 +156,16 @@ impl CustomElement for CodeElement {
             // `sub` is the line index so each line owns a stable selection key
             // across frames. Using the element id alone would make every line
             // share one key and the wash would paint on all of them at once.
-            body = body.child(row.child(ctx.text(line_ix, line.to_string(), Some(runs))));
+            content = content.child(row.child(ctx.text(line_ix, line.to_string(), Some(runs))));
         }
+
+        let body = gpui::div()
+            .id(SharedString::from(format!("__gpuix_code_body_{}", ctx.id)))
+            .flex()
+            .min_w_0()
+            .overflow_x_scroll()
+            .restrict_scroll_to_axis()
+            .child(content);
 
         let mut block = gpui::div()
             .rounded(px(m.code_radius))
@@ -235,6 +243,17 @@ pub(crate) fn wire_standard_events(
     ctx: &CustomRenderContext,
 ) -> gpui::Stateful<gpui::Div> {
     use gpui::prelude::*;
+
+    // Same last-paint box `div` / `text` record. Without this, `getElementBounds`
+    // and automation locators return null for `<markdown>`, `<code>`, and `<diff>`.
+    if ctx
+        .style
+        .and_then(|style| style.position.as_deref())
+        .is_none()
+    {
+        el = el.relative();
+    }
+    el = el.child(crate::automation::bounds_tracker(ctx.id, None));
 
     let id = ctx.id;
     for event in ctx.events {

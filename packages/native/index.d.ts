@@ -57,6 +57,7 @@ export declare class GpuixRenderer {
   /** Whether JavaScript must drive the native event loop with tick(). */
   requiresTick(): boolean
   getWindowSize(): WindowSize
+  getWindowInsets(): WindowInsets
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */
   setDebugFrameOverlay(mode: string): string
   /** Hidden → minimal → full → hidden. */
@@ -304,6 +305,13 @@ export interface DebugFrameOverlayStats {
   samples: number
 }
 
+export interface EdgeInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
 export interface EventModifiers {
   shift: boolean
   ctrl: boolean
@@ -402,6 +410,12 @@ export interface EventPayload {
   /** Exclusive end of the visible logical range. Populated for: visibleRange. */
   endIndex?: number
   modifiers?: EventModifiers
+}
+
+export interface WindowInsets {
+  safeArea: EdgeInsets
+  ime: EdgeInsets
+  effective: EdgeInsets
 }
 
 export interface WindowOptions {

@@ -135,7 +135,7 @@ gpuiv/
 │   └── screenshots.ts           # Regenerate docs/images/
 │
 ├── docs/                        # Design plans + curated images
-├── zed/                         # Pinned GPUI fork submodule (gpui-macos-embedded)
+├── zed/                         # Pinned GPUI fork submodule (gpuix)
 └── .changeset/                  # Pending release notes
 ```
 
@@ -526,7 +526,7 @@ NPM tokens are fetched through Sigillo (`SIGILLO_TOKEN` secret); CI never stores
 
 ### Standalone Build
 
-The `zed/` submodule tracks the `gpui-macos-embedded` branch of `remorses/zed`. Cargo uses path
+The `zed/` submodule tracks the `gpuix` branch of `remorses/zed`. Cargo uses path
 dependencies from that submodule so the native addon and native platforms always
 compile from the same source:
 
@@ -564,9 +564,9 @@ xcodebuild -downloadComponent MetalToolchain
 
 ### Bumping the gpui revision
 
-1. Merge upstream Zed into the `gpui-macos-embedded` branch in `remorses/zed`.
+1. Merge upstream Zed into the `gpuix` branch in `remorses/zed`.
 2. Resolve any embedded `gpui_macos` conflicts in a new commit; do not rewrite history.
-3. Fast-forward the `zed/` submodule to the updated `gpui-macos-embedded` branch.
+3. Fast-forward the `zed/` submodule to the updated `gpuix` branch.
 4. Match `rust-toolchain.toml` to `zed/rust-toolchain.toml`.
 5. Run `cargo check --all-targets`, `bun run build`, and the test suites.
 
@@ -588,7 +588,7 @@ git worktree add /Users/morse/Documents/GitHub/zed-<branch-name> -b <branch-name
 
 Commit only in that worktree. Do not add comments to Zed source. Push the branch
 to `remorses/zed`, then open the PR with `--repo zed-industries/zed --base main`.
-After merge, cherry-pick onto `gpui-macos-embedded` and fast-forward the submodule
+After merge, cherry-pick onto `gpuix` and fast-forward the submodule
 here. Never run `git reset` in `zed/` to "undo" PR work.
 
 ### PRs to GPUIX
