@@ -15,9 +15,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use super::{highlight, HighlightRequest, HighlightedDocument, LanguageId};
 
-/// Bump when the capture tables or grammar queries change, so stale entries
+/// Bump when the scope map or Syntect syntax dump changes, so stale entries
 /// from a previous build of the same process cannot be served.
-pub const QUERY_GENERATION: u32 = 1;
+pub const QUERY_GENERATION: u32 = 2;
 const MAX_DOCUMENTS: usize = 96;
 const MAX_RETAINED_BYTES: usize = 24 * 1024 * 1024;
 
