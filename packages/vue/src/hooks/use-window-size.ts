@@ -7,25 +7,55 @@ export interface WindowSize {
   height: number
 }
 
+/** Fallback until the window answers. Only used if the renderer has no size yet. */
+const DEFAULT_WINDOW_SIZE: WindowSize = { width: 800, height: 600 }
+
+function readWindowSize(renderer: ReturnType<typeof useGpuix>["renderer"]): WindowSize {
+  try {
+    const size = renderer?.getWindowSize?.()
+    if (size && size.width > 0 && size.height > 0) {
+      return { width: size.width, height: size.height }
+    }
+  } catch {
+    // Renderer window is still opening.
+  }
+  return DEFAULT_WINDOW_SIZE
+}
+
+export interface WindowSizeOptions {
+  /** Poll interval in milliseconds. Defaults to 100. Set false for one read. */
+  intervalMs?: number | false
+}
+
 /**
- * Get the current window size as a reactive ref, refreshed on mount.
+ * The current window size, sampled every 100ms by default.
+ *
+ * It polls rather than reading once, for the same reason `useWindowInsets`
+ * does: the first read can land before the platform window has a size, and a
+ * value that stays at the fallback forever is far worse than a late one. Code
+ * that converts a mouse position into layout coordinates silently points at
+ * the wrong row when this number is stale.
  */
-export function useWindowSize(): Ref<WindowSize> {
+export function useWindowSize(options: WindowSizeOptions = {}): Ref<WindowSize> {
   const { renderer } = useGpuix()
-  const size = shallowRef<WindowSize>({ width: 800, height: 600 })
+  const size = shallowRef<WindowSize>(readWindowSize(renderer))
+  const intervalMs = options.intervalMs ?? 100
+  let timer: ReturnType<typeof setInterval> | null = null
 
   onMounted(() => {
-    if (renderer?.getWindowSize) {
-      try {
-        const windowSize = renderer.getWindowSize()
-        size.value = {
-          width: windowSize.width,
-          height: windowSize.height,
-        }
-      } catch {
-        // Renderer not ready
+    const update = () => {
+      const next = readWindowSize(renderer)
+      if (next.width !== size.value.width || next.height !== size.value.height) {
+        size.value = next
       }
     }
+    update()
+    if (intervalMs === false) return
+    timer = setInterval(update, Math.max(16, intervalMs))
+  })
+
+  onBeforeUnmount(() => {
+    if (timer !== null) clearInterval(timer)
   })
 
   return size
