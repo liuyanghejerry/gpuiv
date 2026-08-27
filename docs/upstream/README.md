@@ -53,7 +53,7 @@ Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
 | Mutation wire format / retained-tree perf | `230400e` `2daf988` `fd06111` `f948f50` | pending | typed batch ops, styles shared by content, style-table reclaim; core `retained_tree.rs` we have modified — port carefully |
 | Automation API expansion | `c2b60e8` `ff6daf5` `5805701` `64241ce` | pending | drag/wheel/hover/modifiers, `<input>`/`<textarea>` reachability, live keyboard; large and useful for our tests |
 | Test renderer hardening | `3505f68` `20483dd` `5719d7f` `3cb50c2` `6ad8f83` `bde0ca7` `f93e891` `d1d58e0` `e4fb1c3` | pending | screenshots in repo, host-derived geometry/fonts, entity-handle release, Windows GPU renderer |
-| `onAuxClick` + click button | `280d6ec` | pending | small, user-facing; easy first candidate |
+| `onAuxClick` + click button | `280d6ec` | synced | PR #11 |
 | Window size polling | `f587575` | pending | upstream polls instead of reading once; check our `use-window-size` for the same bug |
 | `<code>` as bare surface | `5033808` `f81e087` | pending | native `<code>` stops painting chrome, styled via style prop; changes default appearance — needs a look before porting |
 | Hygiene | `f921bec` `d1e4c98` `a9cda59` | pending | CRLF normalize in `<code>` sources, ignore tsbuildinfo, split dist wipe out of build |
@@ -75,6 +75,7 @@ from upstream through `367ef48`:
 | #6 | zed submodule `4d80927` → `773208d` (`gpuix` branch), pointer capture, virtual-list `estimatedItemHeight`, `getWindowInsets()`, markdown wrap/bounds, Vue-side ports + tests |
 | #7 | Syntect warmup at renderer construction (fixes first-mount latency; our own fix, not upstream's) |
 | #8 | AGENTS.md guidance port for synced code + framework-agnostic workflow |
+| #11 | `onAuxClick` (gpui `on_aux_click`), `simulateClick` button param, automation `click({ button })` — upstream `280d6ec` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
