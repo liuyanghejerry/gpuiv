@@ -618,7 +618,7 @@ If the change fixes a GitHub issue or should close a PR, put `Fixes #N` / `Close
 
 **Never publish from a local machine.** CI is the only release path. Both packages' `prepublishOnly` scripts exit if `CI` is unset.
 
-`.github/workflows/ci.yml` builds `@gpuiv/native` for every napi target (macOS arm64/x64, Linux x64/arm64, Windows x64/arm64), uploads the `.node` artifacts, then the `publish` job downloads them, runs `napi create-npm-dirs` + `napi artifacts`, and publishes `@gpuiv/native` and `@gpuiv/vue`. Linux and Windows build with `build:release` (no `test-support` feature, which pulls the macOS-only `gpui_macos`).
+`.github/workflows/ci.yml` builds `@gpuiv/native` for every napi target (macOS arm64/x64, Linux x64/arm64, Windows x64/arm64), uploads the `.node` artifacts, then the `publish` job downloads them, runs `napi create-npm-dirs` + `napi artifacts`, and publishes `@gpuiv/native` and `@gpuiv/vue`. macOS and Windows build with `build` (test-support included: Metal / DirectX `TestGpuixRenderer`), and CI runs the full vue + example suites on both. Linux builds with `build:release` (`--no-default-features`, no test-support — waiting on GPUI's wgpu image readback).
 
 Publish order is required. `@gpuiv/vue` depends on `@gpuiv/native` (`workspace:^`, rewritten to the exact published version in CI). If Vue publishes first, an install in that window cannot resolve native.
 
@@ -833,6 +833,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] `<virtual-list>`
 - [x] `<code>`, `<diff>`, `<markdown>` with Syntect
 - [x] Cross-element text selection
+- [x] Text search highlight (`highlight` prop, `useTextSearch`, `findRanges`)
 - [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
 - [x] `setWindowTitle`
 - [x] macOS menu bar with the standard shortcuts (`appName`)
