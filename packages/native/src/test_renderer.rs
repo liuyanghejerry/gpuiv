@@ -11,7 +11,6 @@
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use napi::bindgen_prelude::*;
@@ -374,14 +373,21 @@ impl TestGpuixRenderer {
     /// on the element, not `click`.
     /// IMPORTANT: Call flush() before this — hit testing requires laid-out elements.
     #[napi]
-    pub fn simulate_click(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_click(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             // Not `cx.simulate_click`: that helper hard-codes the left button,
             // so a right click silently became a left click.
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
             let button = u32_to_mouse_button(button.unwrap_or(0));
-            cx.simulate_mouse_down(window, position, button, gpui::Modifiers::default());
-            cx.simulate_mouse_up(window, position, button, gpui::Modifiers::default());
+            cx.simulate_mouse_down(window, position, button, modifiers);
+            cx.simulate_mouse_up(window, position, button, modifiers);
             Ok(())
         })
     }
@@ -442,7 +448,14 @@ impl TestGpuixRenderer {
     /// pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
     /// Used to simulate drag events.
     #[napi]
-    pub fn simulate_mouse_move(&self, x: f64, y: f64, pressed_button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_move(
+        &self,
+        x: f64,
+        y: f64,
+        pressed_button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
@@ -450,7 +463,7 @@ impl TestGpuixRenderer {
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 button,
-                gpui::Modifiers::default(),
+                modifiers,
             );
 
             Ok(())
@@ -487,13 +500,20 @@ impl TestGpuixRenderer {
     /// Simulate a mouse down event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
-    pub fn simulate_mouse_down(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_down(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             cx.simulate_mouse_down(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 u32_to_mouse_button(button.unwrap_or(0)),
-                gpui::Modifiers::default(),
+                modifiers,
             );
             Ok(())
         })
@@ -502,13 +522,20 @@ impl TestGpuixRenderer {
     /// Simulate a mouse up event at the given window coordinates.
     /// Button: 0=left, 1=middle, 2=right. Defaults to left (0).
     #[napi]
-    pub fn simulate_mouse_up(&self, x: f64, y: f64, button: Option<u32>) -> Result<()> {
+    pub fn simulate_mouse_up(
+        &self,
+        x: f64,
+        y: f64,
+        button: Option<u32>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             cx.simulate_mouse_up(
                 window,
                 gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
                 u32_to_mouse_button(button.unwrap_or(0)),
-                gpui::Modifiers::default(),
+                modifiers,
             );
             Ok(())
         })
@@ -517,7 +544,15 @@ impl TestGpuixRenderer {
     /// Simulate a scroll wheel event at the given position.
     /// delta_x and delta_y are in pixels (negative = scroll up/left).
     #[napi]
-    pub fn simulate_scroll_wheel(&self, x: f64, y: f64, delta_x: f64, delta_y: f64) -> Result<()> {
+    pub fn simulate_scroll_wheel(
+        &self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
@@ -527,7 +562,7 @@ impl TestGpuixRenderer {
                         gpui::px(delta_x as f32),
                         gpui::px(delta_y as f32),
                     )),
-                    modifiers: gpui::Modifiers::default(),
+                    modifiers,
                     touch_phase: gpui::TouchPhase::Moved,
                 },
             );
@@ -584,11 +619,11 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn drag_select(&self, x1: f64, y1: f64, x2: f64, y2: f64) -> Result<()> {
         self.flush()?;
-        self.simulate_mouse_down(x1, y1, None)?;
+        self.simulate_mouse_down(x1, y1, None, None)?;
         self.flush()?;
-        self.simulate_mouse_move(x2, y2, Some(0))?;
+        self.simulate_mouse_move(x2, y2, Some(0), None)?;
         self.flush()?;
-        self.simulate_mouse_up(x2, y2, None)?;
+        self.simulate_mouse_up(x2, y2, None, None)?;
         self.flush()?;
         Ok(())
     }

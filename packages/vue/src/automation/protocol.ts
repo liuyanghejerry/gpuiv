@@ -44,6 +44,9 @@ const pointSchema = z.object({
 
 const buttonSchema = z.number().int().min(0).max(2).optional()
 
+/** Held modifiers, in the same hyphenated syntax as `press("cmd-a")`. */
+const modifiersSchema = z.string().optional()
+
 export const boundsSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -111,25 +114,36 @@ export const methods = {
       x: z.number(),
       y: z.number(),
       button: buttonSchema,
+      modifiers: modifiersSchema,
     }),
     result: okSchema,
   },
   mouseDown: {
-    params: pointSchema.extend({ button: buttonSchema }),
+    params: pointSchema.extend({
+      button: buttonSchema,
+      modifiers: modifiersSchema,
+    }),
     result: okSchema,
   },
   mouseUp: {
-    params: pointSchema.extend({ button: buttonSchema }),
+    params: pointSchema.extend({
+      button: buttonSchema,
+      modifiers: modifiersSchema,
+    }),
     result: okSchema,
   },
   mouseMove: {
-    params: pointSchema.extend({ pressedButton: buttonSchema }),
+    params: pointSchema.extend({
+      pressedButton: buttonSchema,
+      modifiers: modifiersSchema,
+    }),
     result: okSchema,
   },
   scrollWheel: {
     params: pointSchema.extend({
       deltaX: z.number(),
       deltaY: z.number(),
+      modifiers: modifiersSchema,
     }),
     result: okSchema,
   },

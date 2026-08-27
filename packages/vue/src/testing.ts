@@ -35,11 +35,17 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusElement(elementId: number): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
-  simulateClick(x: number, y: number, button?: number): void
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number): void
-  simulateMouseDown(x: number, y: number, button: number): void
-  simulateMouseUp(x: number, y: number, button: number): void
+  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string
+  ): void
+  simulateMouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void
+  simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
+  simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
   getTreeJson(): string
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
@@ -288,10 +294,16 @@ export class TestRenderer implements NativeRenderer {
   /** End-to-end: simulate a click through GPUI hit testing →
    *  dispatch resulting events to the registry.
    *  @param button - 0=left (default), 1=middle, 2=right. Non-left fires
-   *  `auxClick` on the element, not `click`. */
-  nativeSimulateClick(x: number, y: number, button?: number): void {
+   *  `auxClick` on the element, not `click`.
+   *  @param modifiers - held modifiers in `press()` syntax: "cmd", "cmd-shift". */
+  nativeSimulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateClick(x, y, button)
+    this.native.simulateClick(x, y, button, modifiers)
     this.dispatchNativeEvents()
     // Flush again after Rust ops (queued by Vue) have been applied by the
     // microtask batch flush — repaint the current tree before any screenshot.
@@ -304,10 +316,11 @@ export class TestRenderer implements NativeRenderer {
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    modifiers?: string
   ): void {
     this.native.flush()
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
     this.dispatchNativeEvents()
   }
 
@@ -315,18 +328,24 @@ export class TestRenderer implements NativeRenderer {
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    modifiers?: string
   ): void {
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
     this.dispatchNativeEvents()
   }
 
   /** End-to-end: simulate mouse move through GPUI →
    *  dispatch resulting events to the registry.
    *  @param pressedButton - optional button held during move (0=left, 1=middle, 2=right) for drag simulation */
-  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void {
+  nativeSimulateMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseMove(x, y, pressedButton)
+    this.native.simulateMouseMove(x, y, pressedButton, modifiers)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -334,9 +353,14 @@ export class TestRenderer implements NativeRenderer {
   /** End-to-end: simulate mouse down through GPUI hit testing →
    *  dispatch resulting events to the registry.
    *  @param button - 0=left (default), 1=middle, 2=right */
-  nativeSimulateMouseDown(x: number, y: number, button?: number): void {
+  nativeSimulateMouseDown(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseDown(x, y, button ?? 0)
+    this.native.simulateMouseDown(x, y, button ?? 0, modifiers)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -344,9 +368,14 @@ export class TestRenderer implements NativeRenderer {
   /** End-to-end: simulate mouse up through GPUI hit testing →
    *  dispatch resulting events to the registry.
    *  @param button - 0=left (default), 1=middle, 2=right */
-  nativeSimulateMouseUp(x: number, y: number, button?: number): void {
+  nativeSimulateMouseUp(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseUp(x, y, button ?? 0)
+    this.native.simulateMouseUp(x, y, button ?? 0, modifiers)
     this.dispatchNativeEvents()
     this.native.flush()
   }

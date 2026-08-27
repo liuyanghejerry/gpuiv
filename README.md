@@ -1472,6 +1472,35 @@ createTestApp()              launch({ command, args })
 focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
 exactly one match exists.
 
+### Drag, hover, wheel, and modifiers
+
+```ts
+await app.getByTestId('clip-7').dragBy(120, 0, { steps: 6 })
+await app.getByTestId('clip-7-trim-end').dragTo(app.getByTestId('clip-8'))
+await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
+await app.getByTestId('row-3').hover()
+
+await app.mouse.drag({ x: 240, y: 500 }, { x: 700, y: 620 })
+await app.mouse.wheel({ x: 700, y: 600 }, -140, 0)
+await app.mouse.down({ x: 100, y: 100 }, { button: 2 })
+```
+
+| Call | What it does |
+|---|---|
+| `locator.hover()` | Moves the pointer to the center, so hover styles and tooltips fire |
+| `locator.wheel(dx, dy)` | One wheel event over the center |
+| `locator.dragBy(dx, dy)` / `locator.dragTo(target)` | Press, travel, release |
+| `locator.center()` | The center of the last painted bounds |
+| `app.mouse.move / down / up / click / wheel / drag` | Raw pointer input in window coordinates |
+
+A drag sends **interpolated moves**, not one jump, because snapping, live
+previews, and per-move commits only appear when the pointer travels. Pass
+`steps` to control how many, and `offset` to press away from the center.
+
+Every mouse call takes **`modifiers`** in the same hyphenated syntax as
+`press('cmd-a')`, so cmd-wheel zoom, shift-click range selection, and alt-drag
+duplication become testable.
+
 ### Screenshots and clock
 
 `app.screenshot({ path })` writes the current GPU frame as a PNG.
