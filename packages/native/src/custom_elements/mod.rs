@@ -7,9 +7,8 @@
 ///
 /// Architecture:
 ///   build_element()
-///     "div"  → build_div()             (built-in)
-///     "text" → build_text()            (built-in)
-///     _      → registry.render(ctx)    (trait dispatch)
+///     "div" | "text" → build_host_container()  (built-in)
+///     _              → registry.render(ctx)    (trait dispatch)
 use std::collections::{HashMap, HashSet};
 
 use crate::renderer::EventCallback;
@@ -93,6 +92,97 @@ impl CustomRenderContext<'_> {
     ) -> gpui::AnyElement {
         crate::text::chrome_text(text.into(), runs)
     }
+}
+
+// ── Shared surface plumbing ──────────────────────────────────────────
+
+/// Prepare the stateful gpui root of a custom element.
+///
+/// Applies the declared styles including `hover` and `active`, records the last
+/// painted box so `getElementBounds` and automation locators can find the
+/// element, and installs the mouse handlers the adapter listed in
+/// `supported_events`. Call it before adding children.
+///
+/// The caller must have given `el` a host-derived id already: gpui keys both the
+/// pseudo-style state and the accessibility node off that id.
+pub(crate) fn custom_surface(
+    mut el: gpui::Stateful<gpui::Div>,
+    ctx: &CustomRenderContext,
+) -> gpui::Stateful<gpui::Div> {
+    use gpui::prelude::*;
+
+    if let Some(style) = ctx.style {
+        el = crate::renderer::apply_interactive_styles(el, style);
+    }
+    // `bounds_tracker` is `absolute().size_full()`, so it needs a positioned
+    // parent to measure.
+    if ctx
+        .style
+        .and_then(|style| style.position.as_deref())
+        .is_none()
+    {
+        el = el.relative();
+    }
+    el = el.child(crate::automation::bounds_tracker(
+        ctx.id,
+        None,
+        ctx.style
+            .map(crate::style::bounds_insets)
+            .unwrap_or_default(),
+    ));
+    wire_standard_events(el, ctx)
+}
+
+/// Attach the mouse events a custom element declares in `supported_events`.
+///
+/// Declaring an event and never installing a handler is worse than not
+/// supporting it: the prop type-checks, the listener is registered on the JS
+/// side, and nothing ever fires.
+///
+/// Generic over the element, not just `Stateful<Div>`, because `<img>` and
+/// `<svg>` are gpui leaves and cannot hold a child. They declare the same props
+/// as everything else, so they have to wire the same events.
+pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
+    mut el: E,
+    ctx: &CustomRenderContext,
+) -> E {
+    use gpui::prelude::*;
+
+    let id = ctx.id;
+    for event in ctx.events {
+        let callback = ctx.event_callback.clone();
+        match event.as_str() {
+            "click" => {
+                el = el.on_click(move |click, _window, _cx| {
+                    crate::renderer::emit_event_full(&callback, id, "click", |p| {
+                        let (x, y) = crate::renderer::point_to_xy(click.position());
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.click_count = Some(click.click_count() as u32);
+                        p.modifiers = Some(click.modifiers().into());
+                    });
+                });
+            }
+            "mouseEnter" | "mouseLeave" => {
+                // gpui reports both edges through one listener, so wire it once.
+                if event == "mouseEnter" || !ctx.events.contains("mouseEnter") {
+                    let enter = ctx.events.contains("mouseEnter");
+                    let leave = ctx.events.contains("mouseLeave");
+                    let callback = ctx.event_callback.clone();
+                    el = el.on_hover(move |&hovered, _window, _cx| {
+                        let kind = if hovered { "mouseEnter" } else { "mouseLeave" };
+                        if (hovered && enter) || (!hovered && leave) {
+                            crate::renderer::emit_event_full(&callback, id, kind, |p| {
+                                p.hovered = Some(hovered);
+                            });
+                        }
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+    el
 }
 
 // ── Traits ───────────────────────────────────────────────────────────

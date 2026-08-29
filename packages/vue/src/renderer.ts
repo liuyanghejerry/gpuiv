@@ -196,6 +196,7 @@ export function createApp(
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
+      gpuivHost.detach()
     },
   }
   slot.handle = handle

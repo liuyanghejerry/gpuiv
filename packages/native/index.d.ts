@@ -138,6 +138,13 @@ export declare class TestGpuixRenderer {
    * so JS can clean up event handlers.
    */
   destroyElement(id: number): Array<number>
+  /**
+   * How many elements the retained tree holds, reachable from the root or
+   * not. `getTreeJson` walks from the root, so it cannot see a node that was
+   * detached and never destroyed. This is the only way a test can prove a
+   * removal actually freed it.
+   */
+  getRetainedElementCount(): number
   appendChild(parentId: number, childId: number): void
   removeChild(parentId: number, childId: number): void
   insertBefore(parentId: number, childId: number, beforeId: number): void
