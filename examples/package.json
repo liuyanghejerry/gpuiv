@@ -8,6 +8,7 @@
     "test": "vitest run",
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
+    "infinite-chat": "bun --hot infinite-chat.tsx",
     "compile": "bun compile-chat.ts"
   },
   "dependencies": {
