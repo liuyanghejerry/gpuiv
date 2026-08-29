@@ -461,6 +461,8 @@ export interface NativeRenderer {
   getWindowSize?(): { width: number; height: number }
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
+  /** Bring the window forward and focus it. Reveals a `show: false` window. */
+  activateWindow?(): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
   cycleDebugFrameOverlay?(): string

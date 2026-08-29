@@ -228,6 +228,8 @@ terminal.
 | `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. Waku uses `(16, 17)` |
 | `appName` | string | Name inside the macOS application menu, in `Hide X` and `Quit X`. Defaults to `title` |
+| `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
+| `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
 | `debugFrameOverlay` | `"hidden"` \| `"minimal"` \| `"full"` | Frame-time overlay (see below) |
 
 ### The macOS menu bar
@@ -255,6 +257,50 @@ Only a real `.app` bundle can change it. The items inside the menu do use
 There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
 AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
 would take the keystroke away from text selection and from `<input>`.
+
+### Background launch
+
+`focus: false` opens the window **without taking focus**. The app you were
+typing in keeps the caret and the active titlebar. `show: false` goes further
+and opens no window at all, so the process runs with a live Vue tree and
+nothing on screen.
+
+```tsx
+createApp(App, { title: 'Notes', focus: false })
+```
+
+**Turn this on whenever a coding agent runs your app.** An agent that starts
+the app to check its work will otherwise yank the window in front of whatever
+you are doing, mid-sentence, once per iteration. With `focus: false` the agent
+still gets a real GPU-rendered window it can screenshot and click, and you keep
+your editor. See [Let an agent drive the app](#let-an-agent-drive-the-app).
+
+`activateWindow()` brings the window forward and focuses it. It is the only way
+to reveal a `show: false` window. Reach it from any component with
+`useGpuixRequired()`:
+
+```tsx
+import { useGpuixRequired } from '@gpuiv/vue'
+
+function Reveal() {
+  const renderer = useGpuixRequired()
+  return <div onClick={() => renderer.activateWindow?.()}>Show</div>
+}
+```
+
+Outside a component, call it on the renderer that `createNativeRenderer()`
+returned.
+
+| Platform | `focus: false` | `show: false` |
+|---|---|---|
+| macOS | window orders in front without becoming key, like `open -g` | honored |
+| Windows | `SW_SHOWNOACTIVATE` | honored |
+| Linux | **ignored**, the window opens focused | **ignored** |
+
+The process still gets a **Dock icon** on macOS. GPUI sets the regular
+activation policy, so there is no menu-bar-agent mode yet. For a real
+background daemon, run the app from a `launchd` agent in
+`~/Library/LaunchAgents/`; launchd never activates the process.
 
 `createApp()` also accepts `{ renderer }` to mount on an existing renderer and
 `{ onEvent }` to observe every event before the handler registry runs. The
@@ -1651,10 +1697,68 @@ ignored; `console.log` cannot break a message.
 import { launch } from '@gpuiv/vue/automation'
 
 const app = await launch({ command: 'bun', args: ['examples/chat.tsx'] })
-await app.getByTestId('composer').fill('hello')
+await app.getByTestId('send').click()
 await app.screenshot({ path: 'live.png' })
 await app.close()
 ```
+
+`fill()` and `press()` do **not** work against `launch()`: the live renderer
+has no `simulateKeystrokes`, so they throw `keystrokes are not live yet`. That
+is unrelated to focus and fails on a focused window too. Use `createTestApp()`
+when a check needs typing.
+
+### Let an agent drive the app
+
+Make focus opt-in through the environment, so a human run behaves normally and
+an agent run stays out of the way:
+
+```tsx
+createApp(App, {
+  title: 'Notes',
+  focus: process.env.GPUIX_BACKGROUND !== '1',
+})
+```
+
+```bash
+bun app.tsx                      # you: window comes to the front
+GPUIX_BACKGROUND=1 bun app.tsx   # agent: window opens behind your editor
+```
+
+`launch()` passes `env` straight through, so an agent script sets it once and
+every screenshot, click, and assertion runs on a window that never interrupts
+you:
+
+```ts
+import { launch } from '@gpuiv/vue/automation'
+
+const app = await launch({
+  command: 'bun',
+  args: ['app.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
+
+await app.getByTestId('bump').waitFor()
+await app.getByTestId('bump').click()
+await app.screenshot({ path: 'tmp/after-click.png' })
+await app.close()
+```
+
+Focus is the only thing that changes. **Automation does not need focus.**
+`click()` hits the last painted bounds and `screenshot()` reads the GPU
+surface, so both work while the window sits behind your editor, and even on a
+`show: false` window that is not on screen at all.
+
+Two limits to know before you rely on it:
+
+- **Keyboard input does not reach a launched process.** `fill()` and `press()`
+  throw `keystrokes are not live yet`. Use `createTestApp()` when a check needs
+  typing
+- **Linux ignores `focus`**, so an agent there still gets a focused window
+
+Prefer `createTestApp()` when you can. It opens **no window at all**, so
+nothing can steal focus and keyboard input works. Reach for `launch()` plus
+`focus: false` when the check needs a real window, real GPU paint, or a real
+process.
 
 ## Testing
 
@@ -1786,6 +1890,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
+- [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element

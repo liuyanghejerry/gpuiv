@@ -146,8 +146,6 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
     mut el: E,
     ctx: &CustomRenderContext,
 ) -> E {
-    use gpui::prelude::*;
-
     let id = ctx.id;
     for event in ctx.events {
         let callback = ctx.event_callback.clone();
