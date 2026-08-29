@@ -84,8 +84,25 @@ export declare class GpuixRenderer {
    * x and y are negative pixel values (scroll down = more negative y).
    */
   scrollTo(elementId: number, x: number, y: number): void
-  /** Scroll a child into view by its index in the children list. */
-  scrollToItem(elementId: number, index: number): void
+  /**
+   * Scroll a child into view by its index in the children list.
+   *
+   * For a `<virtual-list>` the scroll is queued and applied on the next
+   * render, after that frame's child splice, so indices computed against a
+   * just-committed child list are never shifted twice. `offsetInItem` is in
+   * pixels and may be negative, which anchors the viewport top above the
+   * item and resolves against measured heights at layout time.
+   */
+  scrollToItem(elementId: number, index: number, offsetInItem?: number | undefined | null): void
+  /**
+   * The logical scroll anchor of a `<virtual-list>`:
+   * `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+   * else. `itemIndex == item count` is gpui's at-end sentinel.
+   *
+   * Unlike `getScrollOffset` this is exact even while row heights are still
+   * estimates, because it is the anchor gpui itself scrolls by.
+   */
+  getListScrollTop(elementId: number): Array<number> | null
   /**
    * Get the current scroll offset of a scrollable element.
    * Returns [x, y] or null if the element has no scroll handle.
@@ -276,9 +293,18 @@ export declare class TestGpuixRenderer {
   scrollTo(elementId: number, x: number, y: number): void
   /**
    * Scroll a child into view by its index in the children list.
-   * Call flush() after to apply and re-render.
+   * Call flush() after to apply and re-render. For a `<virtual-list>` the
+   * scroll is queued and applied on that flush, after the child splice.
+   * `offset_in_item` is in pixels and may be negative, which anchors the
+   * viewport top above the item.
    */
-  scrollToItem(elementId: number, index: number): void
+  scrollToItem(elementId: number, index: number, offsetInItem?: number | undefined | null): void
+  /**
+   * The logical scroll anchor of a `<virtual-list>`:
+   * `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+   * else. `itemIndex == item count` is gpui's at-end sentinel.
+   */
+  getListScrollTop(elementId: number): Array<number> | null
   /** `"hidden"` | `"minimal"` | `"full"`. */
   setDebugFrameOverlay(mode: string): string
   /** Hidden → minimal → full → hidden. */

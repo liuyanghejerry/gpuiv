@@ -138,6 +138,30 @@ thread_local! {
     /// TODO: Scope by renderer/window ID when multi-window support is added.
     static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
     static VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
+    /// Virtual-list scrolls queued for the next `GpuixView::render`, applied
+    /// AFTER `VirtualListEntry::sync` splices that frame's child changes.
+    ///
+    /// Never applied eagerly: JS computes row indices against the child list it
+    /// just committed, but that commit only reaches `gpui::ListState` when the
+    /// next render splices it in. An eager `scroll_to` would be shifted a
+    /// second time by `splice_focusable` and land on the wrong row.
+    static PENDING_VIRTUAL_LIST_SCROLLS: RefCell<HashMap<u64, gpui::ListOffset>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Queue a virtual-list scroll for the next render. `offset_in_item` may be
+/// negative: gpui then anchors the viewport top above the item, which is what
+/// keeps a row pixel-stable while unmeasured rows are spliced in above it.
+pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f32) {
+    PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| {
+        cell.borrow_mut().insert(
+            id,
+            gpui::ListOffset {
+                item_ix: index,
+                offset_in_item: gpui::px(offset_in_item),
+            },
+        );
+    });
 }
 
 fn parse_debug_frame_overlay_mode_str(
@@ -321,10 +345,15 @@ enum UiCommand {
     ScrollToItem {
         id: u64,
         index: usize,
+        offset: f32,
     },
     GetScrollOffset {
         id: u64,
         response: SyncSender<Option<[f64; 2]>>,
+    },
+    GetListScrollTop {
+        id: u64,
+        response: SyncSender<Option<[f64; 3]>>,
     },
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
@@ -442,16 +471,12 @@ async fn run_ui_commands(
                 }
                 refresh_ui_window(window, cx)
             }
-            UiCommand::ScrollToItem { id, index } => {
+            UiCommand::ScrollToItem { id, index, offset } => {
                 if !VIRTUAL_LIST_STATES.with(|cell| {
-                    let states = cell.borrow();
-                    let Some(state) = states.get(&id) else {
+                    if !cell.borrow().contains_key(&id) {
                         return false;
-                    };
-                    state.scroll_to(gpui::ListOffset {
-                        item_ix: index,
-                        offset_in_item: gpui::px(0.0),
-                    });
+                    }
+                    queue_virtual_list_scroll(id, index, offset);
                     true
                 }) {
                     SCROLL_HANDLES.with(|cell| {
@@ -485,6 +510,20 @@ async fn run_ui_commands(
                         })
                     });
                 response.send(offset).ok();
+                Ok(())
+            }
+            UiCommand::GetListScrollTop { id, response } => {
+                let top = VIRTUAL_LIST_STATES.with(|cell| {
+                    cell.borrow().get(&id).map(|state| {
+                        let top = state.logical_scroll_top();
+                        [
+                            top.item_ix as f64,
+                            f64::from(f32::from(top.offset_in_item)),
+                            f64::from(f32::from(state.viewport_bounds().size.height)),
+                        ]
+                    })
+                });
+                response.send(top).ok();
                 Ok(())
             }
             UiCommand::GetAutomationBounds { response } => {
@@ -1485,20 +1524,28 @@ impl GpuixRenderer {
     }
 
     /// Scroll a child into view by its index in the children list.
+    ///
+    /// For a `<virtual-list>` the scroll is queued and applied on the next
+    /// render, after that frame's child splice, so indices computed against a
+    /// just-committed child list are never shifted twice. `offsetInItem` is in
+    /// pixels and may be negative, which anchors the viewport top above the
+    /// item and resolves against measured heights at layout time.
     #[napi]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<()> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         #[cfg(target_os = "macos")]
         if !VIRTUAL_LIST_STATES.with(|cell| {
-            let states = cell.borrow();
-            let Some(state) = states.get(&id) else {
+            if !cell.borrow().contains_key(&id) {
                 return false;
-            };
-            state.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.0),
-            });
+            }
+            queue_virtual_list_scroll(id, index, offset);
             true
         }) {
             SCROLL_HANDLES.with(|cell| {
@@ -1512,7 +1559,49 @@ impl GpuixRenderer {
         return invalidate_window();
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollToItem { id, index });
+        return self.send_ui_command(UiCommand::ScrollToItem { id, index, offset });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = offset;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    /// The logical scroll anchor of a `<virtual-list>`:
+    /// `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+    /// else. `itemIndex == item count` is gpui's at-end sentinel.
+    ///
+    /// Unlike `getScrollOffset` this is exact even while row heights are still
+    /// estimates, because it is the anchor gpui itself scrolls by.
+    #[napi]
+    pub fn get_list_scroll_top(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return Ok(VIRTUAL_LIST_STATES.with(|cell| {
+            cell.borrow().get(&id).map(|state| {
+                let top = state.logical_scroll_top();
+                vec![
+                    top.item_ix as f64,
+                    f64::from(f32::from(top.offset_in_item)),
+                    f64::from(f32::from(state.viewport_bounds().size.height)),
+                ]
+            })
+        }));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetListScrollTop { id, response })?;
+            return Ok(
+                recv_ui_response(receiver, "the GPUI list scroll query")?.map(|top| top.to_vec())
+            );
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2406,18 +2495,20 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = scrollToItem)]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<(), wasm_bindgen::JsValue> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         if !VIRTUAL_LIST_STATES.with(|states| {
-            let states = states.borrow();
-            let Some(state) = states.get(&id) else {
+            if !states.borrow().contains_key(&id) {
                 return false;
-            };
-            state.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.0),
-            });
+            }
+            queue_virtual_list_scroll(id, index, offset);
             true
         }) {
             SCROLL_HANDLES.with(|handles| {
@@ -2428,6 +2519,28 @@ impl WebGpuixRenderer {
         }
         notify_web();
         Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getListScrollTop)]
+    pub fn get_list_scroll_top(
+        &self,
+        element_id: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let top = VIRTUAL_LIST_STATES.with(|states| {
+            states.borrow().get(&id).map(|state| {
+                let top = state.logical_scroll_top();
+                [
+                    top.item_ix as f64,
+                    f64::from(f32::from(top.offset_in_item)),
+                    f64::from(f32::from(state.viewport_bounds().size.height)),
+                ]
+            })
+        });
+        let Some(top) = top else {
+            return Ok(wasm_bindgen::JsValue::NULL);
+        };
+        Ok(web_number_array(top))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getScrollOffset)]
@@ -2806,19 +2919,37 @@ impl GpuixView {
             .into_any_element()
     }
 
-    pub(crate) fn scroll_virtual_list_to_item(&self, id: u64, index: usize) -> bool {
-        let Some(entry) = self.virtual_lists.get(&id) else {
+    pub(crate) fn scroll_virtual_list_to_item(
+        &self,
+        id: u64,
+        index: usize,
+        offset_in_item: f32,
+    ) -> bool {
+        if !self.virtual_lists.contains_key(&id) {
             return false;
-        };
-        entry.state.scroll_to(gpui::ListOffset {
-            item_ix: index,
-            offset_in_item: gpui::px(0.0),
-        });
+        }
+        queue_virtual_list_scroll(id, index, offset_in_item);
         emit_event_full(&self.event_callback, id, "visibleRange", |payload| {
             payload.start_index = Some(index as f64);
             payload.end_index = Some((index + 1) as f64);
         });
         true
+    }
+
+    /// The list's logical scroll anchor as
+    /// `[item_ix, offset_in_item_px, viewport_height_px]`.
+    ///
+    /// `item_ix == item count` is gpui's at-end sentinel (a bottom-aligned
+    /// list resting at its very end); the viewport height is what lets a
+    /// caller convert that into a position relative to the trailing rows.
+    pub(crate) fn virtual_list_scroll_top(&self, id: u64) -> Option<[f64; 3]> {
+        let state = &self.virtual_lists.get(&id)?.state;
+        let top = state.logical_scroll_top();
+        Some([
+            top.item_ix as f64,
+            f64::from(f32::from(top.offset_in_item)),
+            f64::from(f32::from(state.viewport_bounds().size.height)),
+        ])
     }
 
     pub(crate) fn set_virtual_list_offset(&self, id: u64, x: f32, y: f32) -> bool {
@@ -2869,7 +3000,7 @@ impl GpuixView {
         let Some((list_id, index)) = location else {
             return false;
         };
-        self.scroll_virtual_list_to_item(list_id, index)
+        self.scroll_virtual_list_to_item(list_id, index, 0.0)
     }
 }
 
@@ -3263,6 +3394,27 @@ impl VirtualListEntry {
             return;
         }
 
+        // gpui anchors a list on a logical item, so splicing rows in at the
+        // front keeps the rows already on screen and pushes the new ones above
+        // the viewport. A browser anchors too, but suppresses it at scrollTop 0,
+        // so a prepend is visible. Match the browser: remember a list pinned to
+        // the top and put it back after the splice.
+        //
+        // While the content is shorter than the viewport gpui re-anchors to
+        // item 0 every layout, so the drift only appears once the list
+        // overflows. That is why `example-app` looked stuck at two rows.
+        //
+        // The guard is `is_following_tail()`, not `config.follow_tail`: a
+        // following list that does not fill its viewport also ends layout
+        // anchored at {0, 0}, and `scroll_to` would call `stop_following` on it.
+        // Once the user scrolls up to the top, following is already stopped, so
+        // a top-aligned `followTail` list still gets the browser behaviour.
+        let top = self.state.logical_scroll_top();
+        let was_pinned_to_top = matches!(config.alignment, gpui::ListAlignment::Top)
+            && !self.state.is_following_tail()
+            && top.item_ix == 0
+            && top.offset_in_item <= gpui::px(0.0);
+
         // A windowed list's children are a sliding viewport. Splicing by
         // child position would treat a scroll as a rewrite of items 0..N.
         if config.item_count.is_none() && self.child_ids != child_ids {
@@ -3323,6 +3475,9 @@ impl VirtualListEntry {
                 .remeasure_items(start..window_start + child_ids.len());
         }
         self.remeasure_unknown_rows(window_start, &child_ids, &old_rows);
+        if was_pinned_to_top {
+            self.state.scroll_to(gpui::ListOffset::default());
+        }
 
         self.window_start = window_start;
         self.child_ids = child_ids;
@@ -3540,6 +3695,10 @@ impl gpui::Render for GpuixView {
                 states.insert(id, entry.state.clone());
             }
         });
+        // One-shot: a queued scroll for a list that did not build this frame
+        // would otherwise fire on some later frame, against child indices that
+        // no longer match what JS meant.
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear());
 
         if motion_active {
             window.request_animation_frame();
@@ -3752,6 +3911,15 @@ fn build_virtual_list(
             entry.state.clone()
         }
     };
+
+    // Queued scrolls apply here, after `sync` spliced this frame's child
+    // changes, so the indices JS computed against its committed child list are
+    // the indices the splice-adjusted ListState sees.
+    if let Some(offset) =
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id))
+    {
+        list_state.scroll_to(offset);
+    }
 
     if element.events.contains("visibleRange") {
         let callback = ctx.event_callback.clone();

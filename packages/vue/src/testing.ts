@@ -57,8 +57,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRootId(): number | null
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number): void
-  scrollToItem(elementId: number, index: number): void
+  scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
+  getListScrollTop(elementId: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
@@ -497,10 +498,14 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** Scroll a child into view by its index in the children list. */
-  scrollToItem(elementId: number, index: number): void {
+  /** Scroll a child into view by its index in the children list.
+   *
+   *  `offsetInItem` is in pixels. A negative value anchors the viewport top
+   *  above the item, resolved against measured row heights at layout time, so
+   *  a row stays pixel-stable while unmeasured rows are spliced in above it. */
+  scrollToItem(elementId: number, index: number, offsetInItem?: number): void {
     this.native.flush()
-    this.native.scrollToItem(elementId, index)
+    this.native.scrollToItem(elementId, index, offsetInItem)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -511,6 +516,18 @@ export class TestRenderer implements NativeRenderer {
     const result = this.native.getScrollOffset(elementId)
     if (!result) return null
     return [result[0], result[1]]
+  }
+
+  /** The logical scroll anchor of a `<virtual-list>`:
+   *  `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+   *  else. `itemIndex == item count` is gpui's at-end sentinel. Exact even
+   *  while row heights are still estimates, because it is the anchor gpui
+   *  itself scrolls by. */
+  getListScrollTop(elementId: number): [number, number, number] | null {
+    this.native.flush()
+    const result = this.native.getListScrollTop(elementId)
+    if (!result) return null
+    return [result[0], result[1], result[2]]
   }
 
   // ── Selection API ───────────────────────────────────────────────

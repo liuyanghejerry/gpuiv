@@ -77,7 +77,11 @@ export type {
   SelectTriggerState,
   SelectValueProps,
 } from "./components/select.js"
-export type { WindowedVirtualListProps } from "./components/virtual-list.js"
+export type {
+  VirtualListInstance,
+  VirtualListScrollTop,
+  WindowedVirtualListProps,
+} from "./components/virtual-list.js"
 export type { VirtualListProps } from "./types.js"
 
 export { createGpuivRendererHost } from "./reconciler/vue-renderer.js"

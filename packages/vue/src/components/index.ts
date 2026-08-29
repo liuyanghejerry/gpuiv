@@ -1,7 +1,8 @@
 // GPUIX Vue components and native motion wrappers.
 
 export { motion } from "./motion.js"
-export type { WindowedVirtualListProps } from "./virtual-list.js"
+export type { VirtualListInstance, WindowedVirtualListProps } from "./virtual-list.js"
+export type { VirtualListScrollTop } from "./virtual-list.js"
 export { VirtualList } from "./virtual-list.js"
 export {
   FloatingLayer,

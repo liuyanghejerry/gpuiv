@@ -29,12 +29,12 @@ import {
   SelectItem,
   SelectLabel,
   SelectTrigger,
-  useGpuix,
   VirtualList,
   type EventPayload,
   type SelectItemState,
   type SelectTriggerState,
   type StyleDesc,
+  type VirtualListInstance,
 } from '@gpuiv/vue'
 import { mdxParse } from 'safe-mdx/parse'
 import type { Root, RootContent, Table } from 'mdast'
@@ -819,18 +819,13 @@ function expandTurns(count: number): Turn[] {
   return out
 }
 
-interface ListHandle {
-  /** The mounted host element (the native `virtual-list` node). */
-  $el: { id: number }
-}
-
 // `memo(Transcript)` — Vue's prop comparison skips the update when `turns`
 // keeps the same reference, which is exactly what the memo did in React.
 const Transcript = defineComponent({
   props: {
     turns: { type: Array as () => Turn[], required: true },
     includeSafeMdx: { type: Boolean, default: false },
-    listRef: { type: Object as PropType<Ref<ListHandle | null>>, default: null },
+    listRef: { type: Object as PropType<Ref<VirtualListInstance | null>>, default: null },
   },
   setup(props) {
     return () => {
@@ -1886,8 +1881,7 @@ export const ChatApp = defineComponent({
     const branch = ref('main')
 
     const turns = ref(expandTurns(props.turnCount))
-    const listRef = ref<ListHandle | null>(null)
-    const { renderer } = useGpuix()
+    const listRef = ref<VirtualListInstance | null>(null)
     const rowCount = computed(() => turns.value.length + (props.includeSafeMdx ? 1 : 0))
 
     // React ran this in an effect that skipped the first run and scrolled on
@@ -1897,9 +1891,7 @@ export const ChatApp = defineComponent({
       rowCount,
       (count) => {
         queueMicrotask(() => {
-          const id = listRef.value?.$el?.id
-          if (id == null || !renderer?.scrollToItem) return
-          renderer.scrollToItem(id, count - 1)
+          listRef.value?.scrollToItem(count - 1)
         })
       },
       { flush: 'post' },

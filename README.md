@@ -742,32 +742,56 @@ Combine `alignment="bottom"` and `followTail` for a chat thread:
 
 The list follows new rows while the user is at the bottom. Scrolling upward pauses tail following. Returning to the bottom enables it again. A streaming final row is remeasured as its content grows.
 
-### Programmatic scrolling
+### Scroll anchoring
 
-Use a ref to call the same renderer scroll methods as a plain scroll container:
+The list is anchored on a **row index**, not on a pixel offset. In children mode Vue reconciles by key, so that index still lands on the same row after a prepend: the rows already on screen stay exactly where they are. A browser does the same, and calls it scroll anchoring.
+
+One exception, also copied from the browser: a top-aligned list that is scrolled to the **very top** stays at the top, so a prepended row is visible.
+
+```text
+scrolled down                          pinned to the top
+┌──────────────────┐                   ┌──────────────────┐
+│ new row  (above) │  ◄── inserted     │ new row          │  ◄── inserted, visible
+├──────────────────┤                   ├──────────────────┤
+│ ░░ viewport ░░░░ │  stays put        │ ░░ viewport ░░░░ │  follows the insert
+│ ░░░░░░░░░░░░░░░░ │                   │ ░░░░░░░░░░░░░░░░ │
+└──────────────────┘                   └──────────────────┘
+```
+
+That is what a todo list or a feed wants: putting the fresh row in front of the array puts it on screen. A history pane that loads older pages while the user reads should use `alignment="bottom"` instead, so a page load never moves the text.
+
+**With `itemCount` (raw host usage), the app owns the correction.** There is no key to reconcile against, so the index is all there is. Prepending shifts every row down one slot, and the anchor keeps pointing at the old number, so the content slides by exactly the number of rows you inserted. Move `windowStart` by the same amount:
 
 ```tsx
-interface ListHandle {
-  /** The mounted host element (the native `virtual-list` node). */
-  $el: { id: number }
+const prepend = (fresh: Row) => {
+  rows.value = [fresh, ...rows.value]
+  // The anchor is an index. One new row above the window means every existing
+  // row moved down one, so the window has to move with it.
+  windowStart.value = windowStart.value === 0 ? 0 : windowStart.value + 1
 }
+```
+
+Leave `windowStart` at `0` alone; the list is pinned to the top there and the new row should be visible. The `VirtualList` wrapper computes its window from `visibleRange` events, so it needs no manual correction.
+
+### Programmatic scrolling
+
+`<VirtualList>` exposes imperative methods through a template ref. The wrapper owns its host element id and widens the mounted window before a far scroll lands:
+
+```tsx
+import { VirtualList, type VirtualListInstance } from "@gpuiv/vue"
 
 const Results = defineComponent({
   props: { rows: { type: Array as () => Result[], required: true } },
   setup(props) {
-    const { renderer } = useGpuix()
-    const listRef = ref<ListHandle | null>(null)
+    const list = ref<VirtualListInstance | null>(null)
 
     const reveal = (index: number) => {
-      const id = listRef.value?.$el?.id
-      if (id != null) {
-        renderer?.scrollToItem?.(id, index)
-      }
+      list.value?.scrollToItem(index)
     }
 
     return () => (
       <>
-        <VirtualList ref={listRef} style={{ height: 400 }} itemCount={props.rows.length} renderItem={(index) => <ResultRow key={props.rows[index]!.id} row={props.rows[index]!} />} />
+        <VirtualList ref={list} style={{ height: 400 }} itemCount={props.rows.length} estimatedItemHeight={64} renderItem={(index) => <ResultRow key={props.rows[index]!.id} row={props.rows[index]!} />} />
         <div onClick={() => reveal(props.rows.length - 1)}>Reveal latest</div>
       </>
     )
@@ -775,7 +799,33 @@ const Results = defineComponent({
 })
 ```
 
-`scrollTo`, `scrollToItem`, and `getScrollOffset` all support virtual lists.
+- `scrollToItem(index, offsetInItem?)` — `offsetInItem` is in pixels and **may be negative**, which anchors the viewport top above the row. The next layout resolves it against real measured heights: that is the pixel-stable restore primitive for infinite-scroll history (read `getListScrollTop` first, commit the fetched page, then re-anchor on the message that was under the loading row).
+- `getListScrollTop()` — the list's logical anchor as `{ itemIndex, offsetInItem, viewportHeight, atEnd }`, or null before mount. It is exact even while row heights are still estimates, because it is the anchor gpui itself scrolls by. `atEnd` decodes gpui's at-end sentinel (`itemIndex == itemCount`, a bottom-aligned list resting at its very end); converting that sentinel to pixels is app knowledge (it depends on the trailing edge height).
+- `id` — the host element id, for direct `renderer` calls on surfaces the wrapper does not cover.
+
+Virtual-list `scrollToItem` calls are applied on the **next render, after that frame's child splice**, so an index computed against a just-committed child list is never shifted twice. On the renderer the same pair exists element-id-addressed — `renderer.scrollToItem(id, index, offsetInItem?)` and `renderer.getListScrollTop(id)` returning the raw `[itemIndex, offsetInItemPx, viewportHeightPx]` tuple — and `scrollTo`, `scrollToItem`, and `getScrollOffset` all support virtual lists.
+
+### Row heights
+
+**Rows do not need equal heights, and you do not need to know them.** GPUI measures a row when it enters the viewport. `estimatedItemHeight` is a **hint for rows nothing has measured yet**, not a size contract.
+
+```text
+index:     0        1        2        3        4        5        6        7
+       ┌────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+       │  hint  │  hint  │measured│measured│measured│  hint  │  hint  │  hint  │
+       │  220px │  220px │  184px │  512px │   96px │  220px │  220px │  220px │
+       └────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+           ▲                          ▲                          ▲
+           │                          │                          │
+     estimate only         real, variable heights          estimate only
+                          (viewport plus overdraw)
+```
+
+The sum of that height cache is the scroll length, so a rough estimate only affects **scrollbar accuracy** before a row is visited. The measured height replaces the estimate automatically, and the scrollbar converges as you scroll.
+
+When a retained descendant changes, GPUIX marks its direct row for remeasurement, so a streaming row grows correctly. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
+
+`estimatedItemHeight` is optional in children mode, where every row exists and can be measured. It is **required** with `itemCount`, because Vue never mounts the rows outside the window and native has no element to measure. Those indexes render as an empty box of the estimated height until Vue mounts the real row.
 
 ### Performance model
 
