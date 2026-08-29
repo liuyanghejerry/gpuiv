@@ -2012,6 +2012,9 @@ if (isEntryPoint) {
     windowBackground: 'blurred',
     trafficLightX: 16,
     trafficLightY: 17,
+    // An agent driving the app through automation sets GPUIX_BACKGROUND=1 so
+    // the window opens behind whatever a human is typing in.
+    focus: process.env.GPUIX_BACKGROUND !== '1',
     debugFrameOverlay: 'full',
   })
 }

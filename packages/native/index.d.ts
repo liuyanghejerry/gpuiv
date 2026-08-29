@@ -67,6 +67,11 @@ export declare class GpuixRenderer {
   resetDebugFrameOverlayStats(): void
   /** Same numbers as the on-screen overlay: current, p90, p99, max, frames. */
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  /**
+   * Bring the window forward and give it focus. This is how a window opened
+   * with `show: false` or `focus: false` is revealed later.
+   */
+  activateWindow(): void
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
@@ -497,6 +502,16 @@ export interface WindowOptions {
   windowBackground?: string
   trafficLightX?: number
   trafficLightY?: number
+  /**
+   * Give the window key focus when it opens. `false` opens it behind the
+   * active app, like `open -g`. Ignored on Linux.
+   */
+  focus?: boolean
+  /**
+   * Show the window when it opens. `false` opens it hidden; call
+   * `activateWindow()` to reveal it. Ignored on Linux.
+   */
+  show?: boolean
   /**
    * The name macOS shows in the application menu, and in its "Hide" and
    * "Quit" items. Defaults to `title`.
