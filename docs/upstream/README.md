@@ -37,13 +37,14 @@ lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ledger
 
-Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
+Inventoried range: `367ef48..3e2d121` (2026-08-28). Earlier history is in
 [Sync log](#sync-log) below.
 
 | Topic | Upstream commits | Status | Notes |
 |---|---|---|---|
-| Wasm / browser rendering, website | `75a1fe6` `92082a3` `7d6e1f9` `711945f` `7f6732a` `7a3e356` `bbcea1f` `291b92d` `a906cf9` `f52fa54` | declined | [wasm-web-rendering.md](./wasm-web-rendering.md) |
+| Wasm / browser rendering, website | `75a1fe6` `92082a3` `7d6e1f9` `711945f` `7f6732a` `7a3e356` `bbcea1f` `291b92d` `a906cf9` `f52fa54` `de1c74a` | declined | [wasm-web-rendering.md](./wasm-web-rendering.md) — `de1c74a` (serve infinite-chat at `/infinite`) extends the same topic |
 | CI / release plumbing | `0b257d0` `301b834` `ac0426c` | declined | one-target-per-OS matrix and archive shipping serve their matrix, not ours; our CI publishes both packages |
+| `create-gpuix-app` CLI scaffolder | `6e75327` `4a24b43` `3e2d121` | declined | [create-gpuix-app-cli.md](./create-gpuix-app-cli.md) |
 | Example app / starter / timeline | `7d45d36` `691ca1f` `9472574` `6c5b0b5` `3d759b2` `813ece4` `555fa30` `8210a38` | declined | upstream-only surfaces (`example-app/` starter, timeline demo); revisit if we ship a starter |
 | Occlude semantics relaxation | `d96413d` | diverged | upstream lets the wheel pass under absolutely positioned items; we keep absolute/fixed occluding (documented in root AGENTS.md). Revisit if it causes real scroll bugs |
 | VirtualList wrapper removal | `3d759b2` | diverged | upstream deleted the React wrapper ("there must not be one"); we keep the Vue wrapper — `chat.tsx` depends on it. Revisit if windowed mounting moves fully native |
@@ -51,7 +52,8 @@ Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
 | Text-search highlight | `bb138ba` `9a18172` `c444c28` `8aef438` `12fb344` `848c617` | synced | PR #18 — `text/search.rs`, two-level resolve cache on `searchRevision`, `Inherited.highlight` cascade, paint-order numbering incl. `<code>`/`<markdown>`/`<diff>`, Vue `useTextSearch` + `findRanges`, `getPaintedHighlights`; virtual-list offset is app-supplied (`matches: { total, indexOffset }`) |
 | Element identity & one-root | `d655dd1` `a4730a5` `4519156` `32ffa54` `6319b0d` `3d9eb0e` `4dde73a` | synced | PR #21 — one `build_host_container` for div/text with `ElementId::Integer`, `apply_interactive_styles`/`custom_surface` everywhere, img/svg/anchored events + `on_painted` bounds, one-renderer-one-root in the Vue host, zed → `8b94def`. React's Suspense test and fresh-ids-per-root test not ported (no Vue counterpart); Vue already freed removed text nodes — pinned by test |
 | Background window launch | `594ba31` `dbeca11` | synced | PR #22 — `focus`/`show` window options gating `cx.activate`, napi `activateWindow()` + `UiCommand::ActivateWindow`, `GPUIX_BACKGROUND` pattern in chat.tsx + AGENTS rule; live `fill()` doc claim corrected |
-| Virtual-list pinning / anchoring | `01f5788` `ae4766f` `a8f302a` `c8a96b8` | pending | top pin on prepend, followTail hole, anchoring-by-index docs; touches the same native list code we synced in PR #6 |
+| Virtual-list pinning / anchoring | `01f5788` `ae4766f` `a8f302a` `c8a96b8` `329a52f` | pending | top pin on prepend, followTail hole, anchoring-by-index docs; touches the same native list code we synced in PR #6. `329a52f` adds pixel-stable restore: `scrollToItem(id, index, offsetInItem?)` queued past the frame's splice + `getListScrollTop`; its negative-offset gpui fix already landed here with the #21 submodule bump (`8b94def`) |
+| Infinite-chat example | `50e08b9` | pending | bidirectional pagination example on `<virtual-list>` + `PublicInstance` typed refs; depends on the pinning/anchoring topic above. Its browser-serving half (`de1c74a`) went to the declined wasm row |
 | Mutation wire format / retained-tree perf | `230400e` `2daf988` `fd06111` `f948f50` | pending | typed batch ops, styles shared by content, style-table reclaim; core `retained_tree.rs` we have modified — port carefully |
 | Automation API expansion | `c2b60e8` `ff6daf5` `5805701` `64241ce` | synced | PR #16 — Locator hover/wheel/dragTo/dragBy/center, `app.mouse.*`, modifiers everywhere, live scroll+keyboard, `<input>` bounds_tracker, `textContent` descendants; browser-input docs from `5805701` skipped (web topic) |
 | Test renderer hardening | `3505f68` `20483dd` `5719d7f` `3cb50c2` `6ad8f83` `bde0ca7` `f93e891` `d1d58e0` `e4fb1c3` | synced | PR #15 — Windows DirectX suite in CI, constructor window sizing, real `getWindowSize`, teardown Drop; test-file-only parts (screenshots-in-repo, wrap literals, word chord) moot for our corpus |
@@ -63,7 +65,7 @@ Inventoried range: `367ef48..64241ce` (2026-08-27). Earlier history is in
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8.
 
-**Last inventoried upstream head:** `64241ce` (2026-08-27)
+**Last inventoried upstream head:** `3e2d121` (2026-08-28)
 
 ## Sync log
 
