@@ -3431,7 +3431,7 @@ impl gpui::Render for GpuixView {
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
-        // from scroll to non-scroll) is handled inside build_div().
+        // from scroll to non-scroll) is handled inside build_host_container().
         self.scroll_handles
             .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
@@ -3573,13 +3573,13 @@ pub(crate) fn build_element(
     }
 
     let built = match element.element_type.as_str() {
-        "div" => {
+        // `<text>` is a `<div>` that happens to carry a string. Giving it its
+        // own builder meant every interaction prop on the shared `Props` type
+        // (onClick, hover, focus, tabIndex) type-checked, registered a JS
+        // listener, and then silently did nothing.
+        "div" | "text" => {
             ctx.custom_registry.destroy(id);
-            build_div(element, style, ctx, window, cx)
-        }
-        "text" => {
-            ctx.custom_registry.destroy(id);
-            build_text(element, style, ctx, window, cx)
+            build_host_container(element, style, ctx, window, cx)
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -3765,7 +3765,12 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
     }
 }
 
-pub(crate) fn build_div(
+/// The one builder for `<div>` and `<text>`.
+///
+/// Both get the same stable GPUI id, so gpui keeps their interactive element
+/// state (hover, active, pointer capture, scroll, accessibility node) across
+/// frames, and both wire the whole shared `Props` surface.
+pub(crate) fn build_host_container(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     ctx: &mut BuildCtx,
@@ -3774,22 +3779,14 @@ pub(crate) fn build_div(
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let element_id_str = format!("__gpuix_{}", element.id);
-    let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
+    // `ElementId::Integer` rather than a formatted name: host ids are already
+    // unique per renderer, and every `<div>` and `<text>` builds one of these on
+    // every frame, so the string allocation was pure overhead. Custom elements
+    // use `ElementId::Name`, which is a different variant and cannot collide.
+    let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
 
     if let Some(style) = style {
-        el = apply_styles(el, style);
-
-        // ── Pseudo-selector styles (hover / active) ──────────────────
-        // GPUI's .hover() and .active() take a closure that receives a
-        // StyleRefinement and returns it with modifications. Since
-        // StyleRefinement implements Styled, we can reuse apply_styles().
-        if let Some(ref hover_style) = style.hover {
-            el = el.hover(|refinement| apply_styles(refinement, hover_style));
-        }
-        if let Some(ref active_style) = style.active {
-            el = el.active(|refinement| apply_styles(refinement, active_style));
-        }
+        el = apply_interactive_styles(el, style);
 
         if crate::style::should_occlude(style) {
             // BlockMouse (occlude) stops the hit test. The parent scroller
@@ -4137,61 +4134,6 @@ fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElem
     })
 }
 
-pub(crate) fn build_text(
-    element: &crate::retained_tree::RetainedElement,
-    style: Option<&StyleDesc>,
-    ctx: &mut BuildCtx,
-    window: &mut gpui::Window,
-    cx: &mut gpui::Context<GpuixView>,
-) -> gpui::AnyElement {
-    use gpui::prelude::*;
-
-    // Fast path: plain text leaf without style. It still goes through
-    // `text_content` so the glyphs land in the selection registry — the old
-    // raw-string return was the reason text was not selectable.
-    if style.is_none() && element.children.is_empty() {
-        let content = element.content.clone().unwrap_or_default();
-        return gpui::div()
-            .relative()
-            .child(crate::automation::bounds_tracker(
-                element.id,
-                None,
-                Default::default(),
-            ))
-            .child(text_content(element.id, &content, ctx))
-            .into_any_element();
-    }
-
-    // The full style set, exactly as `<div>` gets it. `<text>` used to apply a
-    // text-only subset, so `padding`, `width` and every layout prop on a text
-    // node were silently dropped — a hole with no error and no warning.
-    let mut el = gpui::div();
-    if let Some(style) = style {
-        el = apply_styles(el, style);
-    }
-    if style.and_then(|style| style.position.as_deref()).is_none() {
-        el = el.relative();
-    }
-    el = el.child(crate::automation::bounds_tracker(
-        element.id,
-        selection_start_flag(style),
-        style
-            .map(crate::style::bounds_insets)
-            .unwrap_or_default(),
-    ));
-
-    if let Some(ref content) = element.content {
-        el = el.child(text_content(element.id, content, ctx));
-    }
-
-    let child_ids: Vec<u64> = element.children.clone();
-    for child_id in child_ids {
-        el = el.child(build_element(child_id, ctx, window, cx));
-    }
-
-    el.into_any_element()
-}
-
 /// Explicit `userSelect` on this node. `None` means inherit; the ancestor
 /// that set the value already owns the start region.
 fn selection_start_flag(style: Option<&StyleDesc>) -> Option<bool> {
@@ -4220,6 +4162,27 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
         crate::style::DimensionValue::Percentage(v) => el.h(gpui::relative(*v as f32)),
         crate::style::DimensionValue::Auto => el,
     }
+}
+
+/// Base styles plus gpui's `hover` and `active` refinements.
+///
+/// Every stateful GPUI root must go through this, never `apply_styles` alone.
+/// `StyleDesc` carries `hover` and `active` for every element type, so a custom
+/// element that only applied the base styles accepted the prop, serialized it,
+/// and dropped it. gpui reads both refinements from the element state behind the
+/// element's `ElementId`, so the caller must have called `.id(..)` first.
+pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc) -> E
+where
+    E: gpui::Styled + gpui::StatefulInteractiveElement,
+{
+    el = apply_styles(el, style);
+    if let Some(hover_style) = style.hover.as_deref() {
+        el = el.hover(|refinement| apply_styles(refinement, hover_style));
+    }
+    if let Some(active_style) = style.active.as_deref() {
+        el = el.active(|refinement| apply_styles(refinement, active_style));
+    }
+    el
 }
 
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
@@ -4511,12 +4474,12 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         _ => {}
     }
     // Overflow: hidden is on the Styled trait, so we handle it here.
-    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_div().
+    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_host_container().
     // CSS precedence: axis-specific (overflowX/Y) overrides the shorthand (overflow).
     {
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
-        // Only apply hidden here — scroll is handled in build_div.
+        // Only apply hidden here — scroll is handled in build_host_container.
         if resolved_x == Some("hidden") && resolved_y == Some("hidden") {
             el = el.overflow_hidden();
         } else if resolved_x == Some("hidden") {

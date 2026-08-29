@@ -289,9 +289,20 @@ impl CustomElement for AnchoredElement {
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
-        let mut content = gpui::div().flex_col();
+        // The overlay, not the trigger, is what a user clicks, so the recorded
+        // box has to be this content div after `anchored` placed it. Only gpui
+        // knows where that is, so it reports its own painted box instead of
+        // carrying a `bounds_tracker` child.
+        let mut content = gpui::div()
+            .id(gpui::SharedString::from(format!(
+                "__gpuix_anchored_{}",
+                ctx.id
+            )))
+            .flex_col();
+        content = crate::automation::track_own_bounds(content, ctx.id);
+        content = super::wire_standard_events(content, &ctx);
         if let Some(style) = ctx.style {
-            content = crate::renderer::apply_styles(content, style);
+            content = crate::renderer::apply_interactive_styles(content, style);
         }
         // Deferred overlays paint over the window blur. A missing fill lets the
         // page show through the card. Force an opaque surface when JS omitted one.
@@ -401,7 +412,7 @@ impl CustomElement for AnchoredElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &[]
+        &["click", "mouseEnter", "mouseLeave"]
     }
 
     fn destroy(&mut self) {}

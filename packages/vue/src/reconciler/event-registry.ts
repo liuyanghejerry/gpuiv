@@ -3,11 +3,26 @@ import type { Container, EventHandlerMap, NativeRenderer } from "../types.js"
 
 const containersByRenderer = new WeakMap<NativeRenderer, Container>()
 
+/** One renderer drives one window, one native root id, and one event map, so a
+ *  second live root would silently take all three over: its `attachRoot` call
+ *  replaces the shared entry, and unmounting either root then deletes it and
+ *  kills every handler on the other. Sequential remounts are fine — the
+ *  previous root unmounts (and detaches) first, which is what `createApp()`'s
+ *  remount path does. */
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
+  const existing = containersByRenderer.get(renderer)
+  if (existing && existing !== container) {
+    throw new Error(
+      "This renderer already drives a mounted GPUIX root. One renderer owns one window, one native root id, and one event map, so a second root would silently take both over. Unmount the first root first."
+    )
+  }
   containersByRenderer.set(renderer, container)
 }
 
-export function detachRoot(renderer: NativeRenderer): void {
+/** Only the container that owns the renderer can remove the entry, so an
+ *  unmounted root cannot take a later root's registration down with it. */
+export function detachRoot(renderer: NativeRenderer, container: Container): void {
+  if (containersByRenderer.get(renderer) !== container) return
   containersByRenderer.delete(renderer)
 }
 

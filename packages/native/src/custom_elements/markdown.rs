@@ -101,7 +101,7 @@ impl CustomElement for MarkdownElement {
         );
         let body = render_tree(&tree, &mut md, window);
 
-        let mut container = gpui::div()
+        let container = gpui::div()
             .id(SharedString::from(format!("__gpuix_markdown_{}", ctx.id)))
             .flex()
             .flex_col()
@@ -110,14 +110,11 @@ impl CustomElement for MarkdownElement {
             .text_color(theme.text)
             .font_family(theme.font_sans.clone())
             .text_size(gpui::px(theme.metrics.md_text_size))
-            .line_height(gpui::px(theme.metrics.md_line_height))
-            .child(body);
+            .line_height(gpui::px(theme.metrics.md_line_height));
 
-        container = super::code::wire_standard_events(container, &ctx);
-        if let Some(style) = ctx.style {
-            container = crate::renderer::apply_styles(container, style);
-        }
-        container.into_any_element()
+        super::custom_surface(container, &ctx)
+            .child(body)
+            .into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {

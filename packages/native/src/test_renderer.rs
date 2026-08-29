@@ -244,6 +244,15 @@ impl TestGpuixRenderer {
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
+    /// How many elements the retained tree holds, reachable from the root or
+    /// not. `getTreeJson` walks from the root, so it cannot see a node that was
+    /// detached and never destroyed. This is the only way a test can prove a
+    /// removal actually freed it.
+    #[napi]
+    pub fn get_retained_element_count(&self) -> u32 {
+        self.tree.lock().unwrap().elements.len() as u32
+    }
+
     #[napi]
     pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
         let parent_id = to_element_id(parent_id)?;

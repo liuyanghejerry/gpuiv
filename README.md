@@ -272,6 +272,11 @@ remount the Vue app.
 tests and custom hosts. Pass `{ renderer }` into `createApp()` when you already
 have one.
 
+**One renderer drives one root.** A renderer owns one window, one native root
+id, and one event map, so mounting a second root on a renderer that already has
+one throws. `createApp()` unmounts the previous tree before remounting, so only
+code that builds its own host with `createGpuivRendererHost()` can hit this.
+
 ## Debug frame overlay
 
 GPUI paints frame-time stats into the window after layout. The overlay is not
@@ -1500,6 +1505,12 @@ JavaScript round trip.
 Nesting is one level deep. A `hover` object cannot contain another `hover` or
 `active`.
 
+They work on **every** element, including `<text>`, `<code>`, `<markdown>`,
+`<diff>`, `<img>`, `<svg>` and the editors. The one exception is
+`<virtual-list>`, whose `style` type rejects them: gpui's list has no
+interactive identity to hold a hovered or pressed state, so put them on a
+wrapping `<div>`.
+
 > **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in your component and render each line as a separate `<text>` element in a flex column:
 >
 > ```tsx
@@ -1573,6 +1584,15 @@ createTestApp()              launch({ command, args })
 `click()` hits the center of the last painted bounds. `fill(text)` replaces the
 focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
 exactly one match exists.
+
+Every element that accepts `testId` records painted bounds, including `<img>`,
+`<svg>` and `<anchored>`. An `<anchored>` reports the box of the overlay itself,
+not of the trigger it is anchored to, so `click()` lands on the menu even when
+it is deferred and snapped back inside the window.
+
+`<virtual-list>` is the exception, and it takes no `testId`. gpui's list is not
+an interactive element, so it has nothing to record a box against. Put the
+locator on a wrapping `<div>`.
 
 ### Drag, hover, wheel, and modifiers
 

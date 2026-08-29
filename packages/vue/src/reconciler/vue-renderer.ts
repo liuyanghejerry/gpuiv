@@ -18,6 +18,7 @@ import type {
 import { wrapWithBatching } from "./batch-renderer.js"
 import {
   attachRoot,
+  detachRoot,
   registerEventHandler,
   unregisterEventHandler,
 } from "./event-registry.js"
@@ -194,6 +195,8 @@ export interface GpuivRendererHost {
   renderer: NativeRenderer
   /** Flush queued mutations synchronously. */
   flushMutations: () => void
+  /** Release this root's claim on the renderer's event map. */
+  detach: () => void
 }
 
 export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElementId: number }): GpuivRendererHost {
@@ -311,6 +314,12 @@ export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElemen
     container: containerNode,
     renderer: host.renderer,
     flushMutations: host.flushMutations,
+    /** Release this root's claim on the renderer's event map. Call after the
+     *  Vue app unmounted, before another root may mount on the same renderer. */
+    detach: () => {
+      detachRoot(inner, container)
+      detachRoot(host.renderer, container)
+    },
   }
 
   // ── Node mutation internals (closure over container) ────────────

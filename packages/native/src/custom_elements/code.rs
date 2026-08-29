@@ -225,7 +225,7 @@ impl CustomElement for CodeElement {
         }
 
         // The scroller stays a child of the styled surface instead of being the
-        // surface. `wire_standard_events` records the last painted bounds on
+        // surface. `custom_surface` records the last painted bounds on
         // the styled node, and gpui applies the scroll offset to a scroller's
         // own children — merging the two would drift `getElementBounds` (and
         // every automation click) after a horizontal pan.
@@ -237,13 +237,11 @@ impl CustomElement for CodeElement {
             .restrict_scroll_to_axis()
             .child(content);
 
-        let mut block = gpui::div().id(SharedString::from(format!("__gpuix_code_{}", ctx.id)));
-        if let Some(style) = ctx.style {
-            block = crate::renderer::apply_styles(block, style);
-        }
-        block = block.child(body);
-        block = wire_standard_events(block, &ctx);
-        block.into_any_element()
+        let block = super::custom_surface(
+            gpui::div().id(SharedString::from(format!("__gpuix_code_{}", ctx.id))),
+            &ctx,
+        );
+        block.child(body).into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
@@ -266,71 +264,6 @@ impl CustomElement for CodeElement {
     }
 
     fn destroy(&mut self) {}
-}
-
-/// Attach the mouse events a custom element declares in `supported_events`.
-///
-/// Declaring an event and never installing a handler is worse than not
-/// supporting it: the prop type-checks, the listener is registered on the JS
-/// side, and nothing ever fires.
-pub(crate) fn wire_standard_events(
-    mut el: gpui::Stateful<gpui::Div>,
-    ctx: &CustomRenderContext,
-) -> gpui::Stateful<gpui::Div> {
-    use gpui::prelude::*;
-
-    // Same last-paint box `div` / `text` record. Without this, `getElementBounds`
-    // and automation locators return null for `<markdown>`, `<code>`, and `<diff>`.
-    if ctx
-        .style
-        .and_then(|style| style.position.as_deref())
-        .is_none()
-    {
-        el = el.relative();
-    }
-    el = el.child(crate::automation::bounds_tracker(
-        ctx.id,
-        None,
-        ctx.style
-            .map(crate::style::bounds_insets)
-            .unwrap_or_default(),
-    ));
-
-    let id = ctx.id;
-    for event in ctx.events {
-        let callback = ctx.event_callback.clone();
-        match event.as_str() {
-            "click" => {
-                el = el.on_click(move |click, _window, _cx| {
-                    crate::renderer::emit_event_full(&callback, id, "click", |p| {
-                        let (x, y) = crate::renderer::point_to_xy(click.position());
-                        p.x = Some(x);
-                        p.y = Some(y);
-                        p.click_count = Some(click.click_count() as u32);
-                        p.modifiers = Some(click.modifiers().into());
-                    });
-                });
-            }
-            "mouseEnter" | "mouseLeave" => {
-                // gpui reports both edges through one listener, so wire it once.
-                if event == "mouseEnter" || !ctx.events.contains("mouseEnter") {
-                    let enter = ctx.events.contains("mouseEnter");
-                    let leave = ctx.events.contains("mouseLeave");
-                    let callback = ctx.event_callback.clone();
-                    el = el.on_hover(move |&hovered, _window, _cx| {
-                        let kind = if hovered { "mouseEnter" } else { "mouseLeave" };
-                        if (hovered && enter) || (!hovered && leave) {
-                            crate::renderer::emit_event_full(&callback, id, kind, |p| {
-                                p.hovered = Some(hovered);
-                            });
-                        }
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-    el
 }
 
 /// Line-number gutter width, sized analytically from the digit count so the

@@ -372,7 +372,10 @@ export interface ElementProps {
 // ── Virtual list props ───────────────────────────────────────────────
 
 type VirtualListShared = {
-  style?: StyleDesc | Record<string, unknown>
+  /** No `hover` or `active`: gpui's `List` has no interactive element identity,
+   *  so it cannot hold the pressed or hovered state those styles read. Put them
+   *  on a wrapping `<div>` instead. */
+  style?: Omit<StyleDesc, "hover" | "active"> | Record<string, unknown>
   children?: unknown
   alignment?: "top" | "bottom"
   followTail?: boolean

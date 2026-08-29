@@ -252,18 +252,19 @@ impl CustomElement for DiffElement {
         let metrics = theme.metrics;
 
         if data.rows.is_empty() {
-            let mut empty = gpui::div()
+            // Through `custom_surface` like the non-empty branch, or an empty
+            // diff would be the one state with no automation bounds and no
+            // click or hover events.
+            let empty = gpui::div()
                 .id(SharedString::from(format!("__gpuix_diff_empty_{}", ctx.id)))
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_size(px(12.0))
-                .text_color(theme.text_faint)
-                .child(ctx.chrome_text("No changes", None));
-            if let Some(style) = ctx.style {
-                empty = crate::renderer::apply_styles(empty, style);
-            }
-            return empty.into_any_element();
+                .text_color(theme.text_faint);
+            return super::custom_surface(empty, &ctx)
+                .child(ctx.chrome_text("No changes", None))
+                .into_any_element();
         }
 
         let element_id = ctx.id;
@@ -371,17 +372,14 @@ impl CustomElement for DiffElement {
             .id(SharedString::from(format!("__gpuix_diff_{}", ctx.id)))
             .flex()
             .flex_col()
-            .bg(theme.bg)
-            .child(body);
+            .bg(theme.bg);
         if self.scroll {
             container = container.min_h_0();
         }
 
-        container = super::code::wire_standard_events(container, &ctx);
-        if let Some(style) = ctx.style {
-            container = crate::renderer::apply_styles(container, style);
-        }
-        container.into_any_element()
+        super::custom_surface(container, &ctx)
+            .child(body)
+            .into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {

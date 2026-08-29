@@ -260,20 +260,52 @@ is the only place document order is guaranteed: a `list()` decides at paint time
 which rows exist. `selection_frame_reset()` must stay the first child of the
 root, or stale entries from the previous frame leak into the next drag.
 
-## Custom elements are invisible to automation unless they say otherwise
+## A new element needs a host-derived GPUI id, or it has no state
 
-`automation::bounds_tracker` is what puts an element in the bounds registry, and
-`build_element` only attaches it for `<div>` and `<text>`. A custom element that
-paints itself has **no bounds**, so `getByTestId(..).click()` throws
-`Element has no painted bounds`. `<code>` attaches its own. `<input>` /
-`<textarea>` record a selection-start region instead. `<img>`, `<svg>`,
-`<anchored>`, `<diff>` and `<markdown>` do not — `getByTestId` on them returns
-null.
+`.id(..)` is not decoration. gpui keys `InteractiveElementState` off the
+`GlobalElementId`, so an element without one silently loses **hover, active,
+pointer capture, implicit scroll, its accessibility node, and any element state
+gpui itself keeps**. `<img>` had no id, which is why an animated GIF never left
+frame zero: `ImgState` holds the frame index.
 
-Add `el.child(crate::automation::bounds_tracker(ctx.id, None))` to any new custom
-element whose root is a `relative()` div. The tracker is `absolute().size_full()`,
-so it needs a positioned parent. Pass `Some(selectable)` instead of `None` when
-the element also owns a selection-start region.
+`<div>` and `<text>` use `gpui::ElementId::Integer(host_id)`. Host ids are
+already unique per renderer, and a formatted name cost a `SharedString`
+allocation on every node on every frame. Custom elements use
+`ElementId::Name("__gpuix_<kind>_<host id>")`; that is a different enum variant,
+so the two namespaces cannot collide.
+
+**Never call `.id(<index>)` in this crate.** `impl From<usize> for ElementId`
+makes the idiomatic gpui row id an `Integer`, which is the same namespace as a
+host id. Every per-row id here is a formatted name for that reason:
+`__gpuix_diff_line_{ix}`, `__gpuix_md_table_{id}_{sub}`, and the rest.
+
+**Never call `apply_styles` on a stateful root. Call `apply_interactive_styles`.**
+`StyleDesc` carries `hover` and `active` for every element type, so a builder
+that applies only the base styles type-checks the prop, serializes it, and drops
+it. `custom_surface` in `custom_elements/mod.rs` does this for you.
+
+## Bounds: a container uses a tracker, a leaf uses `on_painted`
+
+`getByTestId(..).click()` needs a recorded box. Two mechanisms, both required:
+
+- **Containers** (`<div>`, `<text>`, `<code>`, `<diff>`, `<markdown>`, `<input>`)
+  add `crate::automation::bounds_tracker(id, selection_start, insets)` as a
+  child. It is `absolute().size_full()`, so the parent must be positioned. Pass
+  `Some(selectable)` when the element also owns a selection-start region; the
+  editor uses `Some(false)` so a drag moves the caret instead of starting a
+  document selection. `custom_surface` attaches it.
+- **Leaves** (`<img>`, `<svg>`) and **`<anchored>`** use
+  `crate::automation::track_own_bounds(el, id)`, which is gpui's `on_painted`.
+  Wrapping a leaf in a div instead would move the layout box: the wrapper
+  becomes the flex item, and the image loses intrinsic sizing and corner
+  clipping. `<anchored>` uses it because only gpui knows where the overlay
+  landed after snapping.
+
+Both record during **paint**, and `bounds_frame_reset` clears the registry
+during paint too. Never move any of them to prepaint: `gpui::list()` prepaints a
+speculative row range, then rolls the window back through `Window::transact` and
+prepaints a different one, so a prepaint-recorded box can belong to a row that
+never reached the screen.
 
 ## Layout numbers live in `Theme::metrics`, not in Rust constants
 

@@ -42,7 +42,12 @@ thread_local! {
     static BOUNDS: RefCell<HashMap<u64, ElementBounds>> = RefCell::new(HashMap::new());
 }
 
-/// Zero-size canvas. Paint it with the selection reset, before any content.
+/// Zero-size canvas. Keep it ahead of the app subtree under the root.
+///
+/// Everything here is recorded during **paint**, never prepaint: gpui's
+/// `List::prepaint` speculatively prepaints a row range and can roll the window
+/// back and prepaint a different one, so a prepaint-recorded box can belong to a
+/// row that never reached the screen.
 pub fn bounds_frame_reset() -> impl IntoElement {
     canvas(
         |_, _, _| (),
@@ -53,6 +58,16 @@ pub fn bounds_frame_reset() -> impl IntoElement {
     .absolute()
     .w(px(0.0))
     .h(px(0.0))
+}
+
+/// Record this element's own painted box, with no extra element in the tree.
+///
+/// `bounds_tracker` needs a positioned parent and one canvas child, which a leaf
+/// such as `gpui::img` cannot have. Wrapping the leaf in a div instead would
+/// move the layout box: the wrapper would become the flex item and the image
+/// would lose intrinsic sizing and corner clipping.
+pub fn track_own_bounds<E: gpui::InteractiveElement>(el: E, id: u64) -> E {
+    el.on_painted(move |bounds, _, _| record_bounds(id, bounds))
 }
 
 pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {

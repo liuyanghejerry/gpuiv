@@ -49,6 +49,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getTreeJson(): string
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
+  getRetainedElementCount(): number
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -456,6 +457,12 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getElementBounds(elementId)
   }
 
+  /** How many elements the retained tree holds, reachable from the root or
+   *  not — the only way a test can prove a removal actually freed a node. */
+  getRetainedElementCount(): number {
+    return this.native.getRetainedElementCount()
+  }
+
   clockPause(): number {
     return this.native.clockPause()
   }
@@ -633,6 +640,7 @@ export function createTestApp(
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
+      gpuivHost.detach()
       renderer.flush()
     },
   }
