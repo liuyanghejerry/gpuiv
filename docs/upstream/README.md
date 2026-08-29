@@ -90,6 +90,7 @@ from upstream through `367ef48`:
 | #21 | Element identity & one-root: unified div/text builder with integer GPUI ids, hover/active on every element, img/svg/anchored events + `on_painted` bounds, GIF state, one-renderer-one-root guard + owner-scoped detach, `getRetainedElementCount`, zed `788c72f` → `8b94def` — upstream `d655dd1` `a4730a5` `4519156` + docs |
 | #22 | Background launch: `focus`/`show` options gating `cx.activate`, `activateWindow()` napi + UiCommand, `GPUIX_BACKGROUND` in chat.tsx, agent-drive docs, live `fill()` claim corrected — upstream `594ba31` `dbeca11` |
 | #24 | Virtual-list pinning/anchoring: top pin on prepend + followTail guard, queued `scrollToItem(id, index, offsetInItem?)` (negative offset = pixel-stable restore), `getListScrollTop` logical anchor; Vue `VirtualList` ref API (`scrollToItem`/`getListScrollTop` with `atEnd` decode/`id`) + window widening; chat.tsx drops the `$el.id` escape hatch — upstream `01f5788` `ae4766f` `a8f302a` `c8a96b8` `329a52f` |
+| #25 | Bidirectional infinite-chat example on host `<virtual-list>` children + `onVisibleRange`, `SafeMdxContent` `onLinkClick` render ctx in chat.tsx, `HostNode` template ref (upstream's `PublicInstance` was already our `HostNode`), local `dedent` helper instead of `string-dedent` — upstream `50e08b9` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
