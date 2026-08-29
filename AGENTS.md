@@ -401,6 +401,55 @@ cheaper than retaining one Vue node per line.
 `VirtualList` (the Vue wrapper with `itemCount` + `renderItem`) mounts only the
 visible window in Vue itself — use it for long transcripts.
 
+## A prepended row is only visible at the top
+
+`gpui::ListState` anchors on a **logical item index**, and `splice_focusable`
+shifts that anchor by the number of rows inserted before it. So a prepend keeps
+the rows already on screen and pushes the new one above the viewport. That is
+correct for a history pane, and wrong for a feed.
+
+A browser anchors the same way and suppresses it at `scrollTop: 0`. GPUIV copies
+that: `VirtualListEntry::sync` remembers a top-aligned list whose
+`logical_scroll_top()` is `{0, 0}` and is not following its tail, and calls
+`scroll_to(default)` after the splice. Do not "simplify" that away. The guard is
+`is_following_tail()`, not the `followTail` prop: a following list that does not
+fill its viewport also ends layout anchored at `{0, 0}`, and `scroll_to` would
+call `stop_following` on it and kill the chat tail on any short transcript.
+
+**Do not trust a short list to prove a prepend works.** While the content is
+shorter than the viewport, gpui's "does not fill" branch re-anchors to item 0 on
+every layout, so the drift is invisible. It appears on the frame where the list
+first overflows. The regression test in `virtual-list.test.tsx` grows a 160px
+list from 2 rows to 12 rather than starting tall.
+
+**A loading row is the anchor while the reader waits in it**, so an
+infinite-scroll prepend splices the page in *under* it and replaces the screen
+the reader was looking at. The splice-shift above only protects an anchor
+*below* the insert point. The app owns the correction, because only it knows the
+loading row stands for the arriving content: read `getListScrollTop`, commit,
+then `scrollToItem(indexOfTheMessageUnderTheVoid, offsetInVoid - EDGE_HEIGHT)`.
+The negative offset anchors the viewport top above that row and gpui resolves it
+at layout time against the freshly measured new rows, which is what makes the
+restore pixel-exact; any pixel math done in JS would trust `estimatedItemHeight`
+and still jump. The append twin: a reader waiting at a trailing loading row
+usually rests on gpui's **at-end sentinel** (`itemIndex == item count`, stored
+`logical_scroll_top` is `None`), not inside the void, so the offset is
+meaningless there; convert with the viewport height from the same tuple
+(`EDGE_HEIGHT - viewportHeight`). The Vue wrapper decodes the sentinel to
+`atEnd: boolean` — the pixel conversion stays app-side. Traps that cost upstream
+a session each:
+
+- virtual-list `scrollToItem` is **queued and applied after the next render's
+  splice** (`PENDING_VIRTUAL_LIST_SCROLLS` in `renderer.rs`). Applying it
+  eagerly let `splice_focusable` shift the just-restored anchor a second time
+  on the live renderer, while the test renderer hid it because
+  `TestRenderer.scrollToItem` flushes first
+- a bottom-aligned list with a trailing loading row starts **scrolled to the
+  end**, i.e. showing that loading row. In tests, wheel direction is therefore
+  ambiguous at mount: the first wheel tick can trigger a `next` fetch even when
+  the test means to scroll up. Start from the latest page (no trailing edge) or
+  `scrollToItem` onto content first.
+
 ## Nested scrolling is not supported
 
 Never put a scroll container inside another scroll container. That includes
