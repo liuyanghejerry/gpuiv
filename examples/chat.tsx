@@ -1689,9 +1689,16 @@ interface MdxJsxElement {
 
 type MdxNode = RootContent | MdxJsxElement
 
-function mapMdxChildren(node: { children?: MdxNode[] }): VNodeChild {
+/// Render context threaded through the MDX walkers. `onLinkClick` turns
+/// mdast links into clickable rows (the infinite-chat example routes on it);
+/// without it links render as plain accent text.
+interface MdxRenderCtx {
+  onLinkClick?: (href: string) => void
+}
+
+function mapMdxChildren(node: { children?: MdxNode[] }, ctx?: MdxRenderCtx): VNodeChild {
   const rendered = (node.children ?? []).flatMap((child) => {
-    const out = renderMdx(child)
+    const out = renderMdx(child, ctx)
     return out == null || out === false ? [] : [out]
   })
   if (rendered.length === 0) return null
@@ -1703,11 +1710,11 @@ function mapMdxChildren(node: { children?: MdxNode[] }): VNodeChild {
   )
 }
 
-function renderMdxJsx(node: MdxJsxElement): VNodeChild {
-  if (!node.name) return mapMdxChildren(node)
+function renderMdxJsx(node: MdxJsxElement, ctx?: MdxRenderCtx): VNodeChild {
+  if (!node.name) return mapMdxChildren(node, ctx)
   const component = SAFE_MDX_COMPONENTS[node.name]
   if (!component) return null
-  const props: MdxComponentProps = { children: mapMdxChildren(node) }
+  const props: MdxComponentProps = { children: mapMdxChildren(node, ctx) }
   for (const attr of node.attributes ?? []) {
     if (attr.type === 'mdxJsxAttribute') {
       props[attr.name] = attr.value === null ? true : attr.value
@@ -1716,17 +1723,17 @@ function renderMdxJsx(node: MdxJsxElement): VNodeChild {
   return component(props)
 }
 
-function renderMdx(node: MdxNode): VNodeChild {
+function renderMdx(node: MdxNode, ctx?: MdxRenderCtx): VNodeChild {
   if (node.type === 'mdxJsxFlowElement' || node.type === 'mdxJsxTextElement') {
-    return renderMdxJsx(node)
+    return renderMdxJsx(node, ctx)
   }
   switch (node.type) {
     case 'heading':
-      return SAFE_MDX_COMPONENTS[`h${node.depth}`]!({ children: mapMdxChildren(node) })
+      return SAFE_MDX_COMPONENTS[`h${node.depth}`]!({ children: mapMdxChildren(node, ctx) })
     case 'paragraph':
-      return SAFE_MDX_COMPONENTS.p!({ children: mapMdxChildren(node) })
+      return SAFE_MDX_COMPONENTS.p!({ children: mapMdxChildren(node, ctx) })
     case 'blockquote':
-      return SAFE_MDX_COMPONENTS.blockquote!({ children: mapMdxChildren(node) })
+      return SAFE_MDX_COMPONENTS.blockquote!({ children: mapMdxChildren(node, ctx) })
     case 'thematicBreak':
       return SAFE_MDX_COMPONENTS.hr!({})
     case 'code': {
@@ -1735,27 +1742,43 @@ function renderMdx(node: MdxNode): VNodeChild {
     }
     case 'list': {
       const component = node.ordered ? SAFE_MDX_COMPONENTS.ol! : SAFE_MDX_COMPONENTS.ul!
-      return component({ children: mapMdxChildren(node) })
+      return component({ children: mapMdxChildren(node, ctx) })
     }
     case 'listItem':
       return SAFE_MDX_COMPONENTS.li!({
-        children: mapMdxChildren(node),
+        children: mapMdxChildren(node, ctx),
         ...(node.checked == null ? {} : { 'data-checked': node.checked }),
       })
     case 'table':
-      return renderMdxTable(node)
+      return renderMdxTable(node, ctx)
     case 'text':
       return node.value
     case 'strong':
-      return SAFE_MDX_COMPONENTS.strong!({ children: mapMdxChildren(node) })
+      return SAFE_MDX_COMPONENTS.strong!({ children: mapMdxChildren(node, ctx) })
     case 'emphasis':
-      return SAFE_MDX_COMPONENTS.em!({ children: mapMdxChildren(node) })
+      return SAFE_MDX_COMPONENTS.em!({ children: mapMdxChildren(node, ctx) })
     case 'delete':
-      return SAFE_MDX_COMPONENTS.del!({ children: mapMdxChildren(node) })
+      return SAFE_MDX_COMPONENTS.del!({ children: mapMdxChildren(node, ctx) })
     case 'inlineCode':
       return SAFE_MDX_COMPONENTS.code!({ children: node.value })
-    case 'link':
-      return SAFE_MDX_COMPONENTS.a!({ children: mapMdxChildren(node) })
+    case 'link': {
+      const children = mapMdxChildren(node, ctx)
+      const link = SAFE_MDX_COMPONENTS.a!({ children })
+      if (!ctx?.onLinkClick) return link
+      const href = node.url
+      return (
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            cursor: href ? 'pointer' : undefined,
+          }}
+          onClick={() => href && ctx.onLinkClick!(href)}
+        >
+          {link}
+        </div>
+      )
+    }
     case 'break':
       return SAFE_MDX_COMPONENTS.hr!({})
     case 'definition':
@@ -1772,7 +1795,7 @@ function renderMdx(node: MdxNode): VNodeChild {
   }
 }
 
-function renderMdxTable(node: Table): VNodeChild {
+function renderMdxTable(node: Table, ctx?: MdxRenderCtx): VNodeChild {
   const rowsOut: VNodeChild[][] = []
   let cols = 0
   for (const [rowIndex, row] of node.children.entries()) {
@@ -1780,7 +1803,7 @@ function renderMdxTable(node: Table): VNodeChild {
     const rowCells: VNodeChild[] = []
     for (const [colIndex, cell] of row.children.entries()) {
       rowCells.push(
-        cloneVNode(MdxCell({ header, children: mapMdxChildren(cell) }), {
+        cloneVNode(MdxCell({ header, children: mapMdxChildren(cell, ctx) }), {
           key: `${rowIndex}-${colIndex}`,
         }),
       )
@@ -1814,9 +1837,9 @@ function renderMdxTable(node: Table): VNodeChild {
   )
 }
 
-function renderMdxTree(root: Root): VNodeChild {
+function renderMdxTree(root: Root, ctx?: MdxRenderCtx): VNodeChild {
   const children = (root.children as MdxNode[]).flatMap((child) => {
-    const out = renderMdx(child)
+    const out = renderMdx(child, ctx)
     return out == null || out === false ? [] : [out]
   })
   if (children.length === 1) return children[0]
@@ -1837,12 +1860,15 @@ function parseMdx(source: string): Root {
   return tree
 }
 
-const SafeMdxContent = defineComponent({
-  props: { source: { type: String, required: true } },
+export const SafeMdxContent = defineComponent({
+  props: {
+    source: { type: String, required: true },
+    onLinkClick: { type: Function as PropType<(href: string) => void>, default: undefined },
+  },
   setup(props) {
     return () => (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%' }}>
-        {renderMdxTree(parseMdx(props.source))}
+        {renderMdxTree(parseMdx(props.source), { onLinkClick: props.onLinkClick })}
       </div>
     )
   },
