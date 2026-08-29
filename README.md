@@ -639,15 +639,16 @@ const ProgrammaticScroll = defineComponent({
 ```
 
 A `ref` on a host element (`div`, `virtual-list`) receives the host node itself,
-whose `id` is the element ID. Components are not ref-forwarded to host ids: read
-the id through the component's `$el` (the chat example does
-`listRef.value?.$el?.id`), or pass the ref down to a host element.
+whose `id` is the element ID. Plain components are not ref-forwarded to host ids;
+`<VirtualList>` is the exception — it exposes its element `id` plus scroll
+methods through its ref (see [Programmatic scrolling](#programmatic-scrolling)).
 
 ```ts
 // Available scroll methods on the renderer:
-renderer.scrollTo?(elementId, x, y)        // set offset directly
-renderer.scrollToItem?(elementId, index)   // scroll child into view
-renderer.getScrollOffset?(elementId)       // returns [x, y] or null
+renderer.scrollTo?(elementId, x, y)                          // set offset directly
+renderer.scrollToItem?(elementId, index, offsetInItem?)      // scroll child into view; px offset, may be negative on a virtual list
+renderer.getScrollOffset?(elementId)                         // returns [x, y] or null
+renderer.getListScrollTop?(elementId)                        // virtual-list logical anchor [itemIndex, offsetInItemPx, viewportHeightPx] or null
 ```
 
 ## Virtual lists
