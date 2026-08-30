@@ -37,13 +37,13 @@ lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ledger
 
-Inventoried range: `367ef48..3e2d121` (2026-08-28). Earlier history is in
+Inventoried range: `367ef48..09e0cae` (2026-08-30). Earlier history is in
 [Sync log](#sync-log) below.
 
 | Topic | Upstream commits | Status | Notes |
 |---|---|---|---|
-| Wasm / browser rendering, website | `75a1fe6` `92082a3` `7d6e1f9` `711945f` `7f6732a` `7a3e356` `bbcea1f` `291b92d` `a906cf9` `f52fa54` `de1c74a` | declined | [wasm-web-rendering.md](./wasm-web-rendering.md) — `de1c74a` (serve infinite-chat at `/infinite`) extends the same topic |
-| CI / release plumbing | `0b257d0` `301b834` `ac0426c` | declined | one-target-per-OS matrix and archive shipping serve their matrix, not ours; our CI publishes both packages |
+| Wasm / browser rendering, website | `75a1fe6` `92082a3` `7d6e1f9` `711945f` `7f6732a` `7a3e356` `bbcea1f` `291b92d` `a906cf9` `f52fa54` `de1c74a` `4194d9b` | declined | [wasm-web-rendering.md](./wasm-web-rendering.md) — `de1c74a` (serve infinite-chat at `/infinite`) and `4194d9b` (compact website layout) extend the same topic |
+| CI / release plumbing | `0b257d0` `301b834` `ac0426c` `322993e` `e68f2ec` `dfb83f3` | declined | one-target-per-OS matrix and archive shipping serve their matrix, not ours; our CI publishes both packages; `322993e` `e68f2ec` `dfb83f3` are their 0.6.0 release + bun-publish npmrc fixes |
 | `create-gpuix-app` CLI scaffolder | `6e75327` `4a24b43` `3e2d121` | declined | [create-gpuix-app-cli.md](./create-gpuix-app-cli.md) |
 | Example app / starter / timeline | `7d45d36` `691ca1f` `9472574` `6c5b0b5` `3d759b2` `813ece4` `555fa30` `8210a38` | declined | upstream-only surfaces (`example-app/` starter, timeline demo); revisit if we ship a starter |
 | Occlude semantics relaxation | `d96413d` | diverged | upstream lets the wheel pass under absolutely positioned items; we keep absolute/fixed occluding (documented in root AGENTS.md). Revisit if it causes real scroll bugs |
@@ -54,7 +54,12 @@ Inventoried range: `367ef48..3e2d121` (2026-08-28). Earlier history is in
 | Background window launch | `594ba31` `dbeca11` | synced | PR #22 — `focus`/`show` window options gating `cx.activate`, napi `activateWindow()` + `UiCommand::ActivateWindow`, `GPUIX_BACKGROUND` pattern in chat.tsx + AGENTS rule; live `fill()` doc claim corrected |
 | Virtual-list pinning / anchoring | `01f5788` `ae4766f` `a8f302a` `c8a96b8` `329a52f` | synced | PR #24 — top pin on prepend guarded by `is_following_tail()`, queued `scrollToItem(id, index, offsetInItem?)` applied after the frame's splice, `getListScrollTop` logical anchor; Vue `<VirtualList>` exposes `scrollToItem`/`getListScrollTop` (sentinel decoded to `atEnd`)/`id` via template ref + window widening; anchoring-by-index and row-height docs; flushSync half of `c8a96b8` skipped (React-specific, `flushMutations()` already documented) |
 | Infinite-chat example | `50e08b9` | synced | PR #25 — Vue port: host `<virtual-list>` with retained children + `onVisibleRange`; the React `PublicInstance` ref maps to our already-exported `HostNode`; `SafeMdxContent` gained an `onLinkClick` render ctx in chat.tsx; `string-dedent` inlined as a local helper (no new dep); React's `flushSync` ordering is native's queued `scrollToItem`, tests settle twice after `scrollToItem` because visibleRange dispatches at flush end |
-| Mutation wire format / retained-tree perf | `230400e` `2daf988` `fd06111` `f948f50` | pending | typed batch ops, styles shared by content, style-table reclaim; core `retained_tree.rs` we have modified — port carefully |
+| Mutation wire format / retained-tree perf | `230400e` `2daf988` `fd06111` `f948f50` `4369d55` | synced | PR #27 — atomic `applyBatch` only (12 per-op napi methods deleted from GpuixRenderer/wasm/TestGpuixRenderer), typed `BatchOp` decode from raw bytes (borrowing strings, `&RawValue` styles, strict bool `hasHandler`), `Arc<StyleDesc>` hash-consing + two-arm `maybe_sweep`, `destroy_element` unlink hunk from `bb138ba` (PR #18 had skipped it), Vue `MutationRenderer` facade keeping the microtask `schedule` hook, raw renderer in app context, bench tooling (`bench_serde.rs`, `bench-serialization.ts`, serialization-benchmark doc); `fd06111` already landed via PR #18; CI smoke line from `579c8c7` applied to our Windows step |
+| Comet selection continuity + generic input edits | `fb75c1c` `1cd46cd` | pending | soft-wrap selection washes, drag across unmounted virtual-list rows, edge autoscroll (stops at list ends), input double/triple-click word/all select, textarea drag scroll, 700ms-grouped undo. Our `text/` and `input.rs` are the Comet ports, so the port targets the same files |
+| Linear gradient backgrounds | `09e0cae` | pending | `style.background` becomes a value union (`linear-gradient` with angle/stops/colorSpace) on GPUI shaders; needs Vue `StyleDesc` typing |
+| Blurred window example | `3e3249b` | pending | example-only; our native already supports `windowBackground: 'blurred'` |
+| Docs: background automated windows | `53b3a89` | pending | pattern already landed with PR #22 (`GPUIX_BACKGROUND` in chat.tsx + AGENTS rule); upstream additionally wires every example + README — port the remaining examples when convenient |
+| Repo-wide rustfmt | `ca256d3` | declined | formatting-only; our native files diverge, so porting it just adds diff noise. Revisit if formatting drift makes future hand-ports painful — then run the same rustfmt pass on our crate |
 | Automation API expansion | `c2b60e8` `ff6daf5` `5805701` `64241ce` | synced | PR #16 — Locator hover/wheel/dragTo/dragBy/center, `app.mouse.*`, modifiers everywhere, live scroll+keyboard, `<input>` bounds_tracker, `textContent` descendants; browser-input docs from `5805701` skipped (web topic) |
 | Test renderer hardening | `3505f68` `20483dd` `5719d7f` `3cb50c2` `6ad8f83` `bde0ca7` `f93e891` `d1d58e0` `e4fb1c3` | synced | PR #15 — Windows DirectX suite in CI, constructor window sizing, real `getWindowSize`, teardown Drop; test-file-only parts (screenshots-in-repo, wrap literals, word chord) moot for our corpus |
 | `onAuxClick` + click button | `280d6ec` | synced | PR #11 |
@@ -65,7 +70,7 @@ Inventoried range: `367ef48..3e2d121` (2026-08-28). Earlier history is in
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8.
 
-**Last inventoried upstream head:** `3e2d121` (2026-08-28)
+**Last inventoried upstream head:** `09e0cae` (2026-08-30)
 
 ## Sync log
 
@@ -91,6 +96,7 @@ from upstream through `367ef48`:
 | #22 | Background launch: `focus`/`show` options gating `cx.activate`, `activateWindow()` napi + UiCommand, `GPUIX_BACKGROUND` in chat.tsx, agent-drive docs, live `fill()` claim corrected — upstream `594ba31` `dbeca11` |
 | #24 | Virtual-list pinning/anchoring: top pin on prepend + followTail guard, queued `scrollToItem(id, index, offsetInItem?)` (negative offset = pixel-stable restore), `getListScrollTop` logical anchor; Vue `VirtualList` ref API (`scrollToItem`/`getListScrollTop` with `atEnd` decode/`id`) + window widening; chat.tsx drops the `$el.id` escape hatch — upstream `01f5788` `ae4766f` `a8f302a` `c8a96b8` `329a52f` |
 | #25 | Bidirectional infinite-chat example on host `<virtual-list>` children + `onVisibleRange`, `SafeMdxContent` `onLinkClick` render ctx in chat.tsx, `HostNode` template ref (upstream's `PublicInstance` was already our `HostNode`), local `dedent` helper instead of `string-dedent` — upstream `50e08b9` |
+| #27 | Atomic mutation batches: typed-op decode from raw bytes, `Arc<StyleDesc>` hash-consing + two-arm style-table sweep, `destroy_element` unlink, per-op napi methods removed, Vue `MutationRenderer` facade (microtask `schedule` kept), bench tooling — upstream `230400e` `2daf988` `fd06111` `f948f50` `4369d55` + `bb138ba` destroy hunk + `579c8c7` CI line |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
