@@ -19,6 +19,32 @@ pub struct BoxShadowValue {
     pub color: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinearGradientStopValue {
+    pub color: String,
+    pub position: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum GradientValue {
+    #[serde(rename = "linear-gradient")]
+    LinearGradient {
+        angle: f64,
+        stops: [LinearGradientStopValue; 2],
+        #[serde(rename = "colorSpace")]
+        color_space: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BackgroundValue {
+    Color(String),
+    Gradient(Box<GradientValue>),
+}
+
 /// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(untagged)]
@@ -154,7 +180,7 @@ pub struct StyleDesc {
     pub left: Option<f64>,
 
     // Background & Colors
-    pub background: Option<String>,
+    pub background: Option<BackgroundValue>,
     pub background_color: Option<String>,
     pub color: Option<String>,
     pub opacity: Option<f64>,
@@ -210,6 +236,64 @@ pub struct StyleDesc {
 
 pub use crate::color::{parse_color, parse_color_hex};
 
+impl BackgroundValue {
+    fn resolve(&self) -> Option<gpui::Background> {
+        match self {
+            Self::Color(value) => crate::color::parse_color_rgba(value).map(Into::into),
+            Self::Gradient(gradient) => {
+                let GradientValue::LinearGradient {
+                    angle,
+                    stops,
+                    color_space,
+                } = gradient.as_ref();
+                let angle = *angle as f32;
+                let [from, to] = stops;
+                let from_position = from.position as f32;
+                let to_position = to.position as f32;
+                if !angle.is_finite()
+                    || !(0.0..=1.0).contains(&from_position)
+                    || !(0.0..=1.0).contains(&to_position)
+                {
+                    return None;
+                }
+
+                let color_space = match color_space.as_deref() {
+                    None | Some("srgb") => gpui::ColorSpace::Srgb,
+                    Some("oklab") => gpui::ColorSpace::Oklab,
+                    _ => return None,
+                };
+                Some(
+                    gpui::linear_gradient(
+                        angle,
+                        gpui::linear_color_stop(
+                            crate::color::parse_color_rgba(&from.color)?,
+                            from_position,
+                        ),
+                        gpui::linear_color_stop(
+                            crate::color::parse_color_rgba(&to.color)?,
+                            to_position,
+                        ),
+                    )
+                    .color_space(color_space),
+                )
+            }
+        }
+    }
+}
+
+impl StyleDesc {
+    pub(crate) fn has_background(&self) -> bool {
+        self.background_color.is_some() || self.background.is_some()
+    }
+
+    pub(crate) fn resolved_background(&self) -> Option<gpui::Background> {
+        if let Some(value) = self.background_color.as_deref() {
+            return crate::color::parse_color_rgba(value).map(Into::into);
+        }
+        self.background.as_ref()?.resolve()
+    }
+}
+
 /// Whether this style should insert a mouse hitbox.
 ///
 /// GPUI only hit-tests elements that own a hitbox. A painted overlay without
@@ -228,15 +312,11 @@ pub fn should_occlude(style: &StyleDesc) -> bool {
     if matches!(style.position.as_deref(), Some("absolute") | Some("fixed")) {
         return true;
     }
-    let fill = style
-        .background_color
-        .as_deref()
-        .or(style.background.as_deref());
-    let Some(color) = fill else {
+    if !style.has_background() {
         return false;
-    };
-    match crate::color::parse_color_rgba(color) {
-        Some(color) => color.a > 0.0,
+    }
+    match style.resolved_background() {
+        Some(background) => !background.is_transparent(),
         None => true,
     }
 }
@@ -333,6 +413,32 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn resolves_a_two_stop_linear_gradient() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"#ff0000","position":0},{"color":"#0000ff","position":1}],"colorSpace":"oklab"}}"##,
+        )
+        .unwrap();
+        let expected = gpui::linear_gradient(
+            90.0,
+            gpui::linear_color_stop(crate::color::parse_color_rgba("#ff0000").unwrap(), 0.0),
+            gpui::linear_color_stop(crate::color::parse_color_rgba("#0000ff").unwrap(), 1.0),
+        )
+        .color_space(gpui::ColorSpace::Oklab);
+
+        assert_eq!(style.resolved_background(), Some(expected));
+    }
+
+    #[test]
+    fn transparent_gradient_does_not_occlude() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":0,"stops":[{"color":"transparent","position":0},{"color":"#00000000","position":1}]}}"##,
+        )
+        .unwrap();
+
+        assert!(!should_occlude(&style));
     }
 
     #[test]

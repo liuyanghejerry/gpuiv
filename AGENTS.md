@@ -236,7 +236,7 @@ pub struct RetainedElement {
 
 ### StyleDesc (`style.rs`, camelCase serde)
 
-CSS-like, deserialized from the JS `style` object. Groups: display/flexbox/grid, sizing (`DimensionValue`: pixels | percentage | auto), per-side padding/margin, position, colors, per-side borders + radius + `BoxShadowValue`, text, overflow, cursor, `pointerEvents`, `userSelect`/`selectionColor`, and one-level `hover`/`active` nested `StyleDesc`s applied natively by GPUI (no JS round trip).
+CSS-like, deserialized from the JS `style` object. Groups: display/flexbox/grid, sizing (`DimensionValue`: pixels | percentage | auto), per-side padding/margin, position, colors, per-side borders + radius + `BoxShadowValue`, text, overflow, cursor, `pointerEvents`, `userSelect`/`selectionColor`, and one-level `hover`/`active` nested `StyleDesc`s applied natively by GPUI (no JS round trip). `background` is a `BackgroundValue` union: a color string or a `{type: "linear-gradient", angle, stops: [2], colorSpace?}` object resolved through `StyleDesc::resolved_background()` — painting, `should_occlude()`, and anchored overlay fill detection all share that one resolution.
 
 `should_occlude()` decides the hitbox policy: `pointerEvents: "none"` never blocks; `"auto"` always does; unset follows the painted surface (a fill or absolute/fixed position blocks, with in-flow fills using BlockMouseExceptScroll).
 

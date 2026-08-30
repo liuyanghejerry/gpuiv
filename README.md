@@ -1504,7 +1504,7 @@ keys are camelized, and CSS strings and arrays of objects are accepted too.
 
 **Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
 
-**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
 
 ### Colors
 
@@ -1522,6 +1522,32 @@ uses `csscolorparser` 0.8.3 and accepts:
 Standard comma and modern space/slash alpha forms work. Values are converted
 to hard-clipped sRGB before GPUI paints them. Invalid strings are ignored for
 that property; they do not reject the full style object.
+
+### Linear gradients
+
+`background` accepts GPUI's native **two-stop linear gradient**. Angles follow
+CSS: `0` points up and values increase clockwise. Stop positions use `0` to `1`.
+
+```tsx
+<div
+  style={{
+    background: {
+      type: 'linear-gradient',
+      angle: 90,
+      stops: [
+        { color: '#7c3aed', position: 0 },
+        { color: '#06b6d4', position: 1 },
+      ],
+      colorSpace: 'oklab',
+    },
+    borderRadius: 12,
+  }}
+/>
+```
+
+`colorSpace` is optional and defaults to `"srgb"`. GPUI also supports
+`"oklab"`. It does not support radial, conic, repeating, or gradients with
+more than two stops.
 
 `hsv()`, `hsva()`, and `hwba()` are parser extensions rather than CSS Color 4
 standard functions. `color()`, platform/dynamic colors, and numeric color
