@@ -13,6 +13,7 @@ import type {
   Container,
   ElementProps,
   HostNode,
+  MutationRenderer,
   NativeRenderer,
 } from "../types.js"
 import { wrapWithBatching } from "./batch-renderer.js"
@@ -155,8 +156,8 @@ export function createHostNode(
 // ── Batching host ────────────────────────────────────────────────────
 
 export interface GpuivBatchedHost {
-  /** The batched renderer — what host ops send mutations through. */
-  renderer: NativeRenderer
+  /** The commit-phase facade — what host ops queue mutations on. */
+  renderer: MutationRenderer
   /** Drain the mutation queue synchronously (applyBatch to Rust). */
   flushMutations: () => void
   /** Schedule the drain on a microtask (Vue update path). */
@@ -170,7 +171,7 @@ export function createBatchedHost(inner: NativeRenderer): GpuivBatchedHost {
     flushScheduled = true
     queueMicrotask(() => {
       flushScheduled = false
-      batched.commitMutations()
+      batched.flushMutations()
     })
   }
   const batched = wrapWithBatching(inner, scheduleFlush)
@@ -178,7 +179,7 @@ export function createBatchedHost(inner: NativeRenderer): GpuivBatchedHost {
     renderer: batched,
     flushMutations: () => {
       flushScheduled = false
-      batched.commitMutations()
+      batched.flushMutations()
     },
     scheduleFlush,
   }
@@ -191,8 +192,8 @@ export interface GpuivRendererHost {
   vue: Renderer<HostNode>
   /** The container node passed to `app.mount()` — a real root div in Rust. */
   container: HostNode
-  /** The batched NativeRenderer (mutations + queries). */
-  renderer: NativeRenderer
+  /** The commit-phase facade the host config queues mutations on. */
+  renderer: MutationRenderer
   /** Flush queued mutations synchronously. */
   flushMutations: () => void
   /** Release this root's claim on the renderer's event map. */
@@ -206,8 +207,10 @@ export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElemen
     ids,
     eventHandlers: new Map(),
   }
+  // Events always arrive with the raw renderer (renderer.ts, testing.ts), and
+  // the facade's flushMutations looks the container up by `inner` — only the
+  // raw renderer needs the registration.
   attachRoot(inner, container)
-  attachRoot(host.renderer, container)
 
   const containerNode = createHostNode(
     "#container",
@@ -318,7 +321,6 @@ export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElemen
      *  Vue app unmounted, before another root may mount on the same renderer. */
     detach: () => {
       detachRoot(inner, container)
-      detachRoot(host.renderer, container)
     },
   }
 
@@ -428,7 +430,7 @@ export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElemen
   function removeNode(node: HostNode): void {
     const parent = node.parent
     if (parent && node.id != null && parent.id != null && node.created) {
-      host.renderer.removeChild(parent.id, node.id)
+      // No removeChild wire op: native destroy_element unlinks from the parent.
       host.renderer.destroyElement(node.id)
     }
     removeFromParentMirror(node)
@@ -444,11 +446,9 @@ export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElemen
       materialize(containerNode)
     }
     const resolvedParent = parent
-    // Move across parents: detach from the old one first.
+    // Move across parents: mirror-only. There is no removeChild wire op —
+    // the appendChild/insertBefore below re-parents natively.
     if (child.parent && child.parent !== parent) {
-      if (child.created && child.parent.id != null && child.id != null) {
-        host.renderer.removeChild(child.parent.id, child.id)
-      }
       removeFromParentMirror(child)
     }
     child.parent = parent

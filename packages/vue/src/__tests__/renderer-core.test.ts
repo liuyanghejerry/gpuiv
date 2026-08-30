@@ -1,8 +1,8 @@
 /// Headless tests for the Vue custom renderer core.
 ///
-/// These do not need the native addon: a mock NativeRenderer records the
-/// mutation stream that `applyBatch` would receive, so we can assert on the
-/// exact protocol emitted by mount/update/remove flows.
+/// These do not need the native addon: a mock NativeRenderer records the op
+/// tuples each `applyBatch` receives, so we can assert on the exact protocol
+/// emitted by mount/update/remove flows.
 
 import { beforeEach, describe, expect, it } from "vitest"
 import { defineComponent, h, ref, nextTick } from "vue"
@@ -13,55 +13,9 @@ type Op = unknown[]
 
 class MockRenderer implements NativeRenderer {
   applied: Op[] = []
-  private ops: Op[] = []
 
-  batch(): void {
-    if (this.ops.length === 0) return
-    this.applied.push(...JSON.parse(JSON.stringify(this.ops)))
-    this.ops = []
-  }
-
-  createElement(id: number, elementType: string): void {
-    this.ops.push(["createElement", id, elementType])
-  }
-  destroyElement(id: number): number[] {
-    this.ops.push(["destroyElement", id])
-    return []
-  }
-  appendChild(parentId: number, childId: number): void {
-    this.ops.push(["appendChild", parentId, childId])
-  }
-  removeChild(parentId: number, childId: number): void {
-    this.ops.push(["removeChild", parentId, childId])
-  }
-  insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.ops.push(["insertBefore", parentId, childId, beforeId])
-  }
-  setStyle(id: number, styleJson: string | object): void {
-    this.ops.push(["setStyle", id, styleJson])
-  }
-  setText(id: number, content: string): void {
-    this.ops.push(["setText", id, content])
-  }
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.ops.push(["setEventListener", id, eventType, hasHandler])
-  }
-  setRoot(id: number): void {
-    this.ops.push(["setRoot", id])
-  }
-  commitMutations(): void {
-    this.batch()
-  }
-  setCustomProp(
-    id: number,
-    key: string,
-    value: string | object | number | boolean | null
-  ): void {
-    this.ops.push(["setCustomPropValue", id, key, value])
-  }
   applyBatch(json: string): number[] {
-    for (const op of JSON.parse(json) as Op[]) this.ops.push(op)
-    this.batch()
+    this.applied.push(...(JSON.parse(json) as Op[]))
     return []
   }
 }
@@ -139,13 +93,14 @@ describe("vue renderer core", () => {
     const { mock, host } = mountApp(Comp)
 
     expect(mock.applied).toContainEqual(["setEventListener", 2, "click", true])
-    expect(mock.applied).toContainEqual(["setCustomPropValue", 2, "testId", "btn"])
+    expect(mock.applied).toContainEqual(["setCustomProp", 2, "testId", "btn"])
 
-    // Fire a native click event as the Rust side would.
+    // Fire a native click event as the Rust side would — with the raw
+    // renderer, which is what the event registry is keyed by.
     const { handleGpuixEvent } = await import("../reconciler/event-registry.js")
     handleGpuixEvent(
       { elementId: 2, eventType: "click" } as never,
-      host.renderer
+      mock
     )
     await nextTick()
     expect(count.value).toBe(1)
@@ -161,7 +116,7 @@ describe("vue renderer core", () => {
     const { mock, host, app } = mountApp(Comp)
     app.unmount()
     host.flushMutations()
-    expect(mock.applied).toContainEqual(["removeChild", 1, 2])
+    // No removeChild op: native destroy_element unlinks from the parent.
     expect(mock.applied).toContainEqual(["destroyElement", 2])
   })
 
@@ -201,11 +156,6 @@ describe("vue renderer core", () => {
           if (i !== -1) arr.splice(i, 1)
           const at = arr.indexOf(before)
           arr.splice(at === -1 ? arr.length : at, 0, id)
-        } else if (op[0] === "removeChild") {
-          const arr = ensure(op[1] as number)
-          const id = op[2] as number
-          const i = arr.indexOf(id)
-          if (i !== -1) arr.splice(i, 1)
         } else if (op[0] === "createElement") {
           ensure(op[1] as number)
         }
@@ -248,7 +198,6 @@ describe("vue renderer lifecycle semantics", () => {
     shown.value = false
     await nextTick()
     host.flushMutations()
-    expect(mock.applied).toContainEqual(["removeChild", 2, 3])
     expect(mock.applied).toContainEqual(["destroyElement", 3])
 
     shown.value = true
@@ -324,9 +273,9 @@ describe("vue renderer lifecycle semantics", () => {
         }),
     })
     const { mock } = mountApp(Comp)
-    expect(mock.applied).toContainEqual(["setCustomPropValue", 2, "value", "hello"])
-    expect(mock.applied).toContainEqual(["setCustomPropValue", 2, "placeholder", "Type..."])
-    expect(mock.applied).toContainEqual(["setCustomPropValue", 2, "readOnly", true])
+    expect(mock.applied).toContainEqual(["setCustomProp", 2, "value", "hello"])
+    expect(mock.applied).toContainEqual(["setCustomProp", 2, "placeholder", "Type..."])
+    expect(mock.applied).toContainEqual(["setCustomProp", 2, "readOnly", true])
   })
 
   it("keeps hover/active nested style objects intact", () => {
@@ -343,7 +292,7 @@ describe("vue renderer lifecycle semantics", () => {
       setup: () => () => h("div", { class: "fancy", style: { width: 10 } }),
     })
     const { mock } = mountApp(Comp)
-    expect(mock.applied.some((o) => o[0] === "setCustomPropValue")).toBe(false)
+    expect(mock.applied.some((o) => o[0] === "setCustomProp")).toBe(false)
     expect(mock.applied).toContainEqual(["setStyle", 2, { width: 10 }])
   })
 })

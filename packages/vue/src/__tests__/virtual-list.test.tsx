@@ -18,53 +18,9 @@ type Op = unknown[]
 
 class MockRenderer implements NativeRenderer {
   applied: Op[] = []
-  private ops: Op[] = []
-  batch(): void {
-    if (this.ops.length === 0) return
-    this.applied.push(...JSON.parse(JSON.stringify(this.ops)))
-    this.ops = []
-  }
-  createElement(id: number, elementType: string): void {
-    this.ops.push(["createElement", id, elementType])
-  }
-  destroyElement(id: number): number[] {
-    this.ops.push(["destroyElement", id])
-    return []
-  }
-  appendChild(parentId: number, childId: number): void {
-    this.ops.push(["appendChild", parentId, childId])
-  }
-  removeChild(parentId: number, childId: number): void {
-    this.ops.push(["removeChild", parentId, childId])
-  }
-  insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.ops.push(["insertBefore", parentId, childId, beforeId])
-  }
-  setStyle(id: number, styleJson: string | object): void {
-    this.ops.push(["setStyle", id, styleJson])
-  }
-  setText(id: number, content: string): void {
-    this.ops.push(["setText", id, content])
-  }
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.ops.push(["setEventListener", id, eventType, hasHandler])
-  }
-  setRoot(id: number): void {
-    this.ops.push(["setRoot", id])
-  }
-  commitMutations(): void {
-    this.batch()
-  }
-  setCustomProp(
-    id: number,
-    key: string,
-    value: string | object | number | boolean | null
-  ): void {
-    this.ops.push(["setCustomPropValue", id, key, value])
-  }
+
   applyBatch(json: string): number[] {
-    for (const op of JSON.parse(json) as Op[]) this.ops.push(op)
-    this.batch()
+    this.applied.push(...(JSON.parse(json) as Op[]))
     return []
   }
 }
@@ -86,7 +42,7 @@ function listId(applied: Op[]): number {
 
 function windowStart(applied: Op[]): number | undefined {
   const op = applied.find(
-    (o) => o[0] === "setCustomPropValue" && o[2] === "windowStart",
+    (o) => o[0] === "setCustomProp" && o[2] === "windowStart",
   )
   return op?.[3] as number | undefined
 }
@@ -116,7 +72,7 @@ describe("virtual-list windowing", () => {
     expect(texts[0]).toBe("0")
     expect(texts.at(-1)).toBe("24")
     expect(windowStart(mock.applied)).toBe(0)
-    expect(mock.applied).toContainEqual(["setCustomPropValue", id, "itemCount", 100])
+    expect(mock.applied).toContainEqual(["setCustomProp", id, "itemCount", 100])
   })
 
   it("re-windows when the native visibleRange event arrives", async () => {
@@ -138,13 +94,13 @@ describe("virtual-list windowing", () => {
 
     handleGpuixEvent(
       { elementId: id, eventType: "visibleRange", startIndex: 50, endIndex: 55 } as never,
-      host.renderer,
+      mock,
     )
     await nextTick()
     host.flushMutations()
 
     const starts = mock.applied.filter(
-      (o) => o[0] === "setCustomPropValue" && o[2] === "windowStart",
+      (o) => o[0] === "setCustomProp" && o[2] === "windowStart",
     )
     // 50 - pad(25) = 25
     expect(starts.at(-1)![3]).toBe(25)
@@ -426,7 +382,9 @@ describe("virtual-list imperative api", () => {
       },
     })
     const app = host.vue.createApp(Comp as never)
-    app.provide(GPUIV_CONTEXT, { renderer: host.renderer })
+    // Provide the raw renderer, matching createTestApp: app code sees
+    // application commands (scrollToItem, getListScrollTop), not the facade.
+    app.provide(GPUIV_CONTEXT, { renderer: mock })
     app.mount(host.container)
     host.flushMutations()
     return { mock, host, app, instance }

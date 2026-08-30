@@ -25,7 +25,6 @@ use crate::renderer::{
     GpuixView,
 };
 use crate::retained_tree::RetainedTree;
-use crate::style::StyleDesc;
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
@@ -140,9 +139,7 @@ fn window_dimension(value: Option<f64>, default: f64, label: &str) -> Result<f32
 ///
 /// Usage from JS:
 ///   const r = new TestGpuixRenderer()
-///   r.createElement(1, "div")
-///   r.setRoot(1)
-///   r.commitMutations()
+///   r.applyBatch('[["createElement",1,"div"],["setRoot",1]]')
 ///   r.flush()                  // triggers GpuixView::render() via Metal
 ///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
 ///   const events = r.drainEvents()
@@ -226,24 +223,6 @@ impl TestGpuixRenderer {
         })
     }
 
-    // ── Mutation API (same interface as GpuixRenderer) ────────────────
-
-    #[napi]
-    pub fn create_element(&self, id: f64, element_type: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().create_element(id, element_type);
-        Ok(())
-    }
-
-    /// Destroy an element and all descendants. Returns destroyed IDs
-    /// so JS can clean up event handlers.
-    #[napi]
-    pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
-        let id = to_element_id(id)?;
-        let destroyed = self.tree.lock().unwrap().destroy_element(id);
-        Ok(destroyed.iter().map(|&id| id as f64).collect())
-    }
-
     /// How many elements the retained tree holds, reachable from the root or
     /// not. `getTreeJson` walks from the root, so it cannot see a node that was
     /// detached and never destroyed. This is the only way a test can prove a
@@ -253,104 +232,13 @@ impl TestGpuixRenderer {
         self.tree.lock().unwrap().elements.len() as u32
     }
 
-    #[napi]
-    pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().append_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().remove_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn insert_before(&self, parent_id: f64, child_id: f64, before_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        let before_id = to_element_id(before_id)?;
-        self.tree
-            .lock()
-            .unwrap()
-            .insert_before(parent_id, child_id, before_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let style: StyleDesc = serde_json::from_str(&style_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse style: {}", e)))?;
-        self.tree.lock().unwrap().set_style(id, style);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_text(&self, id: f64, content: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().set_text(id, content);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_event_listener(&self, id: f64, event_type: String, has_handler: bool) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_event_listener(id, event_type, has_handler);
-        Ok(())
-    }
-
-    /// Set the root element (called from appendChildToContainer).
-    #[napi]
-    pub fn set_root(&self, id: f64) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().root_id = Some(id);
-        Ok(())
-    }
-
-    /// Set a custom prop on an element (for non-div/text elements like input, editor, diff).
-    #[napi]
-    pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let value: serde_json::Value = serde_json::from_str(&value_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
-        self.tree.lock().unwrap().set_custom_prop(id, key, value);
-        Ok(())
-    }
-
-    /// Get a custom prop value from an element.
-    #[napi]
-    pub fn get_custom_prop(&self, id: f64, key: String) -> Result<Option<String>> {
-        let id = to_element_id(id)?;
-        let tree = self.tree.lock().unwrap();
-        Ok(tree
-            .get_custom_prop(id, &key)
-            .map(|v| serde_json::to_string(v).unwrap_or_default()))
-    }
-
-    /// Signal that a batch of mutations is complete.
-    /// In tests, this is a no-op — flush() handles the actual re-render.
-    #[napi]
-    pub fn commit_mutations(&self) -> Result<()> {
-        Ok(())
-    }
-
     /// Apply a batch of mutations in a single FFI call.
     /// Same format as GpuixRenderer::apply_batch (string op names).
     /// Returns accumulated destroyed IDs from all destroyElement ops.
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
-        let ops: Vec<serde_json::Value> = serde_json::from_str(&json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse batch: {}", e)))?;
         let mut tree = self.tree.lock().unwrap();
-        apply_batch_to_tree(&mut tree, &ops).map_err(Error::from_reason)
+        apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)
     }
 
     // ── Test-specific methods ────────────────────────────────────────

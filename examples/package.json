@@ -9,7 +9,8 @@
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
     "infinite-chat": "bun --hot infinite-chat.tsx",
-    "compile": "bun compile-chat.ts"
+    "compile": "bun compile-chat.ts",
+    "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
     "@gpuiv/native": "workspace:*",
@@ -22,6 +23,8 @@
   },
   "devDependencies": {
     "@types/mdast": "^4.0.4",
+    "cbor-x": "^1.6.6",
+    "msgpackr": "^2.0.6",
     "tsx": "^4.19.0",
     "vitest": "^4.0.18",
     "@types/node": "^25.3.3",
