@@ -1,7 +1,8 @@
 //! Cross-element text selection state.
 //!
-//! Ported from Comet (https://github.com/zeronsh/comet), MIT.
-//! Original: `crates/ui/src/markdown/selection.rs`.
+//! Ported from Comet, MIT.
+//! Upstream: https://github.com/zeronsh/comet/blob/main/crates/ui/src/markdown/selection.rs
+//! Reviewed fix: https://github.com/zeronsh/comet/commit/3536a3702ca405fec1321e95f54e280240c5d38f
 //!
 //! GPUI has no built-in selection for plain text. Zed's markdown selects
 //! continuously because its whole document is ONE element over one text model.
@@ -62,6 +63,8 @@ pub struct SelectionState {
     /// Byte offset of the anchor within its element.
     anchor_ix: usize,
     dragging: bool,
+    /// Direction established while the anchor is still painted.
+    forward: Option<bool>,
     /// Resolved spans in document order. Empty while a click has not moved.
     spans: Vec<Span>,
     active: bool,
@@ -77,14 +80,15 @@ impl SelectionState {
         self.anchor_key = key.to_string();
         self.anchor_ix = ix;
         self.dragging = false;
+        self.forward = None;
         self.active = false;
         self.pending = true;
         self.spans.clear();
     }
 
     /// Turn a pending press into a live drag. True when this call started it.
-    pub fn promote_pending_for(&mut self, key: &str) -> bool {
-        if !self.pending || self.anchor_key != key {
+    pub fn promote_pending(&mut self) -> bool {
+        if !self.pending {
             return false;
         }
         self.pending = false;
@@ -108,6 +112,7 @@ impl SelectionState {
         self.anchor_key = key.to_string();
         self.anchor_ix = range.start;
         self.dragging = true;
+        self.forward = None;
         self.active = true;
         self.pending = false;
         self.spans = vec![Span {
@@ -118,9 +123,35 @@ impl SelectionState {
         }];
     }
 
-    /// The live drag's anchor offset, if `key` owns the drag.
-    pub fn drag_anchor(&self, key: &str) -> Option<usize> {
-        (self.active && self.dragging && self.anchor_key == key).then_some(self.anchor_ix)
+    pub fn is_dragging(&self) -> bool {
+        self.active && self.dragging
+    }
+
+    /// Resolve a drag head against this frame's visible runs.
+    ///
+    /// Once virtualization removes the anchor, an overlapping selected run
+    /// joins the visible frame to the spans retained from earlier frames.
+    pub fn update_drag(&mut self, elements: &[RegisteredText], head: (usize, usize)) -> bool {
+        if !self.is_dragging() {
+            return false;
+        }
+        let spans = if let Some(anchor_element) = elements
+            .iter()
+            .position(|element| element.key == self.anchor_key)
+        {
+            let anchor = (anchor_element, self.anchor_ix);
+            self.forward = Some(anchor <= head);
+            resolve_spans(elements, anchor, head)
+        } else {
+            let Some(forward) = self.forward else {
+                return false;
+            };
+            let Some(spans) = extend_virtualized_drag(&self.spans, elements, head, forward) else {
+                return false;
+            };
+            spans
+        };
+        self.update_spans(spans)
     }
 
     /// Replace the resolved spans. Returns true when they changed.
@@ -132,13 +163,13 @@ impl SelectionState {
         true
     }
 
-    /// End the drag for `key`'s claim. Returns the joined text when non-empty.
-    pub fn end_drag(&mut self, key: &str) -> Option<String> {
-        if !self.active || self.anchor_key != key || !self.dragging {
+    /// End the active drag even when its anchor is no longer painted.
+    pub fn end_active_drag(&mut self) -> Option<String> {
+        if !self.is_dragging() {
             return None;
         }
         self.dragging = false;
-        if self.spans.iter().all(|s| s.range.is_empty()) {
+        if self.spans.iter().all(|span| span.range.is_empty()) {
             self.clear();
             return None;
         }
@@ -170,6 +201,43 @@ impl SelectionState {
             return None;
         }
         Some(join_spans(&self.spans))
+    }
+}
+
+fn extend_virtualized_drag(
+    existing: &[Span],
+    elements: &[RegisteredText],
+    head: (usize, usize),
+    forward: bool,
+) -> Option<Vec<Span>> {
+    if forward {
+        let (element_index, span_index) =
+            elements
+                .iter()
+                .enumerate()
+                .find_map(|(element_index, element)| {
+                    existing
+                        .iter()
+                        .position(|span| span.key == element.key)
+                        .map(|span_index| (element_index, span_index))
+                })?;
+        let start = existing.get(span_index)?.range.start;
+        let mut merged = existing.get(..span_index)?.to_vec();
+        merged.extend(resolve_spans(elements, (element_index, start), head));
+        Some(merged)
+    } else {
+        let (element_index, span_index) = elements.iter().enumerate().rev().find_map(
+            |(element_index, element)| {
+                existing
+                    .iter()
+                    .position(|span| span.key == element.key)
+                    .map(|span_index| (element_index, span_index))
+            },
+        )?;
+        let end = existing.get(span_index)?.range.end;
+        let mut merged = resolve_spans(elements, head, (element_index, end));
+        merged.extend_from_slice(existing.get(span_index + 1..)?);
+        Some(merged)
     }
 }
 
@@ -313,27 +381,123 @@ mod tests {
     fn drag_lifecycle_and_copy_joins() {
         let mut sel = SelectionState::default();
         sel.arm("p1", 6);
-        assert!(sel.promote_pending_for("p1"));
-        assert_eq!(sel.drag_anchor("p1"), Some(6));
-        assert_eq!(sel.drag_anchor("p2"), None);
+        assert!(sel.promote_pending());
+        assert!(sel.is_dragging());
         let spans = resolve_spans(&elems(), (0, 6), (1, 6));
         assert!(sel.update_spans(spans.clone()));
         assert!(!sel.update_spans(spans));
         assert_eq!(sel.wash_range("p1"), Some(6..15));
         assert_eq!(sel.wash_range("p2"), Some(0..6));
         assert_eq!(sel.wash_range("p3"), None);
-        assert_eq!(sel.end_drag("p1").as_deref(), Some("paragraph\nsecond"));
+        assert_eq!(sel.end_active_drag().as_deref(), Some("paragraph\nsecond"));
         assert_eq!(sel.selected_text().as_deref(), Some("paragraph\nsecond"));
         sel.clear();
         assert_eq!(sel.selected_text(), None);
     }
 
     #[test]
+    fn drag_survives_forward_virtualization() {
+        let mut sel = SelectionState::default();
+        sel.arm("p1", 6);
+        assert!(sel.promote_pending());
+        assert!(sel.update_drag(&elems(), (2, 5)));
+        let shifted = [
+            reg("p2", "second", None),
+            reg("p3", "third one", None),
+            reg("p4", "fourth", None),
+        ];
+        assert!(sel.update_drag(&shifted, (2, 4)));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("paragraph\nsecond\nthird one\nfour")
+        );
+        assert_eq!(
+            sel.end_active_drag().as_deref(),
+            Some("paragraph\nsecond\nthird one\nfour")
+        );
+        assert!(!sel.is_dragging());
+    }
+
+    #[test]
+    fn drag_survives_backward_virtualization() {
+        let mut sel = SelectionState::default();
+        sel.arm("p5", 4);
+        assert!(sel.promote_pending());
+        let first = [
+            reg("p3", "third", None),
+            reg("p4", "fourth", None),
+            reg("p5", "fifth", None),
+        ];
+        assert!(sel.update_drag(&first, (0, 2)));
+        let shifted = [
+            reg("p2", "second", None),
+            reg("p3", "third", None),
+            reg("p4", "fourth", None),
+        ];
+        assert!(sel.update_drag(&shifted, (0, 3)));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("ond\nthird\nfourth\nfift")
+        );
+        assert_eq!(
+            sel.end_active_drag().as_deref(),
+            Some("ond\nthird\nfourth\nfift")
+        );
+    }
+
+    #[test]
+    fn virtualized_drag_requires_overlap() {
+        let mut sel = SelectionState::default();
+        sel.arm("p1", 6);
+        assert!(sel.promote_pending());
+        assert!(sel.update_drag(&elems(), (2, 5)));
+        let unrelated = [reg("p8", "eighth", None), reg("p9", "ninth", None)];
+        assert!(!sel.update_drag(&unrelated, (1, 3)));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("paragraph\nsecond\nthird")
+        );
+    }
+
+    #[test]
+    fn virtualized_drag_waits_until_direction_is_known() {
+        let mut sel = SelectionState::default();
+        sel.arm("p1", 6);
+        assert!(sel.promote_pending());
+        let shifted = [reg("p2", "second", None), reg("p3", "third", None)];
+        assert!(!sel.update_drag(&shifted, (1, 3)));
+        assert_eq!(sel.selected_text(), None);
+    }
+
+    #[test]
+    fn virtualized_copy_preserves_grouped_and_ungrouped_runs() {
+        let mut sel = SelectionState::default();
+        sel.arm("2:0", 0);
+        assert!(sel.promote_pending());
+        let first = [
+            reg("2:0", "Hello ", Some(1)),
+            reg("3:0", "Tommy", Some(1)),
+            reg("7:0", "let a = 1;", None),
+        ];
+        assert!(sel.update_drag(&first, (2, 10)));
+        let shifted = [
+            reg("3:0", "Tommy", Some(1)),
+            reg("7:0", "let a = 1;", None),
+            reg("7:1", "let b = 2;", None),
+        ];
+        assert!(sel.update_drag(&shifted, (2, 10)));
+        assert_eq!(
+            sel.selected_text().as_deref(),
+            Some("Hello Tommy\nlet a = 1;\nlet b = 2;")
+        );
+    }
+
+    #[test]
     fn empty_click_clears_on_release() {
         let mut sel = SelectionState::default();
         sel.arm("p1", 3);
-        assert!(sel.promote_pending_for("p1"));
-        assert_eq!(sel.end_drag("p1"), None);
+        assert!(sel.promote_pending());
+        assert_eq!(sel.end_active_drag(), None);
         assert_eq!(sel.selected_text(), None);
     }
 
@@ -343,7 +507,7 @@ mod tests {
         sel.arm("p1", 3);
         assert!(sel.is_pending());
         assert!(!sel.is_active());
-        assert_eq!(sel.drag_anchor("p1"), None);
+        assert!(!sel.is_dragging());
         sel.cancel_pending();
         assert!(!sel.is_pending());
         assert_eq!(sel.selected_text(), None);
@@ -353,13 +517,12 @@ mod tests {
     fn pending_press_promotes_on_drag() {
         let mut sel = SelectionState::default();
         sel.arm("p1", 6);
-        assert!(!sel.promote_pending_for("p2"));
-        assert!(sel.promote_pending_for("p1"));
-        assert!(!sel.promote_pending_for("p1"));
-        assert_eq!(sel.drag_anchor("p1"), Some(6));
+        assert!(sel.promote_pending());
+        assert!(!sel.promote_pending());
+        assert!(sel.is_dragging());
         let spans = resolve_spans(&elems(), (0, 6), (0, 15));
         assert!(sel.update_spans(spans));
-        assert_eq!(sel.end_drag("p1").as_deref(), Some("paragraph"));
+        assert_eq!(sel.end_active_drag().as_deref(), Some("paragraph"));
     }
 
     #[test]
@@ -367,7 +530,7 @@ mod tests {
         let mut sel = SelectionState::default();
         sel.begin_with_span("p1", "hello world", 6..11);
         assert_eq!(sel.wash_range("p1"), Some(6..11));
-        assert_eq!(sel.end_drag("p1").as_deref(), Some("world"));
+        assert_eq!(sel.end_active_drag().as_deref(), Some("world"));
     }
 
     #[test]
@@ -396,7 +559,7 @@ mod tests {
     fn copy_joins_one_group_without_newlines() {
         let mut sel = SelectionState::default();
         sel.arm("2:0", 0);
-        assert!(sel.promote_pending_for("2:0"));
+        assert!(sel.promote_pending());
         let spans = resolve_spans(&interpolated(), (0, 0), (2, 1));
         assert!(sel.update_spans(spans));
         assert_eq!(sel.selected_text().as_deref(), Some("Hello Tommy!"));
@@ -411,7 +574,7 @@ mod tests {
         ];
         let mut sel = SelectionState::default();
         sel.arm("2:0", 0);
-        assert!(sel.promote_pending_for("2:0"));
+        assert!(sel.promote_pending());
         assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (2, 11))));
         assert_eq!(
             sel.selected_text().as_deref(),
@@ -426,7 +589,7 @@ mod tests {
         let elements = vec![reg("7:0", "let a = 1;", None), reg("7:1", "let b = 2;", None)];
         let mut sel = SelectionState::default();
         sel.arm("7:0", 0);
-        assert!(sel.promote_pending_for("7:0"));
+        assert!(sel.promote_pending());
         assert!(sel.update_spans(resolve_spans(&elements, (0, 0), (1, 10))));
         assert_eq!(
             sel.selected_text().as_deref(),

@@ -441,3 +441,49 @@ describe("virtual-list imperative api", () => {
   })
 })
 
+/// GPU-backed test for the selection continuity port (upstream fb75c1c,
+/// 1cd46cd): a drag near the list edge scrolls the list, and the selection
+/// survives the anchor row unmounting under virtualization.
+describeNative("virtual-list selection autoscroll", () => {
+  it("scrolls and keeps selecting when the anchor row unmounts", async () => {
+    const App = defineComponent({
+      setup: () => () =>
+        h(
+          "virtual-list",
+          { overdraw: 0, estimatedItemHeight: 40, style: { width: 400, height: 160 } },
+          Array.from({ length: 30 }, (_, index) =>
+            h(
+              "div",
+              {
+                key: index,
+                style: { display: "flex", height: 40, flexShrink: 0, alignItems: "center" },
+              },
+              `row-${index}`,
+            ),
+          ),
+        ),
+    })
+    const app = createTestApp(App)
+    const renderer = app.renderer
+    const list = renderer.findByType("virtual-list")[0]!
+
+    renderer.nativeSimulateMouseDown(1, 20)
+    renderer.nativeSimulateMouseMove(1, 158, 0)
+    for (let tick = 0; tick < 8; tick += 1) {
+      renderer.advanceTime(24)
+    }
+
+    const selected = renderer.getSelectedText()
+    expect(renderer.getScrollOffset(list.id)?.[1]).toBeLessThan(-40)
+    expect(selected).toContain("row-0")
+    expect(selected).toMatch(/row-[5-9]/)
+
+    renderer.nativeSimulateMouseUp(1, 158)
+    const stoppedAt = renderer.getScrollOffset(list.id)?.[1]
+    renderer.advanceTime(48)
+    expect(renderer.getScrollOffset(list.id)?.[1]).toBe(stoppedAt)
+    expect(renderer.getSelectedText()).toBe(selected)
+    app.unmount()
+  })
+})
+

@@ -1,6 +1,12 @@
 //! Native single-line and multiline text editors with platform IME support.
 //!
-//! Caret blinking is ported from Comet's `crates/ui/src/composer.rs` (MIT).
+//! The editor follows GPUI's input example:
+//! https://github.com/zed-industries/zed/blob/main/crates/gpui/examples/input.rs
+//! Caret blinking, double-click, drag autoscroll, and bounded undo follow
+//! Comet's composer (MIT). Use Comet only as a generic editor behavior
+//! reference; its composer contains app-specific code.
+//! Upstream: https://github.com/zeronsh/comet/blob/main/crates/ui/src/composer.rs
+//! Reviewed at: https://github.com/zeronsh/comet/blob/b3fa51872f70c8f973c241b659cf0c166766f4f5/crates/ui/src/composer.rs
 
 use std::collections::VecDeque;
 use std::ops::Range;
@@ -8,10 +14,10 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context,
-    CursorStyle, ElementInputHandler, Entity, EntityInputHandler, FocusHandle, GlobalElementId,
-    KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad,
-    Pixels, Point, ScrollWheelEvent, SharedString, Style, Task, TextRun, TextStyle, UTF16Selection,
-    UnderlineStyle, Window, WrappedLine,
+    CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
+    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent, SharedString, Style, Task, TextRun,
+    TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -62,9 +68,51 @@ actions!(
 const INPUT_KEY_CONTEXT: &str = "GpuixInput";
 const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
 const CARET_BLINK_MS: u64 = 500;
+const DRAG_SCROLL_FRAME_MS: u64 = 16;
+const UNDO_COALESCE: Duration = Duration::from_millis(700);
+const UNDO_LIMIT: usize = 200;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS) % 2 == 0
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PressIntent {
+    SelectAll,
+    SelectWord,
+    ExtendSelection,
+    PlaceCaret,
+}
+
+impl PressIntent {
+    fn arms_drag(self) -> bool {
+        matches!(self, Self::ExtendSelection | Self::PlaceCaret)
+    }
+}
+
+fn press_intent(click_count: usize, shift: bool) -> PressIntent {
+    match click_count {
+        n if n >= 3 => PressIntent::SelectAll,
+        2 => PressIntent::SelectWord,
+        _ if shift => PressIntent::ExtendSelection,
+        _ => PressIntent::PlaceCaret,
+    }
+}
+
+fn drag_scroll_delta(
+    pointer_y: f32,
+    viewport_top: f32,
+    viewport_bottom: f32,
+    line_height: f32,
+) -> f32 {
+    let distance = if pointer_y < viewport_top {
+        pointer_y - viewport_top
+    } else if pointer_y > viewport_bottom {
+        pointer_y - viewport_bottom
+    } else {
+        return 0.0;
+    };
+    distance.signum() * (distance.abs() * 0.2).clamp(1.0, line_height)
 }
 
 fn utf16_offset_to_utf8(text: &str, offset: usize) -> usize {
@@ -260,6 +308,9 @@ impl CustomElement for TextEditorElement {
                     selection_reversed: false,
                     marked_range: None,
                     is_selecting: false,
+                    drag_position: None,
+                    drag_generation: 0,
+                    drag_autoscroll_active: false,
                     scroll_top: 0.0,
                     scroll_left: 0.0,
                     follow_cursor: true,
@@ -274,8 +325,9 @@ impl CustomElement for TextEditorElement {
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
-                    undo_stack: Vec::new(),
+                    undo_stack: VecDeque::new(),
                     redo_stack: Vec::new(),
+                    last_edit: None,
                 })
             })
             .clone();
@@ -400,6 +452,79 @@ struct EditSnapshot {
     selection_reversed: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditKind {
+    Insert,
+    DeleteBackward,
+    DeleteForward,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct CoalescingEdit {
+    kind: EditKind,
+    anchor: usize,
+}
+
+#[derive(Clone, Copy)]
+struct LastEdit {
+    edit: CoalescingEdit,
+    when: Instant,
+}
+
+fn coalescing_edit(
+    range: &Range<usize>,
+    new_text: &str,
+    selection_reversed: bool,
+) -> Option<CoalescingEdit> {
+    if new_text.is_empty() {
+        if range.is_empty() {
+            return None;
+        }
+        return Some(CoalescingEdit {
+            kind: if selection_reversed {
+                EditKind::DeleteBackward
+            } else {
+                EditKind::DeleteForward
+            },
+            anchor: range.start,
+        });
+    }
+
+    let mut characters = new_text.chars();
+    let character = characters.next()?;
+    (range.is_empty() && characters.next().is_none() && !character.is_whitespace()).then_some(
+        CoalescingEdit {
+            kind: EditKind::Insert,
+            anchor: range.start + new_text.len(),
+        },
+    )
+}
+
+fn edits_coalesce(
+    previous: CoalescingEdit,
+    current: Option<CoalescingEdit>,
+    range: &Range<usize>,
+    elapsed: Duration,
+) -> bool {
+    let Some(current) = current else {
+        return false;
+    };
+    if previous.kind != current.kind || elapsed >= UNDO_COALESCE {
+        return false;
+    }
+    match current.kind {
+        EditKind::Insert | EditKind::DeleteForward => range.start == previous.anchor,
+        EditKind::DeleteBackward => range.end == previous.anchor,
+    }
+}
+
+fn push_undo_snapshot(history: &mut VecDeque<EditSnapshot>, snapshot: EditSnapshot) {
+    if history.len() == UNDO_LIMIT {
+        history.pop_front();
+    }
+    history.push_back(snapshot);
+}
+
 struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
@@ -418,6 +543,9 @@ struct TextEditorState {
     selection_reversed: bool,
     marked_range: Option<Range<usize>>,
     is_selecting: bool,
+    drag_position: Option<Point<Pixels>>,
+    drag_generation: u64,
+    drag_autoscroll_active: bool,
     scroll_top: f32,
     scroll_left: f32,
     follow_cursor: bool,
@@ -432,8 +560,9 @@ struct TextEditorState {
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
-    undo_stack: Vec<EditSnapshot>,
+    undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
+    last_edit: Option<LastEdit>,
 }
 
 impl TextEditorState {
@@ -496,6 +625,7 @@ impl TextEditorState {
         self.reset_blink(cx);
         self.undo_stack.clear();
         self.redo_stack.clear();
+        self.last_edit = None;
         cx.notify();
     }
 
@@ -525,9 +655,28 @@ impl TextEditorState {
         self.selection_reversed = snapshot.selection_reversed;
         self.marked_range = None;
         self.follow_cursor = true;
+        self.last_edit = None;
         self.reset_blink(cx);
         self.emit_change();
         cx.notify();
+    }
+
+    fn record_edit(&mut self, range: &Range<usize>, new_text: &str, now: Instant) {
+        let current = coalescing_edit(range, new_text, self.selection_reversed);
+        let mergeable = self.last_edit.is_some_and(|previous| {
+            edits_coalesce(
+                previous.edit,
+                current,
+                range,
+                now.duration_since(previous.when),
+            )
+        });
+        if !mergeable {
+            let snapshot = self.snapshot();
+            push_undo_snapshot(&mut self.undo_stack, snapshot);
+        }
+        self.redo_stack.clear();
+        self.last_edit = current.map(|edit| LastEdit { edit, when: now });
     }
 
     fn cursor_offset(&self) -> usize {
@@ -849,7 +998,7 @@ impl TextEditorState {
         if self.read_only {
             return;
         }
-        if let Some(previous) = self.undo_stack.pop() {
+        if let Some(previous) = self.undo_stack.pop_back() {
             self.redo_stack.push(self.snapshot());
             self.restore(previous, cx);
         }
@@ -860,7 +1009,8 @@ impl TextEditorState {
             return;
         }
         if let Some(next) = self.redo_stack.pop() {
-            self.undo_stack.push(self.snapshot());
+            let snapshot = self.snapshot();
+            push_undo_snapshot(&mut self.undo_stack, snapshot);
             self.restore(next, cx);
         }
     }
@@ -945,23 +1095,120 @@ impl TextEditorState {
             window.request_text_input();
         }
         window.focus(&self.focus_handle, cx);
-        self.is_selecting = true;
-        let index = self.index_for_mouse_position(event.position);
-        if event.modifiers.shift {
-            self.select_to(index, cx);
-        } else {
-            self.move_to(index, cx);
+        let intent = press_intent(event.click_count, event.modifiers.shift);
+        self.is_selecting = intent.arms_drag();
+        self.drag_position = intent.arms_drag().then_some(event.position);
+        self.drag_generation = self.drag_generation.wrapping_add(1);
+        self.drag_autoscroll_active = false;
+        match intent {
+            PressIntent::SelectAll => {
+                self.move_to(0, cx);
+                self.select_to(self.content.len(), cx);
+            }
+            PressIntent::SelectWord => {
+                let index = self.index_for_mouse_position(event.position);
+                let range = crate::text::selection::word_range(&self.content, index);
+                self.move_to(range.start, cx);
+                self.select_to(range.end, cx);
+            }
+            PressIntent::ExtendSelection => {
+                self.select_to(self.index_for_mouse_position(event.position), cx);
+            }
+            PressIntent::PlaceCaret => {
+                self.move_to(self.index_for_mouse_position(event.position), cx);
+            }
         }
     }
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
         self.is_selecting = false;
+        self.drag_position = None;
+        self.drag_generation = self.drag_generation.wrapping_add(1);
+        self.drag_autoscroll_active = false;
     }
 
-    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if self.is_selecting {
-            self.select_to(self.index_for_mouse_position(event.position), cx);
+            self.drag_position = Some(event.position);
+            let position = self.drag_selection_position(event.position);
+            self.select_to(self.index_for_mouse_position(position), cx);
+            if self.multiline
+                && self.drag_scroll_delta(event.position) != 0.0
+                && !self.drag_autoscroll_active
+            {
+                self.start_drag_autoscroll(cx);
+            }
         }
+    }
+
+    fn start_drag_autoscroll(&mut self, cx: &mut Context<Self>) {
+        self.drag_autoscroll_active = true;
+        let generation = self.drag_generation;
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor()
+                .timer(Duration::from_millis(DRAG_SCROLL_FRAME_MS))
+                .await;
+            let keep_running = this
+                .update(cx, |input, cx| input.drag_autoscroll_tick(generation, cx))
+                .unwrap_or(false);
+            if !keep_running {
+                break;
+            }
+        })
+        .detach();
+    }
+
+    fn drag_selection_position(&self, position: Point<Pixels>) -> Point<Pixels> {
+        let Some(bounds) = self.last_bounds else {
+            return position;
+        };
+        let x = if self.multiline {
+            position.x.clamp(bounds.left(), bounds.right() - px(0.5))
+        } else {
+            position.x
+        };
+        point(
+            x,
+            position.y.clamp(bounds.top(), bounds.bottom() - px(0.5)),
+        )
+    }
+
+    fn drag_scroll_delta(&self, position: Point<Pixels>) -> f32 {
+        let Some(bounds) = self.last_bounds else {
+            return 0.0;
+        };
+        drag_scroll_delta(
+            f32::from(position.y),
+            f32::from(bounds.top()),
+            f32::from(bounds.bottom()),
+            f32::from(self.line_height),
+        )
+    }
+
+    fn drag_autoscroll_tick(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
+        if !self.multiline || !self.is_selecting || self.drag_generation != generation {
+            return false;
+        }
+        let (Some(position), Some(bounds)) = (self.drag_position, self.last_bounds) else {
+            self.drag_autoscroll_active = false;
+            return false;
+        };
+        let delta = self.drag_scroll_delta(position);
+        if delta == 0.0 {
+            self.drag_autoscroll_active = false;
+            return false;
+        }
+        let max_scroll = (self.content_height - f32::from(bounds.size.height)).max(0.0);
+        let next = (self.scroll_top + delta).clamp(0.0, max_scroll);
+        if next == self.scroll_top {
+            self.drag_autoscroll_active = false;
+            return false;
+        }
+        self.scroll_top = next;
+        let edge_position = self.drag_selection_position(position);
+        self.select_to(self.index_for_mouse_position(edge_position), cx);
+        self.follow_cursor = false;
+        true
     }
 
     fn on_scroll_wheel(
@@ -979,7 +1226,14 @@ impl TextEditorState {
             return;
         }
         let delta = f32::from(event.delta.pixel_delta(self.line_height).y);
-        self.scroll_top = (self.scroll_top - delta).clamp(0.0, max_scroll);
+        let next = (self.scroll_top - delta).clamp(0.0, max_scroll);
+        if next == self.scroll_top {
+            if delta != 0.0 {
+                cx.stop_propagation();
+            }
+            return;
+        }
+        self.scroll_top = next;
         self.follow_cursor = false;
         cx.stop_propagation();
         cx.notify();
@@ -1169,15 +1423,14 @@ impl EntityInputHandler for TextEditorState {
             .map(|range| self.range_from_utf16(range))
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
-        if self.marked_range.is_none() {
-            self.undo_stack.push(self.snapshot());
-            self.redo_stack.clear();
-        }
         let replacement = if self.multiline {
             new_text.to_string()
         } else {
             single_line_text(new_text)
         };
+        if self.marked_range.is_none() {
+            self.record_edit(&range, &replacement, cx.background_executor().now());
+        }
         self.content =
             self.content[..range.start].to_owned() + &replacement + &self.content[range.end..];
         let cursor = range.start + replacement.len();
@@ -1207,8 +1460,10 @@ impl EntityInputHandler for TextEditorState {
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
         if self.marked_range.is_none() {
-            self.undo_stack.push(self.snapshot());
+            let snapshot = self.snapshot();
+            push_undo_snapshot(&mut self.undo_stack, snapshot);
             self.redo_stack.clear();
+            self.last_edit = None;
         }
         let replacement = if self.multiline {
             new_text.to_string()
@@ -1331,7 +1586,6 @@ impl gpui::Render for TextEditorState {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .when(self.emits_key_down, move |editor| {
                 editor.on_key_down(move |event, _window, _cx| {
@@ -1503,6 +1757,12 @@ impl gpui::Element for EditorTextElement {
             ElementInputHandler::new(bounds, self.input.clone()),
             cx,
         );
+        let input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            if phase == DispatchPhase::Bubble && event.pressed_button == Some(MouseButton::Left) {
+                input.update(cx, |input, cx| input.on_mouse_move(event, cx));
+            }
+        });
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
             for quad in prepaint.selection.drain(..) {
                 window.paint_quad(quad);
@@ -1588,5 +1848,148 @@ mod tests {
         let mut input = TextEditorElement::new(false);
         input.set_prop("theme", serde_json::json!({ "caret": "#22c55e" }));
         assert_eq!(input.theme.caret, gpui::rgba(0x22c55eff).into());
+    }
+
+    #[test]
+    fn insertion_undo_coalescing_requires_one_contiguous_non_whitespace_character() {
+        let insert_at_one = CoalescingEdit {
+            kind: EditKind::Insert,
+            anchor: 1,
+        };
+
+        assert_eq!(coalescing_edit(&(0..0), "a", false), Some(insert_at_one));
+        assert!(edits_coalesce(
+            insert_at_one,
+            coalescing_edit(&(1..1), "b", false),
+            &(1..1),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            insert_at_one,
+            coalescing_edit(&(2..2), "b", false),
+            &(2..2),
+            Duration::from_millis(699),
+        ));
+        assert_eq!(coalescing_edit(&(0..1), "a", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "ab", false), None);
+        assert_eq!(coalescing_edit(&(1..1), " ", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "\n", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "\t", false), None);
+        assert_eq!(coalescing_edit(&(1..1), "\u{2003}", false), None);
+        assert!(!edits_coalesce(
+            insert_at_one,
+            coalescing_edit(&(1..1), "b", false),
+            &(1..1),
+            UNDO_COALESCE,
+        ));
+        assert!(!edits_coalesce(
+            CoalescingEdit {
+                kind: EditKind::DeleteBackward,
+                anchor: 1,
+            },
+            coalescing_edit(&(1..1), "b", false),
+            &(1..1),
+            Duration::from_millis(1),
+        ));
+        assert!(!edits_coalesce(
+            insert_at_one,
+            None,
+            &(1..1),
+            Duration::from_millis(1),
+        ));
+    }
+
+    #[test]
+    fn backward_and_forward_deletions_use_their_own_contiguity_rules() {
+        let backward = CoalescingEdit {
+            kind: EditKind::DeleteBackward,
+            anchor: 3,
+        };
+        assert_eq!(
+            coalescing_edit(&(2..3), "", true),
+            Some(CoalescingEdit {
+                kind: EditKind::DeleteBackward,
+                anchor: 2,
+            })
+        );
+        assert!(edits_coalesce(
+            backward,
+            coalescing_edit(&(2..3), "", true),
+            &(2..3),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            backward,
+            coalescing_edit(&(1..2), "", true),
+            &(1..2),
+            Duration::from_millis(699),
+        ));
+
+        let forward = CoalescingEdit {
+            kind: EditKind::DeleteForward,
+            anchor: 2,
+        };
+        assert_eq!(coalescing_edit(&(2..3), "", false), Some(forward));
+        assert!(edits_coalesce(
+            forward,
+            coalescing_edit(&(2..3), "", false),
+            &(2..3),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            forward,
+            coalescing_edit(&(3..4), "", false),
+            &(3..4),
+            Duration::from_millis(699),
+        ));
+        assert!(!edits_coalesce(
+            forward,
+            coalescing_edit(&(2..3), "", false),
+            &(2..3),
+            UNDO_COALESCE,
+        ));
+        assert_eq!(coalescing_edit(&(2..2), "", false), None);
+    }
+
+    #[test]
+    fn undo_history_discards_only_the_oldest_snapshot_at_the_limit() {
+        let mut history = VecDeque::new();
+        for index in 0..=UNDO_LIMIT {
+            push_undo_snapshot(
+                &mut history,
+                EditSnapshot {
+                    content: index.to_string(),
+                    selected_range: index..index,
+                    selection_reversed: false,
+                },
+            );
+        }
+
+        assert_eq!(history.len(), UNDO_LIMIT);
+        assert_eq!(history.front().unwrap().content, "1");
+        assert_eq!(history.back().unwrap().content, UNDO_LIMIT.to_string());
+    }
+
+    #[test]
+    fn drag_autoscroll_is_edge_proportional_and_capped_to_one_line() {
+        let line_height = 20.0;
+        assert_eq!(drag_scroll_delta(200.0, 100.0, 300.0, line_height), 0.0);
+        assert_eq!(drag_scroll_delta(90.0, 100.0, 300.0, line_height), -2.0);
+        assert_eq!(drag_scroll_delta(315.0, 100.0, 300.0, line_height), 3.0);
+        assert_eq!(drag_scroll_delta(-100.0, 100.0, 300.0, line_height), -20.0);
+        assert_eq!(drag_scroll_delta(500.0, 100.0, 300.0, line_height), 20.0);
+    }
+
+    #[test]
+    fn multi_click_selects_word_then_all_and_does_not_arm_drag() {
+        assert_eq!(press_intent(1, false), PressIntent::PlaceCaret);
+        assert_eq!(press_intent(1, true), PressIntent::ExtendSelection);
+        assert_eq!(press_intent(2, false), PressIntent::SelectWord);
+        assert_eq!(press_intent(2, true), PressIntent::SelectWord);
+        assert_eq!(press_intent(3, false), PressIntent::SelectAll);
+        assert!(press_intent(1, false).arms_drag());
+        assert!(press_intent(1, true).arms_drag());
+        assert!(!press_intent(2, false).arms_drag());
+        assert!(!press_intent(3, false).arms_drag());
     }
 }

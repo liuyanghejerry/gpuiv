@@ -249,7 +249,8 @@ One napi struct for all events; fields are optional and only the relevant ones a
 Every string GPUIX paints goes through `crate::text`:
 
 - `selectable_text(..)` for content — registers into the per-frame selection
-  registry and installs the window mouse and key listeners
+  registry; the window mouse and key listeners are installed once per frame by
+  `selection_frame_reset(..)`
 - `chrome_text(..)` for line numbers, language tags and file headers — painted
   and logged for tests, but never part of a selection
 
@@ -261,6 +262,13 @@ The registry is rebuilt during **paint**, not during build, because paint order
 is the only place document order is guaranteed: a `list()` decides at paint time
 which rows exist. `selection_frame_reset()` must stay the first child of the
 root, or stale entries from the previous frame leak into the next drag.
+
+Drag move and mouse-up listeners live on the frame reset, not on each text run,
+so a drag survives its anchor row unmounting under virtualization, and a pointer
+held near a `<virtual-list>` edge autoscrolls the list (the timer stops when the
+list can no longer move). Never `stop_propagation()` on mouse-up elsewhere, or a
+drag and its edge-scroll timer stay armed. `TestRenderer.advanceTime(ms)` drives
+these timers in tests; `clockFastForward` only moves the motion clock.
 
 ## A new element needs a host-derived GPUI id, or it has no state
 

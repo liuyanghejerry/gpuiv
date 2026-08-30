@@ -12,6 +12,7 @@
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -883,6 +884,21 @@ impl TestGpuixRenderer {
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
             Ok(now_ms)
+        })
+    }
+
+    /// Advance GPUI's deterministic test executor and run due timers.
+    #[napi]
+    pub fn advance_time(&self, milliseconds: f64) -> Result<()> {
+        if !milliseconds.is_finite() || milliseconds < 0.0 {
+            return Err(Error::from_reason(format!(
+                "advanceTime milliseconds must be finite and non-negative, got {milliseconds}"
+            )));
+        }
+        with_test_state(|cx, _window, _view| {
+            cx.advance_clock(Duration::from_secs_f64(milliseconds / 1000.0));
+            cx.run_until_parked();
+            Ok(())
         })
     }
 

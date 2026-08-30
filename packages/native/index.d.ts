@@ -297,6 +297,8 @@ export declare class TestGpuixRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
+  /** Advance GPUI's deterministic test executor and run due timers. */
+  advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
 }
