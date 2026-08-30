@@ -25,6 +25,7 @@ cd examples && bun --hot chat.tsx
 | Example | Run | What it shows |
 |---|---|---|
 | **chat** | `bun --hot chat.tsx` | A Waku-style app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
+| **blurred window** | `bun --hot blurred-window.tsx` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
