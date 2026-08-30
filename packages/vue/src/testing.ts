@@ -28,7 +28,6 @@ import { handleGpuixEvent } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
-  applyBatch(json: string): number[]
   flush(): void
   drainEvents(): EventPayload[]
   simulateKeystrokes(keystrokes: string): void
@@ -161,10 +160,9 @@ export interface TestWindowOptions {
 }
 
 export class TestRenderer implements NativeRenderer {
-  commitCount = 0
-
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
+  readonly applyBatch: NativeRenderer["applyBatch"]
 
   constructor(options: TestWindowOptions = {}) {
     if (!NativeTestRenderer) {
@@ -173,57 +171,7 @@ export class TestRenderer implements NativeRenderer {
       )
     }
     this.native = new NativeTestRenderer(options.width, options.height)
-  }
-
-  // ── NativeRenderer interface (all mutations delegate to native) ──
-
-  createElement(id: number, elementType: string): void {
-    this.native.createElement(id, elementType)
-  }
-
-  destroyElement(id: number): Array<number> {
-    return this.native.destroyElement(id)
-  }
-
-  appendChild(parentId: number, childId: number): void {
-    this.native.appendChild(parentId, childId)
-  }
-
-  removeChild(parentId: number, childId: number): void {
-    this.native.removeChild(parentId, childId)
-  }
-
-  insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.native.insertBefore(parentId, childId, beforeId)
-  }
-
-  setStyle(id: number, styleJson: string): void {
-    this.native.setStyle(id, styleJson)
-  }
-
-  setText(id: number, content: string): void {
-    this.native.setText(id, content)
-  }
-
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.native.setEventListener(id, eventType, hasHandler)
-  }
-
-  setRoot(id: number): void {
-    this.native.setRoot(id)
-  }
-
-  setCustomProp(id: number, key: string, valueJson: string): void {
-    this.native.setCustomProp(id, key, valueJson)
-  }
-
-  commitMutations(): void {
-    this.native.commitMutations()
-    this.commitCount++
-  }
-
-  applyBatch(json: string): Array<number> {
-    return this.native.applyBatch(json)
+    this.applyBatch = this.native.applyBatch.bind(this.native)
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
@@ -635,7 +583,9 @@ export function createTestApp(
   const renderer = new TestRenderer(options)
   const gpuivHost = createGpuivRendererHost(renderer, { nextElementId: 0 })
   const app = gpuivHost.vue.createApp(rootComponent)
-  app.provide(GPUIV_CONTEXT, { renderer: gpuivHost.renderer })
+  // App code only ever sees application commands — never the commit facade —
+  // so provide the raw renderer.
+  app.provide(GPUIV_CONTEXT, { renderer })
   app.mount(gpuivHost.container)
   // No Vue scheduler job runs for the initial mount — flush synchronously.
   gpuivHost.flushMutations()

@@ -185,14 +185,16 @@ export function createApp(
 
   const gpuivHost = createGpuivRendererHost(host, idAllocatorFor(host))
   const app = gpuivHost.vue.createApp(rootComponent)
-  app.provide(GPUIV_CONTEXT, { renderer: gpuivHost.renderer })
+  // App code only ever sees application commands (scroll, window, debug) —
+  // never the commit facade — so provide the raw renderer.
+  app.provide(GPUIV_CONTEXT, { renderer: host })
   app.mount(gpuivHost.container)
   gpuivHost.flushMutations()
 
   const handle: GpuivAppHandle = {
     app,
     container: gpuivHost.container,
-    renderer: gpuivHost.renderer,
+    renderer: host,
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()

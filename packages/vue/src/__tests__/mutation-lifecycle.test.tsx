@@ -102,14 +102,14 @@ describeNative("mutation lifecycle", () => {
 
       handleGpuixEvent(
         { elementId: aRoot!, eventType: "click" } as unknown as EventPayload,
-        hostA.renderer
+        rendererA
       )
       expect(onA).toHaveBeenCalledTimes(1)
       expect(onB).not.toHaveBeenCalled()
 
       handleGpuixEvent(
         { elementId: aRoot!, eventType: "click" } as unknown as EventPayload,
-        hostB.renderer
+        rendererB
       )
       expect(onA).toHaveBeenCalledTimes(1)
       expect(onB).toHaveBeenCalledTimes(1)
@@ -191,7 +191,7 @@ describeNative("mutation lifecycle", () => {
       const firstRoot = renderer.getRoot()?.children[0]!
       handleGpuixEvent(
         { elementId: firstRoot, eventType: "click" } as unknown as EventPayload,
-        first.renderer
+        renderer
       )
       expect(onFirst).toHaveBeenCalledTimes(1)
     } finally {
@@ -238,7 +238,7 @@ describeNative("mutation lifecycle", () => {
       const secondRoot = renderer.getRoot()?.children[0]!
       handleGpuixEvent(
         { elementId: secondRoot, eventType: "click" } as unknown as EventPayload,
-        second.renderer
+        renderer
       )
       expect(onSecond).toHaveBeenCalledTimes(1)
       secondApp.unmount()

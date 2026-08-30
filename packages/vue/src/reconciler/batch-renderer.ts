@@ -1,160 +1,101 @@
-/// BatchingRenderer — buffers individual napi mutation calls into a single
-/// applyBatch() FFI call, reducing N FFI boundary crossings to 1 per commit.
+/// Buffers Vue host-config mutations into one applyBatch() FFI call per flush.
 ///
 /// Queue raw objects for setStyle / setCustomProp. Do not JSON.stringify them
 /// first. The outer applyBatch stringify would escape that string again, and
 /// Rust would parse twice. A 10k-row mount spent 626ms in applyBatch that way.
 ///
-/// Implemented as a JS Proxy: mutation method calls on the NativeRenderer are
-/// captured as ["methodName", ...args] in a queue. On commitMutations(), the
-/// entire queue is flushed via applyBatch(json).
-///
-/// Adding a new mutation method to NativeRenderer requires adding it to
-/// BATCHED_METHODS below — nothing else.
+/// The wire format is exactly nine ops: createElement, destroyElement,
+/// appendChild, insertBefore, setStyle, setText, setEventListener, setRoot,
+/// setCustomProp — all with raw (unstringified) values. There is no
+/// removeChild op: destroy_element unlinks from the parent itself, and
+/// appendChild/insertBefore re-parent natively.
 ///
 /// ## Batch timing
 ///
-/// React flushes at the end of the commit phase (synchronous). Vue flushes on
-/// a microtask scheduled by the `schedule` callback, which fires after Vue's
-/// scheduler has run its component update jobs:
+/// Vue's renderer is synchronous within a patch, but its component updates run
+/// through the scheduler on a microtask. The `schedule` callback fires after
+/// every enqueued op, so the host can flush the batch on a microtask that runs
+/// after Vue's scheduler has finished its jobs. `flushMutations()` drains the
+/// queue synchronously for callers that need the Rust tree current (mount,
+/// tests, clock-pinned frames):
 ///
 ///   state change → Vue scheduler → patchProp/insert/remove callbacks
 ///                                ↓ each callback queues ops
 ///                                queue.push([name, ...args])  → schedule()
 ///                                ... (microtask)              → applyBatch(json)
 ///
-/// Multiple setState updates batched by Vue into one render = one batch.
+/// Multiple state updates batched by Vue into one flush = one batch.
 
-import type { NativeRenderer } from "../types.js"
+import type { MutationRenderer, NativeRenderer } from "../types.js"
 import { containerForRenderer, unregisterEventHandlers } from "./event-registry.js"
 
 export type MutationTuple = (number | string | boolean | object | null)[]
 
-/// Methods that should be batched (queued instead of called immediately).
-/// Any method NOT in this set is passed through to the inner renderer directly.
-/// This prevents accidental queuing of getters, queries, or future non-mutation
-/// methods that would return undefined and enqueue garbage ops.
-const BATCHED_METHODS = new Set([
-  "createElement",
-  "appendChild",
-  "removeChild",
-  "insertBefore",
-  "setStyle",
-  "setText",
-  "setEventListener",
-  "setRoot",
-  "setCustomProp",
-])
-
 /**
  * Wrap a NativeRenderer with batching support.
  *
- * If the inner renderer has applyBatch(), returns a Proxy that buffers
- * all mutation calls and flushes them in one applyBatch() per commit.
- * setCustomProp is queued as setCustomPropValue so raw strings stay strings.
- * Without applyBatch, style and custom-prop objects are stringified for the
- * string-only napi methods.
+ * The returned facade exists only for the Vue host config's mutation stream.
+ * Application commands (scroll, selection, window, debug) use the original
+ * NativeRenderer.
  *
  * `schedule` (optional) is called after each op is queued, so the host can
- * flush the batch at a chosen boundary (e.g. a microtask after Vue's render).
+ * flush the batch at a chosen boundary (a microtask after Vue's scheduler).
  */
 export function wrapWithBatching(
   inner: NativeRenderer,
   schedule?: () => void
-): NativeRenderer {
-  if (typeof inner.applyBatch !== "function") {
-    return new Proxy(inner, {
-      get(target, prop: string) {
-        if (prop === "setStyle") {
-          return (id: number, style: string | object) => {
-            target.setStyle(id, typeof style === "string" ? style : JSON.stringify(style))
-          }
-        }
-        if (prop === "setCustomProp") {
-          return (
-            id: number,
-            key: string,
-            value: string | object | number | boolean | null,
-          ) => {
-            target.setCustomProp(id, key, JSON.stringify(value ?? null))
-          }
-        }
-        const method = (target as NativeRenderer & Record<string, unknown>)[prop]
-        if (typeof method === "function") {
-          return method.bind(target)
-        }
-        return method
-      },
-    })
-  }
-
-  const batchable = inner as NativeRenderer & { applyBatch(json: string): number[] }
+): MutationRenderer {
   let queue: MutationTuple[] = []
 
-  const enqueue = (...args: MutationTuple): void => {
-    queue.push(args)
+  const enqueue = (op: MutationTuple): void => {
+    queue.push(op)
     schedule?.()
   }
 
-  return new Proxy(inner, {
-    get(_target, prop: string) {
-      // commitMutations: flush the queue via a single applyBatch() FFI call.
-      if (prop === "commitMutations") {
-        return () => {
-          if (queue.length === 0) {
-            batchable.commitMutations()
-            return
-          }
-
-          const json = JSON.stringify(queue)
-
-          // applyBatch may throw on malformed ops — queue is preserved
-          // on failure so state doesn't desync between JS and Rust.
-          const destroyedIds = batchable.applyBatch(json)
-
-          const container = containerForRenderer(inner)
-          if (container) {
-            for (const id of destroyedIds) {
-              unregisterEventHandlers(container.eventHandlers, id)
-            }
-          }
-
-          // applyBatch already invalidates, so only clear after batch + cleanup.
-          queue = []
-        }
-      }
-
-      // destroyElement: queue the op, return [] (destroyed IDs come from applyBatch).
-      if (prop === "destroyElement") {
-        return (id: number): Array<number> => {
-          queue.push(["destroyElement", id])
-          schedule?.()
-          return []
-        }
-      }
-
-      if (prop === "setCustomProp") {
-        return (...args: MutationTuple) => {
-          queue.push(["setCustomPropValue", ...args])
-          schedule?.()
-        }
-      }
-
-      // Batched mutation methods: queue as [methodName, ...args].
-      if (BATCHED_METHODS.has(prop)) {
-        return (...args: MutationTuple) => {
-          queue.push([prop, ...args])
-          schedule?.()
-        }
-      }
-
-      // Everything else (getters, queries, applyBatch, future methods):
-      // pass through to the inner renderer directly.
-      const value = (batchable as any)[prop]
-      if (typeof value === "function") {
-        return value.bind(batchable)
-      }
-      return value
+  return {
+    createElement(id, elementType) {
+      enqueue(["createElement", id, elementType])
     },
-  })
+    destroyElement(id) {
+      enqueue(["destroyElement", id])
+      // Destroyed ids come back from applyBatch at flush time.
+      return []
+    },
+    appendChild(parentId, childId) {
+      enqueue(["appendChild", parentId, childId])
+    },
+    insertBefore(parentId, childId, beforeId) {
+      enqueue(["insertBefore", parentId, childId, beforeId])
+    },
+    setStyle(id, style) {
+      enqueue(["setStyle", id, style])
+    },
+    setText(id, content) {
+      enqueue(["setText", id, content])
+    },
+    setEventListener(id, eventType, hasHandler) {
+      enqueue(["setEventListener", id, eventType, hasHandler])
+    },
+    setRoot(id) {
+      enqueue(["setRoot", id])
+    },
+    setCustomProp(id, key, value) {
+      enqueue(["setCustomProp", id, key, value])
+    },
+    flushMutations() {
+      if (queue.length === 0) return
+
+      // Preserve the queue on failure so JS and Rust cannot desync.
+      const destroyedIds = inner.applyBatch(JSON.stringify(queue))
+      const container = containerForRenderer(inner)
+      if (container) {
+        for (const id of destroyedIds) {
+          unregisterEventHandlers(container.eventHandlers, id)
+        }
+      }
+
+      // applyBatch already invalidates, so only clear after batch + cleanup.
+      queue = []
+    },
+  }
 }

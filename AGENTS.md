@@ -164,31 +164,33 @@ gpuiv/
 
 ## The Mutation Protocol (JS → Rust)
 
-The FFI surface is a set of direct napi calls — the `NativeRenderer` interface (`packages/vue/src/types.ts`):
+The FFI surface is one atomic batch call. The `NativeRenderer` interface (`packages/vue/src/types.ts`) has a single required mutation method — everything else is optional query/command API:
 
 ```ts
 interface NativeRenderer {
-  createElement(id: number, elementType: string): void
-  destroyElement(id: number): Array<number>
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  setRoot(id: number): void
-  commitMutations(): void
+  /** Apply one commit. Returns every element id destroyed by the batch. */
+  applyBatch(json: string): Array<number>
+  // …optional focus/scroll/selection/window/debug methods
 }
 ```
 
 Element IDs are plain numbers from a JS incrementing counter (u64 in Rust, f64-safe across napi).
 
-`BatchingRenderer` (`packages/vue/src/reconciler/batch-renderer.ts`) wraps this in a Proxy: mutation calls are captured as `["methodName", ...args]` tuples, and `commitMutations()` — invoked on a microtask after Vue's scheduler has run its component update jobs, or synchronously via `flushMutations()` — flushes the whole queue in **one `applyBatch(json)` FFI call**.
+The host config talks to a commit-phase `MutationRenderer` facade (`packages/vue/src/reconciler/batch-renderer.ts`): its explicit methods (`createElement`, `setStyle`, …) only push `["opName", ...args]` tuples onto a queue, and `flushMutations()` — invoked on a microtask after Vue's scheduler has run its component update jobs, or synchronously by callers that need the Rust tree current (mount, tests, clock-pinned frames) — flushes the whole queue in **one `applyBatch(json)` FFI call**. The wire format is nine ops:
 
+```
+["createElement", id, "type"]      ["setStyle", id, { …style }]   ← raw object
+["destroyElement", id]             ["setText", id, "content"]
+["appendChild", parentId, childId] ["setEventListener", id, "type", bool]
+["insertBefore", parentId, childId, beforeId]
+["setRoot", id]                    ["setCustomProp", id, "key", value]   ← raw JSON value
+```
+
+- There is no `removeChild` op: `destroy_element` unlinks the child from its parent and invalidates the parent chain in Rust, and `appendChild`/`insertBefore` re-parent. Never reintroduce a detach op — a dangling child id in `parent.children` or a stale `subtree_revision` cache is the bug it hides.
 - Queue **raw objects** for `setStyle` / `setCustomProp`. Do not `JSON.stringify` them first — the outer applyBatch stringify would escape that string again and Rust would parse twice. A 10k-row mount spent 626ms in `applyBatch` that way.
-- Opcode `setCustomPropValue` carries a raw JSON value; `setCustomProp` still means a JSON **string** (legacy). A raw `"top"` on `setCustomProp` is parsed as JSON and throws — that once killed the composer Selects.
-- Adding a new mutation method means adding it to `BATCHED_METHODS` in `batch-renderer.ts` — nothing else.
-- Vue's renderer patches synchronously within a component update, but the update itself is scheduled on a microtask. Host nodes are materialized into the queue during patch, then the batch is flushed on the microtask after the scheduler finishes. `flushMutations()` drains it synchronously for callers that need the Rust tree current (mount, tests, clock-pinned frames).
+- Adding a new mutation means one facade method in `batch-renderer.ts` plus one `BatchOp` variant in `renderer.rs`. The TS facade type is the JS-side validation; the Rust visitor errors on unknown ops (`unknown operation: …`), so a typo fails loudly, not silently.
+- Rust decodes the batch straight from its JSON bytes into typed ops (strings borrow from the input, styles stay `&RawValue` until apply), then hash-conses identical style payloads into shared `Arc`s **before** applying — parse-then-apply keeps the batch atomic, and a failed style rolls back what the batch interned. A 10k-turn chat mount parses+applies in ~30ms, down from ~127ms. The style table is swept when it doubles or when it outlives a shrunken tree (`maybe_sweep`).
+- Vue's renderer patches synchronously within a component update, but the update itself is scheduled on a microtask. Host nodes are materialized into the queue during patch, then the batch is flushed on the microtask after the scheduler finishes.
 
 Rust applies the batch to `RetainedTree` and invalidates the view. Each GPUI frame, `GpuixView::render()` walks the retained tree and calls `build_element()` to produce ephemeral GPUI elements; Taffy lays them out and the GPU paints.
 
@@ -220,7 +222,7 @@ Put all three on the element the user grabs — a clip handle, a resizer, a slid
 pub struct RetainedElement {
     pub id: u64,
     pub element_type: String,                    // "div", "text", "input", "diff", ...
-    pub style: Option<StyleDesc>,
+    pub style: Option<Arc<StyleDesc>>,           // hash-consed by payload, shared across elements
     pub content: Option<String>,                 // text content
     pub events: HashSet<String>,
     pub children: Vec<u64>,

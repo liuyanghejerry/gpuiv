@@ -5,29 +5,6 @@ export declare class GpuixRenderer {
   constructor(eventCallback?: (((err: Error | null, arg: EventPayload) => any)) | undefined | null)
   /** Initialize GPUI using the native event-loop architecture for this OS. */
   init(options?: WindowOptions | undefined | null): void
-  createElement(id: number, elementType: string): void
-  /**
-   * Destroy an element and all descendants. Returns array of destroyed IDs
-   * so JS can clean up event handlers for the entire subtree.
-   */
-  destroyElement(id: number): Array<number>
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  /** Set the root element (called from appendChildToContainer). */
-  setRoot(id: number): void
-  /**
-   * Set a custom prop on an element (for non-div/text elements like input, editor, diff).
-   * Key is the prop name, value is JSON-encoded.
-   */
-  setCustomProp(id: number, key: string, valueJson: string): void
-  /** Get a custom prop value from an element. Returns JSON string or null. */
-  getCustomProp(id: number, key: string): string | null
-  /** Signal that a batch of mutations is complete. Triggers re-render. */
-  commitMutations(): void
   /**
    * Apply a batch of mutations in a single FFI call.
    *
@@ -38,14 +15,12 @@ export declare class GpuixRenderer {
    *   ["createElement",    id, "type"]
    *   ["destroyElement",   id]
    *   ["appendChild",      parentId, childId]
-   *   ["removeChild",      parentId, childId]
    *   ["insertBefore",     parentId, childId, beforeId]
-   *   ["setStyle",         id, { ...style } | "{styleJson}"]
+   *   ["setStyle",         id, { ...style }]
    *   ["setText",          id, "content"]
    *   ["setEventListener", id, "eventType", true|false]
    *   ["setRoot",          id]
-   *   ["setCustomProp",      id, "key", value | "{valueJson}"]
-   *   ["setCustomPropValue", id, "key", value]
+   *   ["setCustomProp",    id, "key", value]
    *
    * Returns accumulated destroyed IDs from all destroyElement ops.
    * Acquires the tree mutex ONCE for the entire batch.
@@ -144,9 +119,7 @@ export declare class GpuixRenderer {
  *
  * Usage from JS:
  *   const r = new TestGpuixRenderer()
- *   r.createElement(1, "div")
- *   r.setRoot(1)
- *   r.commitMutations()
+ *   r.applyBatch('[["createElement",1,"div"],["setRoot",1]]')
  *   r.flush()                  // triggers GpuixView::render() via Metal
  *   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
  *   const events = r.drainEvents()
@@ -154,12 +127,6 @@ export declare class GpuixRenderer {
  */
 export declare class TestGpuixRenderer {
   constructor(width?: number | undefined | null, height?: number | undefined | null)
-  createElement(id: number, elementType: string): void
-  /**
-   * Destroy an element and all descendants. Returns destroyed IDs
-   * so JS can clean up event handlers.
-   */
-  destroyElement(id: number): Array<number>
   /**
    * How many elements the retained tree holds, reachable from the root or
    * not. `getTreeJson` walks from the root, so it cannot see a node that was
@@ -167,23 +134,6 @@ export declare class TestGpuixRenderer {
    * removal actually freed it.
    */
   getRetainedElementCount(): number
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  /** Set the root element (called from appendChildToContainer). */
-  setRoot(id: number): void
-  /** Set a custom prop on an element (for non-div/text elements like input, editor, diff). */
-  setCustomProp(id: number, key: string, valueJson: string): void
-  /** Get a custom prop value from an element. */
-  getCustomProp(id: number, key: string): string | null
-  /**
-   * Signal that a batch of mutations is complete.
-   * In tests, this is a no-op — flush() handles the actual re-render.
-   */
-  commitMutations(): void
   /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
