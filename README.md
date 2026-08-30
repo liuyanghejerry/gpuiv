@@ -1770,16 +1770,29 @@ ignored; `console.log` cannot break a message.
 ```ts
 import { launch } from '@gpuiv/vue/automation'
 
-const app = await launch({ command: 'bun', args: ['examples/chat.tsx'] })
-await app.getByTestId('send').click()
+const app = await launch({
+  command: 'bun',
+  args: ['examples/chat.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
+await app.getByTestId('composer').fill('hello')
+await app.getByTestId('composer').press('enter')
+await app.getByText('hello').waitFor()
 await app.screenshot({ path: 'live.png' })
 await app.close()
 ```
 
-`fill()` and `press()` do **not** work against `launch()`: the live renderer
-has no `simulateKeystrokes`, so they throw `keystrokes are not live yet`. That
-is unrelated to focus and fails on a focused window too. Use `createTestApp()`
-when a check needs typing.
+Every live-app check should set `GPUIX_BACKGROUND=1`, and the app entry should
+map that flag to `focus: false`. On macOS and Windows, automation uses the
+real window input and paint pipelines without making the window active, so
+taking the user's keyboard has no test benefit. Linux currently ignores
+`focus`.
+
+`fill()` and `press()` dispatch through the live GPUI window input pipeline, so
+native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
+handling instead of a test-only input path. They work without activating the
+window. Prefer `createTestApp()` for typing-heavy checks — it opens no window
+at all.
 
 ### Let an agent drive the app
 
@@ -1820,14 +1833,10 @@ await app.close()
 Focus is the only thing that changes. **Automation does not need focus.**
 `click()` hits the last painted bounds and `screenshot()` reads the GPU
 surface, so both work while the window sits behind your editor, and even on a
-`show: false` window that is not on screen at all.
-
-Two limits to know before you rely on it:
-
-- **Keyboard input does not reach a launched process.** `fill()` and `press()`
-  throw `keystrokes are not live yet`. Use `createTestApp()` when a check needs
-  typing
-- **Linux ignores `focus`**, so an agent there still gets a focused window
+`show: false` window that is not on screen at all. `fill()` and `press()` use
+the live GPUI window input pipeline and work without activating the desktop
+window. **Linux ignores `focus`**, so an agent there still gets a focused
+window.
 
 Prefer `createTestApp()` when you can. It opens **no window at all**, so
 nothing can steal focus and keyboard input works. Reach for `launch()` plus

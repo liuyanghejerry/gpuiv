@@ -208,5 +208,11 @@ const isEntryPoint =
     : process.argv[1]?.endsWith("native-text.tsx")
 
 if (isEntryPoint) {
-  createApp(App, { title: "GPUIX Vue Native Text", width: 900, height: 700 })
+  createApp(App, {
+    title: "GPUIX Vue Native Text",
+    width: 900,
+    height: 700,
+    // Agent checks need real GPU paint, not control of the user's keyboard.
+    focus: process.env.GPUIX_BACKGROUND !== "1",
+  })
 }

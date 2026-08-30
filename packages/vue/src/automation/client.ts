@@ -676,6 +676,16 @@ export interface LiveAutomationRenderer {
     pressedButton?: number,
     modifiers?: string
   ): void
+  simulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string
+  ): void
+  simulateKeystrokes?(keystrokes: string): void
+  simulateKeyDown?(keystroke: string, isHeld?: boolean): void
+  simulateKeyUp?(keystroke: string): void
   tick?(): void
   focusElement(elementId: number): void
   blur(): void
@@ -717,20 +727,40 @@ export function liveRendererAsTest(
       renderer.simulateMouseMove(x, y, pressedButton, modifiers)
       afterInput()
     },
-    nativeSimulateScrollWheel() {
-      throw new AutomationError("Unsupported", "scrollWheel is not live yet")
+    nativeSimulateScrollWheel(x, y, deltaX, deltaY, modifiers) {
+      renderer.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
+      afterInput()
     },
-    simulateKeystrokes() {
-      throw new AutomationError("Unsupported", "keystrokes are not live yet")
+    simulateKeystrokes(keys) {
+      if (!renderer.simulateKeystrokes) {
+        throw new AutomationError("Unsupported", "keystrokes are not live yet")
+      }
+      renderer.simulateKeystrokes(keys)
+      afterInput()
     },
-    nativeSimulateKeystrokes() {
-      throw new AutomationError("Unsupported", "keystrokes are not live yet")
+    nativeSimulateKeystrokes(elementId, keys) {
+      if (!renderer.simulateKeystrokes) {
+        throw new AutomationError("Unsupported", "keystrokes are not live yet")
+      }
+      renderer.focusElement(elementId)
+      renderer.simulateKeystrokes(keys)
+      afterInput()
     },
-    nativeSimulateKeyDown() {
-      throw new AutomationError("Unsupported", "keyDown is not live yet")
+    nativeSimulateKeyDown(elementId, key, isHeld) {
+      if (!renderer.simulateKeyDown) {
+        throw new AutomationError("Unsupported", "keyDown is not live yet")
+      }
+      if (elementId > 0) renderer.focusElement(elementId)
+      renderer.simulateKeyDown(key, isHeld)
+      afterInput()
     },
-    nativeSimulateKeyUp() {
-      throw new AutomationError("Unsupported", "keyUp is not live yet")
+    nativeSimulateKeyUp(elementId, key) {
+      if (!renderer.simulateKeyUp) {
+        throw new AutomationError("Unsupported", "keyUp is not live yet")
+      }
+      if (elementId > 0) renderer.focusElement(elementId)
+      renderer.simulateKeyUp(key)
+      afterInput()
     },
     scrollTo: (id, x, y) => renderer.scrollTo(id, x, y),
     getScrollOffset: (id) => {

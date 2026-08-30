@@ -1038,9 +1038,11 @@ still behaves normally.
 createApp(App, { focus: process.env.GPUIX_BACKGROUND !== '1' })
 ```
 
-`fill()` and `press()` do **not** work against `launch()`. The live renderer has
-no `simulateKeystrokes`, so they throw `keystrokes are not live yet`. That is
-unrelated to focus. Use `createTestApp()` for anything that types.
+`fill()` and `press()` work against `launch()` too: the live renderer's
+`simulateKeystrokes` dispatches synthetic key events through the window's GPUI
+input pipeline, so native `<input>` and `<textarea>` get real key handling
+without the window activating. `createTestApp()` is still preferable for
+typing-heavy checks — it opens no window at all.
 
 ```ts
 import { launch } from '@gpuiv/vue/automation'
