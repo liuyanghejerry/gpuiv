@@ -553,8 +553,38 @@ impl CompactTree {
         slot.subtree_revision = revision;
     }
 
+    /// Detach `child` from its current parent. `RetainedTree` re-parents on
+    /// append/insertBefore, so the replica must too.
+    fn detach(&mut self, child: u32) {
+        let parent = self.elements[child as usize].parent;
+        if parent == NONE {
+            return;
+        }
+        let mut cursor = self.elements[parent as usize].first_child;
+        let mut previous = NONE;
+        while cursor != NONE {
+            if cursor == child {
+                let next = self.elements[child as usize].next_sibling;
+                if previous == NONE {
+                    self.elements[parent as usize].first_child = next;
+                } else {
+                    self.elements[previous as usize].next_sibling = next;
+                }
+                if self.elements[parent as usize].last_child == child {
+                    self.elements[parent as usize].last_child = previous;
+                }
+                break;
+            }
+            previous = cursor;
+            cursor = self.elements[cursor as usize].next_sibling;
+        }
+        self.elements[child as usize].parent = NONE;
+        self.elements[child as usize].next_sibling = NONE;
+    }
+
     fn append(&mut self, parent: u64, child: u64) {
         let (parent, child) = (parent as u32, child as u32);
+        self.detach(child);
         let previous_last = self.elements[parent as usize].last_child;
         if previous_last == NONE {
             self.elements[parent as usize].first_child = child;
@@ -562,6 +592,31 @@ impl CompactTree {
             self.elements[previous_last as usize].next_sibling = child;
         }
         self.elements[parent as usize].last_child = child;
+        self.elements[child as usize].parent = parent;
+    }
+
+    /// The Vue host emits this for anchored inserts; upstream's React fixture
+    /// never did, so the replica originally skipped it and `verify` failed.
+    fn insert_before(&mut self, parent: u64, child: u64, before: u64) {
+        let (parent, child, before) = (parent as u32, child as u32, before as u32);
+        self.detach(child);
+        if self.elements[parent as usize].first_child == before {
+            self.elements[child as usize].next_sibling = before;
+            self.elements[parent as usize].first_child = child;
+            self.elements[child as usize].parent = parent;
+            return;
+        }
+        let mut cursor = self.elements[parent as usize].first_child;
+        while cursor != NONE && self.elements[cursor as usize].next_sibling != before {
+            cursor = self.elements[cursor as usize].next_sibling;
+        }
+        if cursor == NONE {
+            // Anchor not found: append, the least surprising fallback.
+            self.append(parent as u64, child as u64);
+            return;
+        }
+        self.elements[cursor as usize].next_sibling = child;
+        self.elements[child as usize].next_sibling = before;
         self.elements[child as usize].parent = parent;
     }
 
@@ -768,8 +823,36 @@ fn build_pointer_style_tree<P: Clone + From<StyleDesc>>(
                 );
             }
             "appendChild" => {
+                // RetainedTree re-parents: detach from any old parent first.
+                let old_parent = tree.get(&id(2)).and_then(|child| child.parent);
+                if let Some(old_parent) = old_parent {
+                    if let Some(parent) = tree.get_mut(&old_parent) {
+                        parent.children.retain(|child| *child != id(2));
+                    }
+                }
                 if let Some(parent) = tree.get_mut(&id(1)) {
                     parent.children.push(id(2));
+                }
+                if let Some(child) = tree.get_mut(&id(2)) {
+                    child.parent = Some(id(1));
+                }
+            }
+            // The Vue host emits anchored inserts; upstream's React fixture
+            // never did, so this arm is new with the Vue port.
+            "insertBefore" => {
+                let old_parent = tree.get(&id(2)).and_then(|child| child.parent);
+                if let Some(old_parent) = old_parent {
+                    if let Some(parent) = tree.get_mut(&old_parent) {
+                        parent.children.retain(|child| *child != id(2));
+                    }
+                }
+                if let Some(parent) = tree.get_mut(&id(1)) {
+                    let position = parent
+                        .children
+                        .iter()
+                        .position(|child| *child == id(3))
+                        .unwrap_or(parent.children.len());
+                    parent.children.insert(position, id(2));
                 }
                 if let Some(child) = tree.get_mut(&id(2)) {
                     child.parent = Some(id(1));
@@ -826,6 +909,11 @@ fn build_compact_tree(bytes: &[u8]) -> CompactTree {
         match op {
             Op::CreateElement { id, kind } => tree.create(id, kind.as_str()),
             Op::AppendChild { parent, child } => tree.append(parent, child),
+            Op::InsertBefore {
+                parent,
+                child,
+                before,
+            } => tree.insert_before(parent, child, before),
             Op::SetStyle { id, style } => tree.set_style(id, style),
             Op::SetText { id, content } => {
                 tree.contents.push(content.as_str().into());
