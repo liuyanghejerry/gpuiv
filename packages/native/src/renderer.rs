@@ -27,7 +27,6 @@ use std::rc::Rc;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::time::Duration;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use wasm_bindgen::JsCast as _;
@@ -147,6 +146,39 @@ thread_local! {
         RefCell::new(HashMap::new());
 }
 
+const SELECTION_SCROLL_TICK_MS: u64 = 24;
+const SELECTION_SCROLL_EDGE_PX: f32 = 36.0;
+const SELECTION_SCROLL_MAX_STEP_PX: f32 = 24.0;
+
+/// Signed list scroll step for a pointer near a viewport edge.
+fn selection_scroll_step(
+    bounds: gpui::Bounds<gpui::Pixels>,
+    position: gpui::Point<gpui::Pixels>,
+) -> f32 {
+    let height = f32::from(bounds.size.height);
+    if height <= 0.0 {
+        return 0.0;
+    }
+    let edge = SELECTION_SCROLL_EDGE_PX.min(height / 6.0);
+    if edge <= 0.0 {
+        return 0.0;
+    }
+    let y = f32::from(position.y);
+    let top = f32::from(bounds.top());
+    let bottom = f32::from(bounds.bottom());
+    let scaled = |penetration: f32| {
+        let progress = (penetration / edge).clamp(0.0, 1.0);
+        SELECTION_SCROLL_MAX_STEP_PX * progress * progress
+    };
+    if y < top + edge {
+        -scaled(top + edge - y)
+    } else if y > bottom - edge {
+        scaled(y - (bottom - edge))
+    } else {
+        0.0
+    }
+}
+
 /// Queue a virtual-list scroll for the next render. `offset_in_item` may be
 /// negative: gpui then anchors the viewport top above the item, which is what
 /// keeps a row pixel-stable while unmeasured rows are spliced in above it.
@@ -172,6 +204,33 @@ fn parse_debug_frame_overlay_mode_str(
         other => Err(format!(
             "Unknown debug frame overlay mode {other:?}. Use hidden, minimal, or full."
         )),
+    }
+}
+
+#[cfg(test)]
+mod selection_scroll_tests {
+    use super::*;
+
+    #[test]
+    fn selection_scroll_ramps_at_viewport_edges() {
+        let bounds = gpui::Bounds::new(
+            gpui::point(gpui::px(10.0), gpui::px(20.0)),
+            gpui::size(gpui::px(300.0), gpui::px(200.0)),
+        );
+        assert_eq!(
+            selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(120.0))),
+            0.0
+        );
+        assert!(
+            selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(20.0))) < 0.0
+        );
+        assert!(
+            selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(220.0))) > 0.0
+        );
+        assert!(
+            selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(220.0)))
+                > selection_scroll_step(bounds, gpui::point(gpui::px(20.0), gpui::px(200.0)))
+        );
     }
 }
 
@@ -2525,6 +2584,10 @@ pub(crate) struct GpuixView {
     pub(crate) selection: SharedSelection,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
+    /// Latest pointer sample and list during selection edge scrolling.
+    selection_drag_position: Option<gpui::Point<gpui::Pixels>>,
+    selection_scroll_list: Option<u64>,
+    selection_scroll_task: Option<gpui::Task<()>>,
     /// Motion / review clock. Live wall time unless automation freezes it.
     pub(crate) clock: crate::automation::AutomationClock,
     /// Resolved `highlight` state, keyed by the element that declared it.
@@ -2550,6 +2613,9 @@ impl GpuixView {
             motion_states: HashMap::new(),
             selection,
             virtual_lists: HashMap::new(),
+            selection_drag_position: None,
+            selection_scroll_list: None,
+            selection_scroll_task: None,
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
         }
@@ -3255,6 +3321,105 @@ impl VirtualListEntry {
 }
 
 impl GpuixView {
+    fn on_selection_mouse_move(
+        &mut self,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.selection.lock().is_dragging() {
+            self.stop_selection_scroll();
+            return;
+        }
+        let list_id = self
+            .selection_scroll_list
+            .filter(|id| {
+                self.virtual_lists.get(id).is_some_and(|entry| {
+                    let bounds = entry.state.viewport_bounds();
+                    position.x >= bounds.left() && position.x <= bounds.right()
+                })
+            })
+            .or_else(|| {
+                self.virtual_lists
+                    .iter()
+                    .find(|(_, entry)| entry.state.viewport_bounds().contains(&position))
+                    .map(|(id, _)| *id)
+            });
+        let Some(list_id) = list_id else {
+            self.stop_selection_scroll();
+            return;
+        };
+        self.selection_drag_position = Some(position);
+        self.selection_scroll_list = Some(list_id);
+        self.schedule_selection_scroll(cx);
+    }
+
+    fn stop_selection_scroll(&mut self) {
+        self.selection_drag_position = None;
+        self.selection_scroll_list = None;
+        self.selection_scroll_task = None;
+    }
+
+    fn schedule_selection_scroll(&mut self, cx: &mut gpui::Context<Self>) {
+        if self.selection_scroll_task.is_some() || !self.selection.lock().is_dragging() {
+            return;
+        }
+        let (Some(position), Some(list_id)) =
+            (self.selection_drag_position, self.selection_scroll_list)
+        else {
+            return;
+        };
+        let Some(entry) = self.virtual_lists.get(&list_id) else {
+            return;
+        };
+        if selection_scroll_step(entry.state.viewport_bounds(), position) == 0.0 {
+            return;
+        }
+        self.selection_scroll_task = Some(cx.spawn(async move |view, cx| {
+            cx.background_executor()
+                .timer(Duration::from_millis(SELECTION_SCROLL_TICK_MS))
+                .await;
+            if let Err(error) = view.update(cx, |view, cx| {
+                view.selection_scroll_task = None;
+                view.step_selection_scroll(cx);
+            }) {
+                log::debug!("selection scroll stopped after view teardown: {error}");
+            }
+        }));
+    }
+
+    fn step_selection_scroll(&mut self, cx: &mut gpui::Context<Self>) {
+        if !self.selection.lock().is_dragging() {
+            self.stop_selection_scroll();
+            return;
+        }
+        let (Some(position), Some(list_id)) =
+            (self.selection_drag_position, self.selection_scroll_list)
+        else {
+            return;
+        };
+        let Some(entry) = self.virtual_lists.get(&list_id) else {
+            self.stop_selection_scroll();
+            return;
+        };
+        let step = selection_scroll_step(entry.state.viewport_bounds(), position);
+        if step == 0.0 {
+            return;
+        }
+
+        let before = entry.state.logical_scroll_top();
+        let selection_moved = crate::text::paint::update_drag_at(&self.selection, position);
+        entry.state.scroll_by(gpui::px(step));
+        let after = entry.state.logical_scroll_top();
+        let list_moved =
+            after.item_ix != before.item_ix || after.offset_in_item != before.offset_in_item;
+        if !selection_moved && !list_moved {
+            self.stop_selection_scroll();
+            return;
+        }
+        cx.notify();
+        self.schedule_selection_scroll(cx);
+    }
+
     /// Sync focus handles with the current element tree.
     /// Creates handles for new focusable elements, subscribes on_focus/on_blur,
     /// and cleans up handles for destroyed elements.
@@ -3411,12 +3576,28 @@ impl gpui::Render for GpuixView {
         // longer on screen.
         let result = {
             use gpui::prelude::*;
+            let drag_move_view = cx.weak_entity();
+            let drag_end_view = drag_move_view.clone();
             let root = gpui::div()
                 .size_full()
                 .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
                 .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx));
             with_window_menu_actions(root)
-                .child(selection_frame_reset(self.selection.clone()))
+                .child(selection_frame_reset(
+                    self.selection.clone(),
+                    move |position, app| {
+                        drag_move_view
+                            .update(app, |view, cx| {
+                                view.on_selection_mouse_move(position, cx)
+                            })
+                            .ok();
+                    },
+                    move |app| {
+                        drag_end_view
+                            .update(app, |view, _cx| view.stop_selection_scroll())
+                            .ok();
+                    },
+                ))
                 .child(crate::automation::bounds_frame_reset())
                 .child(result)
                 .into_any_element()

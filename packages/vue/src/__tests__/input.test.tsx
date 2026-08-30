@@ -114,4 +114,103 @@ describeNative("native text editors (vue)", () => {
     await app.settle()
     expect(app.renderer.getAllText().join("")).toContain("down:b")
   })
+
+  it("undoes a contiguous typing run as one edit", async () => {
+    const TextInput = defineComponent({
+      setup() {
+        const text = ref("")
+        return () => (
+          <div style={{ width: 400, height: 100 }}>
+            <input
+              value={text.value}
+              style={{ width: 300, height: 40 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+            />
+            <text>{`Value: ${text.value}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(TextInput)
+    const input = app.renderer.findByType("input")[0]
+    app.renderer.nativeSimulateKeystrokes(input.id, "a b c cmd-z")
+    await app.settle()
+
+    expect(app.renderer.getAllText()).toContain("Value: ")
+    expect(app.renderer.getAllText()).not.toContain("Value: ab")
+  })
+
+  it("does not coalesce typing after 700ms", async () => {
+    const TextInput = defineComponent({
+      setup() {
+        const text = ref("")
+        return () => (
+          <div style={{ width: 400, height: 100 }}>
+            <input
+              value={text.value}
+              style={{ width: 300, height: 40 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+            />
+            <text>{`Value: ${text.value}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(TextInput)
+    const input = app.renderer.findByType("input")[0]
+    app.renderer.nativeSimulateKeystrokes(input.id, "a")
+    app.renderer.advanceTime(800)
+    app.renderer.nativeSimulateKeystrokes(input.id, "b cmd-z")
+    await app.settle()
+
+    expect(app.renderer.getAllText()).toContain("Value: a")
+  })
+
+  it("undoes contiguous backward deletion as one edit", async () => {
+    const TextInput = defineComponent({
+      setup() {
+        const text = ref("abcd")
+        return () => (
+          <div style={{ width: 400, height: 100 }}>
+            <input
+              value={text.value}
+              style={{ width: 300, height: 40 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+            />
+            <text>{`Value: ${text.value}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(TextInput)
+    const input = app.renderer.findByType("input")[0]
+    app.renderer.nativeSimulateKeystrokes(input.id, "backspace backspace cmd-z")
+    await app.settle()
+
+    expect(app.renderer.getAllText()).toContain("Value: abcd")
+  })
+
+  it("undoes contiguous forward deletion as one edit", async () => {
+    const TextInput = defineComponent({
+      setup() {
+        const text = ref("abcd")
+        return () => (
+          <div style={{ width: 400, height: 100 }}>
+            <input
+              value={text.value}
+              style={{ width: 300, height: 40 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+            />
+            <text>{`Value: ${text.value}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(TextInput)
+    const input = app.renderer.findByType("input")[0]
+    app.renderer.nativeSimulateKeystrokes(input.id, "cmd-left delete delete cmd-z")
+    await app.settle()
+
+    expect(app.renderer.getAllText()).toContain("Value: abcd")
+  })
 })

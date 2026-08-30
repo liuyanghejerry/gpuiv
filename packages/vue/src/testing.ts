@@ -53,6 +53,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
+  advanceTime(milliseconds: number): void
   getRootId(): number | null
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number): void
@@ -426,6 +427,14 @@ export class TestRenderer implements NativeRenderer {
 
   clockResume(): number {
     return this.native.clockResume()
+  }
+
+  /** Advance GPUI's test dispatcher and run due timers.
+   *  This is not `clockFastForward`. That moves the motion clock only.
+   *  Use this for caret blink, input drag autoscroll, and list edge scroll. */
+  advanceTime(milliseconds: number): void {
+    this.native.advanceTime(milliseconds)
+    this.dispatchNativeEvents()
   }
 
   focusElement(elementId: number): void {
