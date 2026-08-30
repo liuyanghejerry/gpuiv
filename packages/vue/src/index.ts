@@ -100,6 +100,8 @@ export type {
   GpuixMetrics,
   GpuixTheme,
   HostNode,
+  LinearGradientBackground,
+  LinearGradientStop,
   MotionEase,
   MotionProps,
   MotionStyle,

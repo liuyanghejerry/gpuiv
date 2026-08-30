@@ -43,6 +43,20 @@ export interface BoxShadow {
   color: string
 }
 
+export interface LinearGradientStop {
+  color: string
+  /** Position along the gradient from 0 to 1. */
+  position: number
+}
+
+export interface LinearGradientBackground {
+  type: "linear-gradient"
+  /** CSS angle in degrees. 0 points up and values increase clockwise. */
+  angle: number
+  stops: [LinearGradientStop, LinearGradientStop]
+  colorSpace?: "srgb" | "oklab"
+}
+
 export interface StyleDesc {
   display?: string
   visibility?: string
@@ -88,7 +102,7 @@ export interface StyleDesc {
   bottom?: number
   left?: number
 
-  background?: string
+  background?: string | LinearGradientBackground
   backgroundColor?: string
   color?: string
   opacity?: number
