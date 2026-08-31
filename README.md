@@ -1477,6 +1477,57 @@ canvas.value?.uploadPixels(imageData.data)
   `renderer.readCanvasPixels(elementId)` are available without the wrapper.
   `readCanvasPixels` returns the **last upload**, not a GPU readback.
 
+### The 2D context
+
+`getContext("2d")` returns a `CanvasRenderingContext2D` implemented as a
+pure-TypeScript software rasterizer over the pixel bridge — no Rust code, no
+new dependencies. It keeps a JS-owned buffer as the source of truth and
+pushes straight-alpha bytes through `uploadCanvasPixels`; everything a JS
+task paints reaches the GPU in **one** upload on the following microtask.
+
+```tsx
+const canvas = ref<GpuixCanvasInstance | null>(null)
+
+<GpuixCanvas ref={canvas} width={560} height={400}
+             style={{ width: 560, height: 400 }} />
+
+const ctx = canvas.value!.getContext("2d")!
+const sky = ctx.createLinearGradient(0, 0, 560, 400)
+sky.addColorStop(0, "#1e1e2e")
+sky.addColorStop(1, "#3b2f63")
+ctx.fillStyle = sky
+ctx.fillRect(0, 0, 560, 400)
+ctx.strokeStyle = "#89dceb"
+ctx.lineWidth = 3
+ctx.setLineDash([10, 6])
+ctx.beginPath()
+ctx.roundRect(40, 40, 480, 320, 24)
+ctx.stroke()
+```
+
+Supported: the path vocabulary (`moveTo` … `roundRect`, arcs, béziers),
+`fill`/`stroke`/`clip`/`isPointInPath` with both fill rules, the transform
+stack (`save`/`restore`/`translate`/`rotate`/`scale`/`setTransform`…),
+linear and radial gradients, line styles including dashes and miter joins,
+anti-aliased rasterization, `globalAlpha` and the `source-over` /
+`destination-out` / `copy` composite operations, `clearRect`,
+`getImageData`/`putImageData`/`createImageData`, and `drawImage` with
+another `GpuixCanvas` as the source (nearest or bilinear sampling via
+`imageSmoothingEnabled`).
+
+Deliberately not implemented:
+
+- `fillText` / `strokeText` / `measureText` — they **throw**. Glyph
+  rasterization needs a font pipeline that does not exist JS-side yet.
+- `toDataURL` / `toBlob`, shadows, `filter`, `createPattern`, conic
+  gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
+  never sees decoded `<img>` pixels).
+
+Changing the `width`/`height` props resets the bitmap and the context
+state, like setting those properties on a DOM canvas.
+
+`examples/canvas-paint.tsx` is a small drawing pad built on the context.
+
 ### Wheel zoom over a canvas
 
 The FFI boundary is async, so JS cannot `preventDefault()` a wheel event the
@@ -2043,6 +2094,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
+- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite, image data — pure TS; text APIs throw `NotSupported`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)

@@ -940,6 +940,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] Debug frame overlay (`setDebugFrameOverlay`)
 - [x] Native `motion.div` transitions with deterministic frame capture
 - [x] `<canvas>` pixel bridge (`uploadCanvasPixels`/`readCanvasPixels`, `GpuixCanvas`)
+- [x] `CanvasRenderingContext2D` — `getContext("2d")` as a pure-TS software rasterizer over the pixel bridge (paths, transforms, gradients, AA strokes, clip, composite, image data; uploads coalesce to one per JS task). Text APIs throw `NotSupported`; glyph rasterization is follow-up work
 - [x] `contextMenu` event, explicit pointer capture, `stopWheelPropagation`
 
 ### TODO

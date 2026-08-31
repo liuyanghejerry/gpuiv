@@ -1,13 +1,22 @@
 /** Native `<canvas>`: a JS-owned RGBA buffer GPUI paints as a GPU texture. */
 
-import { computed, defineComponent, h, ref, type PropType } from "vue"
+import { computed, defineComponent, h, onUnmounted, ref, watch, type PropType } from "vue"
 import type { HostNode } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
+import { GpuixCanvasRenderingContext2D } from "../canvas/context2d.js"
 
 /** Imperative surface of `<GpuixCanvas>`, reached through a template ref. */
 export interface GpuixCanvasInstance {
   /** Host element id — for direct `renderer` calls and automation. */
   readonly id: number | undefined
+  /**
+   * The 2D drawing context, created on first call and returned on every
+   * later one — same identity as a DOM canvas. Drawing goes through the
+   * pure-TypeScript rasterizer and reaches the GPU through the coalesced
+   * upload below; the pixel-bridge methods stay available for manual
+   * buffer control.
+   */
+  getContext(type: "2d"): GpuixCanvasRenderingContext2D | null
   /**
    * Upload a full RGBA buffer (row-major, 4 bytes per pixel) and repaint.
    * `Uint8ClampedArray` — what `ImageData.data` gives — is accepted.
@@ -39,6 +48,7 @@ export const GpuixCanvas = defineComponent({
   setup(props, { attrs, expose }) {
     const gpuix = useGpuix()
     const root = ref<HostNode | null>(null)
+    let context: GpuixCanvasRenderingContext2D | null = null
 
     function requireId(): number {
       const id = root.value?.id
@@ -46,6 +56,20 @@ export const GpuixCanvas = defineComponent({
         throw new Error("GpuixCanvas method called before the canvas is mounted")
       }
       return id
+    }
+
+    function getContext(type: "2d"): GpuixCanvasRenderingContext2D | null {
+      if (type !== "2d") return null
+      if (!context) {
+        context = new GpuixCanvasRenderingContext2D(props.width, props.height, () => {
+          const id = root.value?.id
+          const renderer = gpuix.renderer
+          return id != null && renderer?.uploadCanvasPixels
+            ? { renderer, id }
+            : null
+        })
+      }
+      return context
     }
 
     function uploadPixels(pixels: Uint8Array | Uint8ClampedArray): void {
@@ -70,8 +94,29 @@ export const GpuixCanvas = defineComponent({
       return renderer.readCanvasPixels(requireId())
     }
 
+    // A DOM canvas resets its bitmap and state when its width or height is
+    // set, even to the same value; we reset only on an actual change so a
+    // reactive no-op does not wipe the drawing.
+    watch(
+      () => [props.width, props.height] as const,
+      ([width, height]) => {
+        if (
+          context &&
+          (context.canvas.width !== width || context.canvas.height !== height)
+        ) {
+          context.resize(width, height)
+        }
+      },
+    )
+
+    onUnmounted(() => {
+      context?.dispose()
+      context = null
+    })
+
     expose({
       id: computed(() => root.value?.id ?? undefined),
+      getContext,
       uploadPixels,
       readPixels,
     })
