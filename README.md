@@ -1400,7 +1400,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `img`           | Local raster or SVG images                       |
 | `svg`           | Tintable monochrome SVG icons from local files   |
 | `anchored`      | Positioned overlay                               |
-| `canvas`        | Custom drawing (planned)                         |
+| `canvas`        | JS-owned RGBA buffer painted as a GPU texture    |
 
 ## Images and icons
 
@@ -1447,6 +1447,71 @@ the same as `style.color`.
 
 The chat example builds every sidebar and composer icon this way.
 
+## Canvas
+
+`<canvas>` is a JS-owned pixel buffer that GPUI paints as a GPU texture every
+frame. JS keeps its own copy as the source of truth — exactly like a DOM
+canvas — and pushes the pixels over a dedicated FFI call. Pixels never travel
+through the mutation JSON: a canvas repaint moves megabytes, and the batch
+would escape and re-parse every byte.
+
+The Vue wrapper is `GpuixCanvas`. A template ref exposes `uploadPixels`,
+`readPixels`, and the host `id`:
+
+```tsx
+const canvas = ref<GpuixCanvasInstance | null>(null)
+
+<GpuixCanvas ref={canvas} width={800} height={600}
+             style={{ width: 800, height: 600 }} />
+
+// RGBA, row-major, 4 bytes per pixel — ImageData.data works as-is.
+canvas.value?.uploadPixels(imageData.data)
+```
+
+- `width`/`height` are the **buffer** size; size the element box with `style`.
+  The buffer stretches to the box (`objectFit` defaults to `"fill"`). Multiply
+  by `devicePixelRatio` yourself for sharp output.
+- Before the first upload the element paints a placeholder box but still
+  receives every event and records its bounds, so it is clickable on mount.
+- `renderer.uploadCanvasPixels(elementId, width, height, pixels)` and
+  `renderer.readCanvasPixels(elementId)` are available without the wrapper.
+  `readCanvasPixels` returns the **last upload**, not a GPU readback.
+
+### Wheel zoom over a canvas
+
+The FFI boundary is async, so JS cannot `preventDefault()` a wheel event the
+way a browser handler would. Give any element `stopWheelPropagation` and GPUIX
+stops the wheel there: ancestor scrollers never see the gesture, which is what
+wheel-zoom needs over a canvas inside a scroller.
+
+```tsx
+<div style={{ width: 600, height: 400, overflow: "scroll" }}>
+  <div stopWheelPropagation onScroll={(e) => zoom(e.deltaY)}
+       style={{ width: 400, height: 300 }} />
+</div>
+```
+
+## Pointer capture
+
+`renderer.setPointerCapture(elementId)` arms GPUI pointer capture on the
+element from its next press on: mouse move and up keep targeting it after the
+pointer leaves its bounds, like HTML `setPointerCapture`. Capture releases on
+mouse up, when the element stops painting, or via
+`renderer.releasePointerCapture()`. An element that listens for both
+`onMouseDown` and `onMouseMove` captures automatically, without the call.
+
+`contextMenu` fires on right-button **release**, like macOS (right-button
+presses also reach `onMouseDown` with `button: 2`):
+
+```tsx
+<div onContextMenu={(e) => openMenu(e.x, e.y)}>{children}</div>
+```
+
+Pen pressure and tilt are not wired yet — the zed submodule drops
+`NSEvent.pressure`; see
+[`docs/upstream/tablet-input.md`](docs/upstream/tablet-input.md) for the
+tracking.
+
 ## Supported Events
 
 | Event | Props | Payload fields |
@@ -1459,6 +1524,7 @@ The chat example builds every sidebar and composer icon this way.
 | Mouse leave | `onMouseLeave` | `hovered` |
 | Mouse move | `onMouseMove` | `x`, `y`, `pressedButton`, `modifiers` |
 | Click outside | `onMouseDownOutside` | `x`, `y`, `button`, `modifiers` |
+| Context menu | `onContextMenu` | `x`, `y`, `button`, `modifiers` — fires on right-button release |
 | Key down | `onKeyDown` | `key`, `keyChar`, `isHeld`, `modifiers` |
 | Key up | `onKeyUp` | `key`, `keyChar`, `modifiers` |
 | Focus | `onFocus` | — |
@@ -1976,7 +2042,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
-- [ ] Canvas element
+- [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
+- [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
 - [ ] Vue HMR during `bun --hot` (ref state across saves; needs a Bun Fast Refresh-style runtime transform)

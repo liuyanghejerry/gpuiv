@@ -336,6 +336,9 @@ export interface ElementProps {
   onMouseMove?: (event: EventPayload) => void
   /** Fires when user clicks OUTSIDE this element. Use for "click outside to close". */
   onMouseDownOutside?: (event: EventPayload) => void
+  /** The DOM `contextmenu` event: fires on right-button release, like macOS.
+   *  Right-button presses still reach `onMouseDown` with `button: 2`. */
+  onContextMenu?: (event: EventPayload) => void
 
   // ── Text search ────────────────────────────────────────────────────
   /**
@@ -465,6 +468,24 @@ export interface NativeRenderer {
   getSelectedText?(): string | null
   /** Drop the current selection. */
   clearSelection?(): void
+
+  // ── Canvas API ─────────────────────────────────────────────────
+  /** Upload a full RGBA pixel buffer for a `<canvas>` element and repaint.
+   *  `pixels.length` must be `width * height * 4`. Pixels never travel through
+   *  `applyBatch` — they would be escaped and re-parsed as JSON. */
+  uploadCanvasPixels?(elementId: number, width: number, height: number, pixels: Uint8Array): void
+  /** Read back the last uploaded buffer as RGBA, or null if nothing uploaded. */
+  readCanvasPixels?(elementId: number): Uint8Array | null
+
+  // ── Pointer capture API ────────────────────────────────────────
+  /** Arm pointer capture on the element from its next press on: mouse move
+   *  and up keep targeting it after the pointer leaves its bounds. Releases
+   *  on mouse up, when the element stops painting, or via
+   *  `releasePointerCapture`. Elements listening for both `onMouseDown` and
+   *  `onMouseMove` capture without this. */
+  setPointerCapture?(elementId: number): void
+  /** Release any active pointer capture now. */
+  releasePointerCapture?(): void
 
   // ── Window API ─────────────────────────────────────────────────
   getWindowSize?(): { width: number; height: number }

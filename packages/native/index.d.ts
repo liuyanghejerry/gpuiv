@@ -26,6 +26,30 @@ export declare class GpuixRenderer {
    * Acquires the tree mutex ONCE for the entire batch.
    */
   applyBatch(json: string): Array<number>
+  /**
+   * Upload a full RGBA pixel buffer for a `<canvas>` element and repaint.
+   *
+   * Deliberately outside `applyBatch`: a canvas repaint moves megabytes of
+   * pixels, and the batch JSON would escape and re-parse every byte. JS
+   * keeps its own copy as the source of truth; this store only feeds the
+   * GPU paint and `readCanvasPixels`.
+   */
+  uploadCanvasPixels(elementId: number, width: number, height: number, pixels: Uint8Array): void
+  /** Read back the last uploaded buffer, converted back to RGBA. */
+  readCanvasPixels(elementId: number): Buffer | null
+  /**
+   * Arm gpui pointer capture on the element from its next press on, like
+   * `setPointerCapture` requested before the press: move and up keep
+   * targeting the element after the pointer leaves its bounds. Capture
+   * releases on mouse up, when the element stops painting, or through
+   * `releasePointerCapture`.
+   */
+  setPointerCapture(elementId: number): void
+  /**
+   * Release any active pointer capture now, like HTML
+   * `releasePointerCapture`.
+   */
+  releasePointerCapture(): void
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
@@ -140,6 +164,14 @@ export declare class TestGpuixRenderer {
    * Returns accumulated destroyed IDs from all destroyElement ops.
    */
   applyBatch(json: string): Array<number>
+  /** Upload a full RGBA buffer (`uploadCanvasPixels`) and repaint. */
+  uploadCanvasPixels(elementId: number, width: number, height: number, pixels: Uint8Array): void
+  /** Read back the last uploaded buffer, converted to RGBA. */
+  readCanvasPixels(elementId: number): Buffer | null
+  /** Arm gpui pointer capture on the element for its next press. */
+  setPointerCapture(elementId: number): void
+  /** Release any active pointer capture now. */
+  releasePointerCapture(): void
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.

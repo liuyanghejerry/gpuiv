@@ -933,6 +933,8 @@ belong in README. This list is only the remaining engineering work.
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`setDebugFrameOverlay`)
 - [x] Native `motion.div` transitions with deterministic frame capture
+- [x] `<canvas>` pixel bridge (`uploadCanvasPixels`/`readCanvasPixels`, `GpuixCanvas`)
+- [x] `contextMenu` event, explicit pointer capture, `stopWheelPropagation`
 
 ### TODO
 
@@ -943,7 +945,12 @@ belong in README. This list is only the remaining engineering work.
 
 #### Medium Priority
 
-- [ ] **Canvas** - custom drawing element (`<canvas>` is typed, not implemented)
+- [ ] **Tablet input** - pen pressure waits on zed PR #63250 (or an aligned
+      fork patch); tilt and coalesced events are fork-only. Research and
+      revisit triggers in `docs/upstream/tablet-input.md`
+- [ ] **Mid-press pointer capture** - arming capture on a press that is
+      already in flight needs a hitbox-aware GPUI listener; today
+      `setPointerCapture` arms from the next press on
 
 #### Low Priority
 

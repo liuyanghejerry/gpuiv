@@ -152,6 +152,8 @@ pub struct TestGpuixRenderer {
     /// Same handle GpuixView paints against, so tests can assert on the live
     /// selection after simulating a drag.
     selection: crate::text::SharedSelection,
+    /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
+    canvas_surfaces: crate::canvas::CanvasStore,
 }
 
 #[napi]
@@ -178,6 +180,7 @@ impl TestGpuixRenderer {
         let callback_clone = event_callback.clone();
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
+        let canvas_surfaces = crate::canvas::CanvasStore::default();
 
         // Create VisualTestAppContext with the host's real GPU renderer (Metal
         // on macOS, DirectX on Windows) + TestDispatcher for deterministic
@@ -199,6 +202,7 @@ impl TestGpuixRenderer {
                         callback_clone,
                         "GPUIX Test".to_string(),
                         selection_clone,
+                        canvas_surfaces.clone(),
                     )
                 })
             })
@@ -221,6 +225,7 @@ impl TestGpuixRenderer {
             tree,
             events,
             selection,
+            canvas_surfaces,
         })
     }
 
@@ -239,7 +244,75 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn apply_batch(&self, json: String) -> Result<Vec<f64>> {
         let mut tree = self.tree.lock().unwrap();
-        apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)
+        let destroyed =
+            apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)?;
+        drop(tree);
+        self.canvas_surfaces.remove_destroyed(&destroyed);
+        Ok(destroyed)
+    }
+
+    // ── <canvas> pixel bridge ─────────────────────────────────────────
+
+    /// Upload a full RGBA buffer (`uploadCanvasPixels`) and repaint.
+    #[napi]
+    pub fn upload_canvas_pixels(
+        &self,
+        element_id: f64,
+        width: f64,
+        height: f64,
+        pixels: Uint8Array,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        self.canvas_surfaces
+            .upload(id, width as u32, height as u32, &pixels)
+            .map_err(Error::from_reason)?;
+        drop(pixels);
+        self.flush()
+    }
+
+    /// Read back the last uploaded buffer, converted to RGBA.
+    #[napi]
+    pub fn read_canvas_pixels(&self, element_id: f64) -> Result<Option<Buffer>> {
+        let id = to_element_id(element_id)?;
+        Ok(self
+            .canvas_surfaces
+            .read(id)
+            .map(|rgba| Buffer::from(rgba)))
+    }
+
+    /// Arm gpui pointer capture on the element for its next press.
+    #[napi]
+    pub fn set_pointer_capture(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, _window, view| {
+            let view = view.clone();
+            cx.update(|cx| {
+                view.update(cx, |view, cx| {
+                    view.pointer_capture_target = Some(id);
+                    cx.notify();
+                });
+            });
+            Ok(())
+        })
+    }
+
+    /// Release any active pointer capture now.
+    #[napi]
+    pub fn release_pointer_capture(&self) -> Result<()> {
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, _| {
+                window.release_pointer();
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.update(|cx| {
+                view.update(cx, |view, cx| {
+                    view.pointer_capture_target = None;
+                    cx.notify();
+                });
+            });
+            Ok(())
+        })
     }
 
     // ── Test-specific methods ────────────────────────────────────────

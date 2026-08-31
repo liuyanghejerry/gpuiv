@@ -29,7 +29,7 @@ impl CustomElementFactory for ImgFactory {
 }
 
 #[derive(Debug, Clone)]
-enum ImgObjectFit {
+pub(crate) enum ImgObjectFit {
     Fill,
     Contain,
     Cover,
@@ -44,7 +44,7 @@ impl Default for ImgObjectFit {
 }
 
 impl ImgObjectFit {
-    fn from_str(value: &str) -> Self {
+    pub(crate) fn from_str(value: &str) -> Self {
         match value {
             "fill" => Self::Fill,
             "cover" => Self::Cover,
@@ -54,7 +54,7 @@ impl ImgObjectFit {
         }
     }
 
-    fn as_gpui(&self) -> gpui::ObjectFit {
+    pub(crate) fn as_gpui(&self) -> gpui::ObjectFit {
         match self {
             Self::Fill => gpui::ObjectFit::Fill,
             Self::Contain => gpui::ObjectFit::Contain,

@@ -420,6 +420,8 @@ enum UiCommand {
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
     FocusElement(u64),
+    SetPointerCapture(u64),
+    ReleasePointerCapture,
     ControlClock {
         control: ClockControl,
         response: SyncSender<f64>,
@@ -609,6 +611,16 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::SetPointerCapture(id) => window.update(cx, move |view, _window, cx| {
+                view.pointer_capture_target = Some(id);
+                cx.notify();
+            }),
+            UiCommand::ReleasePointerCapture => window
+                .update(cx, move |view, window, cx| {
+                    view.pointer_capture_target = None;
+                    window.release_pointer();
+                    cx.notify();
+                }),
             UiCommand::ControlClock { control, response } => {
                 window.update(cx, move |view, _window, cx| {
                     let now_ms = match control {
@@ -731,6 +743,8 @@ pub struct GpuixRenderer {
     /// Shared with GpuixView so napi methods can read the live selection
     /// without an App context. Paint and napi calls can use different threads.
     selection: SharedSelection,
+    /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
+    canvas_surfaces: crate::canvas::CanvasStore,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
 }
@@ -848,6 +862,7 @@ impl GpuixRenderer {
             tree: Arc::new(Mutex::new(RetainedTree::new())),
             initialized: Arc::new(Mutex::new(false)),
             selection: SharedSelection::default(),
+            canvas_surfaces: crate::canvas::CanvasStore::default(),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
         }
@@ -909,6 +924,7 @@ impl GpuixRenderer {
         let callback = self.event_callback_for_view();
 
         let selection = self.selection.clone();
+        let canvas_surfaces = self.canvas_surfaces.clone();
         let opened_window = Rc::new(RefCell::new(None));
         let startup_error = Rc::new(RefCell::new(None));
         let opened_window_for_app = opened_window.clone();
@@ -934,7 +950,13 @@ impl GpuixRenderer {
                 to_gpui_window_options(&window_options, bounds),
                 |_window, cx| {
                     cx.new(|_| {
-                        GpuixView::new(tree.clone(), callback.clone(), title, selection.clone())
+                        GpuixView::new(
+                            tree.clone(),
+                            callback.clone(),
+                            title,
+                            selection.clone(),
+                            canvas_surfaces.clone(),
+                        )
                     })
                 },
             ) {
@@ -1003,6 +1025,7 @@ impl GpuixRenderer {
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
+        let canvas_surfaces = self.canvas_surfaces.clone();
         let callback = self.event_callback_for_view();
         let (command_sender, command_receiver) = mpsc::unbounded();
         let (startup_sender, startup_receiver) = sync_channel(1);
@@ -1023,7 +1046,15 @@ impl GpuixRenderer {
                         let window = match cx.open_window(
                             to_gpui_window_options(&window_options, bounds),
                             |_window, cx| {
-                                cx.new(|_| GpuixView::new(tree, callback, title, selection))
+                                cx.new(|_| {
+                                    GpuixView::new(
+                                        tree,
+                                        callback,
+                                        title,
+                                        selection,
+                                        canvas_surfaces,
+                                    )
+                                })
                             },
                         ) {
                             Ok(window) => window,
@@ -1097,8 +1128,97 @@ impl GpuixRenderer {
         let destroyed =
             apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)?;
         drop(tree);
+        self.canvas_surfaces.remove_destroyed(&destroyed);
         self.request_invalidate()?;
         Ok(destroyed)
+    }
+
+    // ── <canvas> pixel bridge ─────────────────────────────────────────
+
+    /// Upload a full RGBA pixel buffer for a `<canvas>` element and repaint.
+    ///
+    /// Deliberately outside `applyBatch`: a canvas repaint moves megabytes of
+    /// pixels, and the batch JSON would escape and re-parse every byte. JS
+    /// keeps its own copy as the source of truth; this store only feeds the
+    /// GPU paint and `readCanvasPixels`.
+    #[napi]
+    pub fn upload_canvas_pixels(
+        &self,
+        element_id: f64,
+        width: f64,
+        height: f64,
+        pixels: Uint8Array,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        self.canvas_surfaces
+            .upload(id, width as u32, height as u32, &pixels)
+            .map_err(Error::from_reason)?;
+        drop(pixels);
+        self.request_invalidate()
+    }
+
+    /// Read back the last uploaded buffer, converted back to RGBA.
+    #[napi]
+    pub fn read_canvas_pixels(&self, element_id: f64) -> Result<Option<Buffer>> {
+        let id = to_element_id(element_id)?;
+        Ok(self.canvas_surfaces.read(id).map(Buffer::from))
+    }
+
+    /// Arm gpui pointer capture on the element from its next press on, like
+    /// `setPointerCapture` requested before the press: move and up keep
+    /// targeting the element after the pointer leaves its bounds. Capture
+    /// releases on mouse up, when the element stops painting, or through
+    /// `releasePointerCapture`.
+    #[napi]
+    pub fn set_pointer_capture(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(|view, _window, cx| {
+            view.pointer_capture_target = Some(id);
+            cx.notify();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            self.send_ui_command(UiCommand::SetPointerCapture(id))?;
+            self.request_invalidate()
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = id;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    /// Release any active pointer capture now, like HTML
+    /// `releasePointerCapture`.
+    #[napi]
+    pub fn release_pointer_capture(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, window, cx| {
+            view.pointer_capture_target = None;
+            window.release_pointer();
+            cx.notify();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            self.send_ui_command(UiCommand::ReleasePointerCapture)
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
     }
 
     // ── Frame loop ───────────────────────────────────────────────────
@@ -2073,6 +2193,7 @@ fn start_web_app(
                     Some(event_callback),
                     "GPUIX Web".to_string(),
                     selection,
+                    crate::canvas::CanvasStore::default(),
                 )
             })
         });
@@ -2574,6 +2695,10 @@ pub(crate) struct GpuixView {
     /// Registry for custom element types (input, editor, diff, etc.).
     /// Stores factories (one per type) and live instances (one per element ID).
     pub(crate) custom_registry: CustomElementRegistry,
+    /// Uploaded `<canvas>` pixel surfaces, shared with the napi methods.
+    pub(crate) canvas_surfaces: crate::canvas::CanvasStore,
+    /// The element `setPointerCapture` armed, if any.
+    pub(crate) pointer_capture_target: Option<u64>,
     /// Persistent ScrollHandles keyed by element ID.
     /// Created lazily for elements with overflow: "scroll" (or per-axis scroll).
     /// Handles persist across renders so GPUI maintains scroll offset state.
@@ -2601,6 +2726,7 @@ impl GpuixView {
         event_callback: Option<EventCallback>,
         window_title: String,
         selection: SharedSelection,
+        canvas_surfaces: crate::canvas::CanvasStore,
     ) -> Self {
         Self {
             tree,
@@ -2609,6 +2735,8 @@ impl GpuixView {
             focus_handles: HashMap::new(),
             focus_subscriptions: HashMap::new(),
             custom_registry: CustomElementRegistry::with_defaults(),
+            canvas_surfaces,
+            pointer_capture_target: None,
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
@@ -2700,6 +2828,8 @@ impl GpuixView {
             focus_handles: &self.focus_handles,
             scroll_handles: &mut self.scroll_handles,
             custom_registry: &mut self.custom_registry,
+            canvas_surfaces: &self.canvas_surfaces,
+            pointer_capture_target: self.pointer_capture_target,
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
             now,
@@ -2930,6 +3060,12 @@ pub(crate) struct BuildCtx<'a> {
     pub focus_handles: &'a HashMap<u64, gpui::FocusHandle>,
     pub scroll_handles: &'a mut HashMap<u64, gpui::ScrollHandle>,
     pub custom_registry: &'a mut CustomElementRegistry,
+    /// Uploaded `<canvas>` pixel surfaces, keyed by host element id.
+    pub canvas_surfaces: &'a crate::canvas::CanvasStore,
+    /// The element `setPointerCapture` armed, if any. A build-time flag:
+    /// arming happens through gpui's `capture_pointer()`, which takes effect
+    /// on the element's next press.
+    pub pointer_capture_target: Option<u64>,
     virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
     pub now: web_time::Instant,
@@ -3554,6 +3690,8 @@ impl gpui::Render for GpuixView {
                     focus_handles: &self.focus_handles,
                     scroll_handles: &mut self.scroll_handles,
                     custom_registry: &mut self.custom_registry,
+                    canvas_surfaces: &self.canvas_surfaces,
+                    pointer_capture_target: self.pointer_capture_target,
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
                     now,
@@ -3708,6 +3846,16 @@ pub(crate) fn build_element(
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
             build_virtual_list(element, ctx, window, cx)
+        }
+        "canvas" => {
+            ctx.custom_registry.destroy(id);
+            crate::canvas::build_canvas(
+                element,
+                style,
+                ctx.canvas_surfaces,
+                ctx.event_callback,
+                ctx.pointer_capture_target == Some(id),
+            )
         }
 
         // Polymorphic dispatch for all custom elements.
@@ -4014,13 +4162,61 @@ pub(crate) fn build_host_container(
         el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
     }
 
-    // Wire up events.
-    // Some events (on_hover, on_click) require a stateful element (.id()),
-    // which we already set above. Others (on_mouse_down, on_key_down) work
-    // on any InteractiveElement.
+    // Wire up events. The wiring is shared with `<canvas>`: every stateful
+    // root gets the same event surface via wire_host_events.
+    el = wire_host_events(
+        el,
+        element,
+        ctx.event_callback,
+        ctx.pointer_capture_target == Some(element.id),
+    );
+
+    // Text content — selectable, same as a <text> leaf.
+    if let Some(ref content) = element.content {
+        el = el.child(text_content(element.id, content, ctx));
+    }
+
+    // Children
+    let child_ids: Vec<u64> = element.children.clone();
+    for child_id in child_ids {
+        let child = build_element(child_id, ctx, window, cx);
+        el = if overflow_x_only {
+            el.child(gpui::div().flex_none().child(child))
+        } else {
+            el.child(child)
+        };
+    }
+
+    el.into_any_element()
+}
+
+/// Wire the JS-declared event surface onto any stateful element root.
+///
+/// Shared by `<div>`/`<text>` (`build_host_container`) and `<canvas>`
+/// (`build_canvas`) so a host element and a leaf canvas expose exactly the
+/// same events. `force_pointer_capture` arms gpui pointer capture even when
+/// the element does not listen for both `mouseDown` and `mouseMove` — the
+/// `setPointerCapture` napi command sets it for the next press.
+pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
+    mut el: E,
+    element: &crate::retained_tree::RetainedElement,
+    event_callback: &Option<EventCallback>,
+    force_pointer_capture: bool,
+) -> E {
+    // `stopWheelPropagation` is the DOM `preventDefault()` +
+    // `stopPropagation()` pair for wheel zoom over a canvas: the FFI boundary
+    // is async, so JS cannot cancel a wheel event synchronously the way a
+    // browser handler would. Stopping propagation at this element keeps
+    // ancestor scrollers from reacting to the same gesture. It works with or
+    // without a JS `scroll` listener — a canvas usually wants neither event.
+    let stop_wheel_propagation = element
+        .custom_props
+        .get("stopWheelPropagation")
+        .is_some_and(|value| value.as_bool() == Some(true));
+
     for event_type in &element.events {
         let id = element.id;
-        let callback = ctx.event_callback.clone();
+        let callback = event_callback.clone();
         match event_type.as_str() {
             // ── Click ────────────────────────────────────────────
             // Primary button only, like the DOM. Right and middle clicks go to
@@ -4095,6 +4291,23 @@ pub(crate) fn build_host_container(
                 }
             }
 
+            // ── Context menu ─────────────────────────────────────
+            // The DOM `contextmenu` event: on macOS it fires on right-button
+            // RELEASE, so a right-button drag never triggers it. Right-button
+            // presses already reach `onMouseDown` with button: 2.
+            "contextMenu" => {
+                el = el.on_mouse_up(gpui::MouseButton::Right, move |mouse_event, _window, _cx| {
+                    emit_event_full(&callback, id, "contextMenu", |p| {
+                        let (x, y) = point_to_xy(mouse_event.position);
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.button = Some(mouse_button_to_u32(mouse_event.button));
+                        p.is_right_click = Some(true);
+                        p.modifiers = Some(mouse_event.modifiers.into());
+                    });
+                });
+            }
+
             // ── Mouse move ───────────────────────────────────────
             "mouseMove" => {
                 el = el.on_mouse_move(move |mouse_event, _window, _cx| {
@@ -4119,12 +4332,12 @@ pub(crate) fn build_host_container(
                 // Wire on first encounter (mouseEnter sorts before mouseLeave).
                 if event_type.as_str() == "mouseEnter" || !has_enter {
                     let callback_enter = if has_enter {
-                        ctx.event_callback.clone()
+                        event_callback.clone()
                     } else {
                         None
                     };
                     let callback_leave = if has_leave {
-                        ctx.event_callback.clone()
+                        event_callback.clone()
                     } else {
                         None
                     };
@@ -4159,7 +4372,11 @@ pub(crate) fn build_host_container(
 
             // ── Scroll wheel ─────────────────────────────────────
             "scroll" => {
-                el = el.on_scroll_wheel(move |scroll_event, _window, _cx| {
+                el = el.on_scroll_wheel(move |scroll_event, window, cx| {
+                    if stop_wheel_propagation {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                    }
                     emit_event_full(&callback, id, "scroll", |p| {
                         let (x, y) = point_to_xy(scroll_event.position);
                         p.x = Some(x);
@@ -4219,27 +4436,25 @@ pub(crate) fn build_host_container(
         }
     }
 
-    if element.events.contains("mouseDown") && element.events.contains("mouseMove") {
+    // Mouse capture is armed by the press. An element that listens for both
+    // `mouseDown` and `mouseMove` captures implicitly, like HTML's automatic
+    // capture on press; `setPointerCapture` forces it for any element.
+    if (element.events.contains("mouseDown") && element.events.contains("mouseMove"))
+        || force_pointer_capture
+    {
         el = el.capture_pointer();
     }
 
-    // Text content — selectable, same as a <text> leaf.
-    if let Some(ref content) = element.content {
-        el = el.child(text_content(element.id, content, ctx));
+    // A wheel-consuming element with no JS scroll listener still needs the
+    // gesture stopped before an ancestor scroller takes it.
+    if stop_wheel_propagation && !element.events.contains("scroll") {
+        el = el.on_scroll_wheel(move |_scroll_event, window, cx| {
+            window.prevent_default();
+            cx.stop_propagation();
+        });
     }
 
-    // Children
-    let child_ids: Vec<u64> = element.children.clone();
-    for child_id in child_ids {
-        let child = build_element(child_id, ctx, window, cx);
-        el = if overflow_x_only {
-            el.child(gpui::div().flex_none().child(child))
-        } else {
-            el.child(child)
-        };
-    }
-
-    el.into_any_element()
+    el
 }
 
 /// A selectable text run owned by `element_id`. Runs are left to gpui so the
