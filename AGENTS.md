@@ -1,6 +1,12 @@
-# AGENTS.md - GPUIX Codebase Guide
+# AGENTS.md - GPUIV Codebase Guide
 
-**Read [README.md](./README.md) first** to understand what GPUIX is, the architecture, mutation API, event flow, supported elements/events/styles, and the test renderer.
+**Read [README.md](./README.md) first** to understand what GPUIV is, the architecture, mutation API, event flow, supported elements/events/styles, and the test renderer.
+
+> **GPUIV is a self-maintained fork of GPUIX**
+> ([`remorses/gpuix`](https://github.com/remorses/gpuix), the React binding),
+> ported to Vue 3. How this fork relates to upstream — what is synced,
+> declined, or deliberately diverged — is tracked in
+> [`docs/upstream/`](./docs/upstream/README.md).
 
 ## GPUIV is a thin layer on GPUI
 
@@ -27,7 +33,7 @@ other framework's behaviour.
 
 ## Project Goal
 
-GPUIX enables building **native GPU-accelerated desktop applications** using **Vue 3 and TypeScript**, powered by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's rendering framework).
+GPUIV enables building **native GPU-accelerated desktop applications** using **Vue 3 and TypeScript**, powered by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's rendering framework).
 
 Instead of Electron/web rendering, your Vue components render directly to the GPU via Metal/Vulkan.
 
@@ -95,7 +101,7 @@ Vue 3 (TypeScript)  →  napi-rs  →  GPUI (Rust)  →  GPU
 
 GPUI is **immediate-mode** - it rebuilds the entire UI tree every frame. This actually aligns perfectly with Vue's reactive model:
 
-| Traditional DOM Renderer | GPUIX |
+| Traditional DOM Renderer | GPUIV |
 |--------------------------|-------|
 | `appendChild(node)` | Mutation applied to the Rust RetainedTree |
 | `node.style.color = x` | `setStyle` mutation, then rebuild next frame |
@@ -246,7 +252,7 @@ One napi struct for all events; fields are optional and only the relevant ones a
 
 ## Text rendering: one funnel, no exceptions
 
-Every string GPUIX paints goes through `crate::text`:
+Every string GPUIV paints goes through `crate::text`:
 
 - `selectable_text(..)` for content — registers into the per-frame selection
   registry; the window mouse and key listeners are installed once per frame by
@@ -855,14 +861,14 @@ A "PR to Zed" means **upstream** [`zed-industries/zed`](https://github.com/zed-i
 `main`. Never open that PR from this checkout. Never point it at `remorses/zed`.
 
 Do **not** branch, commit review markers, or reset `zed/` inside this checkout.
-That submodule is what GPUIX builds against. A dirty or switched `zed/` breaks
+That submodule is what GPUIV builds against. A dirty or switched `zed/` breaks
 the native addon and the test renderer.
 
 ```bash
-# from gpuivlocal/zed. leaves this submodule on its current commit
+# from a separate local clone of zed, never this repo's zed/ build checkout
 git remote add upstream https://github.com/zed-industries/zed.git  # once
 git fetch upstream
-git worktree add /Users/morse/Documents/GitHub/zed-<branch-name> -b <branch-name> upstream/main
+git worktree add ../zed-<branch-name> -b <branch-name> upstream/main
 ```
 
 Commit only in that worktree. Do not add comments to Zed source. Push the branch
@@ -870,13 +876,13 @@ to `remorses/zed`, then open the PR with `--repo zed-industries/zed --base main`
 After merge, cherry-pick onto `gpuix` and fast-forward the submodule
 here. Never run `git reset` in `zed/` to "undo" PR work.
 
-### PRs to GPUIX
+### PRs to GPUIV
 
-When you open a PR with `gh pr create` against **this repo** (`remorses/gpuiv`),
-the body must name the **harness**, **agent**, and **model** that wrote the
-change. Then put **every user prompt** from the session in a collapsed
-`<details>` block. Reviewers use that to judge prompt quality and how much
-the agent invented.
+When you open a PR with `gh pr create` against **this repo**
+(`liuyanghejerry/gpuiv`), the body must name the **harness**, **agent**, and
+**model** that wrote the change. Then put **every user prompt** from the
+session in a collapsed `<details>` block. Reviewers use that to judge prompt
+quality and how much the agent invented.
 
 Do this for `gh pr create` and for later `gh pr edit` if the first body missed
 it. Do not add this block to Zed PRs.
@@ -917,7 +923,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] napi-rs FFI bindings and RetainedTree
 - [x] Style mapping, including native `hover` / `active`
 - [x] Mouse, keyboard, focus, scroll, and click-outside events
-- [x] `commitMutations()` stores the view entity and calls `cx.notify()`
+- [x] `applyBatch` applies one mutation batch atomically and invalidates the view
 - [x] GPU-backed test renderer
 - [x] Native `<input>` and `<textarea>`
 - [x] `<img>` (local raster/SVG) and `<svg>` (tintable monochrome icons)
@@ -1017,7 +1023,7 @@ Use tuistory for the long-running process. Do not use `tsx` or raw `tmux`.
 
 ### Drive the live window
 
-**Do not use `usecomputer`, `screencapture`, or desktop clicks.** GPUIX has a
+**Do not use `usecomputer`, `screencapture`, or desktop clicks.** GPUIV has a
 Playwright-like automation API. Full docs are in the README **Automation**
 section.
 
@@ -1076,9 +1082,9 @@ you record a sidebar open/close, not a screen recorder.
 
 ## Contributing
 
-1. For Rust changes, work in `zed/crates/gpuix` (easier to build)
-2. Copy changes to `gpuiv/packages/native/src/` when ready
-3. TypeScript changes can be made directly in `packages/vue/`
+1. Rust changes go directly in `packages/native/src/` — this fork has no
+   `zed/crates/gpuix`; the submodule is the GPUI fork only
+2. TypeScript changes can be made directly in `packages/vue/`
 
 ## Examples using same tech as ours. To unblock on issues and compare to our code
 
@@ -1086,6 +1092,6 @@ For example usage of projects depending on gpui in rust: opensrc https://github.
 
 For examples of NAPI rs native packages: https://github.com/napi-rs/package-template and https://github.com/Brooooooklyn/Image
 
-For reading gpui source code: https://github.com/zed-industries/sed inside crates/gpui
+For reading gpui source code: https://github.com/zed-industries/zed inside crates/gpui
 
 For examples of a custom Vue renderer (the `createRenderer` host-config approach we use): https://vuejs.org/api/custom-renderer.html

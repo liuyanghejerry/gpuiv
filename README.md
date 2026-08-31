@@ -10,9 +10,9 @@ GPUIV is a personal fork of [remorses/gpuix](https://github.com/remorses/gpuix),
 
 Most of the underlying architecture — including the Rust/napi-rs native layer, retained tree, mutation protocol, GPUI integration, native elements, and testing approach — comes from upstream GPUIX. Unless a change is specifically noted in this repository's history, implementation details and ongoing maintenance should first be checked against [upstream GPUIX](https://github.com/remorses/gpuix). This fork may diverge as the Vue binding evolves.
 
-![A Waku-style app built with GPUIX](docs/images/chat-app.png)
+![A Waku-style app built with GPUIV](docs/images/chat-app.png)
 
-Everything above is GPUIX: the sidebar, the scrolling list, the composer,
+Everything above is GPUIV: the sidebar, the scrolling list, the composer,
 and native `<markdown>`. Start it with **`bun --hot`** so a save remounts Vue
 on the same window:
 
@@ -38,7 +38,7 @@ Markdown, code and a virtualized diff in one frame:
 
 ## Architecture
 
-GPUIX bridges Vue to GPUI using a **mutation-based protocol** over napi-rs FFI. Vue's custom renderer (`createRenderer` from `vue`) queues DOM-like mutations (`createElement`, `appendChild`, `setStyle`, …) and applies them to Rust as **one atomic `applyBatch(json)` per flush** — no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
+GPUIV bridges Vue to GPUI using a **mutation-based protocol** over napi-rs FFI. Vue's custom renderer (`createRenderer` from `vue`) queues DOM-like mutations (`createElement`, `appendChild`, `setStyle`, …) and applies them to Rust as **one atomic `applyBatch(json)` per flush** — no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -84,7 +84,7 @@ GPUIX bridges Vue to GPUI using a **mutation-based protocol** over napi-rs FFI. 
 
 ## Why This Works
 
-GPUI is an **immediate-mode** UI framework — it rebuilds the entire element tree every frame. Instead of fighting this, GPUIX embraces it:
+GPUI is an **immediate-mode** UI framework — it rebuilds the entire element tree every frame. Instead of fighting this, GPUIV embraces it:
 
 1. Vue's custom renderer detects a state change and queues napi mutations (`createElement`, `setStyle`, `appendChild`, …)
 2. Each queued batch updates a **RetainedTree** on the Rust side — a map of element nodes with interned styles, children, and event flags
@@ -570,7 +570,7 @@ Plain scroll containers still build every child. Use `<virtual-list>` below when
 > (preview plus Show more) instead of giving the child its own viewport.
 >
 > Horizontal overflow is the exception. `overflowX: "scroll"` on a wide child
-> (a code row, a table) does not steal the vertical wheel. GPUIX lays that
+> (a code row, a table) does not steal the vertical wheel. GPUIV lays that
 > scroller out as a flex viewport with `minWidth: 0`. The wide child must not
 > shrink: set `flexShrink: 0` or a definite width. Swipe on **X** to pan.
 > A vertical wheel stays on the parent.
@@ -672,7 +672,7 @@ const MessageList = defineComponent({
 })
 ```
 
-The list needs a **bounded height** or bounded flex space. Its direct children are rows and can contain any GPUIX host or custom element.
+The list needs a **bounded height** or bounded flex space. Its direct children are rows and can contain any GPUIV host or custom element.
 
 | Prop | Default | Purpose |
 |---|---:|---|
@@ -683,7 +683,7 @@ The list needs a **bounded height** or bounded flex space. Its direct children a
 
 ### How virtualization works
 
-**Vue reconciliation stays normal.** The complete keyed child list crosses the mutation protocol and remains in Rust's retained tree. GPUIX defers only the expensive GPUI element construction, layout, and paint work.
+**Vue reconciliation stays normal.** The complete keyed child list crosses the mutation protocol and remains in Rust's retained tree. GPUIV defers only the expensive GPUI element construction, layout, and paint work.
 
 ```text
 Vue vnode diff + Rust RetainedTree     all row IDs, props, text, and events
@@ -703,7 +703,7 @@ Vue vnode diff + Rust RetainedTree     all row IDs, props, text, and events
 
 GPUI measures a row when it enters the viewport. `estimatedItemHeight` gives unseen rows an approximate height so the scrollbar is useful before every row has been visited. The measured height replaces the estimate automatically.
 
-When a retained descendant changes, GPUIX marks its direct row for remeasurement. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
+When a retained descendant changes, GPUIV marks its direct row for remeasurement. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
 
 ### Row boundaries
 
@@ -821,7 +821,7 @@ index:     0        1        2        3        4        5        6        7
 
 The sum of that height cache is the scroll length, so a rough estimate only affects **scrollbar accuracy** before a row is visited. The measured height replaces the estimate automatically, and the scrollbar converges as you scroll.
 
-When a retained descendant changes, GPUIX marks its direct row for remeasurement, so a streaming row grows correctly. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
+When a retained descendant changes, GPUIV marks its direct row for remeasurement, so a streaming row grows correctly. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
 
 `estimatedItemHeight` is optional in children mode, where every row exists and can be measured. It is **required** with `itemCount`, because Vue never mounts the rows outside the window and native has no element to measure. Those indexes render as an empty box of the estimated height until Vue mounts the real row.
 
@@ -874,7 +874,7 @@ exactly what `memo` did in the React binding. The chat example uses
 this pattern.
 
 `overflowX: "scroll"` on a wide child must not steal the vertical wheel.
-GPUIX sets `restrict_scroll_to_axis` on that path. Native
+GPUIV sets `restrict_scroll_to_axis` on that path. Native
 `overflow_x_scroll()` must call the same method.
 
 Turn on `debugFrameOverlay: 'full'` while you scroll. The overlay is **draw
@@ -923,7 +923,7 @@ inactive. Override its colour through the shared native theme:
 
 ## Focus and keyboard navigation
 
-Focus is a **native GPUI concept**. GPUIX connects stable element IDs to
+Focus is a **native GPUI concept**. GPUIV connects stable element IDs to
 persistent `gpui::FocusHandle` values, so focus survives Vue re-renders:
 
 ```text
@@ -1003,7 +1003,7 @@ Style the existing primitives and compose them yourself.
 ### Build a local Select
 
 Create `components/ui/model-picker.tsx`. This file is application code, so it can be
-copied and changed without waiting for GPUIX to add a theme option:
+copied and changed without waiting for GPUIV to add a theme option:
 
 ```tsx
 import { defineComponent, type PropType } from 'vue'
@@ -1213,7 +1213,7 @@ other is always wrong: the count native reports covers the window only, and
 
 ## Text selection
 
-Every text GPUIX paints is **selectable and copyable**, including text inside
+Every text GPUIV paints is **selectable and copyable**, including text inside
 `<code>`, `<diff>` and `<markdown>`. A drag that starts in a heading and ends
 inside a fenced code block selects everything between; Cmd+C copies it joined in
 document order.
@@ -1245,7 +1245,7 @@ the anchor and head, whole for everything between.
 <summary>Why not one big text element, like Zed?</summary>
 
 Zed's markdown selects continuously because its whole document is a single
-element over one text model. GPUIX renders a *tree* of text elements, so it
+element over one text model. GPUIV renders a *tree* of text elements, so it
 rebuilds that continuity at paint time instead. The mechanism is ported from
 [Comet](https://github.com/zeronsh/comet) (MIT), which faced the same problem.
 </details>
@@ -1431,7 +1431,7 @@ shape and tinted with `style.color`. Use this for toolbar icons, not for
 full-colour artwork.
 
 `src` is a filesystem path **or** a `data:image/svg+xml,…` URL. Vitest and some
-Bun `import … with { type: 'file' }` bindings emit the data URL. GPUIX decodes
+Bun `import … with { type: 'file' }` bindings emit the data URL. GPUIV decodes
 both.
 
 `style.color` is required. Without it the icon does not paint. Prefer
@@ -1509,7 +1509,7 @@ keys are camelized, and CSS strings and arrays of objects are accepted too.
 
 ### Colors
 
-Every color-bearing style field accepts the same string grammar. GPUIX native
+Every color-bearing style field accepts the same string grammar. GPUIV native
 uses `csscolorparser` 0.8.3 and accepts:
 
 - named colors and `transparent`;
@@ -1564,7 +1564,7 @@ const theme = {
 }
 
 <div style={{ backgroundColor: theme.surface, borderColor: theme.accent }}>
-  <text style={{ color: theme.text }}>Hello GPUIX!</text>
+  <text style={{ color: theme.text }}>Hello GPUIV!</text>
 </div>
 ```
 
