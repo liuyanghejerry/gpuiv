@@ -487,6 +487,47 @@ export class TestRenderer implements NativeRenderer {
     return [result[0], result[1], result[2]]
   }
 
+  // ── Canvas API ──────────────────────────────────────────────────
+
+  /** Upload a full RGBA buffer for a `<canvas>` element and repaint. The
+   *  native side validates the length and flushes the frame itself. */
+  uploadCanvasPixels(
+    elementId: number,
+    width: number,
+    height: number,
+    pixels: Uint8Array | Uint8ClampedArray,
+  ): void {
+    // ImageData.data is Uint8ClampedArray; native takes a plain Uint8Array.
+    const bytes =
+      pixels instanceof Uint8ClampedArray
+        ? new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength)
+        : pixels
+    this.native.uploadCanvasPixels?.(elementId, width, height, bytes)
+  }
+
+  /** The last uploaded buffer as RGBA, or null before the first upload.
+   *  A bridge round-trip, not a GPU readback. */
+  readCanvasPixels(elementId: number): Uint8Array | null {
+    return this.native.readCanvasPixels?.(elementId) ?? null
+  }
+
+  // ── Pointer capture API ─────────────────────────────────────────
+
+  /** Arm pointer capture on the element from its next press on: move and up
+   *  keep targeting it after the pointer leaves its bounds. */
+  setPointerCapture(elementId: number): void {
+    this.native.setPointerCapture?.(elementId)
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
+  /** Release any active pointer capture now. */
+  releasePointerCapture(): void {
+    this.native.releasePointerCapture?.()
+    this.native.flush()
+    this.dispatchNativeEvents()
+  }
+
   // ── Selection API ───────────────────────────────────────────────
 
   /** Drag-select from (x1,y1) to (x2,y2) and return the selected text.

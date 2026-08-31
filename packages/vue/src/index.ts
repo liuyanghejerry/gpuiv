@@ -11,6 +11,8 @@ export type { HighlightSpec } from "./types.js"
 // Components
 export { motion } from "./components/motion.js"
 export { VirtualList } from "./components/virtual-list.js"
+export { GpuixCanvas } from "./components/gpuix-canvas.js"
+export type { GpuixCanvasInstance } from "./components/gpuix-canvas.js"
 export {
   FloatingLayer,
   floatingRootStyle,

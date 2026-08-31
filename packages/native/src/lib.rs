@@ -1,6 +1,7 @@
 #![deny(clippy::all)]
 
 mod automation;
+mod canvas;
 mod color;
 mod custom_elements;
 mod diff;

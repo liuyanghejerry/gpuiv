@@ -32,6 +32,10 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 web-time = "1"
 pulldown-cmark = { version = "0.12", default-features = false }
 unicode-segmentation = "1"
+# <canvas> pixel buffers wrap into gpui::RenderImage frames. Versions match
+# the zed workspace so cargo unifies them with gpui's own copies.
+image = { version = "0.25.1", default-features = false }
+smallvec = { version = "1.6", features = ["union", "const_new"] }
 
 # macOS text/graphics deps - pinned to avoid core-graphics version conflicts
 # core-text 21.1.0 uses core-graphics 0.25 which conflicts with font-kit's core-graphics 0.24
