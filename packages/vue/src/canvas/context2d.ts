@@ -1,12 +1,20 @@
 /**
- * `CanvasRenderingContext2D` for GPUIV — a pure-TypeScript software
- * rasterizer.
+ * `CanvasRenderingContext2D` for GPUIV — the WebIDL facade over the Rust
+ * rasterization core (`GpuixCanvas2DCore` in `@gpuiv/native`).
  *
- * The context owns a premultiplied RGBA buffer as the source of truth
- * (exactly the relationship a DOM canvas has to its backing store) and
- * pushes straight-alpha bytes through the existing `uploadCanvasPixels`
- * channel; the Rust side is untouched. Draws are coalesced: everything a
- * JS task paints reaches the GPU in one upload on the following microtask.
+ * This layer owns everything script-visible except pixels: argument
+ * conversion (valueOf objects, strings-as-numbers, truncation), validation
+ * with DOM exception types, style parsing and getter serialization, and the
+ * upload schedule. The native class owns the drawing state, the recorded
+ * display list, and the premultiplied buffer — draws are recorded per call
+ * and rasterized once per flush (upload or pixel read), Rust to Rust, so
+ * pixel bytes never cross the bridge in either direction.
+ *
+ * Getters read a JS shadow of the drawing state, kept in lockstep because
+ * every state mutation flows through one setter here (the same trick the
+ * save/restore stack uses). Reads that depend on rasterized pixels or
+ * geometry — `getImageData`, `isPointInPath`, `getTransform` — cross the
+ * bridge synchronously instead.
  *
  * Deliberately NOT implemented (documented in README "Canvas"): text
  * (`fillText`/`strokeText`/`measureText` — they throw, glyph rasterization
@@ -15,28 +23,11 @@
  * `drawImage` source (JS never sees decoded `<img>` pixels).
  */
 
+import { GpuixCanvas2DCore } from "@gpuiv/native"
 import { parseColor, serializeColor, type RgbaColor } from "./color.js"
 import { GpuixCanvasGradient } from "./gradient.js"
 import { GpuixImageData } from "./image-data.js"
-import {
-  applyMatrix,
-  identityMatrix,
-  invertMatrix,
-  maxScaleOf,
-  multiplyMatrix,
-  rotationMatrix,
-  scalingMatrix,
-  translationMatrix,
-  type GpuixMatrix2D,
-} from "./matrix.js"
-import { flattenPath, GpuixPathBuilder, type Poly } from "./path.js"
-import {
-  pointInPolys,
-  rasterizeCoverage,
-  type CoverageBuffer,
-  type FillRule,
-} from "./raster.js"
-import { buildStrokeGeometry, type StrokeParams } from "./stroke.js"
+import type { GpuixMatrix2D } from "./matrix.js"
 import type { NativeRenderer } from "../types.js"
 
 export { GpuixImageData } from "./image-data.js"
@@ -135,11 +126,12 @@ export interface GpuixUploadTarget {
   id: number
 }
 
-interface DrawingState {
-  m: GpuixMatrix2D
-  /** Coverage mask; null means "no clip". Snapshotted per save() — clip()
-   *  always writes a fresh array, so restoring never mutates history. */
-  clip: Float32Array | null
+/**
+ * The JS-visible half of the drawing state — everything a getter returns.
+ * The native core keeps the authoritative copy for drawing; the two stay in
+ * lockstep because every mutation flows through one setter on this class.
+ */
+interface ShadowState {
   fillStyle: GpuixFillStyle
   fill: RgbaColor | null
   strokeStyle: GpuixFillStyle
@@ -170,18 +162,98 @@ function dimensionOf(value: number): number {
   return Number.isFinite(n) && n > 0 ? n : 0
 }
 
+/** WebIDL double conversion for a radius member; BigInt is the one
+ *  input the DOM rejects with a TypeError instead of coercing. */
+function radiusNumber(value: unknown): number {
+  if (typeof value === "bigint") {
+    throw new TypeError("roundRect: radii cannot be BigInt")
+  }
+  if (typeof value === "number") return value
+  if (value === undefined || value === null) return 0
+  return Number(value)
+}
+
+interface CornerRadii {
+  rx: number
+  ry: number
+}
+
+/** Normalize the `roundRect` radii argument: validate and throw the DOM
+ *  exceptions, spread 1–3 corners to four, and scale oversized corners down
+ *  uniformly like the spec's border-radius. Non-finite radii return null —
+ *  the whole call is then a silent no-op. Pure JS: it must run before the
+ *  bridge because the exception types and valueOf side effects are
+ *  script-visible. */
+function normalizeRoundRectRadii(
+  radii: number | Array<number | { x?: number; y?: number }>,
+  w: number,
+  h: number,
+): [CornerRadii, CornerRadii, CornerRadii, CornerRadii] | null {
+  const seq: Array<number | { x?: unknown; y?: unknown }> = Array.isArray(radii)
+    ? radii
+    : [radii]
+  if (seq.length === 0) {
+    throw new RangeError("roundRect: radii must not be empty")
+  }
+  if (seq.length > 4) {
+    throw new RangeError("roundRect: at most four radii")
+  }
+  const corners: CornerRadii[] = seq.map((entry) => {
+    if (typeof entry === "number" || typeof entry === "bigint") {
+      return { rx: radiusNumber(entry), ry: radiusNumber(entry) }
+    }
+    // DOMPointInit: members are independent and default to 0 when absent,
+    // which is why `{}`, `[]` and `[undefined]` all mean "square corner".
+    const rawX = (entry as { x?: unknown } | null | undefined)?.x
+    const rawY = (entry as { y?: unknown } | null | undefined)?.y
+    return {
+      rx: radiusNumber(rawX === undefined ? 0 : rawX),
+      ry: radiusNumber(rawY === undefined ? 0 : rawY),
+    }
+  })
+  // Non-finite radii make the whole call a silent no-op; a finite negative
+  // radius is the RangeError case.
+  if (corners.some((c) => !Number.isFinite(c.rx) || !Number.isFinite(c.ry))) return null
+  if (corners.some((c) => c.rx < 0 || c.ry < 0)) {
+    throw new RangeError("roundRect: radii must be finite and non-negative")
+  }
+  // CSS border-radius spreading: 1 → all, 2 → [a, b, a, b], 3 → [a, b, c, b].
+  if (corners.length === 1) {
+    corners.push(corners[0]!, corners[0]!, corners[0]!)
+  } else if (corners.length === 2) {
+    corners.push(corners[0]!, corners[1]!)
+  } else if (corners.length === 3) {
+    corners.push(corners[1]!)
+  }
+  const [tl, tr, br, bl] = corners as [CornerRadii, CornerRadii, CornerRadii, CornerRadii]
+  // Scale oversized corners down uniformly, like the spec's border-radius.
+  const k = Math.min(
+    1,
+    w / (tl.rx + tr.rx || 1),
+    w / (bl.rx + br.rx || 1),
+    h / (tl.ry + bl.ry || 1),
+    h / (tr.ry + br.ry || 1),
+  )
+  if (k < 1) {
+    for (const corner of corners) {
+      corner.rx *= k
+      corner.ry *= k
+    }
+  }
+  return [tl, tr, br, bl]
+}
+
 export class GpuixCanvasRenderingContext2D {
   readonly canvas: { readonly width: number; readonly height: number }
+
+  /** @internal — the native rasterization core this facade forwards to. */
+  readonly native: GpuixCanvas2DCore
 
   private width: number
   private height: number
   private getUpload: () => GpuixUploadTarget | null
-  private premul: Uint8ClampedArray
-  private cover: CoverageBuffer
-  private straightScratch: Uint8Array | null = null
-  private state: DrawingState
-  private stack: DrawingState[] = []
-  private path = new GpuixPathBuilder()
+  private state: ShadowState
+  private stack: ShadowState[] = []
   private uploadScheduled = false
   private disposed = false
   private drawCount = 0
@@ -214,12 +286,57 @@ export class GpuixCanvasRenderingContext2D {
     return parseColor(String(value))
   }
 
+  /** Push the parsed paint to the native core: a solid colour, or the
+   *  descriptor form of a gradient object. */
+  private static pushFill(
+    native: GpuixCanvas2DCore,
+    which: "fill" | "stroke",
+    parsed: RgbaColor | null,
+    style: GpuixFillStyle,
+  ): void {
+    const gradient = style instanceof GpuixCanvasGradient ? style : null
+    if (gradient) {
+      if (!gradient.empty) {
+        const desc = gradient.toDescriptor()
+        if (which === "fill") {
+          native.setFillGradient(desc.radial, desc.x0, desc.y0, desc.r0, desc.x1, desc.y1, desc.r1, desc.stops)
+        } else {
+          native.setStrokeGradient(desc.radial, desc.x0, desc.y0, desc.r0, desc.x1, desc.y1, desc.r1, desc.stops)
+        }
+      }
+      return
+    }
+    const rgba = parsed ?? { r: 0, g: 0, b: 0, a: 0 }
+    if (which === "fill") {
+      native.setFillRgba(rgba.r, rgba.g, rgba.b, rgba.a)
+    } else {
+      native.setStrokeRgba(rgba.r, rgba.g, rgba.b, rgba.a)
+    }
+  }
+
+  /** Gradients are live objects in the DOM: mutating stops after the style
+   *  was assigned still affects later draws. The native paint snapshots the
+   *  descriptor, so every gradient draw re-pushes the current stops. Solid
+   *  colours are immutable once parsed — no re-push needed. */
+  private syncPaint(which: "fill" | "stroke"): void {
+    const style = which === "fill" ? this.state.fillStyle : this.state.strokeStyle
+    if (style instanceof GpuixCanvasGradient && !style.empty) {
+      GpuixCanvasRenderingContext2D.pushFill(this.native, which, null, style)
+    }
+  }
+
+  /** A degenerate gradient paints nothing at all — and the TS semantics
+   *  were an early return *before* scheduling, so no upload, no draw count. */
+  private paintIsEmpty(which: "fill" | "stroke"): boolean {
+    const style = which === "fill" ? this.state.fillStyle : this.state.strokeStyle
+    return style instanceof GpuixCanvasGradient && style.empty
+  }
+
   constructor(width: number, height: number, getUpload: () => GpuixUploadTarget | null) {
     this.width = dimensionOf(width)
     this.height = dimensionOf(height)
     this.getUpload = getUpload
-    this.premul = new Uint8ClampedArray(this.width * this.height * 4)
-    this.cover = { width: this.width, height: this.height, data: new Float32Array(this.width * this.height) }
+    this.native = new GpuixCanvas2DCore(this.width, this.height)
     this.state = defaultState()
     const self = this
     this.canvas = {
@@ -246,12 +363,9 @@ export class GpuixCanvasRenderingContext2D {
   resize(width: number, height: number): void {
     this.width = dimensionOf(width)
     this.height = dimensionOf(height)
-    this.premul = new Uint8ClampedArray(this.width * this.height * 4)
-    this.cover = { width: this.width, height: this.height, data: new Float32Array(this.width * this.height) }
-    this.straightScratch = null
+    this.native.resize(this.width, this.height)
     this.state = defaultState()
     this.stack = []
-    this.path = new GpuixPathBuilder()
     this.scheduleUpload()
   }
 
@@ -266,12 +380,14 @@ export class GpuixCanvasRenderingContext2D {
     if (value instanceof GpuixCanvasGradient) {
       this.state.fillStyle = value
       this.state.fill = null
+      GpuixCanvasRenderingContext2D.pushFill(this.native, "fill", null, value)
       return
     }
     const parsed = GpuixCanvasRenderingContext2D.parseStyleValue(value)
     if (!parsed) return // invalid assignments leave the style untouched
     this.state.fillStyle = value as string | GpuixColorObject
     this.state.fill = parsed
+    GpuixCanvasRenderingContext2D.pushFill(this.native, "fill", parsed, value)
   }
 
   get strokeStyle(): GpuixFillStyle {
@@ -283,12 +399,14 @@ export class GpuixCanvasRenderingContext2D {
     if (value instanceof GpuixCanvasGradient) {
       this.state.strokeStyle = value
       this.state.stroke = null
+      GpuixCanvasRenderingContext2D.pushFill(this.native, "stroke", null, value)
       return
     }
     const parsed = GpuixCanvasRenderingContext2D.parseStyleValue(value)
     if (!parsed) return
     this.state.strokeStyle = value as string | GpuixColorObject
     this.state.stroke = parsed
+    GpuixCanvasRenderingContext2D.pushFill(this.native, "stroke", parsed, value)
   }
 
   get globalAlpha(): number {
@@ -297,7 +415,10 @@ export class GpuixCanvasRenderingContext2D {
 
   set globalAlpha(value: number) {
     const n = Number(value)
-    if (Number.isFinite(n) && n >= 0 && n <= 1) this.state.globalAlpha = n
+    if (Number.isFinite(n) && n >= 0 && n <= 1) {
+      this.state.globalAlpha = n
+      this.native.setGlobalAlpha(n)
+    }
   }
 
   get lineWidth(): number {
@@ -308,7 +429,10 @@ export class GpuixCanvasRenderingContext2D {
     // WebIDL `double`: strings and valueOf-objects convert before the check,
     // so `ctx.lineWidth = "1e1"` stores 10 like in the DOM.
     const n = Number(value)
-    if (Number.isFinite(n) && n > 0) this.state.lineWidth = n
+    if (Number.isFinite(n) && n > 0) {
+      this.state.lineWidth = n
+      this.native.setLineWidth(n)
+    }
   }
 
   get lineCap(): GpuixLineCap {
@@ -316,7 +440,10 @@ export class GpuixCanvasRenderingContext2D {
   }
 
   set lineCap(value: GpuixLineCap) {
-    if (value === "butt" || value === "round" || value === "square") this.state.lineCap = value
+    if (value === "butt" || value === "round" || value === "square") {
+      this.state.lineCap = value
+      this.native.setLineCap(value)
+    }
   }
 
   get lineJoin(): GpuixLineJoin {
@@ -324,7 +451,10 @@ export class GpuixCanvasRenderingContext2D {
   }
 
   set lineJoin(value: GpuixLineJoin) {
-    if (value === "round" || value === "bevel" || value === "miter") this.state.lineJoin = value
+    if (value === "round" || value === "bevel" || value === "miter") {
+      this.state.lineJoin = value
+      this.native.setLineJoin(value)
+    }
   }
 
   get miterLimit(): number {
@@ -333,7 +463,10 @@ export class GpuixCanvasRenderingContext2D {
 
   set miterLimit(value: number) {
     const n = Number(value)
-    if (Number.isFinite(n) && n > 0) this.state.miterLimit = n
+    if (Number.isFinite(n) && n > 0) {
+      this.state.miterLimit = n
+      this.native.setMiterLimit(n)
+    }
   }
 
   get lineDashOffset(): number {
@@ -342,7 +475,10 @@ export class GpuixCanvasRenderingContext2D {
 
   set lineDashOffset(value: number) {
     const n = Number(value)
-    if (Number.isFinite(n)) this.state.lineDashOffset = n
+    if (Number.isFinite(n)) {
+      this.state.lineDashOffset = n
+      this.native.setLineDashOffset(n)
+    }
   }
 
   get globalCompositeOperation(): GpuixCompositeOperation {
@@ -352,6 +488,7 @@ export class GpuixCanvasRenderingContext2D {
   set globalCompositeOperation(value: GpuixCompositeOperation) {
     if (typeof value === "string" && COMPOSITE_OPERATIONS.has(value)) {
       this.state.composite = value
+      this.native.setComposite(value)
     }
   }
 
@@ -361,6 +498,7 @@ export class GpuixCanvasRenderingContext2D {
 
   set imageSmoothingEnabled(value: boolean) {
     this.state.imageSmoothingEnabled = !!value
+    this.native.setImageSmoothing(!!value)
   }
 
   setLineDash(segments: number[]): void {
@@ -370,6 +508,7 @@ export class GpuixCanvasRenderingContext2D {
     let dash = [...converted]
     if (dash.length % 2 === 1) dash = dash.concat(dash)
     this.state.lineDash = dash
+    this.native.setLineDash(converted)
   }
 
   getLineDash(): number[] {
@@ -380,17 +519,21 @@ export class GpuixCanvasRenderingContext2D {
 
   save(): void {
     this.stack.push(copyState(this.state))
+    this.native.save()
   }
 
   restore(): void {
     const restored = this.stack.pop()
-    if (restored) this.state = restored
+    if (restored) {
+      this.state = restored
+      this.native.restore()
+    }
   }
 
   // ── Transforms ───────────────────────────────────────────────────────
 
   getTransform(): GpuixMatrix2D {
-    const { a, b, c, d, e, f } = this.state.m
+    const { a, b, c, d, e, f } = this.native.getTransform()
     return {
       a,
       b,
@@ -416,90 +559,143 @@ export class GpuixCanvasRenderingContext2D {
     if (typeof transform === "number") {
       const ma = transform
       if (b === undefined || c === undefined || d === undefined || e === undefined || f === undefined) return
-      if (finite(ma, b, c, d, e, f)) {
-        this.state.m = { a: ma, b, c, d, e, f }
+      const nb = Number(b)
+      const nc = Number(c)
+      const nd = Number(d)
+      const ne = Number(e)
+      const nf = Number(f)
+      if (finite(ma, nb, nc, nd, ne, nf)) {
+        this.native.setTransform(ma, nb, nc, nd, ne, nf)
       }
       return
     }
     if (transform && typeof transform === "object") {
       const { a: ma, b: mb, c: mc, d: md, e: me, f: mf } = transform
-      if (finite(ma, mb, mc, md, me, mf)) this.state.m = { a: ma, b: mb, c: mc, d: md, e: me, f: mf }
+      if (finite(ma, mb, mc, md, me, mf)) {
+        this.native.setTransform(ma, mb, mc, md, me, mf)
+      }
       return
     }
     // setTransform() with no arguments resets to the identity matrix.
-    this.state.m = identityMatrix()
+    this.native.resetTransform()
   }
 
   transform(a: number, b: number, c: number, d: number, e: number, f: number): void {
-    if (!finite(a, b, c, d, e, f)) return
-    // DOM accumulation: the new matrix applies to the point FIRST, then the
-    // existing one — drawing happens "inside" the current frame.
-    this.state.m = multiplyMatrix({ a, b, c, d, e, f }, this.state.m)
+    const na = Number(a)
+    const nb = Number(b)
+    const nc = Number(c)
+    const nd = Number(d)
+    const ne = Number(e)
+    const nf = Number(f)
+    if (!finite(na, nb, nc, nd, ne, nf)) return
+    this.native.transform(na, nb, nc, nd, ne, nf)
   }
 
   translate(tx: number, ty: number): void {
-    if (!finite(tx, ty)) return
-    this.state.m = multiplyMatrix(translationMatrix(tx, ty), this.state.m)
+    const ntx = Number(tx)
+    const nty = Number(ty)
+    if (!finite(ntx, nty)) return
+    this.native.translate(ntx, nty)
   }
 
   rotate(angle: number): void {
-    if (!finite(angle)) return
-    this.state.m = multiplyMatrix(rotationMatrix(angle), this.state.m)
+    const n = Number(angle)
+    if (!finite(n)) return
+    this.native.rotate(n)
   }
 
   scale(sx: number, sy: number): void {
-    if (!finite(sx, sy)) return
-    this.state.m = multiplyMatrix(scalingMatrix(sx, sy), this.state.m)
+    const nsx = Number(sx)
+    const nsy = Number(sy)
+    if (!finite(nsx, nsy)) return
+    this.native.scale(nsx, nsy)
   }
 
   resetTransform(): void {
-    this.state.m = identityMatrix()
+    this.native.resetTransform()
   }
 
   /** DOM `reset()`: back to a freshly created context — default state, empty
    *  path, cleared bitmap — keeping the current size. */
   reset(): void {
-    this.resetTransform()
-    this.premul.fill(0)
-    this.cover.data.fill(0)
+    this.native.reset()
     this.state = defaultState()
     this.stack = []
-    this.path = new GpuixPathBuilder()
     this.scheduleUpload()
   }
 
   // ── Path building (user space; the CTM is baked in per segment) ────────
 
   beginPath(): void {
-    this.path = new GpuixPathBuilder()
+    this.native.beginPath()
   }
 
   moveTo(x: number, y: number): void {
-    this.path.moveTo(x, y, this.state.m)
+    // Convert first, validate after: the DOM converts every argument
+    // (running valueOf) even when a sibling argument is non-finite.
+    const nx = Number(x)
+    const ny = Number(y)
+    if (!finite(nx, ny)) return
+    this.native.moveTo(nx, ny)
   }
 
   lineTo(x: number, y: number): void {
-    this.path.lineTo(x, y, this.state.m)
+    const nx = Number(x)
+    const ny = Number(y)
+    if (!finite(nx, ny)) return
+    this.native.lineTo(nx, ny)
   }
 
   closePath(): void {
-    this.path.closePath()
+    this.native.closePath()
   }
 
   quadraticCurveTo(cpx: number, cpy: number, x: number, y: number): void {
-    this.path.quadraticCurveTo(cpx, cpy, x, y, this.state.m)
+    const ncx = Number(cpx)
+    const ncy = Number(cpy)
+    const nx = Number(x)
+    const ny = Number(y)
+    if (!finite(ncx, ncy, nx, ny)) return
+    this.native.quadraticCurveTo(ncx, ncy, nx, ny)
   }
 
   bezierCurveTo(c1x: number, c1y: number, c2x: number, c2y: number, x: number, y: number): void {
-    this.path.bezierCurveTo(c1x, c1y, c2x, c2y, x, y, this.state.m)
+    const n1x = Number(c1x)
+    const n1y = Number(c1y)
+    const n2x = Number(c2x)
+    const n2y = Number(c2y)
+    const nx = Number(x)
+    const ny = Number(y)
+    if (!finite(n1x, n1y, n2x, n2y, nx, ny)) return
+    this.native.bezierCurveTo(n1x, n1y, n2x, n2y, nx, ny)
   }
 
   arcTo(x1: number, y1: number, x2: number, y2: number, radius: number): void {
-    this.path.arcTo(x1, y1, x2, y2, radius, this.state.m)
+    const nx1 = Number(x1)
+    const ny1 = Number(y1)
+    const nx2 = Number(x2)
+    const ny2 = Number(y2)
+    const nr = Number(radius)
+    if (!finite(nx1, ny1, nx2, ny2, nr)) return
+    if (nr < 0) {
+      throw new DOMException("arcTo: radius must not be negative", "IndexSizeError")
+    }
+    this.native.arcTo(nx1, ny1, nx2, ny2, nr)
   }
 
   arc(x: number, y: number, radius: number, startAngle: number, endAngle: number, anticlockwise?: boolean): void {
-    this.path.arc(x, y, radius, startAngle, endAngle, anticlockwise, this.state.m)
+    // Non-finite arguments are silently ignored; only a finite negative
+    // radius throws (the ±Infinity/NaN forms expand out of @nonfinite tests).
+    const nx = Number(x)
+    const ny = Number(y)
+    const nr = Number(radius)
+    const ns = Number(startAngle)
+    const ne = Number(endAngle)
+    if (!finite(nx, ny, nr, ns, ne)) return
+    if (nr < 0) {
+      throw new DOMException("arc: radius must not be negative", "IndexSizeError")
+    }
+    this.native.arc(nx, ny, nr, ns, ne, anticlockwise ?? false)
   }
 
   ellipse(
@@ -512,11 +708,27 @@ export class GpuixCanvasRenderingContext2D {
     endAngle: number,
     anticlockwise?: boolean,
   ): void {
-    this.path.ellipse(x, y, radiusX, radiusY, rotation, startAngle, endAngle, anticlockwise, this.state.m)
+    const nx = Number(x)
+    const ny = Number(y)
+    const nrx = Number(radiusX)
+    const nry = Number(radiusY)
+    const nrot = Number(rotation)
+    const ns = Number(startAngle)
+    const ne = Number(endAngle)
+    if (!finite(nx, ny, nrx, nry, nrot, ns, ne)) return
+    if (nrx < 0 || nry < 0) {
+      throw new DOMException("ellipse: radii must not be negative", "IndexSizeError")
+    }
+    this.native.ellipse(nx, ny, nrx, nry, nrot, ns, ne, anticlockwise ?? false)
   }
 
   rect(x: number, y: number, w: number, h: number): void {
-    this.path.rect(x, y, w, h, this.state.m)
+    const nx = Number(x)
+    const ny = Number(y)
+    const nw = Number(w)
+    const nh = Number(h)
+    if (!finite(nx, ny, nw, nh)) return
+    this.native.rect(nx, ny, nw, nh)
   }
 
   roundRect(
@@ -526,7 +738,24 @@ export class GpuixCanvasRenderingContext2D {
     h: number,
     radii?: number | Array<number | { x?: number; y?: number }>,
   ): void {
-    this.path.roundRect(x, y, w, h, radii ?? 0, this.state.m)
+    // WebIDL converts every argument before validation, so valueOf side
+    // effects happen even when a sibling argument is non-finite.
+    const nx = Number(x)
+    const ny = Number(y)
+    const nw = Number(w)
+    const nh = Number(h)
+    if (!finite(nx, ny, nw, nh)) return
+    const corners = normalizeRoundRectRadii(radii ?? 0, Math.abs(nw), Math.abs(nh))
+    if (!corners) return // non-finite radii are silently ignored, like other arguments
+    // The four corners travel flat; the native builder handles the
+    // negative-extent mirroring and the corner arcs.
+    const [tl, tr, br, bl] = corners
+    this.native.roundRect(nx, ny, nw, nh, [
+      tl.rx, tl.ry,
+      tr.rx, tr.ry,
+      br.rx, br.ry,
+      bl.rx, bl.ry,
+    ])
   }
 
   // ── Drawing ──────────────────────────────────────────────────────────
@@ -534,86 +763,59 @@ export class GpuixCanvasRenderingContext2D {
   fill(fillRule: GpuixFillRule = "nonzero"): void {
     // The path already carries its construction-time matrices; drawing does
     // not re-transform it.
-    const polys = flattenPath(this.path.subpaths, 0.15)
-    this.paintPolys(polys, fillRule, "fill")
+    if (this.paintIsEmpty("fill")) return
+    this.syncPaint("fill")
+    if (this.native.fill(fillRule)) this.scheduleUpload()
   }
 
   stroke(): void {
-    this.strokeBuilderPath(this.path)
+    if (this.paintIsEmpty("stroke")) return
+    this.syncPaint("stroke")
+    if (this.native.stroke()) this.scheduleUpload()
   }
 
   clip(fillRule: GpuixFillRule = "nonzero"): void {
-    const polys = flattenPath(this.path.subpaths, 0.15)
-    this.cover.data.fill(0)
-    const bbox = rasterizeCoverage(polys, fillRule, this.cover)
-    const next = new Float32Array(this.width * this.height)
-    if (bbox) {
-      const current = this.state.clip
-      if (current) {
-        for (let i = 0; i < next.length; i++) {
-          next[i] = current[i]! * this.cover.data[i]!
-        }
-      } else {
-        next.set(this.cover.data)
-      }
-    }
-    // Without a bbox the clip path was empty: the region becomes empty too
-    // (an all-zero mask), so later draws touch nothing.
-    this.state.clip = next
+    this.native.clip(fillRule)
   }
 
   /** The point is in device space — the DOM hit-tests the bitmap, not the
    *  current user space. */
   isPointInPath(x: number, y: number, fillRule: GpuixFillRule = "nonzero"): boolean {
     if (!finite(x, y)) return false
-    const polys = flattenPath(this.path.subpaths, 0.15)
-    return pointInPolys(polys, x, y, fillRule)
+    return this.native.isPointInPath(x, y, fillRule)
   }
 
   fillRect(x: number, y: number, w: number, h: number): void {
-    if (!finite(x, y, w, h)) return
-    const builder = new GpuixPathBuilder()
-    builder.rect(x, y, w, h, this.state.m)
-    const polys = flattenPath(builder.subpaths, 0.15)
-    this.paintPolys(polys, "nonzero", "fill")
+    const nx = Number(x)
+    const ny = Number(y)
+    const nw = Number(w)
+    const nh = Number(h)
+    if (!finite(nx, ny, nw, nh)) return
+    if (this.paintIsEmpty("fill")) return
+    this.syncPaint("fill")
+    if (this.native.fillRect(nx, ny, nw, nh)) this.scheduleUpload()
   }
 
   strokeRect(x: number, y: number, w: number, h: number): void {
     // A zero extent strokes the degenerate line — its band is visible, like
     // the DOM. Only non-finite arguments make the call a no-op.
-    if (!finite(x, y, w, h)) return
-    const builder = new GpuixPathBuilder()
-    builder.rect(x, y, w, h, this.state.m)
-    this.strokeBuilderPath(builder)
+    const nx = Number(x)
+    const ny = Number(y)
+    const nw = Number(w)
+    const nh = Number(h)
+    if (!finite(nx, ny, nw, nh)) return
+    if (this.paintIsEmpty("stroke")) return
+    this.syncPaint("stroke")
+    if (this.native.strokeRect(nx, ny, nw, nh)) this.scheduleUpload()
   }
 
   clearRect(x: number, y: number, w: number, h: number): void {
-    if (!finite(x, y, w, h) || w === 0 || h === 0) return
-    const builder = new GpuixPathBuilder()
-    builder.rect(x, y, w, h, this.state.m)
-    const polys = flattenPath(builder.subpaths, 0.15)
-    this.cover.data.fill(0)
-    const bbox = rasterizeCoverage(polys, "nonzero", this.cover)
-    if (!bbox) return
-    const clip = this.state.clip
-    const { width, data } = this.cover
-    for (let row = bbox.minY; row <= bbox.maxY; row++) {
-      const base = row * width
-      for (let col = bbox.minX; col <= bbox.maxX; col++) {
-        const idx = base + col
-        let e = data[idx]!
-        if (e <= 0) continue
-        if (clip) e *= clip[idx]!
-        if (e <= 0) continue
-        const p = idx * 4
-        const keep = 1 - e
-        this.premul[p] = this.premul[p]! * keep
-        this.premul[p + 1] = this.premul[p + 1]! * keep
-        this.premul[p + 2] = this.premul[p + 2]! * keep
-        this.premul[p + 3] = this.premul[p + 3]! * keep
-      }
-    }
-    this.scheduleUpload()
+    const nx = Number(x)
+    const ny = Number(y)
+    const nw = Number(w)
+    const nh = Number(h)
+    if (!finite(nx, ny, nw, nh) || nw === 0 || nh === 0) return
+    if (this.native.clearRect(nx, ny, nw, nh)) this.scheduleUpload()
   }
 
   // ── Gradients ────────────────────────────────────────────────────────
@@ -706,57 +908,11 @@ export class GpuixCanvasRenderingContext2D {
       dstY += dstH
       dstH = -dstH
     }
-
-    // Snapshot the source region — required for correctness when drawing a
-    // canvas onto itself, and it bounds the sampling reads either way.
-    const snap = snapshotRegion(srcCtx, srcX, srcY, srcW, srcH)
-    if (!snap) return
-
-    const m = this.state.m
-    const inv = invertMatrix(m)
-    if (!inv) return
-    const quad: Poly = {
-      pts: [
-        ...applyMatrix(m, dstX, dstY),
-        ...applyMatrix(m, dstX + dstW, dstY),
-        ...applyMatrix(m, dstX + dstW, dstY + dstH),
-        ...applyMatrix(m, dstX, dstY + dstH),
-      ],
-      closed: true,
+    // The native side snapshots the source region — required for
+    // correctness when drawing a canvas onto itself.
+    if (this.native.drawImage(srcCtx.native, srcX, srcY, srcW, srcH, dstX, dstY, dstW, dstH)) {
+      this.scheduleUpload()
     }
-    this.cover.data.fill(0)
-    const bbox = rasterizeCoverage([quad], "nonzero", this.cover)
-    if (!bbox) return
-    if (this.state.composite === "copy") this.premul.fill(0)
-
-    const clip = this.state.clip
-    const alpha = this.state.globalAlpha
-    const smoothing = this.state.imageSmoothingEnabled
-    const composite = this.state.composite
-    const { width, data } = this.cover
-
-    for (let row = bbox.minY; row <= bbox.maxY; row++) {
-      const base = row * width
-      for (let col = bbox.minX; col <= bbox.maxX; col++) {
-        const idx = base + col
-        const cov = data[idx]!
-        if (cov <= 0) continue
-        let e = cov * alpha
-        if (clip) e *= clip[idx]!
-        if (e <= 1 / 510) continue
-        const [ux, uy] = applyMatrix(inv, col + 0.5, row + 0.5)
-        const su = srcX + ((ux - dstX) / dstW) * srcW
-        const sv = srcY + ((uy - dstY) / dstH) * srcH
-        const rgba = smoothing
-          ? sampleBilinear(snap, su - srcX, sv - srcY)
-          : sampleNearest(snap, su - srcX, sv - srcY)
-        const srcAlpha = rgba[3]! / 255
-        if (srcAlpha <= 0) continue
-        const eff = e * srcAlpha
-        this.compositePixel(idx * 4, rgba, eff, composite)
-      }
-    }
-    this.scheduleUpload()
   }
 
   createImageData(widthOrImage: number | GpuixImageData, height?: number): GpuixImageData {
@@ -804,23 +960,11 @@ export class GpuixCanvasRenderingContext2D {
       top += height
       height = -height
     }
-    const data = new Uint8ClampedArray(width * height * 4)
-    for (let row = 0; row < height; row++) {
-      for (let col = 0; col < width; col++) {
-        const px = left + col
-        const py = top + row
-        if (px < 0 || py < 0 || px >= this.width || py >= this.height) continue
-        const src = (py * this.width + px) * 4
-        const dst = (row * width + col) * 4
-        const a = this.premul[src + 3]!
-        if (a === 0) continue
-        data[dst] = unpremultiply(this.premul[src]!, a)
-        data[dst + 1] = unpremultiply(this.premul[src + 1]!, a)
-        data[dst + 2] = unpremultiply(this.premul[src + 2]!, a)
-        data[dst + 3] = a
-      }
-    }
-    return new GpuixImageData(data, width, height)
+    const buffer = this.native.getImageData(left, top, width, height)
+    // A clamped view over the native buffer keeps `ImageData.data`
+    // semantics (writes clamp) with no copy.
+    const view = new Uint8ClampedArray(buffer.buffer, buffer.byteOffset, width * height * 4)
+    return new GpuixImageData(view, width, height)
   }
 
   putImageData(
@@ -852,22 +996,10 @@ export class GpuixCanvasRenderingContext2D {
     if (dirtyHeight === undefined) y1 = imagedata.height
     if (x1 < x0) [x0, x1] = [x1, x0]
     if (y1 < y0) [y0, y1] = [y1, y0]
-    for (let row = y0; row < y1; row++) {
-      const dstY = destY + row
-      if (dstY < 0 || dstY >= this.height) continue
-      for (let col = x0; col < x1; col++) {
-        const dstX = destX + col
-        if (dstX < 0 || dstX >= this.width) continue
-        if (row < 0 || col < 0 || row >= imagedata.height || col >= imagedata.width) continue
-        const src = (row * imagedata.width + col) * 4
-        const dst = (dstY * this.width + dstX) * 4
-        const a = imagedata.data[src + 3]!
-        this.premul[dst] = (imagedata.data[src]! * a) / 255
-        this.premul[dst + 1] = (imagedata.data[src + 1]! * a) / 255
-        this.premul[dst + 2] = (imagedata.data[src + 2]! * a) / 255
-        this.premul[dst + 3] = a
-      }
-    }
+    // A Uint8Array view over the clamped buffer: zero copy, right typed-
+    // array brand for the bridge.
+    const bytes = new Uint8Array(imagedata.data.buffer, imagedata.data.byteOffset, imagedata.data.length)
+    this.native.putImageData(bytes, imagedata.width, imagedata.height, destX, destY, x0, y0, x1, y1)
     this.scheduleUpload()
   }
 
@@ -887,213 +1019,14 @@ export class GpuixCanvasRenderingContext2D {
 
   // ── Internals ────────────────────────────────────────────────────────
 
-  /** @internal — source-buffer access for `drawImage` on this context. */
-  getBacking(): { width: number; height: number; premul: Uint8ClampedArray } {
-    return { width: this.width, height: this.height, premul: this.premul }
-  }
-
   /** @internal — how many mutating draws ran; lets tests tell "drew
    *  nothing" from "drew and matched". */
   get stats(): { drawCount: number } {
     return { drawCount: this.drawCount }
   }
 
-  /** Shared paint path for fill(), stroke(), fillRect(), strokeRect().
-   *  Strokes are unions of same-orientation pieces, which additive nonzero
-   *  spans resolve exactly — including the AA across piece seams. */
-  private paintPolys(polys: Poly[], rule: FillRule, which: "fill" | "stroke"): void {
-    if (polys.length === 0) return
-    this.cover.data.fill(0)
-    const bbox = rasterizeCoverage(polys, rule, this.cover)
-    if (!bbox) return
-    if (this.state.composite === "copy") this.premul.fill(0)
-
-    const style = which === "fill" ? this.state.fillStyle : this.state.strokeStyle
-    const solid = which === "fill" ? this.state.fill : this.state.stroke
-    const gradient = style instanceof GpuixCanvasGradient ? style : null
-    const alpha = this.state.globalAlpha
-    const composite = this.state.composite
-    const clip = this.state.clip
-    const m = this.state.m
-    const { width, data } = this.cover
-
-    const rgba: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
-    if (gradient) {
-      // Degenerate gradients (zero-length axis, identical circles) paint
-      // nothing at all — the whole fill is a no-op.
-      if (gradient.empty) return
-    }
-    for (let row = bbox.minY; row <= bbox.maxY; row++) {
-      const base = row * width
-      for (let col = bbox.minX; col <= bbox.maxX; col++) {
-        const idx = base + col
-        const cov = data[idx]!
-        if (cov <= 0) continue
-        let e = cov * alpha
-        if (clip) e *= clip[idx]!
-        if (e <= 1 / 510) continue
-        if (gradient) {
-          const sampled = gradient.evaluateDevice(col + 0.5, row + 0.5, m)
-          if (!sampled) continue // outside the gradient's reach: untouched
-          rgba.r = sampled.r
-          rgba.g = sampled.g
-          rgba.b = sampled.b
-          e *= sampled.a
-          if (e <= 1 / 510) continue
-        } else if (solid) {
-          e *= solid.a
-          if (e <= 1 / 510) continue
-          rgba.r = solid.r
-          rgba.g = solid.g
-          rgba.b = solid.b
-        } else {
-          return
-        }
-        this.compositePixel(idx * 4, [rgba.r, rgba.g, rgba.b, 255], e, composite)
-      }
-    }
-    this.scheduleUpload()
-  }
-
-  /** Stroke with DOM semantics: the path flattens in device space (its
-   *  segments carry their construction-time CTM), then maps back through the
-   *  CURRENT matrix so the outline — and the line width — live in user
-   *  space, and maps forward again. This is what makes a scaled transform
-   *  widen strokes without re-transforming the baked-in path. */
-  private strokeBuilderPath(builder: GpuixPathBuilder): void {
-    const m = this.state.m
-    const inv = invertMatrix(m)
-    if (!inv) return // a non-invertible CTM strokes nothing
-    // Flatten tighter for wide strokes: a centerline chord error of ε shows
-    // up on the offset outline amplified by roughly (1 + h/r) at the local
-    // curvature radius, so wide curves need a much finer polyline.
-    const halfWidthDevice = (this.state.lineWidth / 2) * maxScaleOf(m)
-    const tol = Math.max(1e-4, 0.15 / (1 + halfWidthDevice))
-    const devicePolys = flattenPath(builder.subpaths, tol)
-    const userPolys = devicePolys.map((poly) => transformPoly(poly, inv))
-    const params: StrokeParams = {
-      lineWidth: this.state.lineWidth,
-      lineCap: this.state.lineCap,
-      lineJoin: this.state.lineJoin,
-      miterLimit: this.state.miterLimit,
-      lineDash: this.state.lineDash,
-      lineDashOffset: this.state.lineDashOffset,
-    }
-    const outlines = buildStrokeGeometry(userPolys, params)
-    const polys = outlines.map((poly) => transformPoly(poly, m))
-    this.paintPolys(polys, "nonzero", "stroke")
-  }
-
-  /** Blend a straight-RGBA source into the premultiplied buffer at `p`,
-   *  with `e` the effective source alpha (coverage × style × global). Blend
-   *  modes beyond the Porter-Duff set rasterize as `source-over` for now. */
-  private compositePixel(
-    p: number,
-    rgba: ArrayLike<number>,
-    e: number,
-    composite: GpuixCompositeOperation,
-  ): void {
-    const premul = this.premul
-    const dstA = premul[p + 3]! / 255
-
-    if (composite === "clear" || composite === "destination-out") {
-      const keep = 1 - e
-      premul[p] = premul[p]! * keep
-      premul[p + 1] = premul[p + 1]! * keep
-      premul[p + 2] = premul[p + 2]! * keep
-      premul[p + 3] = premul[p + 3]! * keep
-      return
-    }
-    if (composite === "copy") {
-      premul[p] = rgba[0]! * e
-      premul[p + 1] = rgba[1]! * e
-      premul[p + 2] = rgba[2]! * e
-      premul[p + 3] = 255 * e
-      return
-    }
-    if (composite === "xor") {
-      // Porter-Duff Xor: source shows only where the destination is empty,
-      // and vice versa.
-      const keepDst = 1 - e
-      const srcR = rgba[0]! * e * (1 - dstA)
-      const srcG = rgba[1]! * e * (1 - dstA)
-      const srcB = rgba[2]! * e * (1 - dstA)
-      const srcA = e * (1 - dstA)
-      premul[p] = srcR + premul[p]! * keepDst
-      premul[p + 1] = srcG + premul[p + 1]! * keepDst
-      premul[p + 2] = srcB + premul[p + 2]! * keepDst
-      premul[p + 3] = 255 * (srcA + dstA * keepDst)
-      return
-    }
-    if (composite === "lighter") {
-      premul[p] = Math.min(255, premul[p]! + rgba[0]! * e)
-      premul[p + 1] = Math.min(255, premul[p + 1]! + rgba[1]! * e)
-      premul[p + 2] = Math.min(255, premul[p + 2]! + rgba[2]! * e)
-      premul[p + 3] = Math.min(255, premul[p + 3]! + 255 * e)
-      return
-    }
-    if (composite === "destination-over") {
-      const back = 1 - dstA
-      premul[p] = rgba[0]! * e * back + premul[p]!
-      premul[p + 1] = rgba[1]! * e * back + premul[p + 1]!
-      premul[p + 2] = rgba[2]! * e * back + premul[p + 2]!
-      premul[p + 3] = 255 * (e + dstA * back)
-      return
-    }
-    if (composite === "source-in" || composite === "source-out" || composite === "source-atop" || composite === "destination-in" || composite === "destination-atop") {
-      let outR = 0
-      let outG = 0
-      let outB = 0
-      let outA = 0
-      const srcR = rgba[0]! * e
-      const srcG = rgba[1]! * e
-      const srcB = rgba[2]! * e
-      switch (composite) {
-        case "source-in":
-          outA = e * dstA
-          outR = srcR * dstA
-          outG = srcG * dstA
-          outB = srcB * dstA
-          break
-        case "source-out":
-          outA = e * (1 - dstA)
-          outR = srcR * (1 - dstA)
-          outG = srcG * (1 - dstA)
-          outB = srcB * (1 - dstA)
-          break
-        case "source-atop":
-          outA = dstA
-          outR = srcR * dstA + premul[p]! * (1 - e)
-          outG = srcG * dstA + premul[p + 1]! * (1 - e)
-          outB = srcB * dstA + premul[p + 2]! * (1 - e)
-          break
-        case "destination-in":
-          outA = dstA * e
-          outR = premul[p]! * e
-          outG = premul[p + 1]! * e
-          outB = premul[p + 2]! * e
-          break
-        case "destination-atop":
-          outA = e + dstA * (1 - e)
-          outR = srcR + premul[p]! * (1 - e)
-          outG = srcG + premul[p + 1]! * (1 - e)
-          outB = srcB + premul[p + 2]! * (1 - e)
-          break
-      }
-      premul[p] = outR
-      premul[p + 1] = outG
-      premul[p + 2] = outB
-      premul[p + 3] = 255 * outA
-      return
-    }
-    const ia = 1 - e
-    premul[p] = rgba[0]! * e + premul[p]! * ia
-    premul[p + 1] = rgba[1]! * e + premul[p + 1]! * ia
-    premul[p + 2] = rgba[2]! * e + premul[p + 2]! * ia
-    premul[p + 3] = 255 * e + premul[p + 3]! * ia
-  }
-
-  /** One upload per microtask, however many draws the task made. */
+  /** One upload per microtask, however many draws the task made. Pixels
+   *  stay native: the renderer pulls them straight from the core. */
   private scheduleUpload(): void {
     this.drawCount++
     if (this.disposed || this.uploadScheduled) return
@@ -1102,33 +1035,15 @@ export class GpuixCanvasRenderingContext2D {
       this.uploadScheduled = false
       if (this.disposed) return
       const target = this.getUpload()
-      if (!target?.renderer.uploadCanvasPixels) return
-      const straight = this.straightScratch ?? new Uint8Array(this.width * this.height * 4)
-      this.straightScratch = straight
-      const premul = this.premul
-      for (let i = 0; i < straight.length; i += 4) {
-        const a = premul[i + 3]!
-        if (a === 0) {
-          straight[i] = 0
-          straight[i + 1] = 0
-          straight[i + 2] = 0
-          straight[i + 3] = 0
-        } else {
-          straight[i] = unpremultiply(premul[i]!, a)
-          straight[i + 1] = unpremultiply(premul[i + 1]!, a)
-          straight[i + 2] = unpremultiply(premul[i + 2]!, a)
-          straight[i + 3] = a
-        }
-      }
-      target.renderer.uploadCanvasPixels(target.id, this.width, this.height, straight)
+      const upload = target?.renderer.uploadCanvasFromContext
+      if (!upload) return
+      upload.call(target.renderer, target.id, this.native)
     })
   }
 }
 
-function defaultState(): DrawingState {
+function defaultState(): ShadowState {
   return {
-    m: identityMatrix(),
-    clip: null,
     fillStyle: "#000000",
     fill: parseColor("#000000")!,
     strokeStyle: "#000000",
@@ -1145,110 +1060,6 @@ function defaultState(): DrawingState {
   }
 }
 
-function copyState(state: DrawingState): DrawingState {
-  return { ...state, m: { ...state.m }, lineDash: [...state.lineDash] }
-}
-
-function transformPoly(poly: Poly, m: GpuixMatrix2D): Poly {
-  const pts = new Array<number>(poly.pts.length)
-  for (let i = 0; i < poly.pts.length; i += 2) {
-    const [x, y] = applyMatrix(m, poly.pts[i]!, poly.pts[i + 1]!)
-    pts[i] = x
-    pts[i + 1] = y
-  }
-  return { pts, closed: poly.closed }
-}
-
-function unpremultiply(p: number, a: number): number {
-  return Math.min(255, Math.round((p * 255) / a))
-}
-
-interface SourceSnapshot {
-  data: Uint8ClampedArray
-  width: number
-  height: number
-  /** Snapshot origin within the requested source rect, for sampling. */
-  ox: number
-  oy: number
-}
-
-/** Copy a source-rect region of another context's premultiplied buffer,
- *  clipped to its bounds; null when the intersection is empty. */
-function snapshotRegion(
-  srcCtx: GpuixCanvasRenderingContext2D,
-  sx: number,
-  sy: number,
-  sw: number,
-  sh: number,
-): SourceSnapshot | null {
-  const backing = srcCtx.getBacking()
-  const x0 = Math.max(0, Math.floor(sx))
-  const y0 = Math.max(0, Math.floor(sy))
-  const x1 = Math.min(backing.width, Math.ceil(sx + sw))
-  const y1 = Math.min(backing.height, Math.ceil(sy + sh))
-  if (x1 <= x0 || y1 <= y0) return null
-  const w = x1 - x0
-  const h = y1 - y0
-  const data = new Uint8ClampedArray(w * h * 4)
-  for (let row = 0; row < h; row++) {
-    const srcBase = ((y0 + row) * backing.width + x0) * 4
-    data.set(backing.premul.subarray(srcBase, srcBase + w * 4), row * w * 4)
-  }
-  return { data, width: w, height: h, ox: x0 - sx, oy: y0 - sy }
-}
-
-// Sampling helpers work in snapshot-local pixel coordinates.
-function sampleNearest(snap: SourceSnapshot, u: number, v: number): [number, number, number, number] {
-  const px = Math.floor(u + snap.ox)
-  const py = Math.floor(v + snap.oy)
-  if (px < 0 || py < 0 || px >= snap.width || py >= snap.height) return [0, 0, 0, 0]
-  return unpremulPixel(snap.data, (py * snap.width + px) * 4)
-}
-
-function sampleBilinear(snap: SourceSnapshot, u: number, v: number): [number, number, number, number] {
-  const fx = u + snap.ox - 0.5
-  const fy = v + snap.oy - 0.5
-  const x0 = Math.floor(fx)
-  const y0 = Math.floor(fy)
-  const tx = fx - x0
-  const ty = fy - y0
-  // Blend in premultiplied space (translucent edges stay symmetric), then
-  // un-premultiply once at the end.
-  const corners: Array<[number, number, number, number]> = []
-  for (const [ox, oy] of [
-    [0, 0],
-    [1, 0],
-    [0, 1],
-    [1, 1],
-  ] as const) {
-    const px = x0 + ox
-    const py = y0 + oy
-    if (px < 0 || py < 0 || px >= snap.width || py >= snap.height) {
-      corners.push([0, 0, 0, 0])
-    } else {
-      const i = (py * snap.width + px) * 4
-      const d = snap.data
-      corners.push([d[i]!, d[i + 1]!, d[i + 2]!, d[i + 3]!])
-    }
-  }
-  const top = blendStraight(corners[0]!, corners[1]!, tx)
-  const bottom = blendStraight(corners[2]!, corners[3]!, tx)
-  const blended = blendStraight(top, bottom, ty)
-  const a = blended[3]
-  if (a <= 0) return [0, 0, 0, 0]
-  return [unpremultiply(blended[0], a), unpremultiply(blended[1], a), unpremultiply(blended[2], a), a]
-}
-
-function blendStraight(
-  a: [number, number, number, number],
-  b: [number, number, number, number],
-  t: number,
-): [number, number, number, number] {
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, a[3] + (b[3] - a[3]) * t]
-}
-
-function unpremulPixel(data: Uint8ClampedArray, i: number): [number, number, number, number] {
-  const a = data[i + 3]!
-  if (a === 0) return [0, 0, 0, 0]
-  return [unpremultiply(data[i]!, a), unpremultiply(data[i + 1]!, a), unpremultiply(data[i + 2]!, a), a]
+function copyState(state: ShadowState): ShadowState {
+  return { ...state, lineDash: [...state.lineDash] }
 }

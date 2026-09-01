@@ -380,7 +380,7 @@ function runCase(testCase: WptCase): void {
   }
 }
 
-describe("WPT canvas conformance (pure rasterizer)", () => {
+describe("WPT canvas conformance (native core)", () => {
   for (const testCase of CASES) {
     const testName = `${testCase.suite}/${testCase.name}`
 

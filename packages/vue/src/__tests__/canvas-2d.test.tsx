@@ -24,14 +24,15 @@ interface UploadRecord {
   id: number
   width: number
   height: number
-  pixels: Uint8Array
 }
 
 function makeContext(width = 16, height = 16) {
   const uploads: UploadRecord[] = []
   const renderer = {
-    uploadCanvasPixels(id: number, w: number, h: number, pixels: Uint8Array) {
-      uploads.push({ id, width: w, height: h, pixels })
+    // The flush path the facade drives: pixels stay native, so the stub
+    // records the handshake (id + dimensions) rather than byte contents.
+    uploadCanvasFromContext(id: number, core: { getWidth(): number; getHeight(): number }) {
+      uploads.push({ id, width: core.getWidth(), height: core.getHeight() })
     },
   }
   const ctx = new Context2D(width, height, () => ({ id: 7, renderer }))
@@ -414,10 +415,7 @@ describe("canvas 2d context (pure rasterizer)", () => {
     expect(uploads.length).toBe(1)
     expect(uploads[0]!.id).toBe(7)
     expect(uploads[0]!.width).toBe(8)
-    expect(uploads[0]!.pixels.length).toBe(8 * 8 * 4)
-
-    const local = ctx.getImageData(0, 0, 8, 8).data
-    expect(Array.from(uploads[0]!.pixels)).toEqual(Array.from(local))
+    expect(uploads[0]!.height).toBe(8)
 
     ctx.fillStyle = "#0000ff"
     ctx.fillRect(0, 0, 2, 2)

@@ -576,5 +576,6 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
+module.exports.GpuixCanvas2DCore = nativeBinding.GpuixCanvas2DCore
 module.exports.GpuixRenderer = nativeBinding.GpuixRenderer
 module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer

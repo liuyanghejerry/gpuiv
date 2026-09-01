@@ -474,6 +474,11 @@ export interface NativeRenderer {
    *  `pixels.length` must be `width * height * 4`. Pixels never travel through
    *  `applyBatch` — they would be escaped and re-parsed as JSON. */
   uploadCanvasPixels?(elementId: number, width: number, height: number, pixels: Uint8Array): void
+  /** Upload a `<canvas>` element's pixels straight from its 2D context core
+   *  (Rust to Rust — no byte round-trip through JS) and repaint. The core
+   *  materializes its pending display list as part of the handoff; this is
+   *  the path the `CanvasRenderingContext2D` facade flushes on. */
+  uploadCanvasFromContext?(elementId: number, ctx: unknown): void
   /** Read back the last uploaded buffer as RGBA, or null if nothing uploaded. */
   readCanvasPixels?(elementId: number): Uint8Array | null
 

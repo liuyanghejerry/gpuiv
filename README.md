@@ -1400,7 +1400,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `img`           | Local raster or SVG images                       |
 | `svg`           | Tintable monochrome SVG icons from local files   |
 | `anchored`      | Positioned overlay                               |
-| `canvas`        | JS-owned RGBA buffer painted as a GPU texture    |
+| `canvas`        | 2D context rasterized natively, painted as a GPU texture |
 
 ## Images and icons
 
@@ -1449,11 +1449,11 @@ The chat example builds every sidebar and composer icon this way.
 
 ## Canvas
 
-`<canvas>` is a JS-owned pixel buffer that GPUI paints as a GPU texture every
-frame. JS keeps its own copy as the source of truth — exactly like a DOM
-canvas — and pushes the pixels over a dedicated FFI call. Pixels never travel
-through the mutation JSON: a canvas repaint moves megabytes, and the batch
-would escape and re-parse every byte.
+`<canvas>` is a pixel buffer GPUI paints as a GPU texture every frame. The
+buffer lives in the native core — exactly like a DOM canvas owns its backing
+store — and uploads go Rust to Rust, so pixel bytes never cross the FFI
+boundary and never travel through the mutation JSON (a canvas repaint moves
+megabytes; the batch would escape and re-parse every byte).
 
 The Vue wrapper is `GpuixCanvas`. A template ref exposes `uploadPixels`,
 `readPixels`, and the host `id`:
@@ -1474,16 +1474,21 @@ canvas.value?.uploadPixels(imageData.data)
 - Before the first upload the element paints a placeholder box but still
   receives every event and records its bounds, so it is clickable on mount.
 - `renderer.uploadCanvasPixels(elementId, width, height, pixels)` and
-  `renderer.readCanvasPixels(elementId)` are available without the wrapper.
-  `readCanvasPixels` returns the **last upload**, not a GPU readback.
+  `renderer.readCanvasPixels(elementId)` are available without the wrapper
+  for manual buffer control; the 2D context flushes itself through
+  `renderer.uploadCanvasFromContext(elementId, ctx)`. `readCanvasPixels`
+  returns the **last upload**, not a GPU readback.
 
 ### The 2D context
 
-`getContext("2d")` returns a `CanvasRenderingContext2D` implemented as a
-pure-TypeScript software rasterizer over the pixel bridge — no Rust code, no
-new dependencies. It keeps a JS-owned buffer as the source of truth and
-pushes straight-alpha bytes through `uploadCanvasPixels`; everything a JS
-task paints reaches the GPU in **one** upload on the following microtask.
+`getContext("2d")` returns a `CanvasRenderingContext2D`: a TypeScript
+WebIDL facade over a Rust rasterization core (`GpuixCanvas2DCore` in
+`@gpuiv/native`, no third-party dependencies). Every draw call records one
+op — with a snapshot of the state it must draw under — into a native
+display list; the rasterizer replays it **once** per flush (the upload
+microtask, or a pixel read like `getImageData`). Pixel buffers never enter
+JS in either direction, and everything a JS task paints still reaches the
+GPU in **one** upload on the following microtask.
 
 ```tsx
 const canvas = ref<GpuixCanvasInstance | null>(null)

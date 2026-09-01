@@ -505,6 +505,12 @@ export class TestRenderer implements NativeRenderer {
     this.native.uploadCanvasPixels?.(elementId, width, height, bytes)
   }
 
+  /** Upload a `<canvas>` element's pixels straight from its 2D context core
+   *  (Rust to Rust) and repaint — the path the context facade flushes on. */
+  uploadCanvasFromContext(elementId: number, ctx: unknown): void {
+    this.native.uploadCanvasFromContext?.(elementId, ctx)
+  }
+
   /** The last uploaded buffer as RGBA, or null before the first upload.
    *  A bridge round-trip, not a GPU readback. */
   readCanvasPixels(elementId: number): Uint8Array | null {

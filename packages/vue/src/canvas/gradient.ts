@@ -4,13 +4,13 @@
  * stops throw; evaluation clamps outside 0–1 to the end colours).
  *
  * Gradient coordinates are in **user space** — the matrix that matters is
- * the one current at draw time, exactly like the DOM. The rasterizer maps
- * every device pixel back through the inverse CTM before evaluating.
+ * the one current at draw time, exactly like the DOM; the native core maps
+ * device pixels back through the draw-time CTM while evaluating. This class
+ * is the script-visible object only; `toDescriptor()` hands the parsed,
+ * sorted stops to the rasterizer when a paint is recorded.
  */
 
-import { lerpColor, parseColor, type RgbaColor } from "./color.js"
-import type { GpuixMatrix2D } from "./matrix.js"
-import { applyMatrix, invertMatrix } from "./matrix.js"
+import { parseColor, type RgbaColor } from "./color.js"
 
 export type GradientKind = "linear" | "radial"
 
@@ -70,100 +70,41 @@ export class GpuixCanvasGradient {
   }
 
   /** Degenerate gradients paint nothing at all (spec): a zero-length linear
-   *  axis, or a radial gradient whose two circles are identical. */
+   * axis, or a radial gradient whose two circles are identical. */
   get empty(): boolean {
     if (this.kind === "linear") return this.x0 === this.x1 && this.y0 === this.y1
     return this.x0 === this.x1 && this.y0 === this.y1 && this.r0 === this.r1
   }
 
-  /** Evaluate at a **device space** pixel centre, mapping back through the
-   *  draw-time matrix first. Null means "outside the gradient's reach" — the
-   *  radial family never paints this point, so the destination is left alone. */
-  evaluateDevice(x: number, y: number, m: GpuixMatrix2D): RgbaColor | null {
-    const inv = invertMatrix(m)
-    if (!inv) {
-      // Degenerate transform: nothing user-space survives; the first stop
-      // colour is as good a fallback as any.
-      return this.colorAt(0)
+  /** @internal — the wire form for the native paint recorder: parsed stops
+   *  (channels 0–255, alpha 0–1) in sorted offset order. Evaluation lives in
+   *  the Rust core (`GradientDesc`), which ported the piecewise ramp and the
+   *  radial circle-family roots verbatim. */
+  toDescriptor(): {
+    radial: boolean
+    x0: number
+    y0: number
+    r0: number
+    x1: number
+    y1: number
+    r1: number
+    stops: Array<{ offset: number; r: number; g: number; b: number; a: number }>
+  } {
+    return {
+      radial: this.kind === "radial",
+      x0: this.x0,
+      y0: this.y0,
+      r0: this.r0,
+      x1: this.x1,
+      y1: this.y1,
+      r1: this.r1,
+      stops: this.stops.map((stop) => ({
+        offset: stop.offset,
+        r: stop.color.r,
+        g: stop.color.g,
+        b: stop.color.b,
+        a: stop.color.a,
+      })),
     }
-    const [ux, uy] = applyMatrix(inv, x, y)
-    const t = this.parameterAt(ux, uy)
-    return t === null ? null : this.colorAt(t)
-  }
-
-  /** Piecewise colour lookup; before the first stop and after the last the
-   *  end colours hold, which is how the DOM ramps a gradient. */
-  private colorAt(t: number): RgbaColor {
-    const stops = this.stops
-    if (stops.length === 0) return { r: 0, g: 0, b: 0, a: 0 }
-    if (t <= stops[0]!.offset) return stops[0]!.color
-    const last = stops[stops.length - 1]!
-    if (t >= last.offset) return last.color
-    for (let i = 0; i < stops.length - 1; i++) {
-      const from = stops[i]!
-      const to = stops[i + 1]!
-      if (t >= from.offset && t <= to.offset) {
-        const span = to.offset - from.offset
-        const local = span === 0 ? 0 : (t - from.offset) / span
-        return lerpColor(from.color, to.color, local)
-      }
-    }
-    return last.color
-  }
-
-  /**
-   * The gradient parameter at a user-space point: projection on the axis for
-   * linear, the circle-family root for radial. Null means the point is never
-   * painted by this gradient.
-   */
-  private parameterAt(x: number, y: number): number | null {
-    if (this.kind === "linear") {
-      const dx = this.x1 - this.x0
-      const dy = this.y1 - this.y0
-      const denom = dx * dx + dy * dy
-      if (denom === 0) return 0
-      return ((x - this.x0) * dx + (y - this.y0) * dy) / denom
-    }
-    return this.radialParameter(x, y)
-  }
-
-  /**
-   * Radial: the spec's circle family c(ω) = (c0 + ω·d, r0 + ω·dr) is painted
-   * from ω nearest +∞ downward and earlier circles win, so a point takes the
-   * colour at the LARGEST root of |p − c(ω)| = r(ω) — provided that circle
-   * has a positive radius; circles with r(ω) ≤ 0 are never painted, and a
-   * point with no valid root is left untouched.
-   */
-  private radialParameter(x: number, y: number): number | null {
-    const dx = this.x1 - this.x0
-    const dy = this.y1 - this.y0
-    const dr = this.r1 - this.r0
-    const fx = x - this.x0
-    const fy = y - this.y0
-
-    const radiusAt = (t: number) => this.r0 + t * dr
-    const valid = (t: number) => radiusAt(t) > 1e-9
-
-    const a = dx * dx + dy * dy - dr * dr
-    const b = -(dx * fx + dy * fy + this.r0 * dr)
-    const c = fx * fx + fy * fy - this.r0 * this.r0
-
-    if (Math.abs(a) < 1e-12) {
-      // Linear boundary: the family is a set of concentric circles (|d| = |dr|).
-      if (Math.abs(b) < 1e-12) return c < 0 ? 0 : null
-      const t = -c / (2 * b)
-      return valid(t) ? t : null
-    }
-
-    const disc = b * b - a * c
-    if (disc < 0) return null
-    const root = Math.sqrt(disc)
-    const t0 = (-b - root) / a
-    const t1 = (-b + root) / a
-    const hi = Math.max(t0, t1)
-    if (valid(hi)) return hi
-    const lo = Math.min(t0, t1)
-    if (valid(lo)) return lo
-    return null
   }
 }

@@ -1,4 +1,5 @@
-/** Native `<canvas>`: a JS-owned RGBA buffer GPUI paints as a GPU texture. */
+/** Native `<canvas>`: a native rasterization core whose buffer GPUI paints
+ *  as a GPU texture. */
 
 import { computed, defineComponent, h, onUnmounted, ref, watch, type PropType } from "vue"
 import type { HostNode } from "../types.js"
@@ -11,24 +12,23 @@ export interface GpuixCanvasInstance {
   readonly id: number | undefined
   /**
    * The 2D drawing context, created on first call and returned on every
-   * later one — same identity as a DOM canvas. Drawing goes through the
-   * pure-TypeScript rasterizer and reaches the GPU through the coalesced
+   * later one — same identity as a DOM canvas. Drawing records into the
+   * native rasterization core and reaches the GPU through the coalesced
    * upload below; the pixel-bridge methods stay available for manual
    * buffer control.
    */
   getContext(type: "2d"): GpuixCanvasRenderingContext2D | null
-  /**
-   * Upload a full RGBA buffer (row-major, 4 bytes per pixel) and repaint.
-   * `Uint8ClampedArray` — what `ImageData.data` gives — is accepted.
-   * `pixels.length` must be `width * height * 4`; native validates.
+  /** Upload a full RGBA buffer (row-major, 4 bytes per pixel) and repaint.
+   *  `Uint8ClampedArray` — what `ImageData.data` gives — is accepted.
+   *  `pixels.length` must be `width * height * 4`; native validates.
    *
-   * Pixels ride a dedicated FFI call, never `applyBatch`: a canvas repaint
-   * moves megabytes, and the batch JSON would escape every byte. JS keeps its
-   * own copy as the source of truth, exactly like a DOM canvas.
-   */
+   *  Manual pixel control only — the 2D context flushes itself straight
+   *  from the native core (`uploadCanvasFromContext`). Pixels ride a
+   *  dedicated FFI call, never `applyBatch`: a canvas repaint moves
+   *  megabytes, and the batch JSON would escape every byte. */
   uploadPixels(pixels: Uint8Array | Uint8ClampedArray): void
   /** The last uploaded buffer as RGBA, or null before the first upload.
-   *  A bridge round-trip, not a GPU readback — JS owns the drawing state. */
+   *  A store round-trip, not a GPU readback. */
   readPixels(): Uint8Array | null
 }
 
@@ -64,7 +64,7 @@ export const GpuixCanvas = defineComponent({
         context = new GpuixCanvasRenderingContext2D(props.width, props.height, () => {
           const id = root.value?.id
           const renderer = gpuix.renderer
-          return id != null && renderer?.uploadCanvasPixels
+          return id != null && renderer?.uploadCanvasFromContext
             ? { renderer, id }
             : null
         })
