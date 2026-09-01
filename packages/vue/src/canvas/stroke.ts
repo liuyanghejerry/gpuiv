@@ -101,10 +101,8 @@ function strokePiece(
   const n = pts.length / 2
   if (n === 0) return
   if (n === 1 || allCoincident(pts)) {
-    // A zero-length subpath draws a dot under round caps, nothing otherwise.
-    if (params.lineCap === "round") {
-      pushCircle(out, pts[0]!, pts[1]!, h)
-    }
+    // Zero-length subpaths are pruned before stroking — the DOM draws
+    // nothing at all, not even a round-cap dot.
     return
   }
 
@@ -123,29 +121,55 @@ function strokePiece(
     const ay = pts[a * 2 + 1]!
     const bx = pts[b * 2]!
     const by = pts[b * 2 + 1]!
-    pushOriented(
-      out,
-      [ax + nx * h, ay + ny * h, bx + nx * h, by + ny * h, bx - nx * h, by - ny * h, ax - nx * h, ay - ny * h],
-      true,
-    )
+    // The quad is emitted as two same-orientation triangles: when the stroke
+    // is wider than twice the local curvature radius the inner offsets cross
+    // and the quad twists, and a self-intersecting quad cancels its own
+    // winding under nonzero fill. Triangles never self-intersect, and
+    // overlapping positive pieces add coverage without seams.
+    const a1x = ax + nx * h
+    const a1y = ay + ny * h
+    const b1x = bx + nx * h
+    const b1y = by + ny * h
+    const a2x = ax - nx * h
+    const a2y = ay - ny * h
+    const b2x = bx - nx * h
+    const b2y = by - ny * h
+    pushOriented(out, [a1x, a1y, b1x, b1y, b2x, b2y], true)
+    pushOriented(out, [a1x, a1y, b2x, b2y, a2x, a2y], true)
   }
 
   // Joints: every vertex of a closed loop, interior vertices of an open one.
+  // Duplicate vertices (roundRect ends with an explicit closing lineTo) must
+  // not swallow the join, so edge directions skip coincident neighbours.
+  const directionThrough = (i: number, forward: boolean): [number, number] | null => {
+    const px = pts[i * 2]!
+    const py = pts[i * 2 + 1]!
+    for (let step = 1; step <= n; step++) {
+      const j = at(forward ? i + step : i - step)
+      const dx = pts[j * 2]! - px
+      const dy = pts[j * 2 + 1]! - py
+      const len = Math.hypot(dx, dy)
+      if (len > 1e-12) {
+        const ux = dx / len
+        const uy = dy / len
+        return forward ? [ux, uy] : [-ux, -uy]
+      }
+    }
+    return null
+  }
   const jointFrom = closed ? 0 : 1
   const jointTo = closed ? n - 1 : n - 2
   for (let i = jointFrom; i <= jointTo; i++) {
-    const prev = at(i - 1)
     const here = at(i)
-    const next = at(i + 1)
-    const u1 = unitBetween(pts, prev, here) ?? unitBetween(pts, here, next)
-    const u2 = unitBetween(pts, here, next) ?? unitBetween(pts, prev, here)
+    const u1 = directionThrough(here, false)
+    const u2 = directionThrough(here, true)
     if (!u1 || !u2) continue
     strokeJoint(pts[here * 2]!, pts[here * 2 + 1]!, u1, u2, params, h, out)
   }
 
   if (!closed) {
-    const first = unitBetween(pts, 0, 1)
-    const last = unitBetween(pts, n - 2, n - 1)
+    const first = directionThrough(0, true)
+    const last = directionThrough(n - 1, false)
     if (first) {
       strokeCap(pts[0]!, pts[1]!, first, params.lineCap, h, out, true)
     }
@@ -175,7 +199,9 @@ function strokeJoint(
   const cross = u1[0]! * u2[1]! - u1[1]! * u2[0]!
   const dot = u1[0]! * u2[0]! + u1[1]! * u2[1]!
   if (Math.abs(cross) < 1e-9) {
-    if (dot < 0) pushCircle(out, vx, vy, h) // exact reversal: any side may be outer
+    // Exact reversal: only a round join leaves anything (a disk); miter and
+    // bevel degenerate to nothing at the coincident butt ends.
+    if (dot < 0 && params.lineJoin === "round") pushCircle(out, vx, vy, h)
     return
   }
   const side = cross > 0 ? -1 : 1

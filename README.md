@@ -1507,20 +1507,27 @@ ctx.stroke()
 
 Supported: the path vocabulary (`moveTo` … `roundRect`, arcs, béziers),
 `fill`/`stroke`/`clip`/`isPointInPath` with both fill rules, the transform
-stack (`save`/`restore`/`translate`/`rotate`/`scale`/`setTransform`…),
-linear and radial gradients, line styles including dashes and miter joins,
-anti-aliased rasterization, `globalAlpha` and the `source-over` /
-`destination-out` / `copy` composite operations, `clearRect`,
-`getImageData`/`putImageData`/`createImageData`, and `drawImage` with
-another `GpuixCanvas` as the source (nearest or bilinear sampling via
-`imageSmoothingEnabled`).
+stack (`save`/`restore`/`translate`/`rotate`/`scale`/`setTransform`…,
+`reset`), linear and radial gradients, line styles including dashes and miter
+joins, anti-aliased rasterization, `globalAlpha`, every composite operation
+name the DOM accepts (Porter-Duff modes rasterize natively; the separable
+blend modes currently render as `source-over`), `clearRect`,
+`getImageData`/`putImageData`/`createImageData` plus the `ImageData`
+constructor, and `drawImage` with another `GpuixCanvas` as the source
+(nearest or bilinear sampling via `imageSmoothingEnabled`).
+
+The context is pinned by a vendored subset of the **W3C web-platform-tests**
+canvas suite — 593 declarative cases in `packages/vue/wpt/yaml/`, of which
+452 run green and 141 are skipped with the missing API named in the test
+title (`Path2D`, `createPattern`, text, shadows, …). Regenerate the case
+table after updating the YAML with `bun scripts/convert-canvas-wpt.ts`.
 
 Deliberately not implemented:
 
 - `fillText` / `strokeText` / `measureText` — they **throw**. Glyph
   rasterization needs a font pipeline that does not exist JS-side yet.
-- `toDataURL` / `toBlob`, shadows, `filter`, `createPattern`, conic
-  gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
+- `toDataURL` / `toBlob`, shadows, `filter`, `createPattern`, `Path2D`,
+  conic gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
   never sees decoded `<img>` pixels).
 
 Changing the `width`/`height` props resets the bitmap and the context

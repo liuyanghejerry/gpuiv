@@ -50,22 +50,36 @@ export class GpuixCanvasGradient {
 
   addColorStop(offset: number, color: string): void {
     if (!Number.isFinite(offset)) {
-      throw new Error("GpuixCanvasGradient.addColorStop: offset must be finite")
+      throw new TypeError("GpuixCanvasGradient.addColorStop: offset must be finite")
     }
     if (offset < 0 || offset > 1) {
-      throw new Error("GpuixCanvasGradient.addColorStop: offset must be between 0 and 1")
+      throw new DOMException(
+        "GpuixCanvasGradient.addColorStop: offset must be between 0 and 1",
+        "IndexSizeError",
+      )
     }
     const parsed = parseColor(color)
     if (!parsed) {
-      throw new Error(`GpuixCanvasGradient.addColorStop: cannot parse color "${color}"`)
+      throw new DOMException(
+        `GpuixCanvasGradient.addColorStop: cannot parse color "${color}"`,
+        "SyntaxError",
+      )
     }
     this.stops.push({ offset, color: parsed })
     this.stops.sort((a, b) => a.offset - b.offset)
   }
 
+  /** Degenerate gradients paint nothing at all (spec): a zero-length linear
+   *  axis, or a radial gradient whose two circles are identical. */
+  get empty(): boolean {
+    if (this.kind === "linear") return this.x0 === this.x1 && this.y0 === this.y1
+    return this.x0 === this.x1 && this.y0 === this.y1 && this.r0 === this.r1
+  }
+
   /** Evaluate at a **device space** pixel centre, mapping back through the
-   *  draw-time matrix first. */
-  evaluateDevice(x: number, y: number, m: GpuixMatrix2D): RgbaColor {
+   *  draw-time matrix first. Null means "outside the gradient's reach" — the
+   *  radial family never paints this point, so the destination is left alone. */
+  evaluateDevice(x: number, y: number, m: GpuixMatrix2D): RgbaColor | null {
     const inv = invertMatrix(m)
     if (!inv) {
       // Degenerate transform: nothing user-space survives; the first stop
@@ -73,7 +87,8 @@ export class GpuixCanvasGradient {
       return this.colorAt(0)
     }
     const [ux, uy] = applyMatrix(inv, x, y)
-    return this.colorAt(this.parameterAt(ux, uy))
+    const t = this.parameterAt(ux, uy)
+    return t === null ? null : this.colorAt(t)
   }
 
   /** Piecewise colour lookup; before the first stop and after the last the
@@ -97,10 +112,11 @@ export class GpuixCanvasGradient {
   }
 
   /**
-   * The gradient parameter at a user-space point:
-   * projection on the axis for linear, the circle interpolation for radial.
+   * The gradient parameter at a user-space point: projection on the axis for
+   * linear, the circle-family root for radial. Null means the point is never
+   * painted by this gradient.
    */
-  private parameterAt(x: number, y: number): number {
+  private parameterAt(x: number, y: number): number | null {
     if (this.kind === "linear") {
       const dx = this.x1 - this.x0
       const dy = this.y1 - this.y0
@@ -112,47 +128,42 @@ export class GpuixCanvasGradient {
   }
 
   /**
-   * Radial: solve |p − (c0 + t·d)| = r0 + t·dr for t.
-   *
-   * For the common concentric case (c0 == c1, r0 < r1) the positive root is
-   * exactly (|p − c0| − r0) / (r1 − r0). In general we take the real root
-   * inside [0, 1] (preferring the smaller), and clamp when both roots fall
-   * outside — matching what renderers do for points no circle reaches.
+   * Radial: the spec's circle family c(ω) = (c0 + ω·d, r0 + ω·dr) is painted
+   * from ω nearest +∞ downward and earlier circles win, so a point takes the
+   * colour at the LARGEST root of |p − c(ω)| = r(ω) — provided that circle
+   * has a positive radius; circles with r(ω) ≤ 0 are never painted, and a
+   * point with no valid root is left untouched.
    */
-  private radialParameter(x: number, y: number): number {
+  private radialParameter(x: number, y: number): number | null {
     const dx = this.x1 - this.x0
     const dy = this.y1 - this.y0
     const dr = this.r1 - this.r0
     const fx = x - this.x0
     const fy = y - this.y0
 
+    const radiusAt = (t: number) => this.r0 + t * dr
+    const valid = (t: number) => radiusAt(t) > 1e-9
+
     const a = dx * dx + dy * dy - dr * dr
     const b = -(dx * fx + dy * fy + this.r0 * dr)
     const c = fx * fx + fy * fy - this.r0 * this.r0
 
     if (Math.abs(a) < 1e-12) {
-      // Linear boundary case (cone apex at infinity, or equal circles).
-      if (Math.abs(b) < 1e-12) return 0
-      return -c / (2 * b)
+      // Linear boundary: the family is a set of concentric circles (|d| = |dr|).
+      if (Math.abs(b) < 1e-12) return c < 0 ? 0 : null
+      const t = -c / (2 * b)
+      return valid(t) ? t : null
     }
 
     const disc = b * b - a * c
-    if (disc < 0) {
-      // Outside every circle: report which side of the ramp we are on.
-      return b > 0 ? 0 : 1
-    }
+    if (disc < 0) return null
     const root = Math.sqrt(disc)
     const t0 = (-b - root) / a
     const t1 = (-b + root) / a
-    for (const t of t0 <= t1 ? [t0, t1] : [t1, t0]) {
-      if (t >= 0 && t <= 1) return t
-    }
-    // Neither root is in range: clamp the one NEAREST the interval — for the
-    // concentric case that is the outer circle boundary (black past r1),
-    // not the mirrored negative root.
-    const clamp01 = (t: number) => (t < 0 ? 0 : t > 1 ? 1 : t)
-    const d0 = Math.abs(t0 - clamp01(t0))
-    const d1 = Math.abs(t1 - clamp01(t1))
-    return clamp01(d0 <= d1 ? t0 : t1)
+    const hi = Math.max(t0, t1)
+    if (valid(hi)) return hi
+    const lo = Math.min(t0, t1)
+    if (valid(lo)) return lo
+    return null
   }
 }

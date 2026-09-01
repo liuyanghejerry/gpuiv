@@ -160,17 +160,54 @@ function accumulateSpan(
 }
 
 /** Winding test for isPointInPath / isPointInStroke-style hit tests.
- *  The point is in device space; the ray cast runs toward +x. */
+ *  The point is in device space; the ray cast runs toward +x. Points exactly
+ *  on the boundary count as inside, matching the DOM. */
 export function pointInPolys(polys: Poly[], x: number, y: number, rule: FillRule): boolean {
+  const EPS = 1e-7
+  // Boundary first: distance to every segment, including horizontal ones
+  // the winding cast below skips. Overflowed coordinates (a path scaled by
+  // Number.MAX_VALUE) clamp to a huge-but-finite bound so the containment
+  // math still works; NaN segments and collapsed points have no extent.
+  const clean = (v: number): number => {
+    if (Number.isNaN(v)) return NaN
+    if (v === Infinity) return 1e60
+    if (v === -Infinity) return -1e60
+    return v
+  }
+  for (const poly of polys) {
+    const pts = poly.pts
+    const n = pts.length / 2
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n
+      const x1 = clean(pts[i * 2]!)
+      const y1 = clean(pts[i * 2 + 1]!)
+      const x2 = clean(pts[j * 2]!)
+      const y2 = clean(pts[j * 2 + 1]!)
+      if (Number.isNaN(x1) || Number.isNaN(y1) || Number.isNaN(x2) || Number.isNaN(y2)) continue
+      const dx = x2 - x1
+      const dy = y2 - y1
+      const len2 = dx * dx + dy * dy
+      if (len2 === 0) continue
+      let t = ((x - x1) * dx + (y - y1) * dy) / len2
+      t = t < 0 ? 0 : t > 1 ? 1 : t
+      if (Math.hypot(x - (x1 + t * dx), y - (y1 + t * dy)) <= EPS) return true
+    }
+  }
   const edges = collectEdges(polys, true)
   let winding = 0
   let parity = 0
   for (const edge of edges) {
-    const top = edge.y1 < edge.y2 ? edge.y1 : edge.y2
-    const bottom = edge.y1 < edge.y2 ? edge.y2 : edge.y1
+    const x1 = clean(edge.x1)
+    const y1 = clean(edge.y1)
+    const x2 = clean(edge.x2)
+    const y2 = clean(edge.y2)
+    if (Number.isNaN(x1) || Number.isNaN(y1) || Number.isNaN(x2) || Number.isNaN(y2)) continue
+    const top = y1 < y2 ? y1 : y2
+    const bottom = y1 < y2 ? y2 : y1
     if (y < top || y >= bottom) continue
-    const t = (y - edge.y1) / (edge.y2 - edge.y1)
-    const cx = edge.x1 + t * (edge.x2 - edge.x1)
+    if (y2 === y1) continue
+    const t = (y - y1) / (y2 - y1)
+    const cx = x1 + t * (x2 - x1)
     if (cx > x) {
       winding += edge.dir
       parity ^= 1

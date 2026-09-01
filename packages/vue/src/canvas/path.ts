@@ -2,19 +2,20 @@
  * Path building and flattening for the GPUIV 2D context.
  *
  * A path is a list of subpaths of **user-space** segments (line, quadratic,
- * cubic, ellipse-arc). Flattening subdivides curves adaptively and emits
- * device-space polylines; the tolerance is applied to the transformed
- * control points, so quality tracks the CTM, and callers that need
- * user-space geometry (stroking) pass an identity matrix with a tighter
- * tolerance derived from the transform's max scale.
+ * cubic, ellipse-arc). Each segment carries the CTM that was current when it
+ * was appended: the DOM applies transformations while the path is built, not
+ * when it is drawn, so a path can mix matrices segment by segment. Flattening
+ * subdivides curves adaptively and emits device-space polylines; the
+ * tolerance is applied to the transformed control points, so quality tracks
+ * each segment's own matrix.
  */
 
 import type { GpuixMatrix2D } from "./matrix.js"
 import { applyMatrix } from "./matrix.js"
 
 export type PathSegment =
-  | { k: "L"; x: number; y: number }
-  | { k: "Q"; cx: number; cy: number; x: number; y: number }
+  | { k: "L"; x: number; y: number; m: GpuixMatrix2D }
+  | { k: "Q"; cx: number; cy: number; x: number; y: number; m: GpuixMatrix2D }
   | {
       k: "C"
       c1x: number
@@ -23,6 +24,7 @@ export type PathSegment =
       c2y: number
       x: number
       y: number
+      m: GpuixMatrix2D
     }
   | {
       k: "A"
@@ -34,11 +36,16 @@ export type PathSegment =
       start: number
       end: number
       ccw: boolean
+      m: GpuixMatrix2D
     }
 
 export interface PathSubpath {
   sx: number
   sy: number
+  /** The CTM captured when the subpath was started — the DOM transforms path
+   *  coordinates while the path is being built, not when it is drawn, so every
+   *  segment carries the matrix that was current when it was appended. */
+  m: GpuixMatrix2D
   segs: PathSegment[]
   closed: boolean
 }
@@ -79,25 +86,31 @@ export class GpuixPathBuilder {
     return this.hasCurrent ? { x: this.cx, y: this.cy } : null
   }
 
-  moveTo(x: number, y: number): void {
-    if (!allFinite(x, y)) return
-    this.open = { sx: x, sy: y, segs: [], closed: false }
+  moveTo(x: number, y: number, m: GpuixMatrix2D = IDENTITY): void {
+    const nx = Number(x)
+    const ny = Number(y)
+    if (!allFinite(nx, ny)) return
+    this.open = { sx: nx, sy: ny, m, segs: [], closed: false }
     this.subpaths.push(this.open)
-    this.cx = x
-    this.cy = y
+    this.cx = nx
+    this.cy = ny
     this.hasCurrent = true
   }
 
-  lineTo(x: number, y: number): void {
-    if (!allFinite(x, y)) return
+  lineTo(x: number, y: number, m: GpuixMatrix2D = IDENTITY): void {
+    // Convert first, validate after: the DOM converts every argument
+    // (running valueOf) even when a sibling argument is non-finite.
+    const nx = Number(x)
+    const ny = Number(y)
+    if (!allFinite(nx, ny)) return
     if (!this.hasCurrent) {
-      this.moveTo(x, y)
+      this.moveTo(nx, ny, m)
       return
     }
-    this.ensureOpen()
-    this.open!.segs.push({ k: "L", x, y })
-    this.cx = x
-    this.cy = y
+    this.ensureOpen(m)
+    this.open!.segs.push({ k: "L", x: nx, y: ny, m })
+    this.cx = nx
+    this.cy = ny
   }
 
   closePath(): void {
@@ -109,13 +122,13 @@ export class GpuixPathBuilder {
     this.open = null
   }
 
-  quadraticCurveTo(cpx: number, cpy: number, x: number, y: number): void {
+  quadraticCurveTo(cpx: number, cpy: number, x: number, y: number, m: GpuixMatrix2D = IDENTITY): void {
     if (!allFinite(cpx, cpy, x, y)) return
     if (!this.hasCurrent) {
-      this.moveTo(cpx, cpy)
+      this.moveTo(cpx, cpy, m)
     }
-    this.ensureOpen()
-    this.open!.segs.push({ k: "Q", cx: cpx, cy: cpy, x, y })
+    this.ensureOpen(m)
+    this.open!.segs.push({ k: "Q", cx: cpx, cy: cpy, x, y, m })
     this.cx = x
     this.cy = y
   }
@@ -127,13 +140,14 @@ export class GpuixPathBuilder {
     c2y: number,
     x: number,
     y: number,
+    m: GpuixMatrix2D = IDENTITY,
   ): void {
     if (!allFinite(c1x, c1y, c2x, c2y, x, y)) return
     if (!this.hasCurrent) {
-      this.moveTo(c1x, c1y)
+      this.moveTo(c1x, c1y, m)
     }
-    this.ensureOpen()
-    this.open!.segs.push({ k: "C", c1x, c1y, c2x, c2y, x, y })
+    this.ensureOpen(m)
+    this.open!.segs.push({ k: "C", c1x, c1y, c2x, c2y, x, y, m })
     this.cx = x
     this.cy = y
   }
@@ -142,21 +156,21 @@ export class GpuixPathBuilder {
    * DOM `arcTo`: line to the tangent point on the incoming edge, then an arc
    * around the inscribed circle to the tangent point on the outgoing edge.
    */
-  arcTo(x1: number, y1: number, x2: number, y2: number, radius: number): void {
+  arcTo(x1: number, y1: number, x2: number, y2: number, radius: number, m: GpuixMatrix2D = IDENTITY): void {
     if (!allFinite(x1, y1, x2, y2, radius)) return
     if (radius < 0) {
-      throw new Error("arcTo: radius must not be negative")
+      throw new DOMException("arcTo: radius must not be negative", "IndexSizeError")
     }
     if (!this.hasCurrent) {
       // No current point: the arc starts a subpath at its first tangent point.
       // Compute it below by treating the current point as P1 (degenerate).
-      this.moveTo(x1, y1)
+      this.moveTo(x1, y1, m)
       return
     }
     const x0 = this.cx
     const y0 = this.cy
     if ((x0 === x1 && y0 === y1) || (x1 === x2 && y1 === y2) || radius === 0) {
-      this.lineTo(x1, y1)
+      this.lineTo(x1, y1, m)
       return
     }
     const l0 = Math.hypot(x1 - x0, y1 - y0)
@@ -169,11 +183,12 @@ export class GpuixPathBuilder {
     const cross = ux * vy - uy * vx
     if (1 + dot < 1e-12) {
       // 180° reversal: the tangent points run to infinity; keep the corner.
-      this.lineTo(x1, y1)
+      this.lineTo(x1, y1, m)
       return
     }
-    // Signed tangent length; the circle center sits one radius off both edges.
-    const t = (radius * cross) / (1 + dot)
+    // Unsigned tangent length (r·tan(θ/2)); the circle center sits one
+    // radius off both edges, on the side the corner turns toward.
+    const t = Math.abs((radius * cross) / (1 + dot))
     const t1x = x1 - ux * t
     const t1y = y1 - uy * t
     const t2x = x1 + vx * t
@@ -181,10 +196,10 @@ export class GpuixPathBuilder {
     const side = cross > 0 ? 1 : -1
     const ox = t1x + side * radius * -uy
     const oy = t1y + side * radius * ux
-    this.lineTo(t1x, t1y)
+    this.lineTo(t1x, t1y, m)
     const start = Math.atan2(t1y - oy, t1x - ox)
     const end = Math.atan2(t2y - oy, t2x - ox)
-    this.ensureOpen()
+    this.ensureOpen(m)
     this.open!.segs.push({
       k: "A",
       cx: ox,
@@ -196,6 +211,7 @@ export class GpuixPathBuilder {
       end,
       // cross > 0 turns through increasing canvas angles (y down).
       ccw: cross < 0,
+      m,
     })
     this.cx = t2x
     this.cy = t2y
@@ -210,18 +226,19 @@ export class GpuixPathBuilder {
     startAngle: number,
     endAngle: number,
     anticlockwise = false,
+    m: GpuixMatrix2D = IDENTITY,
   ): void {
     if (!allFinite(x, y, radiusX, radiusY, rotation, startAngle, endAngle)) return
     if (radiusX < 0 || radiusY < 0) {
-      throw new Error("ellipse: radii must not be negative")
+      throw new DOMException("ellipse: radii must not be negative", "IndexSizeError")
     }
     const startPoint = this.ellipsePoint(x, y, radiusX, radiusY, rotation, startAngle)
     if (this.hasCurrent) {
-      this.lineTo(startPoint[0], startPoint[1])
+      this.lineTo(startPoint[0], startPoint[1], m)
     } else {
-      this.moveTo(startPoint[0], startPoint[1])
+      this.moveTo(startPoint[0], startPoint[1], m)
     }
-    this.ensureOpen()
+    this.ensureOpen(m)
     this.open!.segs.push({
       k: "A",
       cx: x,
@@ -232,6 +249,7 @@ export class GpuixPathBuilder {
       start: startAngle,
       end: endAngle,
       ccw: anticlockwise,
+      m,
     })
     const endPoint = this.ellipsePoint(x, y, radiusX, radiusY, rotation, endAngle)
     this.cx = endPoint[0]
@@ -245,19 +263,23 @@ export class GpuixPathBuilder {
     startAngle: number,
     endAngle: number,
     anticlockwise = false,
+    m: GpuixMatrix2D = IDENTITY,
   ): void {
+    // Non-finite arguments are silently ignored; only a finite negative
+    // radius throws (the ±Infinity/NaN forms expand out of @nonfinite tests).
+    if (!allFinite(x, y, radius, startAngle, endAngle)) return
     if (radius < 0) {
-      throw new Error("arc: radius must not be negative")
+      throw new DOMException("arc: radius must not be negative", "IndexSizeError")
     }
-    this.ellipse(x, y, radius, radius, 0, startAngle, endAngle, anticlockwise)
+    this.ellipse(x, y, radius, radius, 0, startAngle, endAngle, anticlockwise, m)
   }
 
-  rect(x: number, y: number, w: number, h: number): void {
+  rect(x: number, y: number, w: number, h: number, m: GpuixMatrix2D = IDENTITY): void {
     if (!allFinite(x, y, w, h)) return
-    this.moveTo(x, y)
-    this.lineTo(x + w, y)
-    this.lineTo(x + w, y + h)
-    this.lineTo(x, y + h)
+    this.moveTo(x, y, m)
+    this.lineTo(x + w, y, m)
+    this.lineTo(x + w, y + h, m)
+    this.lineTo(x, y + h, m)
     this.closePath()
   }
 
@@ -267,23 +289,64 @@ export class GpuixPathBuilder {
     w: number,
     h: number,
     radii: number | Array<number | { x?: number; y?: number }> = 0,
+    m: GpuixMatrix2D = IDENTITY,
   ): void {
-    if (!allFinite(x, y, w, h)) return
-    if (w < 0 || h < 0) {
-      throw new Error("roundRect: width and height must not be negative")
-    }
-    const corners = normalizeRoundRectRadii(radii, w, h)
-    const [tl, tr, br, bl] = corners
+    // WebIDL converts every argument before validation, so valueOf side
+    // effects happen even when a sibling argument is non-finite.
+    const nx = Number(x)
+    const ny = Number(y)
+    const nw = Number(w)
+    const nh = Number(h)
+    if (!allFinite(nx, ny, nw, nh)) return
+    const corners = normalizeRoundRectRadii(radii, Math.abs(nw), Math.abs(nh))
+    if (!corners) return // non-finite radii are silently ignored, like other arguments
 
-    this.moveTo(x + tl.rx, y)
-    this.lineTo(x + w - tr.rx, y)
-    this.cornerArc(x + w - tr.rx, y + tr.ry, tr, -Math.PI / 2, 0)
-    this.lineTo(x + w, y + h - br.ry)
-    this.cornerArc(x + w - br.rx, y + h - br.ry, br, 0, Math.PI / 2)
-    this.lineTo(x + bl.rx, y + h)
-    this.cornerArc(x + bl.rx, y + h - bl.ry, bl, Math.PI / 2, Math.PI)
-    this.lineTo(x, y + tl.ry)
-    this.cornerArc(x + tl.rx, y + tl.ry, tl, Math.PI, Math.PI * 1.5)
+    // A negative extent mirrors the rectangle: normalize the box and flip
+    // the corner list across the same axes ([tl,tr,br,bl] order). An odd
+    // number of mirrors also reverses the traversal direction — the traced
+    // orientation flips, which nonzero fills observe.
+    let [tl, tr, br, bl] = corners
+    let bx = nx
+    let by = ny
+    let bw = nw
+    let bh = nh
+    if (bw < 0) {
+      bx += bw
+      bw = -bw
+      ;[tl, tr] = [tr, tl]
+      ;[bl, br] = [br, bl]
+    }
+    if (bh < 0) {
+      by += bh
+      bh = -bh
+      ;[tl, bl] = [bl, tl]
+      ;[tr, br] = [br, tr]
+    }
+    const mirrored = (nw < 0) !== (nh < 0)
+
+    if (mirrored) {
+      this.moveTo(bx + tl.rx, by, m)
+      this.cornerArc(bx + tl.rx, by + tl.ry, tl, Math.PI * 1.5, Math.PI, m, true)
+      this.lineTo(bx, by + bh - bl.ry, m)
+      this.cornerArc(bx + bl.rx, by + bh - bl.ry, bl, Math.PI, Math.PI / 2, m, true)
+      this.lineTo(bx + bw - br.rx, by + bh, m)
+      this.cornerArc(bx + bw - br.rx, by + bh - br.ry, br, Math.PI / 2, 0, m, true)
+      this.lineTo(bx + bw, by + tr.ry, m)
+      this.cornerArc(bx + bw - tr.rx, by + tr.ry, tr, 0, -Math.PI / 2, m, true)
+      this.lineTo(bx + tl.rx, by, m)
+      this.closePath()
+      return
+    }
+
+    this.moveTo(bx + tl.rx, by, m)
+    this.lineTo(bx + bw - tr.rx, by, m)
+    this.cornerArc(bx + bw - tr.rx, by + tr.ry, tr, -Math.PI / 2, 0, m)
+    this.lineTo(bx + bw, by + bh - br.ry, m)
+    this.cornerArc(bx + bw - br.rx, by + bh - br.ry, br, 0, Math.PI / 2, m)
+    this.lineTo(bx + bl.rx, by + bh, m)
+    this.cornerArc(bx + bl.rx, by + bh - bl.ry, bl, Math.PI / 2, Math.PI, m)
+    this.lineTo(bx, by + tl.ry, m)
+    this.cornerArc(bx + tl.rx, by + tl.ry, tl, Math.PI, Math.PI * 1.5, m)
     this.closePath()
   }
 
@@ -293,9 +356,11 @@ export class GpuixPathBuilder {
     corner: { rx: number; ry: number },
     start: number,
     end: number,
+    m: GpuixMatrix2D,
+    ccw = false,
   ): void {
     if (corner.rx <= 0 || corner.ry <= 0) return
-    this.ensureOpen()
+    this.ensureOpen(m)
     this.open!.segs.push({
       k: "A",
       cx,
@@ -305,7 +370,8 @@ export class GpuixPathBuilder {
       rot: 0,
       start,
       end,
-      ccw: false,
+      ccw,
+      m,
     })
     const p = this.ellipsePoint(cx, cy, corner.rx, corner.ry, 0, end)
     this.cx = p[0]
@@ -329,42 +395,65 @@ export class GpuixPathBuilder {
   }
 
   /** After closePath the next segment opens a fresh subpath from the close point. */
-  private ensureOpen(): void {
+  private ensureOpen(m: GpuixMatrix2D = IDENTITY): void {
     if (!this.open) {
-      this.open = { sx: this.cx, sy: this.cy, segs: [], closed: false }
+      this.open = { sx: this.cx, sy: this.cy, m, segs: [], closed: false }
       this.subpaths.push(this.open)
     }
   }
 }
+
+const IDENTITY: GpuixMatrix2D = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }
 
 interface CornerRadii {
   rx: number
   ry: number
 }
 
+/** WebIDL-ish double conversion for a radius member; BigInt is the one
+ *  input the DOM rejects with a TypeError instead of coercing. */
+function radiusNumber(value: unknown): number {
+  if (typeof value === "bigint") {
+    throw new TypeError("roundRect: radii cannot be BigInt")
+  }
+  if (typeof value === "number") return value
+  if (value === undefined || value === null) return 0
+  return Number(value)
+}
+
 function normalizeRoundRectRadii(
   radii: number | Array<number | { x?: number; y?: number }>,
   w: number,
   h: number,
-): [CornerRadii, CornerRadii, CornerRadii, CornerRadii] {
-  const seq: Array<number | { x?: number; y?: number }> = Array.isArray(radii) ? radii : [radii]
+): [CornerRadii, CornerRadii, CornerRadii, CornerRadii] | null {
+  const seq: Array<number | { x?: number | unknown; y?: number | unknown }> = Array.isArray(radii)
+    ? radii
+    : [radii]
+  if (seq.length === 0) {
+    throw new RangeError("roundRect: radii must not be empty")
+  }
   if (seq.length > 4) {
-    throw new Error("roundRect: at most four radii")
+    throw new RangeError("roundRect: at most four radii")
   }
   const corners: CornerRadii[] = seq.map((entry) => {
-    if (typeof entry === "number") {
-      if (!Number.isFinite(entry) || entry < 0) {
-        throw new Error("roundRect: radii must be finite and non-negative")
-      }
-      return { rx: entry, ry: entry }
+    if (typeof entry === "number" || typeof entry === "bigint") {
+      return { rx: radiusNumber(entry), ry: radiusNumber(entry) }
     }
-    const rx = entry.x ?? entry.y ?? 0
-    const ry = entry.y ?? entry.x ?? 0
-    if (!Number.isFinite(rx) || !Number.isFinite(ry) || rx < 0 || ry < 0) {
-      throw new Error("roundRect: radii must be finite and non-negative")
+    // DOMPointInit: members are independent and default to 0 when absent,
+    // which is why `{}`, `[]` and `[undefined]` all mean "square corner".
+    const rawX = (entry as { x?: unknown } | null | undefined)?.x
+    const rawY = (entry as { y?: unknown } | null | undefined)?.y
+    return {
+      rx: radiusNumber(rawX === undefined ? 0 : rawX),
+      ry: radiusNumber(rawY === undefined ? 0 : rawY),
     }
-    return { rx, ry }
   })
+  // Non-finite radii make the whole call a silent no-op; a finite negative
+  // radius is the RangeError case.
+  if (corners.some((c) => !Number.isFinite(c.rx) || !Number.isFinite(c.ry))) return null
+  if (corners.some((c) => c.rx < 0 || c.ry < 0)) {
+    throw new RangeError("roundRect: radii must be finite and non-negative")
+  }
   // CSS border-radius spreading: 1 → all, 2 → [a, b, a, b], 3 → [a, b, c, b].
   if (corners.length === 1) {
     corners.push(corners[0]!, corners[0]!, corners[0]!)
@@ -406,26 +495,28 @@ function normalizedSweep(start: number, end: number, ccw: boolean): number {
 
 /**
  * Flatten every subpath into device-space polylines with a chord tolerance
- * of `tol` pixels. Curves are transformed first and subdivided against the
- * transformed control polygon; arcs pick their sample count from the
- * device-space radius.
+ * of `tol` pixels. Every segment carries the CTM captured when it was
+ * appended — the DOM applies transformations while the path is built — so
+ * flattening transforms each piece with its own matrix. Curves are
+ * transformed first and subdivided against the transformed control polygon;
+ * arcs pick their sample count from the device-space radius.
  */
-export function flattenPath(subpaths: PathSubpath[], m: GpuixMatrix2D, tol: number): Poly[] {
+export function flattenPath(subpaths: PathSubpath[], tol: number): Poly[] {
   const polys: Poly[] = []
   for (const sub of subpaths) {
     const pts: number[] = []
-    const [sx, sy] = applyMatrix(m, sub.sx, sub.sy)
+    const [sx, sy] = applyMatrix(sub.m, sub.sx, sub.sy)
     pts.push(sx, sy)
     for (const seg of sub.segs) {
       switch (seg.k) {
         case "L": {
-          const [x, y] = applyMatrix(m, seg.x, seg.y)
+          const [x, y] = applyMatrix(seg.m, seg.x, seg.y)
           pts.push(x, y)
           break
         }
         case "Q": {
-          const [cx, cy] = applyMatrix(m, seg.cx, seg.cy)
-          const [x, y] = applyMatrix(m, seg.x, seg.y)
+          const [cx, cy] = applyMatrix(seg.m, seg.cx, seg.cy)
+          const [x, y] = applyMatrix(seg.m, seg.x, seg.y)
           flattenQuad(
             pts[pts.length - 2]!,
             pts[pts.length - 1]!,
@@ -440,9 +531,9 @@ export function flattenPath(subpaths: PathSubpath[], m: GpuixMatrix2D, tol: numb
           break
         }
         case "C": {
-          const [c1x, c1y] = applyMatrix(m, seg.c1x, seg.c1y)
-          const [c2x, c2y] = applyMatrix(m, seg.c2x, seg.c2y)
-          const [x, y] = applyMatrix(m, seg.x, seg.y)
+          const [c1x, c1y] = applyMatrix(seg.m, seg.c1x, seg.c1y)
+          const [c2x, c2y] = applyMatrix(seg.m, seg.c2x, seg.c2y)
+          const [x, y] = applyMatrix(seg.m, seg.x, seg.y)
           flattenCubic(
             pts[pts.length - 2]!,
             pts[pts.length - 1]!,
@@ -459,7 +550,7 @@ export function flattenPath(subpaths: PathSubpath[], m: GpuixMatrix2D, tol: numb
           break
         }
         case "A": {
-          flattenArc(seg, m, tol, pts)
+          flattenArc(seg, tol, pts)
           break
         }
       }
@@ -535,13 +626,13 @@ function flattenCubic(
 
 function flattenArc(
   seg: Extract<PathSegment, { k: "A" }>,
-  m: GpuixMatrix2D,
   tol: number,
   out: number[],
 ): void {
   const sweep = normalizedSweep(seg.start, seg.end, seg.ccw)
   const cosRot = Math.cos(seg.rot)
   const sinRot = Math.sin(seg.rot)
+  const m = seg.m
   // Device-space half-axes: the linear part of the matrix applied to the
   // user-space axis vectors.
   const uxv = [cosRot * seg.rx, sinRot * seg.rx]

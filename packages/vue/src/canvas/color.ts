@@ -103,9 +103,38 @@ export function hslToRgb(h: number, s: number, l: number): [number, number, numb
   return [clamp255((r + m) * 255), clamp255((g + m) * 255), clamp255((b + m) * 255)]
 }
 
-/** Parse an `fn(args)` functional colour: rgb, rgba, hsl, hsla. */
-function parseFunctional(spec: string): RgbaColor | null {
+/** Parse `color(srgb r g b [/ a])` — the one predefined color space that maps
+ *  straight onto our sRGB buffer. Other spaces are rejected. */
+function parseColorFunc(spec: string): RgbaColor | null {
   const open = spec.indexOf("(")
+  const close = spec.lastIndexOf(")")
+  if (open < 0 || close < open) return null
+  const parts = spec
+    .slice(open + 1, close)
+    .split(/\s+/)
+    .filter((p) => p.length > 0)
+  if (parts.length < 4 || parts[0]!.toLowerCase() !== "srgb") return null
+  let alpha = 1
+  const channels = parts.slice(1)
+  if (channels.length === 4) {
+    const a = parseChannel(channels[3]!, 1)
+    if (a == null) return null
+    alpha = a
+    channels.pop()
+  } else if (channels.length !== 3) {
+    return null
+  }
+  const rgb: number[] = []
+  for (const channel of channels) {
+    const v = parseChannel(channel, 1)
+    if (v == null) return null
+    rgb.push(clamp255(v * 255))
+  }
+  return { r: rgb[0]!, g: rgb[1]!, b: rgb[2]!, a: alpha }
+}
+
+/** Parse an `fn(args)` functional colour: rgb, rgba, hsl, hsla. */
+function parseFunctional(spec: string): RgbaColor | null {  const open = spec.indexOf("(")
   const close = spec.lastIndexOf(")")
   if (open < 0 || close < open) return null
   const fn = spec.slice(0, open).trim().toLowerCase()
@@ -298,6 +327,11 @@ const NAMED_COLORS: Record<string, string> = {
   wheat: "f5deb3",
   white: "ffffff",
   whitesmoke: "f5f5f5",
+  threeddarkshadow: "767676",
+  threedface: "f0f0f0",
+  threedhighlight: "ffffff",
+  threedlightshadow: "d4d0c8",
+  threedshadow: "a0a0a0",
   yellow: "ffff00",
   yellowgreen: "9acd32",
 }
@@ -322,6 +356,7 @@ export function parseColor(spec: string): RgbaColor | null {
       a: 1,
     }
   }
+  if (s.startsWith("color(")) return parseColorFunc(s)
   return parseFunctional(s)
 }
 
@@ -333,4 +368,16 @@ export function lerpColor(from: RgbaColor, to: RgbaColor, t: number): RgbaColor 
     b: from.b + (to.b - from.b) * t,
     a: from.a + (to.a - from.a) * t,
   }
+}
+
+/** The DOM's canvas serialisation of a parsed colour: 6-digit lowercase hex
+ *  when opaque, legacy `rgba(r, g, b, a)` otherwise. This is what the
+ *  `fillStyle`/`strokeStyle` getters return — not the string that was set. */
+export function serializeColor(c: RgbaColor): string {
+  const channel = (v: number) => Math.round(clamp255(v)).toString(16).padStart(2, "0")
+  if (c.a >= 1) {
+    return `#${channel(c.r)}${channel(c.g)}${channel(c.b)}`
+  }
+  const rgb = (v: number) => String(Math.round(clamp255(v)))
+  return `rgba(${rgb(c.r)}, ${rgb(c.g)}, ${rgb(c.b)}, ${String(c.a)})`
 }

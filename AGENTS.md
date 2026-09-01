@@ -994,6 +994,14 @@ THROTTLE=utility bun --hot chat.tsx
 `examples/chat.perf.test.tsx` is the automated profile. It uses `createTestApp()`,
 not the live window. Assert **p95 draw / flush ms**, not a per-frame FPS floor.
 
+`packages/vue/src/__tests__/canvas-wpt.test.ts` runs a vendored subset of the
+W3C web-platform-tests canvas suite (593 cases: 452 run, 141 skipped with the
+missing API named in the title) against the pure-TS 2D context — no window,
+no GPU. The cases come from `packages/vue/wpt/yaml/`; regenerate the JSON with
+`bun scripts/convert-canvas-wpt.ts` after updating them. A case the context
+cannot express yet goes into the `requires` list in the converter, not into a
+`skip()` in the runner — the skip reason must stay machine-visible.
+
 `THROTTLE` re-execs under `taskpolicy -c`. `utility` is an M1/M2 Air CPU proxy.
 `background` is harsher, closer to a 2019 Intel Mac. GPU and RAM stay on this
 machine. `taskpolicy -c` only works at launch. The vitest config wraps the main

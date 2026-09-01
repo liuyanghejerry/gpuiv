@@ -336,9 +336,12 @@ describe("canvas 2d context (pure rasterizer)", () => {
     expectPixelClose(px(copy, 8, 8), [0, 0, 255, 255], 0)
     expectPixelClose(px(copy, 1, 1), [0, 0, 0, 0], 0) // copy clears the rest
 
-    // Unknown composite values are ignored.
-    copy.globalCompositeOperation = "xor" as never
+    // Unknown composite values are ignored; every spec-listed mode,
+    // including the newly supported xor/clear/lighter set, is accepted.
+    copy.globalCompositeOperation = "nonexistent" as never
     expect(copy.globalCompositeOperation).toBe("copy")
+    copy.globalCompositeOperation = "xor" as never
+    expect(copy.globalCompositeOperation).toBe("xor")
   })
 
   it("clears rectangles through the clip mask", () => {
@@ -441,13 +444,15 @@ describe("canvas 2d context (pure rasterizer)", () => {
     ctx.fillStyle = "notacolor"
     expect(ctx.fillStyle).toBe("#000000")
     ctx.fillStyle = "rgb(10, 20, 30)"
-    expect(ctx.fillStyle).toBe("rgb(10, 20, 30)")
+    // Color strings re-serialize canonically (opaque colors as hex), the
+    // way the DOM's fillStyle getter does — never the raw input.
+    expect(ctx.fillStyle).toBe("#0a141e")
     ctx.fillStyle = "nonsense"
-    expect(ctx.fillStyle).toBe("rgb(10, 20, 30)")
+    expect(ctx.fillStyle).toBe("#0a141e")
     ctx.strokeStyle = "hsl(120, 100%, 50%)"
-    expect(ctx.strokeStyle).toBe("hsl(120, 100%, 50%)")
+    expect(ctx.strokeStyle).toBe("#00ff00")
     ctx.strokeStyle = 42 as never
-    expect(ctx.strokeStyle).toBe("hsl(120, 100%, 50%)")
+    expect(ctx.strokeStyle).toBe("#00ff00")
   })
 
   it("reports isPointInPath in canvas space regardless of transform", () => {

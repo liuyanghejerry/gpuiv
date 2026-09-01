@@ -15,6 +15,9 @@ export interface GpuixMatrix2D {
   d: number
   e: number
   f: number
+  /** Convenience flag `getTransform()` fills in (DOMMatrix-flavoured);
+   *  not part of the matrix algebra. */
+  isIdentity?: boolean
 }
 
 export function identityMatrix(): GpuixMatrix2D {
@@ -39,9 +42,13 @@ export function multiplyMatrix(first: GpuixMatrix2D, second: GpuixMatrix2D): Gpu
   }
 }
 
-/** Map a point through a matrix. */
+/** Map a point through a matrix. Exact-zero coefficients drop their term
+ *  instead of multiplying: `0 · ±Infinity` is NaN, and a scaled path can
+ *  legitimately produce infinite coordinates. */
 export function applyMatrix(m: GpuixMatrix2D, x: number, y: number): [number, number] {
-  return [m.a * x + m.c * y + m.e, m.b * x + m.d * y + m.f]
+  const px = (m.a === 0 ? 0 : m.a * x) + (m.c === 0 ? 0 : m.c * y) + m.e
+  const py = (m.b === 0 ? 0 : m.b * x) + (m.d === 0 ? 0 : m.d * y) + m.f
+  return [px, py]
 }
 
 /**
