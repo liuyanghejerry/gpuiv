@@ -1539,6 +1539,11 @@ Changing the `width`/`height` props resets the bitmap and the context
 state, like setting those properties on a DOM canvas.
 
 `examples/canvas-paint.tsx` is a small drawing pad built on the context.
+`examples/paint.tsx` is a full drawing app — brush/eraser/line/rect/ellipse
+tools, live shape previews, undo/redo, a grid toggle, and a toolbar floating
+over a window-sized canvas. Same coordinate trick as the pad: the canvas sits
+at the window origin, so window pointer coordinates are canvas coordinates
+until `EventPayload` grows `offsetX`/`offsetY`.
 
 ### Wheel zoom over a canvas
 
