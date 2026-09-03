@@ -2,6 +2,10 @@
 
 mod automation;
 mod canvas;
+// Canvas 2D math, ported verbatim from packages/vue/src/canvas/. Public so
+// the napi context layer (canvas2d/context.rs) can build on it; until that
+// lands only its own tests call it, and a private module would dead-code-warn.
+pub mod canvas2d;
 mod color;
 mod custom_elements;
 mod diff;

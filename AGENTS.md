@@ -940,6 +940,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] Debug frame overlay (`setDebugFrameOverlay`)
 - [x] Native `motion.div` transitions with deterministic frame capture
 - [x] `<canvas>` pixel bridge (`uploadCanvasPixels`/`readCanvasPixels`, `GpuixCanvas`)
+- [x] `CanvasRenderingContext2D` — `getContext("2d")`: a TS WebIDL facade over the Rust rasterization core (`GpuixCanvas2DCore`; paths, transforms, gradients, AA strokes, clip, composite, image data). Draws record into a native display list and rasterize once per flush; uploads pull straight from the core (`uploadCanvasFromContext`), pixels never cross FFI. Text APIs throw `NotSupported`; glyph rasterization is follow-up work
 - [x] `contextMenu` event, explicit pointer capture, `stopWheelPropagation`
 
 ### TODO
@@ -992,6 +993,15 @@ THROTTLE=utility bun --hot chat.tsx
 
 `examples/chat.perf.test.tsx` is the automated profile. It uses `createTestApp()`,
 not the live window. Assert **p95 draw / flush ms**, not a per-frame FPS floor.
+
+`packages/vue/src/__tests__/canvas-wpt.test.ts` runs a vendored subset of the
+W3C web-platform-tests canvas suite (593 cases: 452 run, 141 skipped with the
+missing API named in the title) against the 2D context — no window, no GPU
+renderer; it loads `@gpuiv/native` for the rasterization core, so it needs a
+built `.node`. The cases come from `packages/vue/wpt/yaml/`; regenerate the
+JSON with `bun scripts/convert-canvas-wpt.ts` after updating them. A case the
+context cannot express yet goes into the `requires` list in the converter,
+not into a `skip()` in the runner — the skip reason must stay machine-visible.
 
 `THROTTLE` re-execs under `taskpolicy -c`. `utility` is an M1/M2 Air CPU proxy.
 `background` is harsher, closer to a 2019 Intel Mac. GPU and RAM stay on this

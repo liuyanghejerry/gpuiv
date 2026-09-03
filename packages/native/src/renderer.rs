@@ -1157,6 +1157,25 @@ impl GpuixRenderer {
         self.request_invalidate()
     }
 
+    /// Upload a `<canvas>` element's pixels straight from its 2D context
+    /// core — Rust to Rust, no byte round-trip through JS — and repaint.
+    /// The core materializes its pending display list as part of the
+    /// handoff, so one call per flush is the whole upload path.
+    #[napi]
+    pub fn upload_canvas_from_context(
+        &self,
+        element_id: f64,
+        ctx: &crate::canvas2d::context::GpuixCanvas2DCore,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let (width, height) = ctx.dimensions();
+        let rgba = ctx.straight_rgba();
+        self.canvas_surfaces
+            .upload(id, width, height, &rgba)
+            .map_err(Error::from_reason)?;
+        self.request_invalidate()
+    }
+
     /// Read back the last uploaded buffer, converted back to RGBA.
     #[napi]
     pub fn read_canvas_pixels(&self, element_id: f64) -> Result<Option<Buffer>> {

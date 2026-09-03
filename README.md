@@ -1400,7 +1400,7 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `img`           | Local raster or SVG images                       |
 | `svg`           | Tintable monochrome SVG icons from local files   |
 | `anchored`      | Positioned overlay                               |
-| `canvas`        | JS-owned RGBA buffer painted as a GPU texture    |
+| `canvas`        | 2D context rasterized natively, painted as a GPU texture |
 
 ## Images and icons
 
@@ -1449,11 +1449,11 @@ The chat example builds every sidebar and composer icon this way.
 
 ## Canvas
 
-`<canvas>` is a JS-owned pixel buffer that GPUI paints as a GPU texture every
-frame. JS keeps its own copy as the source of truth — exactly like a DOM
-canvas — and pushes the pixels over a dedicated FFI call. Pixels never travel
-through the mutation JSON: a canvas repaint moves megabytes, and the batch
-would escape and re-parse every byte.
+`<canvas>` is a pixel buffer GPUI paints as a GPU texture every frame. The
+buffer lives in the native core — exactly like a DOM canvas owns its backing
+store — and uploads go Rust to Rust, so pixel bytes never cross the FFI
+boundary and never travel through the mutation JSON (a canvas repaint moves
+megabytes; the batch would escape and re-parse every byte).
 
 The Vue wrapper is `GpuixCanvas`. A template ref exposes `uploadPixels`,
 `readPixels`, and the host `id`:
@@ -1474,8 +1474,76 @@ canvas.value?.uploadPixels(imageData.data)
 - Before the first upload the element paints a placeholder box but still
   receives every event and records its bounds, so it is clickable on mount.
 - `renderer.uploadCanvasPixels(elementId, width, height, pixels)` and
-  `renderer.readCanvasPixels(elementId)` are available without the wrapper.
-  `readCanvasPixels` returns the **last upload**, not a GPU readback.
+  `renderer.readCanvasPixels(elementId)` are available without the wrapper
+  for manual buffer control; the 2D context flushes itself through
+  `renderer.uploadCanvasFromContext(elementId, ctx)`. `readCanvasPixels`
+  returns the **last upload**, not a GPU readback.
+
+### The 2D context
+
+`getContext("2d")` returns a `CanvasRenderingContext2D`: a TypeScript
+WebIDL facade over a Rust rasterization core (`GpuixCanvas2DCore` in
+`@gpuiv/native`, no third-party dependencies). Every draw call records one
+op — with a snapshot of the state it must draw under — into a native
+display list; the rasterizer replays it **once** per flush (the upload
+microtask, or a pixel read like `getImageData`). Pixel buffers never enter
+JS in either direction, and everything a JS task paints still reaches the
+GPU in **one** upload on the following microtask.
+
+```tsx
+const canvas = ref<GpuixCanvasInstance | null>(null)
+
+<GpuixCanvas ref={canvas} width={560} height={400}
+             style={{ width: 560, height: 400 }} />
+
+const ctx = canvas.value!.getContext("2d")!
+const sky = ctx.createLinearGradient(0, 0, 560, 400)
+sky.addColorStop(0, "#1e1e2e")
+sky.addColorStop(1, "#3b2f63")
+ctx.fillStyle = sky
+ctx.fillRect(0, 0, 560, 400)
+ctx.strokeStyle = "#89dceb"
+ctx.lineWidth = 3
+ctx.setLineDash([10, 6])
+ctx.beginPath()
+ctx.roundRect(40, 40, 480, 320, 24)
+ctx.stroke()
+```
+
+Supported: the path vocabulary (`moveTo` … `roundRect`, arcs, béziers),
+`fill`/`stroke`/`clip`/`isPointInPath` with both fill rules, the transform
+stack (`save`/`restore`/`translate`/`rotate`/`scale`/`setTransform`…,
+`reset`), linear and radial gradients, line styles including dashes and miter
+joins, anti-aliased rasterization, `globalAlpha`, every composite operation
+name the DOM accepts (Porter-Duff modes rasterize natively; the separable
+blend modes currently render as `source-over`), `clearRect`,
+`getImageData`/`putImageData`/`createImageData` plus the `ImageData`
+constructor, and `drawImage` with another `GpuixCanvas` as the source
+(nearest or bilinear sampling via `imageSmoothingEnabled`).
+
+The context is pinned by a vendored subset of the **W3C web-platform-tests**
+canvas suite — 593 declarative cases in `packages/vue/wpt/yaml/`, of which
+452 run green and 141 are skipped with the missing API named in the test
+title (`Path2D`, `createPattern`, text, shadows, …). Regenerate the case
+table after updating the YAML with `bun scripts/convert-canvas-wpt.ts`.
+
+Deliberately not implemented:
+
+- `fillText` / `strokeText` / `measureText` — they **throw**. Glyph
+  rasterization needs a font pipeline that does not exist JS-side yet.
+- `toDataURL` / `toBlob`, shadows, `filter`, `createPattern`, `Path2D`,
+  conic gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
+  never sees decoded `<img>` pixels).
+
+Changing the `width`/`height` props resets the bitmap and the context
+state, like setting those properties on a DOM canvas.
+
+`examples/canvas-paint.tsx` is a small drawing pad built on the context.
+`examples/paint.tsx` is a full drawing app — brush/eraser/line/rect/ellipse
+tools, live shape previews, undo/redo, a grid toggle, and a toolbar floating
+over a window-sized canvas. Same coordinate trick as the pad: the canvas sits
+at the window origin, so window pointer coordinates are canvas coordinates
+until `EventPayload` grows `offsetX`/`offsetY`.
 
 ### Wheel zoom over a canvas
 
@@ -2043,6 +2111,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
+- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite, image data — pure TS; text APIs throw `NotSupported`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)

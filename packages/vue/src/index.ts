@@ -13,6 +13,21 @@ export { motion } from "./components/motion.js"
 export { VirtualList } from "./components/virtual-list.js"
 export { GpuixCanvas } from "./components/gpuix-canvas.js"
 export type { GpuixCanvasInstance } from "./components/gpuix-canvas.js"
+// Canvas 2D context (pure-TS software rasterizer on the pixel bridge).
+export { GpuixCanvasGradient } from "./canvas/gradient.js"
+export { GpuixImageData } from "./canvas/context2d.js"
+export type {
+  GpuixCanvasRenderingContext2D,
+  GpuixColorObject,
+  GpuixCompositeOperation,
+  GpuixDrawImageSource,
+  GpuixFillRule,
+  GpuixFillStyle,
+  GpuixLineCap,
+  GpuixLineJoin,
+  GpuixTextMetrics,
+} from "./canvas/context2d.js"
+export type { GpuixMatrix2D } from "./canvas/matrix.js"
 export {
   FloatingLayer,
   floatingRootStyle,

@@ -37,6 +37,17 @@ icons (ISC, Copyright (c) 2026 Lucide Icons and Contributors). The OpenAI mark
 is ported from **[Comet](https://github.com/zeronsh/comet)** (MIT, Copyright (c)
 2026 Wing).
 
+## Canvas conformance tests
+
+`packages/vue/wpt/yaml/` vendors canvas test cases from the **W3C
+web-platform-tests** project (3-Clause BSD, Copyright © web-platform-tests
+contributors), taken from
+[`html/canvas/tools/yaml/`](https://github.com/web-platform-tests/wpt/tree/master/html/canvas/tools/yaml).
+The assertion-comment rewrite in `scripts/convert-canvas-wpt.ts` follows the
+same rule set as WPT's gentest and Automattic/node-canvas's
+[`test/wpt/generate.js`](https://github.com/Automattic/node-canvas/blob/master/test/wpt/generate.js)
+(MIT) port of it.
+
 ## Bundled grammars
 
 Syntax highlighting bundles the following Tree-sitter components. Versions are

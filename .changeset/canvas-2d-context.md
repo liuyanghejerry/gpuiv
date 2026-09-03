@@ -1,0 +1,5 @@
+---
+'@gpuiv/vue': minor
+---
+
+Add a `CanvasRenderingContext2D` implementation for `<canvas>`: `GpuixCanvas` template refs now expose `getContext("2d")`, a pure-TypeScript software rasterizer that draws into a JS-owned buffer and uploads through the existing pixel bridge (one coalesced upload per JS task, no Rust changes, no new dependencies). Covers the path vocabulary (`moveTo`…`roundRect`, arcs, béziers), `fill`/`stroke`/`clip`/`isPointInPath` with nonzero and even-odd rules, the transform stack, linear and radial gradients, line styles with dashes/caps/miter joins, anti-aliased rasterization, `globalAlpha`, `source-over`/`destination-out`/`copy` compositing, `clearRect`, `getImageData`/`putImageData`/`createImageData`, and `drawImage` from another `GpuixCanvas` with nearest or bilinear sampling. Text APIs (`fillText`/`strokeText`/`measureText`) throw `NotSupported` — glyph rasterization is follow-up work; `toDataURL`, shadows, `filter`, patterns, and WebGL are documented as not implemented. New `examples/canvas-paint.tsx` is a small drawing pad built on the context.
