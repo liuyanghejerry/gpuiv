@@ -7,6 +7,7 @@ import { defineComponent, ref } from "vue"
 import { describe, expect, it } from "vitest"
 import type { EventPayload } from "@gpuiv/native"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
+import { motion } from "../index.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -106,6 +107,106 @@ describeNative("events (vue)", () => {
     app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5)
     await app.settle()
     expect(log.value).toEqual(["auxClick", "click"])
+    app.unmount()
+  })
+
+  it("synthesizes click only for the primary button", async () => {
+    const received: string[] = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div
+            style={{ width: 200, height: 50 }}
+            onMouseDown={(event) => received.push(`down:${event.button}`)}
+            onMouseUp={(event) => received.push(`up:${event.button}`)}
+            onClick={(event) => received.push(`click:${event.button}:${event.isRightClick}`)}
+          />
+        )
+      },
+    })
+    const app = createTestApp(App)
+
+    for (const button of [1, 2]) {
+      app.renderer.nativeSimulateMouseDown(10, 10, button)
+      app.renderer.nativeSimulateMouseUp(10, 10, button)
+    }
+    await app.settle()
+    expect(received).toEqual(["down:1", "up:1", "down:2", "up:2"])
+
+    app.renderer.nativeSimulateMouseDown(10, 10, 0)
+    app.renderer.nativeSimulateMouseUp(10, 10, 0)
+    await app.settle()
+    expect(received).toEqual([
+      "down:1",
+      "up:1",
+      "down:2",
+      "up:2",
+      "down:0",
+      "up:0",
+      "click:0:false",
+    ])
+    app.unmount()
+  })
+
+  it("dispatches primary clicks from motion elements", async () => {
+    let clicks = 0
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <motion.div
+            initial={false}
+            animate={{ width: 200 }}
+            style={{ width: 200, height: 50 }}
+            onClick={() => {
+              clicks += 1
+            }}
+          />
+        )
+      },
+    })
+    const app = createTestApp(App)
+
+    app.renderer.nativeSimulateMouseDown(10, 10, 0)
+    app.renderer.nativeSimulateMouseUp(10, 10, 0)
+    await app.settle()
+    expect(clicks).toBe(1)
+
+    app.renderer.nativeSimulateMouseDown(10, 10, 2)
+    app.renderer.nativeSimulateMouseUp(10, 10, 2)
+    await app.settle()
+    expect(clicks).toBe(1)
+    app.unmount()
+  })
+
+  it("dispatches primary clicks from native custom elements", async () => {
+    const clicks: EventPayload[] = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", padding: 20 }}>
+            <code
+              code="hello"
+              language="ts"
+              onClick={(event) => {
+                clicks.push(event)
+              }}
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+
+    app.renderer.nativeSimulateMouseDown(30, 28, 0)
+    app.renderer.nativeSimulateMouseUp(30, 28, 0)
+    await app.settle()
+    expect(clicks).toHaveLength(1)
+    expect(clicks[0]).toMatchObject({ button: 0, isRightClick: false })
+
+    app.renderer.nativeSimulateMouseDown(30, 28, 2)
+    app.renderer.nativeSimulateMouseUp(30, 28, 2)
+    await app.settle()
+    expect(clicks).toHaveLength(1)
     app.unmount()
   })
 
