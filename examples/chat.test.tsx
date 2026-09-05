@@ -264,12 +264,17 @@ describeNative('chat example (vue)', () => {
 
   // A real child process serving automation on stdin: mouse input enters
   // through the window without the JS side holding the root view, so a
-  // locator click must not abort the GPUI process. Windows CI runners cannot
-  // host the live window's stdio handshake reliably, so this runs on macOS.
+  // locator click must not abort the GPUI process.
+  //
+  // Deliberately drives counter.tsx, not the chat app: this file's tests run
+  // in the same vitest job as chat.perf.test.tsx, and a live 1000-message
+  // window stealing CPU/GPU made those draw budgets fail on CI. Windows CI
+  // runners cannot host the live child's stdio handshake reliably, so this
+  // runs on macOS.
   it.skipIf(process.platform !== 'darwin')('drives mouse input in the live app', async () => {
     const app = await launch({
       command: 'bun',
-      args: ['chat.tsx'],
+      args: ['counter.tsx'],
       cwd: path.dirname(fileURLToPath(import.meta.url)),
       // VITEST is inherited from this worker and would disable the child's
       // automation stdio server; blank it so the child serves commands.
@@ -277,15 +282,21 @@ describeNative('chat example (vue)', () => {
     })
 
     try {
-      const sidebar = app.getByTestId('sidebar-collapse')
-      await sidebar.waitFor({ timeoutMs: 30_000 })
-      await Promise.race([
-        sidebar.click(),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('live click timed out')), 5_000)
-        ),
-      ])
-      await app.getByTestId('sidebar-expand').waitFor()
+      const value = app.getByTestId('counter-value')
+      await value.waitFor({ timeoutMs: 30_000 })
+      const before = await value.textContent()
+      await app.getByTestId('increment').click()
+
+      // The click handler ran a full applyBatch cycle on the live renderer —
+      // the exact path that used to trip GPUI's nested-lease abort.
+      const deadline = Date.now() + 5_000
+      let after = before
+      while (Date.now() < deadline) {
+        after = await value.textContent()
+        if (after !== before) break
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      expect(after).not.toBe(before)
     } finally {
       await app.close()
     }
