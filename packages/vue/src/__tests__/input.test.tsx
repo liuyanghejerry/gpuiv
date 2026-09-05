@@ -16,6 +16,32 @@ describeNative("native text editors (vue)", () => {
     app?.unmount()
   })
 
+  it("delivers primary clicks with a DOM-like payload", async () => {
+    let click: EventPayload | undefined
+    const TextInput = defineComponent({
+      setup() {
+        return () => (
+          <input
+            value=""
+            style={{ width: 300, height: 40 }}
+            onClick={(event: EventPayload) => {
+              click = event
+            }}
+          />
+        )
+      },
+    })
+    app = createTestApp(TextInput)
+
+    const input = app.renderer.findByType("input")[0]
+    const bounds = app.renderer.getElementBounds(input.id)!
+    app.renderer.nativeSimulateMouseDown(bounds[0] + 10, bounds[1] + 10, 0)
+    app.renderer.nativeSimulateMouseUp(bounds[0] + 10, bounds[1] + 10, 0)
+    await app.settle()
+    expect(click).toMatchObject({ button: 0, isRightClick: false })
+    app.unmount()
+  })
+
   it("edits text natively and emits the complete value", async () => {
     const TextInput = defineComponent({
       setup() {
