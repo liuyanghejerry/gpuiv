@@ -162,6 +162,12 @@ export declare class GpuixRenderer {
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
+  /** Move focus to the next GPUI tab stop. */
+  focusNext(): void
+  /** Move focus to the previous GPUI tab stop. */
+  focusPrevious(): void
+  /** Enable the window key events requested by the JS renderer. */
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection and request a repaint. */
@@ -267,6 +273,12 @@ export declare class TestGpuixRenderer {
   setPointerCapture(elementId: number): void
   /** Release any active pointer capture now. */
   releasePointerCapture(): void
+  /** Move focus to the next GPUI tab stop. */
+  focusNext(): void
+  /** Move focus to the previous GPUI tab stop. */
+  focusPrevious(): void
+  /** Enable the window key events requested by the JS renderer. */
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.

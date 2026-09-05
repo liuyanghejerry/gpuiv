@@ -15,6 +15,7 @@ import type {
   HostNode,
   MutationRenderer,
   NativeRenderer,
+  WindowKeyEventHandlers,
 } from "../types.js"
 import { wrapWithBatching } from "./batch-renderer.js"
 import {
@@ -200,16 +201,26 @@ export interface GpuivRendererHost {
   renderer: MutationRenderer
   /** Flush queued mutations synchronously. */
   flushMutations: () => void
-  /** Release this root's claim on the renderer's event map. */
-  detach: () => void
+  /** Release this root's claim on the renderer's event map. Returns whether
+   *  this root was the live one (and so its native listeners must stop). */
+  detach: () => boolean
+  /** The registry container backing this root. */
+  registryContainer: Container
 }
 
-export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElementId: number }): GpuivRendererHost {
+export function createGpuivRendererHost(
+  inner: NativeRenderer,
+  ids: { nextElementId: number },
+  windowKeyEventHandlers: WindowKeyEventHandlers = {},
+  windowKeyEventId = 0
+): GpuivRendererHost {
   const host = createBatchedHost(inner)
   const container: Container = {
     renderer: host.renderer,
     ids,
     eventHandlers: new Map(),
+    windowKeyEventHandlers,
+    windowKeyEventId,
   }
   // Events always arrive with the raw renderer (renderer.ts, testing.ts), and
   // the facade's flushMutations looks the container up by `inner` — only the
@@ -321,11 +332,11 @@ export function createGpuivRendererHost(inner: NativeRenderer, ids: { nextElemen
     container: containerNode,
     renderer: host.renderer,
     flushMutations: host.flushMutations,
+    registryContainer: container,
     /** Release this root's claim on the renderer's event map. Call after the
-     *  Vue app unmounted, before another root may mount on the same renderer. */
-    detach: () => {
-      detachRoot(inner, container)
-    },
+     *  Vue app unmounted, before another root may mount on the same renderer.
+     *  Returns whether this root was the live one. */
+    detach: () => detachRoot(inner, container),
   }
 
   // ── Node mutation internals (closure over container) ────────────

@@ -22,9 +22,14 @@ import type {
   DebugFrameOverlayStats,
   HostNode,
   NativeRenderer,
+  WindowKeyEventHandlers,
 } from "./types.js"
 import { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
-import { handleGpuixEvent, idAllocatorFor } from "./reconciler/event-registry.js"
+import {
+  handleGpuixEvent,
+  idAllocatorFor,
+  nextWindowKeyEventId,
+} from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
@@ -56,6 +61,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   advanceTime(milliseconds: number): void
   getRootId(): number | null
   getAllText(): string[]
+  focusNext(): void
+  focusPrevious(): void
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
@@ -157,15 +165,24 @@ export interface TestElement {
 // ── TestRenderer ─────────────────────────────────────────────────────
 
 /** Offscreen window size for a test renderer. Defaults to 1280x800 in native. */
-export interface TestWindowOptions {
+export interface TestRendererOptions {
   width?: number
   height?: number
 }
+
+export type TestWindowOptions = TestRendererOptions & WindowKeyEventHandlers
 
 export class TestRenderer implements NativeRenderer {
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
   readonly applyBatch: NativeRenderer["applyBatch"]
+  readonly focusNext: () => void
+  readonly focusPrevious: () => void
+  readonly setWindowKeyEvents: (
+    keyDown: boolean,
+    keyUp: boolean,
+    eventId: number
+  ) => void
 
   constructor(options: TestWindowOptions = {}) {
     if (!NativeTestRenderer) {
@@ -175,6 +192,9 @@ export class TestRenderer implements NativeRenderer {
     }
     this.native = new NativeTestRenderer(options.width, options.height)
     this.applyBatch = this.native.applyBatch.bind(this.native)
+    this.focusNext = this.native.focusNext.bind(this.native)
+    this.focusPrevious = this.native.focusPrevious.bind(this.native)
+    this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
@@ -641,7 +661,18 @@ export function createTestApp(
   const renderer = new TestRenderer(options)
   // The allocator lives in the reload-proof registry state so a renderer
   // reused across createTestApp calls never restarts ids at 0.
-  const gpuivHost = createGpuivRendererHost(renderer, idAllocatorFor(renderer))
+  const windowKeyEventId = nextWindowKeyEventId(renderer)
+  const gpuivHost = createGpuivRendererHost(
+    renderer,
+    idAllocatorFor(renderer),
+    { onKeyDown: options.onKeyDown, onKeyUp: options.onKeyUp },
+    windowKeyEventId
+  )
+  renderer.setWindowKeyEvents(
+    Boolean(options.onKeyDown),
+    Boolean(options.onKeyUp),
+    windowKeyEventId
+  )
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands — never the commit facade —
   // so provide the raw renderer.
@@ -667,7 +698,10 @@ export function createTestApp(
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
-      gpuivHost.detach()
+      // Only the live root may turn its window key listeners off.
+      if (gpuivHost.detach()) {
+        renderer.setWindowKeyEvents(false, false, windowKeyEventId)
+      }
       renderer.flush()
     },
   }

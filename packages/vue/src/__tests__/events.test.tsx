@@ -7,9 +7,9 @@ import { fileURLToPath } from "node:url"
 import { defineComponent, ref } from "vue"
 import { describe, expect, it } from "vitest"
 import type { EventPayload } from "@gpuiv/native"
-import { createTestApp, hasNativeTestRenderer } from "../testing.js"
+import { createTestApp, hasNativeTestRenderer, TestRenderer } from "../testing.js"
 import { motion } from "../index.js"
-import { installRuntimeErrorHandlers, startFrameLoop } from "../renderer.js"
+import { createApp, installRuntimeErrorHandlers, resetApp, startFrameLoop } from "../renderer.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -114,6 +114,99 @@ describe("frame loop (vue)", () => {
     })
     expect(result.status, result.stderr || result.error?.message).toBe(0)
     expect(result.stdout).toMatch(/SURVIVED [1-9]/)
+  })
+})
+
+describeNative("window key events (vue)", () => {
+  it("delivers keys to the render-level onKeyDown observer", async () => {
+    const seen: string[] = []
+    const App = defineComponent({
+      setup: () => () => <div style={{ width: 100, height: 100 }}>keys</div>,
+    })
+    const app = createTestApp(App, {
+      onKeyDown: (event) => seen.push(`${event.key}:${event.modifiers?.shift ?? false}`),
+    })
+
+    app.renderer.simulateKeystrokes("tab")
+    await app.settle()
+    expect(seen).toEqual(["tab:false"])
+
+    app.renderer.simulateKeystrokes("shift-tab")
+    await app.settle()
+    expect(seen).toEqual(["tab:false", "tab:true"])
+    app.unmount()
+  })
+
+  it("keeps tab traversal opt-in: typing moves only through focusNext", async () => {
+    const App = defineComponent({
+      setup: () => () => (
+        <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: 30, gap: 8 }}>
+          <input value="" placeholder="one" style={{ width: 200, height: 40 }} />
+          <input value="" placeholder="two" style={{ width: 200, height: 40 }} />
+        </div>
+      ),
+    })
+    const app = createTestApp(App)
+    const inputs = app.renderer.findByType("input")
+    expect(inputs).toHaveLength(2)
+
+    // Programmatic focus, like autoFocus or a click on an editor.
+    app.renderer.focusElement(inputs[0].id)
+    await app.settle()
+    app.renderer.simulateKeystrokes("a")
+    await app.settle()
+    expect(app.renderer.getPaintedText().filter((s) => s.includes("a"))).toHaveLength(1)
+
+    // Tab is a normal key now: it lands in the editor as text, focus does not
+    // move, so the next character still goes to the first editor.
+    app.renderer.simulateKeystrokes("tab")
+    await app.settle()
+    app.renderer.simulateKeystrokes("b")
+    await app.settle()
+    const afterTab = app.renderer.getPaintedText()
+    expect(afterTab.some((s) => s.includes("a") && s.includes("b"))).toBe(true)
+    expect(afterTab.some((s) => s === "b")).toBe(false)
+
+    // Explicit traversal moves focus; the character lands in the second editor.
+    app.renderer.focusNext()
+    await app.settle()
+    app.renderer.simulateKeystrokes("c")
+    await app.settle()
+    expect(app.renderer.getPaintedText().some((s) => s === "c")).toBe(true)
+    app.unmount()
+  })
+
+  it("does not deliver window keys from an old root to its replacement", async () => {
+    const renderer = new TestRenderer()
+    const App = defineComponent({
+      props: { label: { type: String, required: true } },
+      setup(props) {
+        return () => <div style={{ width: 100, height: 100 }}>{props.label}</div>
+      },
+    })
+
+    try {
+      const seen: string[] = []
+      createApp(defineComponent({ setup: () => () => <App label="first" /> }), {
+        renderer,
+        onKeyDown: () => seen.push("first"),
+      })
+      renderer.simulateKeystrokes("a")
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(seen).toEqual(["first"])
+
+      createApp(defineComponent({ setup: () => () => <App label="second" /> }), {
+        renderer,
+        onKeyDown: () => seen.push("second"),
+      })
+      renderer.simulateKeystrokes("b")
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      // A queued event from the old root's generation cannot enter the
+      // replacement's observer.
+      expect(seen).toEqual(["first", "second"])
+    } finally {
+      resetApp()
+    }
   })
 })
 

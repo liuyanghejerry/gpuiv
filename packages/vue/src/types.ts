@@ -447,6 +447,15 @@ export interface NativeRenderer {
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
   blur?(): void
+  /** Move focus to the next / previous GPUI tab stop. Apps own Tab key
+   *  behavior; call these from a render-level onKeyDown to install a
+   *  traversal policy. */
+  focusNext?(): void
+  focusPrevious?(): void
+  /** Enable window-level key events for the owning root. The event id is a
+   *  generation: queued events from an old root carry a stale id and are
+   *  rejected before reaching handlers. */
+  setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
@@ -552,6 +561,12 @@ export interface ElementIdAllocator {
   nextElementId: number
 }
 
+/** Render-level key observers handed to createApp / createTestApp. */
+export interface WindowKeyEventHandlers {
+  onKeyDown?: (event: EventPayload) => void
+  onKeyUp?: (event: EventPayload) => void
+}
+
 // One renderer root. Event handlers stay on this object so two live roots
 // can both use id 1. Ids come from an allocator that lives with the
 // NativeRenderer, so a remount on the same renderer cannot reuse them.
@@ -560,6 +575,11 @@ export interface Container {
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
   /** Render-level observer bound to the owning root; only sees events a live
-   *  handler consumed. Replaced by each createApp() call. */
+   *  handler consumed. Replaced by each createApp call. */
   onEvent?: (event: EventPayload) => void
+  /** Window-level key observers + the generation their native listeners
+   *  belong to. A queued event from an old root cannot enter its
+   *  replacement. */
+  windowKeyEventHandlers: WindowKeyEventHandlers
+  windowKeyEventId: number
 }

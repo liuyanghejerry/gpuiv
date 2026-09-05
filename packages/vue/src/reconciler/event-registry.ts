@@ -4,6 +4,7 @@ import type { Container, ElementIdAllocator, EventHandlerMap, NativeRenderer } f
 interface RendererState {
   container?: Container
   ids: ElementIdAllocator
+  windowKeyEventId: number
 }
 
 // bun --hot preserves the native renderer (renderer.ts keeps it on a
@@ -24,7 +25,7 @@ const rendererStates = (() => {
 function stateFor(renderer: NativeRenderer): RendererState {
   let state = rendererStates.get(renderer)
   if (!state) {
-    state = { ids: { nextElementId: 0 } }
+    state = { ids: { nextElementId: 0 }, windowKeyEventId: 0 }
     rendererStates.set(renderer, state)
   }
   return state
@@ -32,6 +33,13 @@ function stateFor(renderer: NativeRenderer): RendererState {
 
 export function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
   return stateFor(renderer).ids
+}
+
+export function nextWindowKeyEventId(renderer: NativeRenderer): number {
+  // A queued event from an old root must not enter its replacement.
+  const state = stateFor(renderer)
+  state.windowKeyEventId += 1
+  return state.windowKeyEventId
 }
 
 /** One renderer drives one window, one native root id, and one event map, so a
@@ -52,12 +60,15 @@ export function attachRoot(renderer: NativeRenderer, container: Container): void
 }
 
 /** Only the container that owns the renderer can remove the entry, so an
- *  unmounted root cannot take a later root's registration down with it. */
-export function detachRoot(renderer: NativeRenderer, container: Container): void {
+ *  unmounted root cannot take a later root's registration down with it.
+ *  Returns whether this container was the live one. */
+export function detachRoot(renderer: NativeRenderer, container: Container): boolean {
   const state = stateFor(renderer)
   if (state.container === container) {
     state.container = undefined
+    return true
   }
+  return false
 }
 
 export function containerForRenderer(renderer: NativeRenderer): Container | undefined {
@@ -71,6 +82,21 @@ export function handleGpuixEvent(payload: EventPayload, renderer: NativeRenderer
   const container = containerForRenderer(renderer)
   if (!container) return false
   const onEvent = container.onEvent
+  if (payload.eventType === "windowKeyDown" || payload.eventType === "windowKeyUp") {
+    if (payload.elementId !== container.windowKeyEventId) return false
+    const handler =
+      payload.eventType === "windowKeyDown"
+        ? container.windowKeyEventHandlers.onKeyDown
+        : container.windowKeyEventHandlers.onKeyUp
+    if (!handler) return false
+    handler({
+      ...payload,
+      elementId: 0,
+      eventType: payload.eventType === "windowKeyDown" ? "keyDown" : "keyUp",
+    })
+    onEvent?.(payload)
+    return true
+  }
   const elementHandlers = container.eventHandlers.get(payload.elementId)
   if (!elementHandlers) return false
   const handler = elementHandlers.get(payload.eventType)

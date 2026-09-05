@@ -2,9 +2,19 @@ import type { Component } from "vue"
 import type { App } from "vue"
 import { GpuixRenderer } from "@gpuiv/native"
 import type { EventPayload, WindowOptions } from "@gpuiv/native"
-import type { DebugFrameOverlayMode, HostNode, NativeRenderer } from "./types.js"
+import type {
+  DebugFrameOverlayMode,
+  HostNode,
+  NativeRenderer,
+  WindowKeyEventHandlers,
+} from "./types.js"
 import { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
-import { containerForRenderer, handleGpuixEvent, idAllocatorFor } from "./reconciler/event-registry.js"
+import {
+  containerForRenderer,
+  handleGpuixEvent,
+  idAllocatorFor,
+  nextWindowKeyEventId,
+} from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
 import {
   InProcessBackend,
@@ -152,7 +162,7 @@ function renderSlot(): RenderSlot {
   return created
 }
 
-export interface RenderOptions extends WindowOptions {
+export interface RenderOptions extends WindowOptions, WindowKeyEventHandlers {
   onEvent?: (event: EventPayload) => void
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through layout. */
@@ -178,7 +188,14 @@ export function createApp(
   rootComponent: Component,
   options: RenderOptions = {}
 ): GpuivAppHandle {
-  const { onEvent, renderer: injected, debugFrameOverlay, ...windowOptions } = options
+  const {
+    onEvent,
+    onKeyDown,
+    onKeyUp,
+    renderer: injected,
+    debugFrameOverlay,
+    ...windowOptions
+  } = options
   const slot = renderSlot()
   if (!slot.renderer) {
     if (injected) {
@@ -215,12 +232,24 @@ export function createApp(
     slot.handle.unmount()
   }
 
-  const gpuivHost = createGpuivRendererHost(host, idAllocatorFor(host))
+  const windowKeyEventId = nextWindowKeyEventId(host)
+  const gpuivHost = createGpuivRendererHost(
+    host,
+    idAllocatorFor(host),
+    { onKeyDown, onKeyUp },
+    windowKeyEventId
+  )
   // Bind the render-level observer to this root. A remount replaces it, and
   // events from the unmounted tree find no handlers, so they never reach the
   // replacement's observer.
   const registryContainer = containerForRenderer(host)
   if (registryContainer) registryContainer.onEvent = onEvent
+  try {
+    host.setWindowKeyEvents?.(Boolean(onKeyDown), Boolean(onKeyUp), windowKeyEventId)
+  } catch (error) {
+    gpuivHost.detach()
+    throw error
+  }
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands (scroll, window, debug) —
   // never the commit facade — so provide the raw renderer.
@@ -235,7 +264,11 @@ export function createApp(
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
-      gpuivHost.detach()
+      // Only the live root may turn its window key listeners off; a stale
+      // unmount must not disable the replacement's.
+      if (gpuivHost.detach()) {
+        host.setWindowKeyEvents?.(false, false, windowKeyEventId)
+      }
     },
   }
   slot.handle = handle
