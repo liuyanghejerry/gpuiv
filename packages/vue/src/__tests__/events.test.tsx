@@ -3,6 +3,7 @@
  *  handler result lands in the component state and is asserted after settle(). */
 
 import { spawnSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import { defineComponent, ref } from "vue"
 import { describe, expect, it } from "vitest"
 import type { EventPayload } from "@gpuiv/native"
@@ -92,7 +93,7 @@ describe("frame loop (vue)", () => {
   })
 
   it("keeps the process alive after an uncaught exception", () => {
-    const rendererPath = new URL("../renderer.ts", import.meta.url).pathname
+    const rendererPath = fileURLToPath(new URL("../renderer.ts", import.meta.url))
     const script = [
       `import { installRuntimeErrorHandlers, startFrameLoop } from ${JSON.stringify(rendererPath)}`,
       "installRuntimeErrorHandlers()",
