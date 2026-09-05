@@ -4,7 +4,7 @@ import { GpuixRenderer } from "@gpuiv/native"
 import type { EventPayload, WindowOptions } from "@gpuiv/native"
 import type { DebugFrameOverlayMode, HostNode, NativeRenderer } from "./types.js"
 import { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
-import { handleGpuixEvent } from "./reconciler/event-registry.js"
+import { containerForRenderer, handleGpuixEvent, idAllocatorFor } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
 import {
   InProcessBackend,
@@ -27,9 +27,11 @@ export function installRuntimeErrorHandlers(): void {
   })
 }
 
-export function createNativeRenderer(
-  onEvent?: (event: EventPayload) => void
-): GpuixRenderer {
+/** Create the live renderer. Render-level event observation is bound to the
+ *  owning root through the event registry (Container.onEvent), not captured
+ *  here, so a `bun --hot` remount with a different `onEvent` is honored and
+ *  stale roots cannot reach the replacement's observer. */
+export function createNativeRenderer(): GpuixRenderer {
   const renderer = new GpuixRenderer((err, event) => {
     if (err) {
       console.error("[GPUIX] Native event error:", err)
@@ -40,9 +42,6 @@ export function createNativeRenderer(
       // native callback runs off the JS event loop with no frame above it.
       try {
         handleGpuixEvent(event, renderer)
-        if (onEvent) {
-          onEvent(event)
-        }
       } catch (error) {
         console.error("[gpuiv] event handler:", error)
       }
@@ -167,23 +166,13 @@ export function resetApp(): void {
   Reflect.deleteProperty(globalThis, RENDER_HOST_KEY)
 }
 
-const idAllocators = new WeakMap<NativeRenderer, { nextElementId: number }>()
-
-function idAllocatorFor(renderer: NativeRenderer): { nextElementId: number } {
-  let alloc = idAllocators.get(renderer)
-  if (!alloc) {
-    alloc = { nextElementId: 0 }
-    idAllocators.set(renderer, alloc)
-  }
-  return alloc
-}
-
 /**
  * Mount a Vue app onto the native GPUI window.
  *
  * Under `bun --hot`, later calls unmount the previous tree and remount on the
- * same native window. `renderer` stays on the slot, so ids and Rust state
- * survive the remount.
+ * same native window. `renderer` stays on the slot and its element-id
+ * allocator lives in the registry's module-reload-proof state, so ids and
+ * Rust state survive the remount.
  */
 export function createApp(
   rootComponent: Component,
@@ -195,7 +184,7 @@ export function createApp(
     if (injected) {
       slot.renderer = injected
     } else {
-      const renderer = createNativeRenderer(onEvent)
+      const renderer = createNativeRenderer()
       renderer.init(windowOptions)
       slot.renderer = renderer
       console.log("[gpuiv] created native window")
@@ -227,6 +216,11 @@ export function createApp(
   }
 
   const gpuivHost = createGpuivRendererHost(host, idAllocatorFor(host))
+  // Bind the render-level observer to this root. A remount replaces it, and
+  // events from the unmounted tree find no handlers, so they never reach the
+  // replacement's observer.
+  const registryContainer = containerForRenderer(host)
+  if (registryContainer) registryContainer.onEvent = onEvent
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands (scroll, window, debug) —
   // never the commit facade — so provide the raw renderer.

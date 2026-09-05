@@ -1,7 +1,38 @@
 import type { EventPayload } from "@gpuiv/native"
-import type { Container, EventHandlerMap, NativeRenderer } from "../types.js"
+import type { Container, ElementIdAllocator, EventHandlerMap, NativeRenderer } from "../types.js"
 
-const containersByRenderer = new WeakMap<NativeRenderer, Container>()
+interface RendererState {
+  container?: Container
+  ids: ElementIdAllocator
+}
+
+// bun --hot preserves the native renderer (renderer.ts keeps it on a
+// globalThis slot), so its element-ID allocator must survive JavaScript
+// module re-evaluation too: a fresh WeakMap would restart ids at 0 and
+// collide with the retained Rust tree.
+const RENDERER_STATES_KEY = Symbol.for("@gpuiv/vue/renderer-states")
+const rendererStates = (() => {
+  const existing = Reflect.get(globalThis, RENDERER_STATES_KEY) as
+    | WeakMap<NativeRenderer, RendererState>
+    | undefined
+  if (existing) return existing
+  const created = new WeakMap<NativeRenderer, RendererState>()
+  Reflect.set(globalThis, RENDERER_STATES_KEY, created)
+  return created
+})()
+
+function stateFor(renderer: NativeRenderer): RendererState {
+  let state = rendererStates.get(renderer)
+  if (!state) {
+    state = { ids: { nextElementId: 0 } }
+    rendererStates.set(renderer, state)
+  }
+  return state
+}
+
+export function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
+  return stateFor(renderer).ids
+}
 
 /** One renderer drives one window, one native root id, and one event map, so a
  *  second live root would silently take all three over: its `attachRoot` call
@@ -10,33 +41,43 @@ const containersByRenderer = new WeakMap<NativeRenderer, Container>()
  *  previous root unmounts (and detaches) first, which is what `createApp()`'s
  *  remount path does. */
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
-  const existing = containersByRenderer.get(renderer)
+  const state = stateFor(renderer)
+  const existing = state.container
   if (existing && existing !== container) {
     throw new Error(
       "This renderer already drives a mounted GPUIX root. One renderer owns one window, one native root id, and one event map, so a second root would silently take both over. Unmount the first root first."
     )
   }
-  containersByRenderer.set(renderer, container)
+  state.container = container
 }
 
 /** Only the container that owns the renderer can remove the entry, so an
  *  unmounted root cannot take a later root's registration down with it. */
 export function detachRoot(renderer: NativeRenderer, container: Container): void {
-  if (containersByRenderer.get(renderer) !== container) return
-  containersByRenderer.delete(renderer)
+  const state = stateFor(renderer)
+  if (state.container === container) {
+    state.container = undefined
+  }
 }
 
 export function containerForRenderer(renderer: NativeRenderer): Container | undefined {
-  return containersByRenderer.get(renderer)
+  return stateFor(renderer).container
 }
 
-export function handleGpuixEvent(payload: EventPayload, renderer: NativeRenderer): void {
-  const container = containersByRenderer.get(renderer)
-  if (!container) return
+/** Dispatch one native event. Returns true only when a live handler consumed
+ *  it, so a render-level `onEvent` observer never hears events that belong to
+ *  a stale root. */
+export function handleGpuixEvent(payload: EventPayload, renderer: NativeRenderer): boolean {
+  const container = containerForRenderer(renderer)
+  if (!container) return false
+  const onEvent = container.onEvent
   const elementHandlers = container.eventHandlers.get(payload.elementId)
-  if (!elementHandlers) return
+  if (!elementHandlers) return false
   const handler = elementHandlers.get(payload.eventType)
-  if (handler) handler(payload)
+  if (!handler) return false
+  handler(payload)
+  onEvent?.(payload)
+  return true
 }
 
 export function registerEventHandler(

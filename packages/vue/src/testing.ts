@@ -24,7 +24,7 @@ import type {
   NativeRenderer,
 } from "./types.js"
 import { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
-import { handleGpuixEvent } from "./reconciler/event-registry.js"
+import { handleGpuixEvent, idAllocatorFor } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
@@ -639,7 +639,9 @@ export function createTestApp(
   options: TestWindowOptions = {},
 ): TestApp {
   const renderer = new TestRenderer(options)
-  const gpuivHost = createGpuivRendererHost(renderer, { nextElementId: 0 })
+  // The allocator lives in the reload-proof registry state so a renderer
+  // reused across createTestApp calls never restarts ids at 0.
+  const gpuivHost = createGpuivRendererHost(renderer, idAllocatorFor(renderer))
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands — never the commit facade —
   // so provide the raw renderer.

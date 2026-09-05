@@ -559,4 +559,7 @@ export interface Container {
   renderer: MutationRenderer
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
+  /** Render-level observer bound to the owning root; only sees events a live
+   *  handler consumed. Replaced by each createApp() call. */
+  onEvent?: (event: EventPayload) => void
 }
