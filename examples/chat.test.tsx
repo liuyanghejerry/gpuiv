@@ -10,7 +10,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { createApp, createTestApp, hasNativeTestRenderer, resetApp, TestRenderer } from '@gpuiv/vue'
-import { connectTest } from '@gpuiv/vue/automation'
+import { connectTest, launch } from '@gpuiv/vue/automation'
 import { ChatApp, SafeMdxTranscript } from './chat'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -261,4 +261,33 @@ describeNative('chat example (vue)', () => {
     }
     app.unmount()
   }, 15_000)
+
+  // A real child process serving automation on stdin: mouse input enters
+  // through the window without the JS side holding the root view, so a
+  // locator click must not abort the GPUI process. Windows CI runners cannot
+  // host the live window's stdio handshake reliably, so this runs on macOS.
+  it.skipIf(process.platform !== 'darwin')('drives mouse input in the live app', async () => {
+    const app = await launch({
+      command: 'bun',
+      args: ['chat.tsx'],
+      cwd: path.dirname(fileURLToPath(import.meta.url)),
+      // VITEST is inherited from this worker and would disable the child's
+      // automation stdio server; blank it so the child serves commands.
+      env: { GPUIX_BACKGROUND: '1', VITEST: '' },
+    })
+
+    try {
+      const sidebar = app.getByTestId('sidebar-collapse')
+      await sidebar.waitFor({ timeoutMs: 30_000 })
+      await Promise.race([
+        sidebar.click(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('live click timed out')), 5_000)
+        ),
+      ])
+      await app.getByTestId('sidebar-expand').waitFor()
+    } finally {
+      await app.close()
+    }
+  }, 60_000)
 })
