@@ -37,15 +37,16 @@ lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ledger
 
-Inventoried range: `367ef48..09e0cae` (2026-08-30). Earlier history is in
+Inventoried range: `367ef48..cbc3de0` (2026-09-04). Earlier history is in
 [Sync log](#sync-log) below.
 
 | Topic | Upstream commits | Status | Notes |
 |---|---|---|---|
-| Wasm / browser rendering, website | `75a1fe6` `92082a3` `7d6e1f9` `711945f` `7f6732a` `7a3e356` `bbcea1f` `291b92d` `a906cf9` `f52fa54` `de1c74a` `4194d9b` | declined | [wasm-web-rendering.md](./wasm-web-rendering.md) — `de1c74a` (serve infinite-chat at `/infinite`) and `4194d9b` (compact website layout) extend the same topic |
-| CI / release plumbing | `0b257d0` `301b834` `ac0426c` `322993e` `e68f2ec` `dfb83f3` | declined | one-target-per-OS matrix and archive shipping serve their matrix, not ours; our CI publishes both packages; `322993e` `e68f2ec` `dfb83f3` are their 0.6.0 release + bun-publish npmrc fixes |
+| Wasm / browser rendering, website | `75a1fe6` `92082a3` `7d6e1f9` `711945f` `7f6732a` `7a3e356` `bbcea1f` `291b92d` `a906cf9` `f52fa54` `de1c74a` `4194d9b` `3bb1ac6` | declined | [wasm-web-rendering.md](./wasm-web-rendering.md) — `de1c74a` (serve infinite-chat at `/infinite`) and `4194d9b` (compact website layout) extend the same topic; `3bb1ac6`'s website-tooling half joins it (its README keyboard reference rides with the Tab-key port) |
+| CI / release plumbing | `0b257d0` `301b834` `ac0426c` `322993e` `e68f2ec` `dfb83f3` `a24b4a4` | declined | one-target-per-OS matrix and archive shipping serve their matrix, not ours; our CI publishes both packages; `322993e` `e68f2ec` `dfb83f3` are their 0.6.0 release + bun-publish npmrc fixes; `a24b4a4` is their 0.7.0 release (our releases go through changesets + CI) |
 | `create-gpuix-app` CLI scaffolder | `6e75327` `4a24b43` `3e2d121` | declined | [create-gpuix-app-cli.md](./create-gpuix-app-cli.md) |
-| Example app / starter / timeline | `7d45d36` `691ca1f` `9472574` `6c5b0b5` `3d759b2` `813ece4` `555fa30` `8210a38` | declined | upstream-only surfaces (`example-app/` starter, timeline demo); revisit if we ship a starter |
+| Example app / starter / timeline | `7d45d36` `691ca1f` `9472574` `6c5b0b5` `3d759b2` `813ece4` `555fa30` `8210a38` `cbc3de0` | declined | upstream-only surfaces (`example-app/` starter, timeline demo, `mail.tsx` + README hero); revisit if we ship a starter |
+| Upstream contribution-policy docs | `2c807b2` | declined | their AGENTS.md change allowing collaborator PRs; no code, nothing to port |
 | Occlude semantics relaxation | `d96413d` | diverged | upstream lets the wheel pass under absolutely positioned items; we keep absolute/fixed occluding (documented in root AGENTS.md). Revisit if it causes real scroll bugs |
 | VirtualList wrapper removal | `3d759b2` | diverged | upstream deleted the React wrapper ("there must not be one"); we keep the Vue wrapper — `chat.tsx` depends on it. Revisit if windowed mounting moves fully native |
 | macOS application menu bar | `7baa36f` `d804d93` | synced | PR #17 — `app_menu.rs`, `appName` window option (TS type comes free via native d.ts), AGENTS + README docs; no Edit menu on purpose |
@@ -67,11 +68,20 @@ Inventoried range: `367ef48..09e0cae` (2026-08-30). Earlier history is in
 | Window size polling | `f587575` | synced | PR #12 |
 | `<code>` as bare surface | `5033808` `f81e087` | synced | PR #14 — breaking: `showHeader` gone, `codePaddingX`→`mdCodePaddingX` etc.; card moved into app code (chat `CodeBlock`) |
 | Hygiene | `f921bec` `d1e4c98` `a9cda59` | synced | PR #13 |
+| Nonblocking embedded AppKit ticks | `9b1def2` `5700c96` | pending | zed `8b94def` → `df3c9b7`: `tick()` drains only ready AppKit events so Bun timers/sockets/PTYs progress between frames; README docs + idle-tick perf regression test (their #39) |
+| Primary clicks from mouse-up | `bf98e07` | pending | deliver `onClick` from primary mouse-up (GPUI's semantic click never finalizes under the embedded macOS pump); renderer + custom elements + the diverged `input.rs` hunk (their #41) |
+| Windows DPI + last-window quit | `aacb070` | pending | Per-Monitor-V2 DPI awareness from inside the `.node` (node/bun have no manifest) + Windows/Linux `tick()` reporting last-window close so the JS loop exits (their #31/#32) |
+| Linux `TestGpuixRenderer` stub | `5937978` | pending | export the class on every platform; construction throws an explanation where the GPU test renderer is unavailable; `hasTestGpuixRenderer()` (their #30) |
+| `<img>` data URLs | `b20e98a` | pending | base64 + percent-encoded `data:` sources retained as `gpui::Image`; decoder shared with the SVG source path (their #35) |
+| macOS window survives JS runtime errors | `2487521` | pending | `startFrameLoop` catches `tick()` throws and reschedules; native callbacks catch handler throws; `uncaughtException`/`unhandledRejection` keep bun alive; loop starts before first flush and survives remounts |
+| Events live across `bun --hot` | `1c4c67b` | pending | renderer-owned containers / element-ID allocators / window key-event ids persist across module re-evaluation via a `Symbol.for` registry; stale events rejected (their #37) |
+| Tab key ownership | `10e1bb0` `3bb1ac6` | pending | breaking: remove the process-wide Tab/Shift+Tab focus bindings; napi `focusNext`/`focusPrevious`/`setWindowKeyEvents` + window-level `onKeyDown`/`onKeyUp` with remount-safe generations; README keyboard reference from `3bb1ac6` (their #36) |
+| Live automation mouse lease fix | `e948b20` | pending | dispatch locator mouse input through `AnyWindowHandle` instead of holding the root view (nested lease aborts the process); child-process regression test (their #38) |
 
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8.
 
-**Last inventoried upstream head:** `09e0cae` (2026-08-30)
+**Last inventoried upstream head:** `cbc3de0` (2026-09-04)
 
 ## Sync log
 
