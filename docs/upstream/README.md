@@ -71,7 +71,7 @@ Inventoried range: `367ef48..cbc3de0` (2026-09-04). Earlier history is in
 | Nonblocking embedded AppKit ticks | `9b1def2` `5700c96` | synced | PR #37 — zed `8b94def` → `df3c9b7`: `tick()` drains only ready AppKit events so Bun timers/sockets/PTYs progress between frames; README docs + idle-tick perf regression test (their #39) |
 | Primary clicks from mouse-up | `bf98e07` | synced | PR #38 — deliver `onClick` from primary mouse-up (GPUI's semantic click never finalizes under the embedded macOS pump); renderer + custom elements + the diverged `input.rs` hunk (their #41) |
 | Windows DPI + last-window quit | `aacb070` | synced | PR #39 — Per-Monitor-V2 DPI awareness from inside the `.node` (node/bun have no manifest) + Windows/Linux `tick()` reporting last-window close so the JS loop exits (their #31/#32) |
-| Linux `TestGpuixRenderer` stub | `5937978` | pending | export the class on every platform; construction throws an explanation where the GPU test renderer is unavailable; `hasTestGpuixRenderer()` (their #30) |
+| Linux `TestGpuixRenderer` stub | `5937978` | synced | PR #40 — export the class on every platform; construction throws an explanation where the GPU test renderer is unavailable; `hasTestGpuixRenderer()` gates `hasNativeTestRenderer` (their #30) |
 | `<img>` data URLs | `b20e98a` | pending | base64 + percent-encoded `data:` sources retained as `gpui::Image`; decoder shared with the SVG source path (their #35) |
 | macOS window survives JS runtime errors | `2487521` | pending | `startFrameLoop` catches `tick()` throws and reschedules; native callbacks catch handler throws; `uncaughtException`/`unhandledRejection` keep bun alive; loop starts before first flush and survives remounts |
 | Events live across `bun --hot` | `1c4c67b` | pending | renderer-owned containers / element-ID allocators / window key-event ids persist across module re-evaluation via a `Symbol.for` registry; stale events rejected (their #37) |
@@ -115,6 +115,7 @@ from upstream through `367ef48`:
 | #37 | Nonblocking embedded AppKit ticks: zed `8b94def` → `df3c9b7`, README pump docs, idle-tick child-process regression — upstream `9b1def2` `5700c96` |
 | #38 | Primary clicks from mouse-up in `wire_host_events`/`wire_standard_events`/editor, click payload `button:0`, tests — upstream `bf98e07` |
 | #39 | Windows Per-Monitor-V2 DPI from the UI thread + `ui_running` atomic behind `tick()`/`requiresTick()` on Win/Linux, quit-mode pin, frame-loop docs + exit-once test, `windows` 0.61 dep — upstream `aacb070` |
+| #40 | `TestGpuixRenderer` throwing stub outside macOS/Windows test-support, `hasTestGpuixRenderer()` + Vue `hasNativeTestRenderer` gate, availability test — upstream `5937978` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
