@@ -135,7 +135,13 @@ export declare class GpuixRenderer {
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
-  /** Whether JavaScript must drive the native event loop with tick(). */
+  /**
+   * Whether JavaScript must call tick() until it returns false.
+   *
+   * macOS: tick() pumps AppKit. Windows/Linux: tick() only reports whether
+   * the UI thread is still inside `Platform::run`. Both return false after
+   * the last window closes so the JS frame loop can exit the process.
+   */
   requiresTick(): boolean
   getWindowSize(): WindowSize
   getWindowInsets(): WindowInsets

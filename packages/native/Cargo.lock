@@ -2551,6 +2551,7 @@ dependencies = [
  "two-face",
  "unicode-segmentation",
  "web-time",
+ "windows 0.61.3",
 ]
 
 [[package]]
