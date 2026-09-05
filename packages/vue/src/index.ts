@@ -127,6 +127,7 @@ export type {
   NativeWindowInsets,
   StyleDesc,
   SyntaxTheme,
+  WindowKeyEventHandlers,
 } from "./types.js"
 
 // Testing utilities

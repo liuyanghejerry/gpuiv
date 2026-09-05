@@ -40,8 +40,6 @@ use crate::style::StyleDesc;
 use crate::text::{selectable_text, selection_frame_reset, SharedSelection};
 use crate::theme::Theme;
 
-gpui::actions!(gpuix_focus, [FocusNext, FocusPrevious]);
-
 /// The Window menu items act on the focused window, and the root element is the
 /// only place in GPUIX that has one. `crate::app_menu` owns everything else.
 #[cfg(target_os = "macos")]
@@ -57,13 +55,6 @@ fn with_window_menu_actions(root: gpui::Div) -> gpui::Div {
 #[cfg(not(target_os = "macos"))]
 fn with_window_menu_actions(root: gpui::Div) -> gpui::Div {
     root
-}
-
-pub(crate) fn init_key_bindings(cx: &mut gpui::App) {
-    cx.bind_keys([
-        gpui::KeyBinding::new("tab", FocusNext, None),
-        gpui::KeyBinding::new("shift-tab", FocusPrevious, None),
-    ]);
 }
 
 /// Parse a CSS font-weight value (string or number) into a GPUI FontWeight.
@@ -382,6 +373,13 @@ enum UiCommand {
     Invalidate,
     ActivateWindow,
     SetWindowTitle(String),
+    FocusNext,
+    FocusPrevious,
+    SetWindowKeyEvents {
+        key_down: bool,
+        key_up: bool,
+        event_id: u64,
+    },
     GetWindowSize {
         response: SyncSender<WindowSize>,
     },
@@ -734,6 +732,21 @@ async fn run_ui_commands(
                     .ok();
                 result
             }
+            UiCommand::FocusNext => window.update(cx, |_view, window, cx| window.focus_next(cx)),
+            UiCommand::FocusPrevious => {
+                window.update(cx, |_view, window, cx| window.focus_prev(cx))
+            }
+            UiCommand::SetWindowKeyEvents {
+                key_down,
+                key_up,
+                event_id,
+            } => window.update(cx, move |view, window, cx| {
+                view.window_key_down = key_down;
+                view.window_key_up = key_up;
+                view.window_key_event_id = event_id;
+                cx.notify();
+                window.refresh();
+            }),
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
         };
         if let Err(error) = result {
@@ -966,7 +979,6 @@ impl GpuixRenderer {
         let app = gpui::Application::with_platform(platform.clone())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
-            init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
             // After the other bindings: `set_menus` reads key equivalents out of
             // the keymap, so every binding must exist before it runs.
@@ -1107,8 +1119,7 @@ impl GpuixRenderer {
                     gpui_platform::application()
                         .with_quit_mode(gpui::QuitMode::LastWindowClosed)
                         .run(move |cx| {
-                            init_key_bindings(cx);
-                            crate::custom_elements::input::init(cx);
+                                            crate::custom_elements::input::init(cx);
                             let bounds = gpui::Bounds::centered(
                                 None,
                                 gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
@@ -1625,6 +1636,71 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::Blur);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the next GPUI tab stop.
+    #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, cx| window.focus_next(cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusNext);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Move focus to the previous GPUI tab stop.
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, cx| window.focus_prev(cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::FocusPrevious);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Enable the window key events requested by the JS renderer.
+    #[napi]
+    pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.window_key_down = key_down;
+            view.window_key_up = key_up;
+            view.window_key_event_id = event_id;
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetWindowKeyEvents {
+            key_down,
+            key_up,
+            event_id,
+        });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2290,7 +2366,6 @@ fn start_web_app(
     }
     gpui_platform::web_init();
     let app = gpui_platform::single_threaded_web().run_embedded(move |cx| {
-        init_key_bindings(cx);
         crate::custom_elements::input::init(cx);
         let window = cx.open_window(Default::default(), |window, cx| {
             if let Some(mode) = PENDING_DEBUG_OVERLAY.with(|pending| pending.borrow_mut().take()) {
@@ -2509,6 +2584,32 @@ impl WebGpuixRenderer {
 
     pub fn blur(&self) -> Result<(), wasm_bindgen::JsValue> {
         update_web_window(|_view, window, _cx| window.blur())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusNext)]
+    pub fn focus_next(&self) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_window(|_view, window, cx| window.focus_next(cx))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = focusPrevious)]
+    pub fn focus_previous(&self) -> Result<(), wasm_bindgen::JsValue> {
+        update_web_window(|_view, window, cx| window.focus_prev(cx))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowKeyEvents)]
+    pub fn set_window_key_events(
+        &self,
+        key_down: bool,
+        key_up: bool,
+        event_id: f64,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let event_id = web_element_id(event_id)?;
+        update_web_window(move |view, _window, cx| {
+            view.window_key_down = key_down;
+            view.window_key_up = key_up;
+            view.window_key_event_id = event_id;
+            cx.notify();
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getSelectedText)]
@@ -2808,6 +2909,61 @@ impl Drop for GpuixRenderer {
 
 // ── GPUI View ────────────────────────────────────────────────────────
 
+/// Zero-size canvas that installs the window-level key listeners the JS
+/// renderer asked for. Listeners are registered during paint, so they follow
+/// the same frame lifecycle as every other GPUI subscription.
+fn window_key_events(
+    callback: Option<EventCallback>,
+    key_down: bool,
+    key_up: bool,
+    event_id: u64,
+) -> impl gpui::IntoElement {
+    use gpui::prelude::*;
+
+    gpui::canvas(
+        |_, _, _| (),
+        move |_, _, window, _| {
+            if key_down || cfg!(all(target_arch = "wasm32", target_os = "unknown")) {
+                let callback = callback.clone();
+                window.on_root_key_event(move |event: &gpui::KeyDownEvent, phase, _window, _cx| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    if key_down {
+                        emit_event_full(&callback, event_id, "windowKeyDown", |payload| {
+                            payload.key = Some(event.keystroke.key.clone());
+                            payload.key_char = event.keystroke.key_char.clone();
+                            payload.is_held = Some(event.is_held);
+                            payload.modifiers = Some(event.keystroke.modifiers.into());
+                        });
+                    }
+                    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+                    if event.keystroke.key == "tab" {
+                        // Keep browser focus on GPUI's hidden keyboard element.
+                        _cx.stop_propagation();
+                    }
+                });
+            }
+            if key_up {
+                let callback = callback.clone();
+                window.on_root_key_event(move |event: &gpui::KeyUpEvent, phase, _window, _cx| {
+                    if phase != gpui::DispatchPhase::Bubble {
+                        return;
+                    }
+                    emit_event_full(&callback, event_id, "windowKeyUp", |payload| {
+                        payload.key = Some(event.keystroke.key.clone());
+                        payload.key_char = event.keystroke.key_char.clone();
+                        payload.modifiers = Some(event.keystroke.modifiers.into());
+                    });
+                });
+            }
+        },
+    )
+    .absolute()
+    .w(gpui::px(0.0))
+    .h(gpui::px(0.0))
+}
+
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) event_callback: Option<EventCallback>,
@@ -2844,6 +3000,12 @@ pub(crate) struct GpuixView {
     /// Resolved `highlight` state, keyed by the element that declared it.
     /// Empty in every app that does not use search.
     highlights: HashMap<u64, HighlightCacheEntry>,
+    /// Whether the JS renderer asked for window-level key events, and the
+    /// event id (generation) they belong to. A queued event from an old root
+    /// carries a stale id and must not enter its replacement.
+    pub(crate) window_key_down: bool,
+    pub(crate) window_key_up: bool,
+    pub(crate) window_key_event_id: u64,
 }
 
 impl GpuixView {
@@ -2872,6 +3034,9 @@ impl GpuixView {
             selection_scroll_task: None,
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
+            window_key_down: false,
+            window_key_up: false,
+            window_key_event_id: 0,
         }
     }
 
@@ -3842,11 +4007,21 @@ impl gpui::Render for GpuixView {
             use gpui::prelude::*;
             let drag_move_view = cx.weak_entity();
             let drag_end_view = drag_move_view.clone();
-            let root = gpui::div()
-                .size_full()
-                .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
-                .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx));
+            let root = gpui::div().size_full();
             with_window_menu_actions(root)
+                .when(
+                    self.window_key_down
+                        || self.window_key_up
+                        || cfg!(all(target_arch = "wasm32", target_os = "unknown")),
+                    |root| {
+                        root.child(window_key_events(
+                            callback.clone(),
+                            self.window_key_down,
+                            self.window_key_up,
+                            self.window_key_event_id,
+                        ))
+                    },
+                )
                 .child(selection_frame_reset(
                     self.selection.clone(),
                     move |position, app| {

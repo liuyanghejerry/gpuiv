@@ -188,7 +188,6 @@ impl TestGpuixRenderer {
         let platform = gpui_platform::current_platform(false);
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
-            crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
         });
 
@@ -330,6 +329,49 @@ impl TestGpuixRenderer {
                     cx.notify();
                 });
             });
+            Ok(())
+        })
+    }
+
+    /// Move focus to the next GPUI tab stop.
+    #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, app| window.focus_next(app))
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Move focus to the previous GPUI tab stop.
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, app| window.focus_prev(app))
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Enable the window key events requested by the JS renderer.
+    #[napi]
+    pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.window_key_down = key_down;
+                    view.window_key_up = key_up;
+                    view.window_key_event_id = event_id;
+                    cx.notify();
+                });
+                window.refresh();
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
             Ok(())
         })
     }

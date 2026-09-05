@@ -944,6 +944,8 @@ belong in README. This list is only the remaining engineering work.
 - [x] `contextMenu` event, explicit pointer capture, `stopWheelPropagation`
 - [x] Runtime errors keep the macOS window alive (`startFrameLoop` catches
       `tick()` throws; `createApp` installs uncaught handlers)
+- [x] Applications own the Tab key: no process-wide Tab bindings;
+      `focusNext`/`focusPrevious` napi + render-level `onKeyDown`/`onKeyUp`
 
 ### TODO
 

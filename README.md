@@ -959,14 +959,34 @@ a `div` when it should receive keyboard focus:
 
 | Prop | Behavior |
 |---|---|
-| `tabIndex={0}` | Joins the normal Tab order |
+| `tabIndex={0}` | Joins the normal tab order |
 | `tabIndex={n}` | Uses `n` as its GPUI tab-order index |
-| `tabIndex={-1}` | Skipped by Tab, but focusable by click or renderer API |
+| `tabIndex={-1}` | Skipped by traversal, but focusable by click or renderer API |
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
-`Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
-`window.focus_prev()`. This navigation stays in Rust and does not make a
-JavaScript round trip.
+**Applications own the Tab key.** GPUIV installs no process-wide Tab /
+Shift+Tab bindings, so editors and terminals receive the raw key events. For
+classic traversal, call the direct GPUI wrappers from the render-level
+`onKeyDown`:
+
+```tsx
+createApp(App, {
+  onKeyDown(event) {
+    if (event.key !== 'tab') return
+    if (event.modifiers?.shift) app.renderer.focusPrevious?.()
+    else app.renderer.focusNext?.()
+  },
+})
+```
+
+`focusNext()` / `focusPrevious()` map straight onto GPUI's
+`window.focus_next()` / `window.focus_prev()` — the navigation stays in Rust
+and does not interrupt element key handlers.
+
+`createApp` (and `createTestApp`) accept `onKeyDown` and `onKeyUp` observers
+that see every window-level key event after element handlers had their chance.
+Each mounted root owns a key-event generation, so a queued event from a
+previous tree cannot enter its replacement after `bun --hot` remounts.
 
 Use a ref for imperative focus:
 
