@@ -421,8 +421,11 @@ and PTY callbacks can run between ticks. Pass `{ frameMs }` to change the rate, 
 call `.stop()` on the returned handle to end it.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
-dedicated Rust UI thread. Node sends in-process commands to that thread, so
-`startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
+dedicated Rust UI thread. `renderer.tick()` only reports whether that loop is
+still running, so `startFrameLoop` polls it at the same rate and returns once
+the last window closes — `createApp()` then exits the process. Windows DPI
+awareness (Per-Monitor V2) is set from inside the `.node`, since node.exe and
+bun.exe carry no manifest to declare it.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
 extension comes from the pinned GPUI fork. CI runs the full Vue and example

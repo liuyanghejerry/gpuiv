@@ -45,6 +45,11 @@ core-graphics = "=0.24.0"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
 
+# Same crate GPUI uses. A .node cannot ship an exe manifest, so Windows DPI
+# awareness is set at runtime in renderer.rs instead of via windows-manifest.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi"] }
+
 [features]
 # test-support is default so published binaries include TestGpuixRenderer,
 # letting users write GPU-backed tests for their apps.

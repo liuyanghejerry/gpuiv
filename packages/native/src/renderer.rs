@@ -8,7 +8,7 @@
 //!   const renderer = new GpuixRenderer(eventCallback)
 //!   renderer.init({ title: 'My App', width: 800, height: 600 })
 //!   renderer.applyBatch(json)             // one atomic React commit
-//!   setTimeout(function loop() {         // drive AppKit on macOS
+//!   setTimeout(function loop() {         // macOS pumps AppKit; Win/Linux polls UI thread
 //!     if (!renderer.tick()) process.exit(0)
 //!     setTimeout(loop, 8)
 //!   })
@@ -24,6 +24,8 @@ use napi_derive::napi;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use std::sync::mpsc::{sync_channel, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -718,6 +720,11 @@ async fn run_ui_commands(
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
         };
         if let Err(error) = result {
+            // The last window can close mid-command; logging `window not found`
+            // for every later command is noise, and the loop must stop anyway.
+            if cx.update(|cx| cx.windows().is_empty()) {
+                break;
+            }
             log::error!("Failed to handle GPUI UI command: {error:#}");
         }
     }
@@ -747,6 +754,12 @@ pub struct GpuixRenderer {
     canvas_surfaces: crate::canvas::CanvasStore,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
+    /// False after `Platform::run` returns. `tick()` reports that so JS can
+    /// `process.exit`, matching macOS where `pump_events` returning false is
+    /// the last-window-closed signal. The UI thread owns the Win32/Linux loop,
+    /// so `tick()` cannot pump it; it only observes this flag.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    ui_running: Arc<AtomicBool>,
 }
 
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
@@ -865,6 +878,8 @@ impl GpuixRenderer {
             canvas_surfaces: crate::canvas::CanvasStore::default(),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+            ui_running: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -1009,6 +1024,36 @@ impl GpuixRenderer {
         Ok(())
     }
 
+    // GPUI declares PerMonitorV2 only in the host exe manifest (zed#8936).
+    // A napi .node is loaded by node.exe/bun.exe, so that manifest never applies.
+    // Call on gpuix-ui only, before WindowsPlatform::new. Never on the Node thread:
+    // the V2 fallback is SetThreadDpiAwarenessContext, which would change bun itself.
+    #[cfg(target_os = "windows")]
+    fn enable_per_monitor_dpi() {
+        use windows::Win32::UI::HiDpi::{
+            AreDpiAwarenessContextsEqual, GetThreadDpiAwarenessContext,
+            SetProcessDpiAwarenessContext, SetThreadDpiAwarenessContext,
+            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
+        };
+
+        unsafe {
+            let current = GetThreadDpiAwarenessContext();
+            if AreDpiAwarenessContextsEqual(current, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+                .as_bool()
+            {
+                return;
+            }
+            if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2).is_ok() {
+                return;
+            }
+            if SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE).is_ok() {
+                return;
+            }
+            // Process awareness is already locked (node/bun manifest). This thread has no HWND yet.
+            SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        }
+    }
+
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn init_threaded(&self, options: Option<WindowOptions>) -> Result<()> {
         let options = options.unwrap_or_default();
@@ -1030,53 +1075,64 @@ impl GpuixRenderer {
         let (command_sender, command_receiver) = mpsc::unbounded();
         let (startup_sender, startup_receiver) = sync_channel(1);
         let exit_startup_sender = startup_sender.clone();
+        let ui_running = self.ui_running.clone();
+        let ui_running_for_run = ui_running.clone();
 
         std::thread::Builder::new()
             .name("gpuix-ui".to_string())
             .spawn(move || {
+                #[cfg(target_os = "windows")]
+                Self::enable_per_monitor_dpi();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    gpui_platform::application().run(move |cx| {
-                        init_key_bindings(cx);
-                        crate::custom_elements::input::init(cx);
-                        let bounds = gpui::Bounds::centered(
-                            None,
-                            gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
-                            cx,
-                        );
-                        let window = match cx.open_window(
-                            to_gpui_window_options(&window_options, bounds),
-                            |_window, cx| {
-                                cx.new(|_| {
-                                    GpuixView::new(
-                                        tree,
-                                        callback,
-                                        title,
-                                        selection,
-                                        canvas_surfaces,
-                                    )
-                                })
-                            },
-                        ) {
-                            Ok(window) => window,
-                            Err(error) => {
-                                startup_sender
-                                    .send(Err(format!("Failed to open the GPUI window: {error}")))
-                                    .ok();
-                                cx.quit();
-                                return;
-                            }
-                        };
+                    // Default is already LastWindowClosed on Windows/Linux.
+                    // Set it anyway so a GPUI default change cannot leave bun
+                    // running after the last window closes, as on macOS.
+                    gpui_platform::application()
+                        .with_quit_mode(gpui::QuitMode::LastWindowClosed)
+                        .run(move |cx| {
+                            init_key_bindings(cx);
+                            crate::custom_elements::input::init(cx);
+                            let bounds = gpui::Bounds::centered(
+                                None,
+                                gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
+                                cx,
+                            );
+                            let window = match cx.open_window(
+                                to_gpui_window_options(&window_options, bounds),
+                                |_window, cx| {
+                                    cx.new(|_| {
+                                        GpuixView::new(
+                                            tree,
+                                            callback,
+                                            title,
+                                            selection,
+                                            canvas_surfaces,
+                                        )
+                                    })
+                                },
+                            ) {
+                                Ok(window) => window,
+                                Err(error) => {
+                                    startup_sender
+                                        .send(Err(format!("Failed to open the GPUI window: {error}")))
+                                        .ok();
+                                    cx.quit();
+                                    return;
+                                }
+                            };
 
-                        cx.spawn(async move |cx| {
-                            run_ui_commands(command_receiver, window, cx).await;
-                        })
-                        .detach();
-                        if activate {
-                            cx.activate(true);
-                        }
-                        startup_sender.send(Ok(())).ok();
-                    });
+                            cx.spawn(async move |cx| {
+                                run_ui_commands(command_receiver, window, cx).await;
+                            })
+                            .detach();
+                            if activate {
+                                cx.activate(true);
+                            }
+                            ui_running_for_run.store(true, Ordering::Release);
+                            startup_sender.send(Ok(())).ok();
+                        });
                 }));
+                ui_running.store(false, Ordering::Release);
 
                 let error = match result {
                     Ok(()) => {
@@ -1264,7 +1320,13 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return Ok(true);
+        {
+            let running = self.ui_running.load(Ordering::Acquire);
+            if !running {
+                self.ui_commands.lock().unwrap().take();
+            }
+            return Ok(running);
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1282,10 +1344,19 @@ impl GpuixRenderer {
         *self.initialized.lock().unwrap()
     }
 
-    /// Whether JavaScript must drive the native event loop with tick().
+    /// Whether JavaScript must call tick() until it returns false.
+    ///
+    /// macOS: tick() pumps AppKit. Windows/Linux: tick() only reports whether
+    /// the UI thread is still inside `Platform::run`. Both return false after
+    /// the last window closes so the JS frame loop can exit the process.
     #[napi]
     pub fn requires_tick(&self) -> bool {
-        cfg!(target_os = "macos")
+        cfg!(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        ))
     }
 
     #[napi]

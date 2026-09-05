@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest"
 import type { EventPayload } from "@gpuiv/native"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 import { motion } from "../index.js"
+import { startFrameLoop } from "../renderer.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -40,6 +41,30 @@ describe("frame loop (vue)", () => {
       expect(elapsedMs).toBeLessThan(200)
     },
   )
+
+  it("keeps ticking until a later false, then exits once", async () => {
+    let ticks = 0
+    let terminated = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          return ticks < 3
+        },
+      },
+      {
+        frameMs: 5,
+        onTerminated: () => {
+          terminated += 1
+        },
+      },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(ticks).toBe(3)
+    expect(terminated).toBe(1)
+    loop.stop()
+  })
 })
 
 describeNative("events (vue)", () => {
