@@ -73,7 +73,7 @@ Inventoried range: `367ef48..cbc3de0` (2026-09-04). Earlier history is in
 | Windows DPI + last-window quit | `aacb070` | synced | PR #39 — Per-Monitor-V2 DPI awareness from inside the `.node` (node/bun have no manifest) + Windows/Linux `tick()` reporting last-window close so the JS loop exits (their #31/#32) |
 | Linux `TestGpuixRenderer` stub | `5937978` | synced | PR #40 — export the class on every platform; construction throws an explanation where the GPU test renderer is unavailable; `hasTestGpuixRenderer()` gates `hasNativeTestRenderer` (their #30) |
 | `<img>` data URLs | `b20e98a` | synced | PR #41 — base64 + percent-encoded `data:` sources retained as `gpui::Image`; decoder shared with the SVG source path; fallbacks via `chrome_text` (their #35) |
-| macOS window survives JS runtime errors | `2487521` | pending | `startFrameLoop` catches `tick()` throws and reschedules; native callbacks catch handler throws; `uncaughtException`/`unhandledRejection` keep bun alive; loop starts before first flush and survives remounts |
+| macOS window survives JS runtime errors | `2487521` | synced | PR #42 — `startFrameLoop` catches `tick()` throws and reschedules; native callbacks catch handler throws; `uncaughtException`/`unhandledRejection` keep bun alive; loop starts before first flush and survives remounts |
 | Events live across `bun --hot` | `1c4c67b` | pending | renderer-owned containers / element-ID allocators / window key-event ids persist across module re-evaluation via a `Symbol.for` registry; stale events rejected (their #37) |
 | Tab key ownership | `10e1bb0` `3bb1ac6` | pending | breaking: remove the process-wide Tab/Shift+Tab focus bindings; napi `focusNext`/`focusPrevious`/`setWindowKeyEvents` + window-level `onKeyDown`/`onKeyUp` with remount-safe generations; README keyboard reference from `3bb1ac6` (their #36) |
 | Live automation mouse lease fix | `e948b20` | pending | dispatch locator mouse input through `AnyWindowHandle` instead of holding the root view (nested lease aborts the process); child-process regression test (their #38) |
@@ -117,6 +117,7 @@ from upstream through `367ef48`:
 | #39 | Windows Per-Monitor-V2 DPI from the UI thread + `ui_running` atomic behind `tick()`/`requiresTick()` on Win/Linux, quit-mode pin, frame-loop docs + exit-once test, `windows` 0.61 dep — upstream `aacb070` |
 | #40 | `TestGpuixRenderer` throwing stub outside macOS/Windows test-support, `hasTestGpuixRenderer()` + Vue `hasNativeTestRenderer` gate, availability test — upstream `5937978` |
 | #41 | `<img>` data URLs: `ImgSource` + `decode_image_data_url` shared with `<svg>`, `chrome_text` fallbacks, `base64` 0.22 dep, img.test.tsx — upstream `b20e98a` |
+| #42 | Runtime-error keep-alive: tick/handler try-catch, uncaught listeners, loop-before-mount (no restart on remount), child-process survival test — upstream `2487521` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)

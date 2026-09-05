@@ -3,12 +3,13 @@
  *  handler result lands in the component state and is asserted after settle(). */
 
 import { spawnSync } from "node:child_process"
+import { fileURLToPath } from "node:url"
 import { defineComponent, ref } from "vue"
 import { describe, expect, it } from "vitest"
 import type { EventPayload } from "@gpuiv/native"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 import { motion } from "../index.js"
-import { startFrameLoop } from "../renderer.js"
+import { installRuntimeErrorHandlers, startFrameLoop } from "../renderer.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -64,6 +65,55 @@ describe("frame loop (vue)", () => {
     expect(ticks).toBe(3)
     expect(terminated).toBe(1)
     loop.stop()
+  })
+
+  it("keeps pumping after tick throws", async () => {
+    let ticks = 0
+    let terminated = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          if (ticks === 1) throw new Error("frame boom")
+          return true
+        },
+      },
+      {
+        frameMs: 5,
+        onTerminated: () => {
+          terminated += 1
+        },
+      },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    loop.stop()
+    expect(ticks).toBeGreaterThanOrEqual(2)
+    expect(terminated).toBe(0)
+  })
+
+  it("keeps the process alive after an uncaught exception", () => {
+    const rendererPath = fileURLToPath(new URL("../renderer.ts", import.meta.url))
+    const script = [
+      `import { installRuntimeErrorHandlers, startFrameLoop } from ${JSON.stringify(rendererPath)}`,
+      "installRuntimeErrorHandlers()",
+      "let ticks = 0",
+      "startFrameLoop({",
+      "  requiresTick: () => true,",
+      "  tick: () => { ticks += 1; return true },",
+      "}, { frameMs: 5 })",
+      "setTimeout(() => { throw new Error('boom') }, 10)",
+      "setTimeout(() => {",
+      "  console.log(`SURVIVED ${ticks}`)",
+      "  process.exit(0)",
+      "}, 40)",
+    ].join("\n")
+    const result = spawnSync("bun", ["-e", script], {
+      encoding: "utf8",
+      timeout: 3_000,
+    })
+    expect(result.status, result.stderr || result.error?.message).toBe(0)
+    expect(result.stdout).toMatch(/SURVIVED [1-9]/)
   })
 })
 
