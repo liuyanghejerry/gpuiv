@@ -2526,6 +2526,7 @@ name = "gpuiv-native"
 version = "0.4.0"
 dependencies = [
  "anyhow",
+ "base64",
  "core-graphics 0.24.0",
  "core-text",
  "csscolorparser",

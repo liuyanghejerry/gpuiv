@@ -3,6 +3,7 @@
 /// This provides a native `<img>` for GPUIX React apps while keeping the same
 /// custom-element prop pipeline (`setCustomProp`/`custom_props`).
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
+use base64::Engine as _;
 
 pub struct ImgFactory;
 
@@ -66,9 +67,57 @@ impl ImgObjectFit {
 }
 
 #[derive(Debug, Clone, Default)]
+enum ImgSource {
+    #[default]
+    Empty,
+    Path(std::path::PathBuf),
+    Data(std::sync::Arc<gpui::Image>),
+    Invalid,
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ImgElement {
-    src: String,
+    source: ImgSource,
     object_fit: ImgObjectFit,
+}
+
+impl ImgElement {
+    fn load_src(&mut self, src: &str) {
+        self.source = if src.trim().is_empty() {
+            ImgSource::Empty
+        } else if src.starts_with("data:") {
+            // TODO: Replace JSON data URLs with binary mutations to keep base64 decoding off paint.
+            decode_image_data_url(src)
+                .map(|(format, bytes)| {
+                    ImgSource::Data(std::sync::Arc::new(gpui::Image::from_bytes(format, bytes)))
+                })
+                .unwrap_or(ImgSource::Invalid)
+        } else {
+            ImgSource::Path(src.into())
+        };
+    }
+}
+
+fn img_fallback(ctx: &CustomRenderContext, message: &str) -> gpui::AnyElement {
+    use gpui::prelude::*;
+
+    let fallback = super::custom_surface(
+        gpui::div()
+            .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)))
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(gpui::rgba(0x1f2230ff))
+            .border(gpui::px(1.0))
+            .border_color(gpui::rgba(0x5d6481ff))
+            .text_color(gpui::rgba(0xa4accdff)),
+        ctx,
+    );
+    // `chrome_text`, not a raw string: a raw child is invisible to
+    // `getPaintedText()`, so this state could only be tested by screenshot.
+    fallback
+        .child(ctx.chrome_text(message.to_string(), None))
+        .into_any_element()
 }
 
 impl CustomElement for ImgElement {
@@ -80,33 +129,17 @@ impl CustomElement for ImgElement {
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
-        if self.src.trim().is_empty() {
-            let fallback = super::custom_surface(
-                gpui::div()
-                    .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(gpui::rgba(0x1f2230ff))
-                    .border(gpui::px(1.0))
-                    .border_color(gpui::rgba(0x5d6481ff))
-                    .text_color(gpui::rgba(0xa4accdff)),
-                &ctx,
-            );
-            // `chrome_text`, not a raw string: a raw child is invisible to
-            // `getPaintedText()`, so this state could only be tested by
-            // screenshot.
-            return fallback
-                .child(ctx.chrome_text("img: no src", None))
-                .into_any_element();
-        }
-
-        let src_path = std::path::PathBuf::from(self.src.clone());
+        let el = match &self.source {
+            ImgSource::Path(path) => gpui::img(path.clone()),
+            ImgSource::Data(image) => gpui::img(image.clone()),
+            ImgSource::Empty => return img_fallback(&ctx, "img: no src"),
+            ImgSource::Invalid => return img_fallback(&ctx, "img: load failed"),
+        };
         // The id is what makes gpui's `ImgState` persist. Without it `Img` has no
         // `GlobalElementId`, so the animated-GIF frame index and the delayed
         // loading state are rebuilt from scratch on every frame and an animation
         // never advances past frame zero.
-        let mut el = gpui::img(src_path)
+        let mut el = el
             .object_fit(self.object_fit.as_gpui())
             .with_fallback(|| {
                 gpui::div()
@@ -132,7 +165,7 @@ impl CustomElement for ImgElement {
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "src" => self.src = value.as_str().unwrap_or("").to_string(),
+            "src" => self.load_src(value.as_str().unwrap_or("")),
             "objectFit" => {
                 self.object_fit = value
                     .as_str()
@@ -169,17 +202,30 @@ impl SvgElement {
 }
 
 fn svg_bytes(src: &str) -> Option<Vec<u8>> {
-    if let Some(payload) = src.strip_prefix("data:") {
-        let (meta, data) = payload.split_once(',')?;
-        if !meta.starts_with("image/svg+xml") {
-            return None;
-        }
-        return Some(percent_decode(data));
+    if src.starts_with("data:") {
+        let (format, bytes) = decode_image_data_url(src)?;
+        return (format == gpui::ImageFormat::Svg).then_some(bytes);
     }
     #[cfg(target_family = "wasm")]
     return None;
     #[cfg(not(target_family = "wasm"))]
     std::fs::read(src).ok()
+}
+
+fn decode_image_data_url(src: &str) -> Option<(gpui::ImageFormat, Vec<u8>)> {
+    let (metadata, data) = src.strip_prefix("data:")?.split_once(',')?;
+    let mut parts = metadata.split(';');
+    let mime_type = parts.next()?.to_ascii_lowercase();
+    let format = gpui::ImageFormat::from_mime_type(&mime_type)?;
+    let is_base64 = parts.any(|part| part.eq_ignore_ascii_case("base64"));
+    let bytes = if is_base64 {
+        base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .ok()?
+    } else {
+        percent_decode(data)
+    };
+    Some((format, bytes))
 }
 
 fn percent_decode(input: &str) -> Vec<u8> {
