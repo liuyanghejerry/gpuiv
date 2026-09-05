@@ -13,6 +13,20 @@ import {
   type LiveAutomationRenderer,
 } from "./automation/client.js"
 
+let runtimeErrorHandlersInstalled = false
+
+/** Keep bun alive after an uncaught throw. A dead process stops AppKit pumps. */
+export function installRuntimeErrorHandlers(): void {
+  if (typeof process === "undefined" || runtimeErrorHandlersInstalled) return
+  runtimeErrorHandlersInstalled = true
+  process.on("uncaughtException", (error) => {
+    console.error("[gpuiv] uncaughtException:", error)
+  })
+  process.on("unhandledRejection", (reason) => {
+    console.error("[gpuiv] unhandledRejection:", reason)
+  })
+}
+
 export function createNativeRenderer(
   onEvent?: (event: EventPayload) => void
 ): GpuixRenderer {
@@ -22,9 +36,15 @@ export function createNativeRenderer(
       return
     }
     if (event) {
-      handleGpuixEvent(event, renderer)
-      if (onEvent) {
-        onEvent(event)
+      // A throwing app handler must not become a napi_fatal_exception: the
+      // native callback runs off the JS event loop with no frame above it.
+      try {
+        handleGpuixEvent(event, renderer)
+        if (onEvent) {
+          onEvent(event)
+        }
+      } catch (error) {
+        console.error("[gpuiv] event handler:", error)
       }
     }
   })
@@ -64,6 +84,9 @@ export interface FrameLoop {
  *
  * `tick()` returning false means the last window closed. The loop stops and
  * `onTerminated` runs. `createApp()` uses that to exit the process.
+ *
+ * A throw from `tick()` must not stop the timer. On macOS that timer is the
+ * AppKit pump; if it dies the window freezes while bun may still be alive.
  */
 export function startFrameLoop(
   renderer: Pick<GpuixRenderer, "requiresTick" | "tick">,
@@ -86,7 +109,12 @@ export function startFrameLoop(
   const loop = (): void => {
     if (stopped) return
     const started = performance.now()
-    const running = renderer.tick()
+    let running = true
+    try {
+      running = renderer.tick()
+    } catch (error) {
+      console.error("[gpuiv] tick:", error)
+    }
     if (running === false) {
       stop()
       options.onTerminated?.()
@@ -180,6 +208,19 @@ export function createApp(
   if (debugFrameOverlay) {
     host.setDebugFrameOverlay?.(debugFrameOverlay)
   }
+  if (!injected && slot.renderer instanceof GpuixRenderer) {
+    installRuntimeErrorHandlers()
+    // Start pumping before the first mount flush, so a throw during mount
+    // still leaves AppKit ticking. The loop is not restarted on remount:
+    // stopping it between trees would freeze the window for a frame.
+    if (!slot.loop) {
+      slot.loop = startFrameLoop(slot.renderer, {
+        onTerminated: () => {
+          process.exit(0)
+        },
+      })
+    }
+  }
   if (slot.handle) {
     console.log("[gpuiv] remount: unmount previous tree")
     slot.handle.unmount()
@@ -205,14 +246,6 @@ export function createApp(
   }
   slot.handle = handle
 
-  if (!injected && slot.renderer instanceof GpuixRenderer) {
-    slot.loop?.stop()
-    slot.loop = startFrameLoop(slot.renderer, {
-      onTerminated: () => {
-        process.exit(0)
-      },
-    })
-  }
   console.log("[gpuiv] mount complete")
   return handle
 }

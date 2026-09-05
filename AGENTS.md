@@ -942,6 +942,8 @@ belong in README. This list is only the remaining engineering work.
 - [x] `<canvas>` pixel bridge (`uploadCanvasPixels`/`readCanvasPixels`, `GpuixCanvas`)
 - [x] `CanvasRenderingContext2D` — `getContext("2d")`: a TS WebIDL facade over the Rust rasterization core (`GpuixCanvas2DCore`; paths, transforms, gradients, AA strokes, clip, composite, image data). Draws record into a native display list and rasterize once per flush; uploads pull straight from the core (`uploadCanvasFromContext`), pixels never cross FFI. Text APIs throw `NotSupported`; glyph rasterization is follow-up work
 - [x] `contextMenu` event, explicit pointer capture, `stopWheelPropagation`
+- [x] Runtime errors keep the macOS window alive (`startFrameLoop` catches
+      `tick()` throws; `createApp` installs uncaught handlers)
 
 ### TODO
 
