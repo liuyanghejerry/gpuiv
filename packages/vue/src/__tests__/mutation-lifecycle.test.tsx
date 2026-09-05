@@ -21,6 +21,7 @@ import type { EventPayload } from "@gpuiv/native"
 import { createGpuivRendererHost } from "../reconciler/vue-renderer.js"
 import { handleGpuixEvent } from "../reconciler/event-registry.js"
 import { TestRenderer, createTestApp, hasNativeTestRenderer } from "../testing.js"
+import { createApp, resetApp } from "../renderer.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -245,6 +246,64 @@ describeNative("mutation lifecycle", () => {
       second.flushMutations()
     } finally {
       second.detach()
+    }
+  })
+
+  it("rebinds the render-level onEvent observer to each root", async () => {
+    const renderer = new TestRenderer()
+    const observed: string[] = []
+    const App = defineComponent({
+      props: { label: { type: String, required: true } },
+      setup(props) {
+        return () => (
+          <div style={{ width: 100, height: 100 }} onClick={() => observed.push(props.label)}>
+            {props.label}
+          </div>
+        )
+      },
+    })
+
+    try {
+      createApp(defineComponent({
+        setup: () => () => <App label="first" />,
+      }), { renderer, onEvent: () => observed.push("observer:first") })
+      renderer.nativeSimulateClick(10, 10)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(observed).toEqual(["first", "observer:first"])
+
+      // The second root's observer replaces the first's — a click must not
+      // reach the stale one.
+      createApp(defineComponent({
+        setup: () => () => <App label="second" />,
+      }), { renderer, onEvent: () => observed.push("observer:second") })
+      renderer.nativeSimulateClick(10, 10)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(observed).toEqual(["first", "observer:first", "second", "observer:second"])
+    } finally {
+      resetApp()
+    }
+  })
+
+  it("keeps root ids unique across remounts on one renderer", () => {
+    const renderer = new TestRenderer()
+    const App = defineComponent({
+      setup: () => () => <div style={{ width: 100, height: 100 }}>tree</div>,
+    })
+
+    try {
+      createApp(App, { renderer })
+      const firstRoot = renderer.getRoot()?.id
+
+      resetApp()
+      createApp(App, { renderer })
+      const secondRoot = renderer.getRoot()?.id
+
+      // The allocator survives the remount, so the replacement root's id can
+      // never collide with retained Rust state from the previous tree.
+      expect(secondRoot).not.toBeNull()
+      expect(secondRoot).not.toBe(firstRoot)
+    } finally {
+      resetApp()
     }
   })
 })
