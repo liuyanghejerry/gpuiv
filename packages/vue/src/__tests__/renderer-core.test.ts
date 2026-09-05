@@ -5,11 +5,32 @@
 /// emitted by mount/update/remove flows.
 
 import { beforeEach, describe, expect, it } from "vitest"
+import { createRequire } from "node:module"
 import { defineComponent, h, ref, nextTick } from "vue"
 import type { NativeRenderer } from "../types.js"
 import { createGpuivRendererHost, toGpuixStyle } from "../reconciler/vue-renderer.js"
+import { hasNativeTestRenderer } from "../testing.js"
 
 type Op = unknown[]
+
+describe("TestGpuixRenderer availability", () => {
+  it("exports a constructor, and a flag that is true only when construction works", () => {
+    const native = createRequire(import.meta.url)("@gpuiv/native") as {
+      TestGpuixRenderer?: new (width?: number, height?: number) => unknown
+      hasTestGpuixRenderer?: () => boolean
+    }
+    expect(typeof native.TestGpuixRenderer).toBe("function")
+    expect(native.hasTestGpuixRenderer?.()).toBe(hasNativeTestRenderer)
+    if (hasNativeTestRenderer) {
+      const renderer = new native.TestGpuixRenderer!(1, 1)
+      expect(renderer).toBeTruthy()
+    } else {
+      expect(() => new native.TestGpuixRenderer!()).toThrow(
+        /macOS and Windows only.*wgpu cannot read a rendered image back yet.*GpuixRenderer still works/s,
+      )
+    }
+  })
+})
 
 class MockRenderer implements NativeRenderer {
   applied: Op[] = []

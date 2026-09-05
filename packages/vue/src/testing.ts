@@ -78,14 +78,16 @@ interface NativeTestRendererConstructor {
   new (width?: number, height?: number): NativeTestRendererApi
 }
 
-// Exported by every test-support build: Metal on macOS, DirectX on Windows.
+// Real on macOS (Metal) and Windows (DirectX) test-support builds; a throwing
+// stub everywhere else, so the class existing is not availability.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const native = require("@gpuiv/native") as {
     TestGpuixRenderer?: NativeTestRendererConstructor
+    hasTestGpuixRenderer?: () => boolean
   }
-  if (native.TestGpuixRenderer) {
+  if (native.TestGpuixRenderer && (native.hasTestGpuixRenderer?.() ?? true)) {
     NativeTestRenderer = native.TestGpuixRenderer
   }
 } catch {
