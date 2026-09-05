@@ -2,12 +2,44 @@
  *  focus. Every simulation goes through the native GPUI hit-test pipeline; the
  *  handler result lands in the component state and is asserted after settle(). */
 
+import { spawnSync } from "node:child_process"
 import { defineComponent, ref } from "vue"
 import { describe, expect, it } from "vitest"
 import type { EventPayload } from "@gpuiv/native"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+describe("frame loop (vue)", () => {
+  // The embedded AppKit pump must drain only ready events and return, never
+  // wait for a display-link wake — otherwise Bun timers and sockets starve
+  // between frames. Runs in a child process because it needs the real
+  // GpuixRenderer, not the test renderer.
+  it.skipIf(process.platform !== "darwin")(
+    "returns control to JavaScript while AppKit is idle",
+    () => {
+      const script = [
+        'import { GpuixRenderer } from "@gpuiv/native"',
+        "const renderer = new GpuixRenderer(() => {})",
+        "renderer.init({ focus: false })",
+        "renderer.tick()",
+        "const startedAt = performance.now()",
+        "for (let index = 0; index < 30; index += 1) renderer.tick()",
+        "console.log(performance.now() - startedAt)",
+        "process.exit(0)",
+      ].join("\n")
+      const result = spawnSync(process.execPath, ["-e", script], {
+        encoding: "utf8",
+        timeout: 3_000,
+      })
+
+      expect(result.status, result.stderr || result.error?.message).toBe(0)
+      const elapsedMs = Number(result.stdout.trim())
+      expect(elapsedMs).not.toBeNaN()
+      expect(elapsedMs).toBeLessThan(200)
+    },
+  )
+})
 
 describeNative("events (vue)", () => {
   it("delivers click and mouseDown events in order", async () => {

@@ -68,7 +68,7 @@ Inventoried range: `367ef48..cbc3de0` (2026-09-04). Earlier history is in
 | Window size polling | `f587575` | synced | PR #12 |
 | `<code>` as bare surface | `5033808` `f81e087` | synced | PR #14 — breaking: `showHeader` gone, `codePaddingX`→`mdCodePaddingX` etc.; card moved into app code (chat `CodeBlock`) |
 | Hygiene | `f921bec` `d1e4c98` `a9cda59` | synced | PR #13 |
-| Nonblocking embedded AppKit ticks | `9b1def2` `5700c96` | pending | zed `8b94def` → `df3c9b7`: `tick()` drains only ready AppKit events so Bun timers/sockets/PTYs progress between frames; README docs + idle-tick perf regression test (their #39) |
+| Nonblocking embedded AppKit ticks | `9b1def2` `5700c96` | synced | PR #37 — zed `8b94def` → `df3c9b7`: `tick()` drains only ready AppKit events so Bun timers/sockets/PTYs progress between frames; README docs + idle-tick perf regression test (their #39) |
 | Primary clicks from mouse-up | `bf98e07` | pending | deliver `onClick` from primary mouse-up (GPUI's semantic click never finalizes under the embedded macOS pump); renderer + custom elements + the diverged `input.rs` hunk (their #41) |
 | Windows DPI + last-window quit | `aacb070` | pending | Per-Monitor-V2 DPI awareness from inside the `.node` (node/bun have no manifest) + Windows/Linux `tick()` reporting last-window close so the JS loop exits (their #31/#32) |
 | Linux `TestGpuixRenderer` stub | `5937978` | pending | export the class on every platform; construction throws an explanation where the GPU test renderer is unavailable; `hasTestGpuixRenderer()` (their #30) |
@@ -112,6 +112,7 @@ from upstream through `367ef48`:
 | #29 | Linear gradient backgrounds: `style.background` value union (two-stop `linear-gradient`, sRGB/Oklab), shared resolution for paint/occlude/anchored fill, Vue types + README — upstream `09e0cae` |
 | #28 | Comet selection continuity + generic input edits: soft-wrap wash fix, frame-level drag listeners + virtualized drag continuation, list edge autoscroll with stop-at-end, input word/all multi-click, textarea drag scroll, coalesced bounded undo, `advanceTime` test-dispatcher API — upstream `fb75c1c` `1cd46cd` |
 | #27 | Atomic mutation batches: typed-op decode from raw bytes, `Arc<StyleDesc>` hash-consing + two-arm style-table sweep, `destroy_element` unlink, per-op napi methods removed, Vue `MutationRenderer` facade (microtask `schedule` kept), bench tooling — upstream `230400e` `2daf988` `fd06111` `f948f50` `4369d55` + `bb138ba` destroy hunk + `579c8c7` CI line |
+| #37 | Nonblocking embedded AppKit ticks: zed `8b94def` → `df3c9b7`, README pump docs, idle-tick child-process regression — upstream `9b1def2` `5700c96` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
