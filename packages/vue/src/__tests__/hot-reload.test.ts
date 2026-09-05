@@ -83,7 +83,9 @@ describeNative("bun --hot reloads", () => {
     mkdirSync(dir, { recursive: true })
     const entry = join(dir, "hot-entry.ts")
     writeFileSync(entry, hotAppSource("hello"), "utf8")
-    const child = spawn("bun", ["--hot", entry], { cwd: dir })
+    // Windows locks a process's working directory, so the child must not run
+    // from the directory the test deletes.
+    const child = spawn("bun", ["--hot", entry], { cwd: srcDir })
     const output = collectOutput(child)
     try {
       await output.wait("HOT_CLICK hello", 10_000)
@@ -93,6 +95,13 @@ describeNative("bun --hot reloads", () => {
       await output.wait("HOT_NEW_ROOT_ID true", 10_000)
     } finally {
       child.kill()
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 2_000)
+        child.on("exit", () => {
+          clearTimeout(timer)
+          resolve(null)
+        })
+      })
       rmSync(dir, { recursive: true, force: true })
     }
   }, 25_000)
