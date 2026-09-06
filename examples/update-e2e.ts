@@ -21,7 +21,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { createServer } from "node:http"
 import { tmpdir } from "node:os"
 import path from "node:path"
-import { launch } from '@gpuiv/vue/automation'
+import { connectStdio } from '@gpuiv/vue/automation'
 
 const EXAMPLES_DIR = import.meta.dir
 const PACKAGER_BIN = path.join(EXAMPLES_DIR, '..', 'packages', 'packager', 'bin', 'gpuiv-packager.ts')
@@ -164,45 +164,71 @@ try {
   // ── 5. drive the packaged v0.1.0 through a self-update ─────────────────
 
   log(`launching packaged ${OLD_VERSION}`)
-  const app = await launch({ command: v1Exe, cwd: path.dirname(v1Exe), env: { GPUIX_BACKGROUND: '1' } })
-  await app.getByTestId('update-restart').waitFor({ timeoutMs: 240_000 })
-  log('update staged; clicking Restart')
-
+  // Spawn manually (not launch()) so the product's stderr is captured — the
+  // updater logs apply failures there, and a blind timeout helps nobody.
+  let appStderr = ''
+  const child = spawn(v1Exe, [], {
+    cwd: path.dirname(v1Exe),
+    env: { ...process.env, GPUIX_BACKGROUND: '1' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
+  child.stderr.on('data', (chunk: Buffer) => (appStderr += chunk.toString('utf8')))
+  const app = await connectStdio({
+    write: (chunk) => child.stdin.write(chunk),
+    feed: (listener) => {
+      child.stdout.on('data', (buffer: Buffer) => listener(buffer.toString('utf8')))
+    },
+    close: async () => {
+      child.kill()
+    },
+  })
+  const dumpStderr = () => {
+    if (appStderr.trim()) console.error(`[update-e2e] product stderr (tail):\n${appStderr.slice(-3000)}`)
+  }
   try {
-    await Promise.race([
-      app.getByTestId('update-restart').click(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('click timed out (expected if the process exited first)')), 15_000)),
-    ])
-  } catch (error) {
-    log(`click finished with: ${error instanceof Error ? error.message : error}`)
-  }
+    await app.getByTestId('update-restart').waitFor({ timeoutMs: 240_000 })
+    log('update staged; clicking Restart')
 
-  // ── 6. verify the swap on disk ─────────────────────────────────────────
-
-  let after = ''
-  for (let i = 0; i < 30; i++) {
-    await sleep(2_000)
-    after = hash(v1Exe)
-    if (after === v2Hash) break
-  }
-  if (after !== v2Hash) throw new Error(`the installed exe did not become the ${NEW_VERSION} build`)
-  log(`exe is now the ${NEW_VERSION} build ✓`)
-
-  if (isWindows) {
-    // The replacement deletes the renamed old exe at startup (with a retry).
-    const oldFile = `${v1Exe}.old`
-    for (let i = 0; i < 10 && existsSync(oldFile); i++) await sleep(2_000)
-    if (existsSync(oldFile)) throw new Error(`${path.basename(oldFile)} was not cleaned after relaunch`)
-    log('old exe cleaned after relaunch ✓')
-  } else {
-    for (const leftover of [path.join(v1Dir, `.${PRODUCT_NAME}.app.backup`), path.join(v1Dir, `.${PRODUCT_NAME}.app.update`)]) {
-      if (existsSync(leftover)) throw new Error(`swap leftover not cleaned: ${leftover}`)
+    try {
+      await Promise.race([
+        app.getByTestId('update-restart').click(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('click timed out (expected if the process exited first)')), 15_000)),
+      ])
+    } catch (error) {
+      log(`click finished with: ${error instanceof Error ? error.message : error}`)
     }
-    log('no swap leftovers ✓')
-  }
 
-  if (downloadCount === 0) throw new Error('the mock feed served no artifact download — the update did not go through the feed')
-  log(`feed served ${downloadCount} artifact download(s) ✓`)
+    // ── 6. verify the swap on disk ───────────────────────────────────────
+
+    let after = ''
+    for (let i = 0; i < 30; i++) {
+      await sleep(2_000)
+      after = hash(v1Exe)
+      if (after === v2Hash) break
+    }
+    if (after !== v2Hash) throw new Error(`the installed exe did not become the ${NEW_VERSION} build`)
+    log(`exe is now the ${NEW_VERSION} build ✓`)
+
+    if (isWindows) {
+      // The handoff stages beside the product dir; the relaunched app cleans
+      // it at init (best-effort retry while locks clear).
+      const staging = path.join(path.dirname(path.dirname(v1Exe)), `.${path.basename(path.dirname(v1Exe))}-update`)
+      for (let i = 0; i < 15 && existsSync(staging); i++) await sleep(2_000)
+      if (existsSync(staging)) throw new Error(`update staging not cleaned after relaunch: ${staging}`)
+      log('update staging cleaned after relaunch ✓')
+    } else {
+      for (const leftover of [path.join(v1Dir, `.${PRODUCT_NAME}.app.backup`), path.join(v1Dir, `.${PRODUCT_NAME}.app.update`)]) {
+        if (existsSync(leftover)) throw new Error(`swap leftover not cleaned: ${leftover}`)
+      }
+      log('no swap leftovers ✓')
+    }
+
+    if (downloadCount === 0) throw new Error('the mock feed served no artifact download — the update did not go through the feed')
+    log(`feed served ${downloadCount} artifact download(s) ✓`)
+  } catch (error) {
+    dumpStderr()
+    throw error
+  }
 
   // Kill the relaunched process (it has no automation pipe to close).
   if (isWindows) {

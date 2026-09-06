@@ -177,13 +177,19 @@ await updater.applyAndRelaunch()  // or queueApplyOnQuit()
 
 ### Windows apply
 
-A running exe cannot be overwritten but **can be renamed**:
+A bun executable holds a mapping of its own binary, so the classic
+"rename the running exe" trick is not reliable for our products — the
+first CI run of `update-e2e (win32-x64)` got all the way through download,
+verify, banner and click, then failed at the rename. Windows apply is a
+**lock-free relay** instead; no process ever touches a running file:
 
-1. Extract the new version to `app-dir/../.gpuiv-update-<version>/`.
-2. Rename the running `Chat.exe` → `Chat.exe.old`; move the new exe and
-   files over the old ones.
-3. Spawn the new exe detached, exit; on next launch, delete any
-   `*.old*` leftovers before the UI comes up.
+1. Old process: extract the update to `.<product>-update/` beside the
+   product, spawn the NEW exe from there with the finish marker, exit.
+2. New process (before any UI, `finishPendingWindowsUpdate()` at the app
+   entry): copy itself over the product dir (retries while the old
+   process's locks clear), spawn the product exe without the marker, exit.
+3. Product exe v2: runs normally; `createUpdater` cleans the staging dir
+   and old `.old` files at init, best-effort with a delayed retry.
 
 ### Relaunch
 
@@ -306,6 +312,6 @@ with no swap leftovers. What the build surfaced beyond the design:
 - **The e2e driver must spawn children asynchronously**: its mock S3 lives
   in the same process, and a `spawnSync` child blocks the event loop that
   has to serve the publish PUTs — the first run deadlocked into a fetch
-  timeout. The Windows swap deletes the `.old` exe at the replacement's
-  startup with a delayed retry (the dying process may still hold the lock
-  for a moment).
+  timeout. The driver also captures the product's stderr (manual spawn +
+  `connectStdio` instead of `launch()`) so an apply failure in CI prints
+  the updater's actual error instead of a blind hash timeout.

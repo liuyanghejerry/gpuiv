@@ -25,6 +25,7 @@ import {
   applyMacCpuThrottleFromEnv,
   createApp,
   createUpdater,
+  finishPendingWindowsUpdate,
   isPackaged,
   motion,
   Select,
@@ -2026,6 +2027,9 @@ const isEntryPoint =
     : process.argv[1]?.endsWith('chat.tsx'))
 
 if (isEntryPoint) {
+  // The second leg of a Windows self-update hands control to this process
+  // before any UI exists; a no-op everywhere else.
+  await finishPendingWindowsUpdate()
   applyMacCpuThrottleFromEnv()
   // Define-injected by @gpuiv/packager when the config pins an update feed;
   // absent in development, so the updater stays inert under `bun --hot`.

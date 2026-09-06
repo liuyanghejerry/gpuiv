@@ -31,6 +31,10 @@ import { homedir, tmpdir, platform, arch } from "node:os"
 import path from "node:path"
 import { isPackaged } from "./packaged.js"
 
+/** Set on the staged exe by the Windows handoff; `finishPendingWindowsUpdate`
+ * consumes it at the app entry. */
+const FINISH_UPDATE_ENV = "GPUIV_FINISH_UPDATE"
+
 // ── Feed types ────────────────────────────────────────────────────────────
 
 export interface ReleasePlatformEntry {
@@ -197,13 +201,15 @@ export function createUpdater(userOptions: Partial<UpdaterOptions> = {}): Update
   let pendingManifest: ReleaseManifest | null = null
   let stagedZip: string | null = null
 
-  // A Windows update renames the running exe aside; the replacement deletes
-  // it here, on the next launch. Best-effort twice: the dying process may
-  // still hold the lock when the replacement starts.
-  if (platform() === "win32" && isPackaged()) {
+  // Windows update leftovers (the staging dir of the previous handoff, old
+  // `.old` files from earlier versions of this engine) are cleaned here,
+  // best-effort with a retry — the dying process may still hold locks.
+  if (platform() === "win32" && isPackaged() && !process.env[FINISH_UPDATE_ENV]) {
     const tryClean = () => {
       try {
         cleanWindowsLeftovers(path.dirname(process.execPath))
+        const staging = windowsStagingDir()
+        if (staging) rmSync(staging, { recursive: true, force: true })
       } catch {
         // read-only installs, races — the next launch tries again
       }
@@ -319,7 +325,9 @@ export function createUpdater(userOptions: Partial<UpdaterOptions> = {}): Update
       const manifest = pendingManifest!
       const exePath = applyUpdateSync(zip, options.bundleId)
       emit({ type: "applied", version: manifest.version })
-      relaunchExecutable(exePath)
+      // The Windows handoff already spawned its successor (null); relaunch
+      // is only ours on platforms that swap in place.
+      if (exePath) relaunchExecutable(exePath)
       process.exit(0)
     },
 
@@ -328,7 +336,7 @@ export function createUpdater(userOptions: Partial<UpdaterOptions> = {}): Update
       process.on("exit", () => {
         try {
           const exePath = applyUpdateSync(stagedZip!, options.bundleId)
-          relaunchExecutable(exePath)
+          if (exePath) relaunchExecutable(exePath)
         } catch (error) {
           console.error("[gpuiv-updater] apply-on-quit failed:", error)
         }
@@ -350,9 +358,10 @@ function appDataDir(bundleId: string): string {
   return path.join(homedir(), ".local", "share", bundleId)
 }
 
-/** Extract + swap, synchronously (safe inside a process 'exit' handler).
- * Returns the new executable to relaunch. Exported for tests. */
-export function applyUpdateSync(zipPath: string, bundleId: string): string {
+/** Extract + swap. Returns the executable to relaunch, or null when the
+ * platform's swap already spawned its successor (the Windows handoff).
+ * Exported for tests. */
+export function applyUpdateSync(zipPath: string, bundleId: string): string | null {
   const exePath = process.execPath
   const exeDir = path.dirname(exePath)
 
@@ -362,7 +371,7 @@ export function applyUpdateSync(zipPath: string, bundleId: string): string {
     return applyDarwinSwap(zipPath, bundleRoot)
   }
   if (platform() === "win32") {
-    return applyWindowsSwap(zipPath, exeDir)
+    return applyWindowsHandoff(zipPath, exeDir)
   }
   throw new Error("Linux self-update is not implemented (P2).")
 }
@@ -406,26 +415,74 @@ export function applyDarwinSwap(zipPath: string, bundleRoot: string): string {
   }
 }
 
-/** Windows: a running exe cannot be overwritten but CAN be renamed. Rename
- * the running exe aside FIRST, copy the new version over, relaunch; the
- * `.old` file is cleaned on the next launch (cleanWindowsLeftovers). */
-export function applyWindowsSwap(zipPath: string, productDir: string): string {
-  const staging = mkdtempSync(path.join(tmpdir(), ".gpuiv-update-"))
-  try {
-    extractZip(zipPath, staging)
-    // The zip contains the product folder (Foo-win32-x64/…); find it.
-    const entries = readdirSync(staging)
-    const inner = entries.length === 1 ? path.join(staging, entries[0]) : staging
-    const exeName = path.basename(process.execPath)
-    renameSync(path.join(productDir, exeName), path.join(productDir, `${exeName}.old`))
-    cpSync(inner, productDir, { recursive: true, force: true })
-    return path.join(productDir, exeName)
-  } finally {
-    rmSync(staging, { recursive: true, force: true })
+/** Windows apply is a lock-free relay — renaming or overwriting the file of
+ * a running executable is not reliable for bun products (the process holds
+ * a mapping of its own binary), so nothing ever touches a running file:
+ *
+ *   old exe: extract the update beside the product, spawn the NEW exe from
+ *   there with the finish marker, exit
+ *   → new exe (before any UI): copy itself over the product dir, spawn the
+ *     product exe without the marker, exit
+ *   → product exe v2: runs normally, cleans the staging dir at init
+ */
+export function applyWindowsHandoff(zipPath: string, productDir: string): null {
+  const staging = windowsStagingDir() ?? path.join(path.dirname(productDir), ".gpuiv-update-staging")
+  rmSync(staging, { recursive: true, force: true })
+  extractZip(zipPath, staging)
+  const inner = singleChild(staging) ?? staging
+  const innerExe = path.join(inner, path.basename(process.execPath))
+  if (!existsSync(innerExe)) {
+    throw new Error(`The update zip does not contain ${path.basename(process.execPath)} at the expected layout.`)
   }
+  spawn(innerExe, [], {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, [FINISH_UPDATE_ENV]: productDir },
+  }).unref()
+  return null
 }
 
-/** Remove `*.old` leftovers from a previous update before the UI comes up. */
+/** The relay's second leg, awaited at the app entry before anything else:
+ * when the finish marker is set, this process is the staged update — copy
+ * itself into the product dir, relaunch from there, exit. No-op otherwise. */
+export async function finishPendingWindowsUpdate(): Promise<void> {
+  const targetDir = process.env[FINISH_UPDATE_ENV]
+  if (!targetDir) return
+  const sourceDir = path.dirname(process.execPath)
+  const exeName = path.basename(process.execPath)
+
+  // The old process exits right after spawning us; its locks may need a
+  // moment to clear.
+  let copied = false
+  for (let attempt = 0; attempt < 10 && !copied; attempt++) {
+    try {
+      cpSync(sourceDir, targetDir, { recursive: true, force: true })
+      copied = true
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 1_000))
+    }
+  }
+  if (!copied) throw new Error(`finish-update: could not copy ${sourceDir} over ${targetDir}`)
+
+  const env = { ...process.env }
+  delete env[FINISH_UPDATE_ENV]
+  spawn(path.join(targetDir, exeName), [], { detached: true, stdio: "ignore", env }).unref()
+  process.exit(0)
+}
+
+/** Where the Windows handoff stages an update: beside the product dir. */
+function windowsStagingDir(): string | null {
+  if (platform() !== "win32") return null
+  const productDir = path.dirname(process.execPath)
+  return path.join(path.dirname(productDir), `.${path.basename(productDir)}-update`)
+}
+
+function singleChild(dir: string): string | null {
+  const entries = readdirSync(dir)
+  return entries.length === 1 ? path.join(dir, entries[0]) : null
+}
+
+/** Remove `*.old` leftovers from earlier versions of this engine. */
 export function cleanWindowsLeftovers(productDir: string): void {
   for (const name of readdirSync(productDir)) {
     if (name.endsWith(".old")) rmSync(path.join(productDir, name), { force: true })

@@ -6,10 +6,11 @@ export type { ResourcesPathInput } from "./packaged.js"
 export { createUpdater } from "./updater.js"
 export {
   applyDarwinSwap,
-  applyWindowsSwap,
+  applyWindowsHandoff,
   cleanWindowsLeftovers,
   compareVersions,
   decideUpdate,
+  finishPendingWindowsUpdate,
   parseUpdatePublicKey,
   platformKey,
   verifyArtifact,
