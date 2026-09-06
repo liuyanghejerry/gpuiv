@@ -20,6 +20,25 @@ export interface BundleOptions {
 
 export async function bundleApp(opts: BundleOptions): Promise<void> {
   const isWindowsHost = process.platform === "win32"
+  // Assembled conditionally: an `icon: undefined` key still trips Bun's
+  // "windows.icon must be a valid path" validation, so the key must be
+  // absent — not undefined — when no icon is available.
+  const windows = opts.config.icon?.win32
+    ? {
+        icon: opts.config.icon.win32,
+        hideConsole: true,
+        title: opts.config.productName,
+        publisher: opts.config.publisher ?? opts.config.bundleId,
+        version: normalizeWindowsVersion(opts.config.version),
+        description: opts.config.description ?? opts.config.productName,
+      }
+    : {
+        hideConsole: true,
+        title: opts.config.productName,
+        publisher: opts.config.publisher ?? opts.config.bundleId,
+        version: normalizeWindowsVersion(opts.config.version),
+        description: opts.config.description ?? opts.config.productName,
+      }
   const result = await Bun.build({
     entrypoints: [opts.entry],
     // The host build compiles for the host bun; foreign targets use the
@@ -27,18 +46,7 @@ export async function bundleApp(opts: BundleOptions): Promise<void> {
     target: isHostBuild(opts.spec) ? "bun" : opts.spec.bunTarget,
     compile: {
       outfile: opts.outfile,
-      ...(opts.spec.platform === "win32" && isWindowsHost
-        ? {
-            windows: {
-              icon: opts.config.icon?.win32,
-              hideConsole: true,
-              title: opts.config.productName,
-              publisher: opts.config.publisher ?? opts.config.bundleId,
-              version: normalizeWindowsVersion(opts.config.version),
-              description: opts.config.description ?? opts.config.productName,
-            },
-          }
-        : {}),
+      ...(opts.spec.platform === "win32" && isWindowsHost ? { windows } : {}),
     },
     plugins: [
       {
