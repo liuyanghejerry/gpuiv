@@ -36,8 +36,15 @@ export async function smokeTest(opts: {
   ])
   try {
     await app.getByTestId(opts.testId).waitFor({ timeoutMs: opts.timeoutMs })
-    await app.screenshot({ path: opts.screenshot })
-    console.log(`[gpuiv-packager] smoke: passed, screenshot at ${opts.screenshot}`)
+    // Live-window capture is macOS-only in this fork (`render_to_image` under
+    // test-support); on Windows the waitFor above already proved the product
+    // launches, loads the embedded binding, opens a window and paints.
+    if (process.platform === "darwin") {
+      await app.screenshot({ path: opts.screenshot })
+      console.log(`[gpuiv-packager] smoke: passed, screenshot at ${opts.screenshot}`)
+    } else {
+      console.log(`[gpuiv-packager] smoke: passed (screenshot skipped — live capture is macOS-only)`)
+    }
   } finally {
     await app.close()
   }
