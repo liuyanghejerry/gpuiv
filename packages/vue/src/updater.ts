@@ -377,10 +377,13 @@ export function applyUpdateSync(zipPath: string, bundleId: string): string | nul
 }
 
 /** bsdtar reads zip on macOS and Windows 10+ alike — one extraction path,
- * no zip library. */
+ * no zip library. `--force-local` (a GNU tar option the Windows bsdtar
+ * accepts, macOS's does not) keeps the drive colon in `C:\…` paths from
+ * being parsed as a remote host. */
 function extractZip(zipPath: string, destDir: string): void {
   mkdirSync(destDir, { recursive: true })
-  const result = spawnSync("tar", ["-xf", zipPath, "-C", destDir], { timeout: 120_000 })
+  const args = [...(platform() === "win32" ? ["--force-local"] : []), "-xf", zipPath, "-C", destDir]
+  const result = spawnSync("tar", args, { timeout: 120_000 })
   if (result.status !== 0) {
     throw new Error(`Extraction failed (tar ${result.status}): ${result.stderr}`)
   }
