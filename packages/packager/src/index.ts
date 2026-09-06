@@ -11,7 +11,7 @@
  *
  * See docs/packaging-plan.md for the design record. */
 
-import { mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
 import { defaultHostTargetName, loadConfig, type PackageConfig, type ResolvedConfig } from "./config.js"
 import { bundleApp, executableLayout } from "./bundle.js"
@@ -53,6 +53,19 @@ export async function buildPackage(args: BuildPackageArgs): Promise<PackageResul
   mkdirSync(config.outDir, { recursive: true })
   // Deliberately not wiping outDir: separate invocations per target must not
   // erase each other's artifacts; each build clears its own product below.
+
+  // Icons are generated on a dev machine into gitignored paths; a CI runner
+  // without the tooling packages without them rather than failing. Bun also
+  // hard-rejects a nonexistent windows.icon, so drop it before bundling.
+  for (const platform of ["darwin", "win32"] as const) {
+    const icon = config.icon[platform]
+    if (icon && !existsSync(icon)) {
+      console.warn(
+        `[gpuiv-packager] ${platform} icon ${icon} is configured but missing; packaging without it (generate it with the icons script on a dev machine)`,
+      )
+      config.icon[platform] = undefined
+    }
+  }
 
   const explicit = (args.targets?.length ?? 0) > 0
   const targets = explicit ? args.targets! : config.targets ?? [defaultHostTargetName()]
