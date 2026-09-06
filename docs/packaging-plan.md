@@ -289,7 +289,9 @@ Developer ID signing + notarization in CI, GitHub Release attach +
 **P2 — the rest of the desktop story**
 Linux AppImage (native build already exists sans test-support), NSIS/MSIX
 installer, deep-link registration (plist `CFBundleURLTypes` + installer
-registry writes), Sparkle-style update client consuming `latest.json`.
+registry writes), and the auto-update client — designed in
+[auto-update-plan.md](./auto-update-plan.md) (S3-backed signed feed,
+ed25519-pinned pure-TS updater, per-platform apply-and-relaunch).
 
 ## Risks & open questions
 

@@ -988,9 +988,9 @@ belong in README. This list is only the remaining engineering work.
 #### Low Priority
 
 - [ ] **Packaging P1/P2** - release signing + notarization (macOS CI),
-      Windows signing hook, dmg/installer, GitHub Release + `latest.json`
-      update contract, Linux AppImage, universal-macOS `lipo` spike. See
-      `docs/packaging-plan.md` phasing
+      Windows signing hook, dmg/installer, S3-backed auto-update feed +
+      pure-TS updater (`docs/auto-update-plan.md`), Linux AppImage,
+      universal-macOS `lipo` spike. See `docs/packaging-plan.md` phasing
 - [ ] **Window controls** - resize, minimize (title already works)
 - [ ] **Multiple windows** - Support multiple GPUI windows
 - [x] **JS remount** - `createApp()` plus `bun --hot` remounts the Vue tree on the same window
