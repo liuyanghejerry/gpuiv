@@ -43,6 +43,7 @@
       "version": "0.4.0",
       "dependencies": {
         "@gpuiv/native": "workspace:^",
+        "@vue/reactivity": "^3.5.13",
         "eventsource-parser": "^4.1.0",
         "zod": "^4.4.3",
       },

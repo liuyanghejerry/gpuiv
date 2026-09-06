@@ -2010,6 +2010,42 @@ nothing can steal focus and keyboard input works. Reach for `launch()` plus
 `focus: false` when the check needs a real window, real GPU paint, or a real
 process.
 
+### Component state
+
+The protocol can also see **through** the host element tree into the Vue
+components that rendered it — the DevTools component inspector, for agents.
+`getComponentTree` lists every component with its name, source file, props,
+and `setup()` state; `getComponentState` takes an automation element id and
+returns the component that rendered it. Live apps attach the inspector
+automatically; in vitest, pass one to `connectTest`:
+
+```ts
+import { connectTest, createComponentInspector } from '@gpuiv/vue/automation'
+
+const automation = await connectTest(
+  app.renderer,
+  app.settle,
+  createComponentInspector(app.app)
+)
+
+const [root] = await automation.components.tree()
+// { name: 'Root', state: { sidebarOpen: true }, hostIds: [2], children: [...] }
+
+const node = await automation.getByTestId('composer').element()
+const owner = await automation.components.state(node.id)
+// { name: 'Composer', props: { draft: '…' }, state: { draft: '…' }, … }
+```
+
+`state` reads refs unwrapped and runs with dependency tracking paused, so a
+debug read never subscribes the caller to the component's state. Output is
+bounded (depth 4, 50 keys/items, 500-char strings) and JSON-safe; functions
+serialize as `ƒ name()`, cycles as `[circular]`. State kept in a `setup()`
+closure (returning the render function directly) is invisible, exactly as in
+Vue DevTools — return an object from `setup()` to make it inspectable. A
+session opened without an inspector rejects these methods with
+`Unsupported`; when Vue's internals shift under a future version, the walker
+answers `null` instead of failing the session.
+
 ## Testing
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).

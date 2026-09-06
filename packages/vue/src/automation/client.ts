@@ -17,6 +17,7 @@ import {
   type AutomationRequest,
   type AutomationResponse,
   type AutomationServerEvent,
+  type ComponentTreeNode,
   type ElementBounds,
   type MethodName,
   type ParamsOf,
@@ -58,8 +59,16 @@ abstract class ValidatedAutomationBackend implements AutomationBackend {
   abstract close(): Promise<void>
 }
 
-export interface TestAutomationRenderer {
-  nativeSimulateClick(
+/** Component-state views for the automation protocol. Built with
+ *  `createComponentInspector(app)`; optional on every backend. */
+export interface ComponentInspector {
+  /** The component tree, or null when Vue's internals are not walkable. */
+  getComponentTree(): ComponentTreeNode[] | null
+  /** The component that rendered this host element, or null. */
+  getComponentState(elementId: number): ComponentTreeNode | null
+}
+
+export interface TestAutomationRenderer {  nativeSimulateClick(
     x: number,
     y: number,
     button?: number,
@@ -112,9 +121,26 @@ type HandlerMap = {
 export class InProcessBackend extends ValidatedAutomationBackend {
   constructor(
     private readonly renderer: TestAutomationRenderer,
-    private readonly settle?: () => Promise<void>
+    private readonly settle?: () => Promise<void>,
+    private components?: ComponentInspector
   ) {
     super()
+  }
+
+  /** Late-attach a component inspector. The live app calls this after the
+   *  Vue tree mounts, which can be after the stdio server has started. */
+  setComponentInspector(components: ComponentInspector): void {
+    this.components = components
+  }
+
+  private requireComponents(): ComponentInspector {
+    if (!this.components) {
+      throw new AutomationError(
+        "Unsupported",
+        "this session has no component inspector (pass one to connectTest, or retry after the app mounts)"
+      )
+    }
+    return this.components
   }
 
   protected request<M extends MethodName>(
@@ -132,7 +158,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     initialize: () => ({
       protocolVersion: PROTOCOL_VERSION,
       pid: process.pid,
-      capabilities: ["input", "screenshot", "clock", "tree"],
+      capabilities: ["input", "screenshot", "clock", "tree", "components"],
       window: { width: 800, height: 600 },
     }),
     cancel: () => ({ ok: true as const }),
@@ -214,6 +240,12 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       const raw = JSON.parse(this.renderer.getAutomationTree()) as unknown
       return { tree: raw === null ? null : (raw as TreeNode) }
     },
+    getComponentTree: () => ({
+      components: this.requireComponents().getComponentTree(),
+    }),
+    getComponentState: (params) => ({
+      component: this.requireComponents().getComponentState(params.elementId),
+    }),
     getPaintedText: () => ({ text: this.renderer.getPaintedText() }),
     getAllText: () => ({ text: this.renderer.getAllText() }),
     getBounds: (params) => {
@@ -533,6 +565,12 @@ export class App {
     resume: () => Promise<number>
   }
 
+  /** Component-state views. Requires a session opened with an inspector. */
+  readonly components: {
+    tree: () => Promise<ComponentTreeNode[] | null>
+    state: (elementId: number) => Promise<ComponentTreeNode | null>
+  }
+
   /**
    * Raw pointer input in window coordinates. Prefer a locator when the target
    * is an element; use this for empty space, marquee selection, and gestures
@@ -559,6 +597,11 @@ export class App {
       fastForward: async (deltaMs) =>
         (await this.call("clockFastForward", { deltaMs })).nowMs,
       resume: async () => (await this.call("clockResume", {})).nowMs,
+    }
+    this.components = {
+      tree: async () => (await this.call("getComponentTree", {})).components,
+      state: async (elementId) =>
+        (await this.call("getComponentState", { elementId })).component,
     }
     this.mouse = {
       move: async (target, options = {}) => {
@@ -785,9 +828,10 @@ export function liveRendererAsTest(
 
 export async function connectTest(
   renderer: TestAutomationRenderer,
-  settle?: () => Promise<void>
+  settle?: () => Promise<void>,
+  components?: ComponentInspector
 ): Promise<App> {
-  const app = new App(new InProcessBackend(renderer, settle))
+  const app = new App(new InProcessBackend(renderer, settle, components))
   await app.call("initialize", {
     protocolVersion: PROTOCOL_VERSION,
     client: "@gpuiv/vue/automation",

@@ -14,12 +14,14 @@ export {
 } from "./client.js"
 export type {
   AutomationBackend,
+  ComponentInspector,
   DragOptions,
   LiveAutomationRenderer,
   MouseOptions,
   PointTarget,
   TestAutomationRenderer,
 } from "./client.js"
+export { createComponentInspector } from "./component-inspector.js"
 export {
   AutomationError,
   createSseDecoder,
@@ -36,6 +38,8 @@ export type {
   AutomationRequest,
   AutomationResponse,
   AutomationServerEvent,
+  ComponentTreeNode,
+  SerializedValue,
   ElementBounds,
   MethodName,
   ParamsOf,
