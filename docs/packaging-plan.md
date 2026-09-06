@@ -360,9 +360,18 @@ design above:
   local cross build (`cargo build --target x86_64-apple-darwin` — verified)
   or the CI bindings artifact. Publishing them (napi pre-publish already
   emits them) unlocks `bunx`-driven packaging for external apps.
-- **`darwin-x64` cross-compiles and smoke-tests from an arm64 host** — the
-  bun runtime download is the slow part; the x64 product runs under Rosetta,
-  which `canRunOnHost` allows for darwin only.
+- **`darwin-x64` cross-compiles and smoke-tests from an arm64 host** —
+  verified green in CI (`package-macos`), including the Rosetta smoke run.
+  The target-runtime download is the fragile part (a stalled download held
+  one CI attempt for 20+ minutes before timeouts were added); every packager
+  subprocess now carries a 2-minute `spawnSync` timeout, the build itself a
+  10-minute race, and the CI steps `timeout-minutes: 25`.
+- **Live-window screenshots are macOS-only in this fork**
+  (`render_to_image` gates on `target_os = "macos"` + test-support), so the
+  Windows smoke test asserts the load-bearing part — launch, binding load,
+  window open, root `testId` painted — and skips the screenshot with a log
+  line. The CI `package-windows` job proved the packaged GUI exe serves
+  automation over stdio pipes exactly as designed.
 - **chat's debug HUD hides itself in packaged products**
   (`debugFrameOverlay: isPackaged() ? undefined : 'full'`) — a development
   aid should not ship on the user's screen.
