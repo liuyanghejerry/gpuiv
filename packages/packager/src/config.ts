@@ -36,7 +36,8 @@ export interface PackageConfig {
   /** Root `testId` the packaged app must paint before the smoke test passes.
    * Default `'app-root'`; `null` disables the smoke test. */
   smokeTestId?: string | null
-  /** Smoke-test timeout in ms. Default 30_000. */
+  /** Smoke-test timeout in ms. Default 60_000 (generous for Rosetta
+   * cold-translation of a cross-compiled x64 product on a fresh runner). */
   smokeTimeoutMs?: number
 }
 
@@ -103,7 +104,7 @@ export async function loadConfig(explicitPath?: string): Promise<{ config: Resol
       outDir: resolveFrom(raw.outDir ?? "dist/package"),
       extraResources: (raw.extraResources ?? []).map(resolveFrom),
       minSystemVersion: raw.minSystemVersion ?? "13.0",
-      smokeTimeoutMs: raw.smokeTimeoutMs ?? 30_000,
+      smokeTimeoutMs: raw.smokeTimeoutMs ?? 60_000,
     },
   }
 }

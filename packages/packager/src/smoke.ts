@@ -20,7 +20,11 @@ export async function smokeTest(opts: {
   console.log(`[gpuiv-packager] smoke: launching ${opts.exePath} (testId "${opts.testId}")`)
   // A product that crashes before serving automation would leave launch()
   // waiting on `initialize` forever — race it so the failure is a message,
-  // not a hung job.
+  // not a hung job. The launch bound is deliberately generous beyond
+  // timeoutMs: under Rosetta the FIRST execution of an x64 product on a
+  // fresh runner AOT-translates the whole binary, which can exceed 30s
+  // before the process serves anything.
+  const launchBoundMs = Math.max(opts.timeoutMs, 120_000)
   const app = await Promise.race([
     launch({
       command: opts.exePath,
@@ -29,8 +33,8 @@ export async function smokeTest(opts: {
     }),
     new Promise<never>((_, reject) =>
       setTimeout(
-        () => reject(new Error(`the packaged app did not serve automation within ${opts.timeoutMs}ms`)),
-        opts.timeoutMs,
+        () => reject(new Error(`the packaged app did not serve automation within ${launchBoundMs / 1000}s`)),
+        launchBoundMs,
       ).unref(),
     ),
   ])
