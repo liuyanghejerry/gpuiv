@@ -21,7 +21,11 @@ export function organizeWindowsProduct(opts: { config: PackageConfig; productDir
 
 export function zipWindows(opts: { productDir: string; zipPath: string }): void {
   // Compress from the parent so the zip contains the product folder itself.
-  run("tar", ["-a", "-c", "-f", opts.zipPath, path.basename(opts.productDir)], {
-    cwd: path.dirname(opts.productDir),
-  })
+  // --force-local: bsdtar otherwise parses the drive colon in `D:\…` as a
+  // remote host ("Cannot connect to D: resolve failed").
+  run(
+    "tar",
+    ["--force-local", "-a", "-c", "-f", opts.zipPath, path.basename(opts.productDir)],
+    { cwd: path.dirname(opts.productDir) },
+  )
 }
