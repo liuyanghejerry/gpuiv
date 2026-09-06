@@ -136,28 +136,43 @@ gpuiv/
 │   │   ├── Cargo.toml
 │   │   └── build.rs
 │   │
-│   └── vue/                     # Vue 3 custom renderer (@gpuiv/vue)
-│       ├── src/
-│       │   ├── index.ts          # Public exports
-│       │   ├── testing.ts        # createTestApp(), TestRenderer
-│       │   ├── reconciler/
-│       │   │   ├── vue-renderer.ts    # Vue createRenderer host config (mutation protocol)
-│       │   │   ├── batch-renderer.ts  # BatchingRenderer: queues ops, one applyBatch() per flush
-│       │   │   └── event-registry.ts  # (id, eventType) → handler map
-│       │   ├── components/       # motion, VirtualList, Select, FloatingLayer
-│       │   ├── automation/       # connectTest/launch client, stdio protocol
-│       │   ├── hooks/            # use-gpuix, use-window-size
-│       │   ├── types.ts          # NativeRenderer interface, StyleDesc TS types
-│       │   └── __tests__/        # vitest suites (GPU-backed)
-│       └── package.json
+│   ├── vue/                     # Vue 3 custom renderer (@gpuiv/vue)
+│   │   ├── src/
+│   │   │   ├── index.ts          # Public exports
+│   │   │   ├── testing.ts        # createTestApp(), TestRenderer
+│   │   │   ├── reconciler/
+│   │   │   │   ├── vue-renderer.ts    # Vue createRenderer host config (mutation protocol)
+│   │   │   │   ├── batch-renderer.ts  # BatchingRenderer: queues ops, one applyBatch() per flush
+│   │   │   │   └── event-registry.ts  # (id, eventType) → handler map
+│   │   │   ├── components/       # motion, VirtualList, Select, FloatingLayer
+│   │   │   ├── automation/       # connectTest/launch client, stdio protocol
+│   │   │   ├── hooks/            # use-gpuix, use-window-size
+│   │   │   ├── packaged.ts       # isPackaged(), resourcesPath()
+│   │   │   ├── types.ts          # NativeRenderer interface, StyleDesc TS types
+│   │   │   └── __tests__/        # vitest suites (GPU-backed)
+│   │   └── package.json
+│   │
+│   └── packager/                 # App packaging (@gpuiv/packager, workspace-only for now)
+│       ├── bin/gpuiv-packager.ts # CLI entry (run under bun)
+│       └── src/
+│           ├── config.ts         # gpuiv.package.ts schema + loader
+│           ├── targets.ts        # target map + .node resolution (walks up from the app)
+│           ├── shim.ts           # binding pin: one literal .node require per product
+│           ├── bundle.ts         # Bun.build({ compile }) wrapper
+│           ├── macos.ts          # .app wrap, plist, ad-hoc codesign, ditto zip
+│           ├── windows.ts        # portable folder + tar zip
+│           ├── smoke.ts          # packaged-app automation smoke test
+│           ├── icons.ts          # dev-machine icon generator (rsvg/sips/iconutil + TS ICO writer)
+│           └── index.ts / cli.ts # programmatic API + CLI
 │
 ├── examples/                    # Example apps (private workspace)
 │   ├── chat.tsx                 # Waku-style app (the flagship example)
 │   ├── chat.test.tsx            # Automation-driven UI test
 │   ├── chat.perf.test.tsx       # Draw / chrome perf regression test
 │   ├── counter.tsx, diff.tsx, native-text.tsx
-│   ├── profile-chat-scroll.tsx  # Manual profiling entry
-│   └── compile-chat.ts          # bun compile bundle script
+│   ├── gpuiv.package.ts         # chat packaging config (`bun run package`)
+│   ├── icons.ts                 # chat icon generation (`bun run icons`)
+│   └── profile-chat-scroll.tsx  # Manual profiling entry
 │
 ├── scripts/
 │   ├── dev.ts                   # Watch Rust src, rebuild, re-render screenshots
@@ -948,6 +963,19 @@ belong in README. This list is only the remaining engineering work.
       `tick()` throws; `createApp` installs uncaught handlers)
 - [x] Applications own the Tab key: no process-wide Tab bindings;
       `focusNext`/`focusPrevious` napi + render-level `onKeyDown`/`onKeyUp`
+- [x] App packaging (`@gpuiv/packager`): `bun run package` → macOS `.app`
+      (plist/icon/ad-hoc codesign/zip) + Windows portable exe (GUI subsystem,
+      icon/version info), one pinned napi binding embedded per product,
+      automation smoke test on every build, `package-macos`/`package-windows`
+      CI jobs (manual dispatch). Design record: `docs/packaging-plan.md`
+- [x] Auto-update (`@gpuiv/packager publish/promote/keygen` +
+      `createUpdater` in `@gpuiv/vue`): S3-compatible signed feed, ed25519
+      pinned at package time, pure-TS updater with per-platform
+      apply-and-relaunch, CI publish/promote jobs behind S3 secrets, and a
+      manual-dispatch `update-e2e` CI job that verifies the full
+      self-update on macOS and Windows against an in-process mock S3.
+      Design record: `docs/auto-update-plan.md` (delta updates and staged
+      rollout are its P2)
 
 ### TODO
 
@@ -967,6 +995,10 @@ belong in README. This list is only the remaining engineering work.
 
 #### Low Priority
 
+- [ ] **Packaging P1/P2** - release signing + notarization (macOS CI),
+      Windows signing hook, dmg/installer, S3-backed auto-update feed +
+      pure-TS updater (`docs/auto-update-plan.md`), Linux AppImage,
+      universal-macOS `lipo` spike. See `docs/packaging-plan.md` phasing
 - [ ] **Window controls** - resize, minimize (title already works)
 - [ ] **Multiple windows** - Support multiple GPUI windows
 - [x] **JS remount** - `createApp()` plus `bun --hot` remounts the Vue tree on the same window
