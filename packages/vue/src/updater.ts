@@ -18,6 +18,7 @@ import {
   type KeyObject,
 } from "node:crypto"
 import {
+  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -376,16 +377,22 @@ export function applyUpdateSync(zipPath: string, bundleId: string): string | nul
   throw new Error("Linux self-update is not implemented (P2).")
 }
 
-/** bsdtar reads zip on macOS and Windows 10+ alike — one extraction path,
- * no zip library. `--force-local` (a GNU tar option the Windows bsdtar
- * accepts, macOS's does not) keeps the drive colon in `C:\…` paths from
- * being parsed as a remote host. */
+/** bsdtar reads zip on macOS and Windows 10+ alike. The archive is copied
+ * next to the destination and extracted by its bare name with `cwd` there —
+ * absolute paths hit one landmine per platform (the Windows drive colon
+ * reads as a remote host; relative paths across the macOS /var symlink
+ * resolve wrong), and a bare filename sidesteps the whole class. */
 function extractZip(zipPath: string, destDir: string): void {
   mkdirSync(destDir, { recursive: true })
-  const args = [...(platform() === "win32" ? ["--force-local"] : []), "-xf", zipPath, "-C", destDir]
-  const result = spawnSync("tar", args, { timeout: 120_000 })
-  if (result.status !== 0) {
-    throw new Error(`Extraction failed (tar ${result.status}): ${result.stderr}`)
+  const local = path.join(destDir, "update.zip")
+  copyFileSync(zipPath, local)
+  try {
+    const result = spawnSync("tar", ["-xf", "update.zip"], { cwd: destDir, timeout: 120_000 })
+    if (result.status !== 0) {
+      throw new Error(`Extraction failed (tar ${result.status}): ${result.stderr}`)
+    }
+  } finally {
+    rmSync(local, { force: true })
   }
 }
 
