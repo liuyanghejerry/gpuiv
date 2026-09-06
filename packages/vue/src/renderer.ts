@@ -22,6 +22,7 @@ import {
   serveAutomationStdio,
   type LiveAutomationRenderer,
 } from "./automation/client.js"
+import { createComponentInspector } from "./automation/component-inspector.js"
 
 let runtimeErrorHandlersInstalled = false
 
@@ -62,11 +63,17 @@ export function createNativeRenderer(): GpuixRenderer {
     const init = renderer.init.bind(renderer)
     renderer.init = (options) => {
       init(options)
-      serveAutomationStdio(new InProcessBackend(liveRendererAsTest(renderer)))
+      const backend = new InProcessBackend(liveRendererAsTest(renderer))
+      // The Vue app does not exist yet — `createApp` attaches the component
+      // inspector once it mounts, through this map.
+      automationBackends.set(renderer, backend)
+      serveAutomationStdio(backend)
     }
   }
   return renderer
 }
+
+const automationBackends = new WeakMap<NativeRenderer, InProcessBackend>()
 
 /** ~125fps. Above any common display refresh rate, so frames are never the
  *  bottleneck, while still leaving the Node event loop almost entirely idle. */
@@ -256,6 +263,9 @@ export function createApp(
   app.provide(GPUIV_CONTEXT, { renderer: host })
   app.mount(gpuivHost.container)
   gpuivHost.flushMutations()
+  // Component state over the automation protocol. Reattached on every mount
+  // so a `bun --hot` remount never leaves the session walking a dead tree.
+  automationBackends.get(host)?.setComponentInspector(createComponentInspector(app))
 
   const handle: GpuivAppHandle = {
     app,

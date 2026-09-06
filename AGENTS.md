@@ -932,6 +932,8 @@ belong in README. This list is only the remaining engineering work.
 - [x] Cross-element text selection
 - [x] Text search highlight (`highlight` prop, `useTextSearch`, `findRanges`)
 - [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
+- [x] Component-state inspection over the automation protocol
+      (`getComponentTree` / `getComponentState`, `createComponentInspector`)
 - [x] `setWindowTitle`
 - [x] macOS menu bar with the standard shortcuts (`appName`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)

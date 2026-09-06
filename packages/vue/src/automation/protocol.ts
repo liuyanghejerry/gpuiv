@@ -82,10 +82,61 @@ export interface TreeNode {
   children?: TreeNode[]
 }
 
+/** A JSON-safe component-state value. Reactive proxies are serialized with
+ *  bounds (depth 4, 50 items/keys, 500-char strings); refs are unwrapped. */
+export type SerializedValue =
+  | string
+  | number
+  | boolean
+  | null
+  | SerializedValue[]
+  | { [key: string]: SerializedValue }
+
+export const serializedValueSchema: z.ZodType<SerializedValue> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(serializedValueSchema),
+    z.record(z.string(), serializedValueSchema),
+  ])
+)
+
+export const componentTreeNodeSchema: z.ZodType<ComponentTreeNode> = z.lazy(() =>
+  z.object({
+    id: z.number(),
+    name: z.string(),
+    file: z.string().optional(),
+    hostIds: z.array(z.number()).optional(),
+    props: z.record(z.string(), serializedValueSchema).optional(),
+    attrs: z.record(z.string(), serializedValueSchema).optional(),
+    state: z.record(z.string(), serializedValueSchema).optional(),
+    data: z.record(z.string(), serializedValueSchema).optional(),
+    children: z.array(componentTreeNodeSchema).optional(),
+  })
+)
+
+export interface ComponentTreeNode {
+  /** Per-call sequential id, stable only within one response. */
+  id: number
+  name: string
+  file?: string
+  /** Automation element ids this component rendered directly. */
+  hostIds?: number[]
+  props?: Record<string, SerializedValue>
+  attrs?: Record<string, SerializedValue>
+  /** `setup()` state; refs read unwrapped. */
+  state?: Record<string, SerializedValue>
+  /** Options-API `data`. */
+  data?: Record<string, SerializedValue>
+  children?: ComponentTreeNode[]
+}
+
 const okSchema = z.object({ ok: z.literal(true) })
 
 const capabilitiesSchema = z.array(
-  z.enum(["input", "screenshot", "clock", "tree"])
+  z.enum(["input", "screenshot", "clock", "tree", "components"])
 )
 
 /** Single source of truth for method names, params, and results. */
@@ -194,6 +245,14 @@ export const methods = {
   getTree: {
     params: z.object({}),
     result: z.object({ tree: treeNodeSchema.nullable() }),
+  },
+  getComponentTree: {
+    params: z.object({}),
+    result: z.object({ components: z.array(componentTreeNodeSchema).nullable() }),
+  },
+  getComponentState: {
+    params: z.object({ elementId: z.number() }),
+    result: z.object({ component: componentTreeNodeSchema.nullable() }),
   },
   getPaintedText: {
     params: z.object({}),
