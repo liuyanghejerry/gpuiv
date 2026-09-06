@@ -238,7 +238,16 @@ try {
     spawnSync('pkill', ['-f', v1Exe], { stdio: 'ignore' })
   }
 
-  rmSync(work, { recursive: true, force: true })
+  // Best-effort cleanup with retries: on Windows the just-killed
+  // processes can hold handles into the temp dir for a moment (EPERM).
+  for (let i = 0; i < 6; i++) {
+    try {
+      rmSync(work, { recursive: true, force: true })
+      break
+    } catch {
+      await sleep(1_000)
+    }
+  }
   log(`PASS: packaged app self-updated ${OLD_VERSION} → ${NEW_VERSION} on ${target}`)
   process.exit(0)
 } finally {
