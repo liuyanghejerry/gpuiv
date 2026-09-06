@@ -473,11 +473,14 @@ export async function finishPendingWindowsUpdate(): Promise<void> {
   process.exit(0)
 }
 
-/** Where the Windows handoff stages an update: beside the product dir. */
+/** Where the Windows handoff stages an update: beside the product dir.
+ * The name is space-free on purpose — it reaches bsdtar as a `-C`
+ * argument, and spaces in spawned paths have bitten us twice already. */
 function windowsStagingDir(): string | null {
   if (platform() !== "win32") return null
   const productDir = path.dirname(process.execPath)
-  return path.join(path.dirname(productDir), `.${path.basename(productDir)}-update`)
+  const slug = path.basename(productDir).replace(/\s+/g, "-")
+  return path.join(path.dirname(productDir), `.${slug}-update`)
 }
 
 function singleChild(dir: string): string | null {

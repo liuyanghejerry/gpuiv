@@ -210,9 +210,10 @@ try {
     log(`exe is now the ${NEW_VERSION} build ✓`)
 
     if (isWindows) {
-      // The handoff stages beside the product dir; the relaunched app cleans
-      // it at init (best-effort retry while locks clear).
-      const staging = path.join(path.dirname(path.dirname(v1Exe)), `.${path.basename(path.dirname(v1Exe))}-update`)
+      // The handoff stages beside the product dir (space-free name — it
+      // feeds bsdtar); the relaunched app cleans it at init.
+      const productDirName = path.basename(path.dirname(v1Exe)).replace(/\s+/g, '-')
+      const staging = path.join(path.dirname(path.dirname(v1Exe)), `.${productDirName}-update`)
       for (let i = 0; i < 15 && existsSync(staging); i++) await sleep(2_000)
       if (existsSync(staging)) throw new Error(`update staging not cleaned after relaunch: ${staging}`)
       log('update staging cleaned after relaunch ✓')
