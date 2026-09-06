@@ -314,4 +314,16 @@ with no swap leftovers. What the build surfaced beyond the design:
   has to serve the publish PUTs — the first run deadlocked into a fetch
   timeout. The driver also captures the product's stderr (manual spawn +
   `connectStdio` instead of `launch()`) so an apply failure in CI prints
-  the updater's actual error instead of a blind hash timeout.
+  the updater's actual error instead of a blind hash timeout — that
+  capture is what identified every Windows fix below.
+- **Cross-platform tar extraction landed on "no path at all"**: absolute
+  Windows paths hit the drive-colon-as-host ("Cannot connect to C:");
+  `--force-local` fixes that but is GNU-only (the macOS bsdtar rejects
+  it); space-bearing paths split the Windows spawn argument list;
+  relative paths resolve wrong across the macOS `/var` symlink. The final
+  `extractZip` copies the archive next to the destination and extracts it
+  by bare filename with `cwd` there.
+- **A just-killed Windows process holds handles briefly** — deleting the
+  e2e's temp dir right after `taskkill` raises EPERM; the cleanup retries.
+  The same pattern (retry, next launch cleans) covers the updater's own
+  leftover handling.
