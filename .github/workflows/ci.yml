@@ -355,6 +355,50 @@ jobs:
           bun run promote-release -- --channel stable --version "$VERSION" \
             --target darwin-arm64 --target darwin-x64 --target win32-x64
 
+  # Full self-update verification: two packaged versions against an
+  # in-process mock S3, the packaged v0.1.0 product auto-downloads and
+  # swaps itself to the published v0.2.0 (examples/update-e2e.ts).
+  # Manual runs only.
+  update-e2e:
+    name: update-e2e (${{ matrix.target }})
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: macos-latest
+            target: darwin-arm64
+            bindings: bindings-aarch64-apple-darwin
+          - host: windows-latest
+            target: win32-x64
+            bindings: bindings-x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.host }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download bindings
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.bindings }}
+          path: packages/native/
+
+      - name: Build @gpuiv/vue
+        run: bun run build
+        working-directory: packages/vue
+
+      - name: Run the self-update e2e
+        working-directory: examples
+        shell: bash
+        run: bun run update-e2e
+        timeout-minutes: 20
+
   publish:
     name: publish
     # Publishing needs SIGILLO_TOKEN + npm rights that only the upstream

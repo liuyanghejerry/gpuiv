@@ -14,6 +14,7 @@
     "package": "gpuiv-packager build",
     "publish-release": "gpuiv-packager publish",
     "promote-release": "gpuiv-packager promote",
+    "update-e2e": "bun update-e2e.ts",
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {

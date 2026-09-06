@@ -197,6 +197,21 @@ export function createUpdater(userOptions: Partial<UpdaterOptions> = {}): Update
   let pendingManifest: ReleaseManifest | null = null
   let stagedZip: string | null = null
 
+  // A Windows update renames the running exe aside; the replacement deletes
+  // it here, on the next launch. Best-effort twice: the dying process may
+  // still hold the lock when the replacement starts.
+  if (platform() === "win32" && isPackaged()) {
+    const tryClean = () => {
+      try {
+        cleanWindowsLeftovers(path.dirname(process.execPath))
+      } catch {
+        // read-only installs, races — the next launch tries again
+      }
+    }
+    tryClean()
+    setTimeout(tryClean, 5_000).unref()
+  }
+
   const emit = (event: UpdaterEvent) => {
     for (const listener of listeners) {
       try {

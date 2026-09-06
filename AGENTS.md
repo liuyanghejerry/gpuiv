@@ -971,9 +971,11 @@ belong in README. This list is only the remaining engineering work.
 - [x] Auto-update (`@gpuiv/packager publish/promote/keygen` +
       `createUpdater` in `@gpuiv/vue`): S3-compatible signed feed, ed25519
       pinned at package time, pure-TS updater with per-platform
-      apply-and-relaunch, CI publish/promote jobs behind S3 secrets. Design
-      record: `docs/auto-update-plan.md` (delta updates and staged rollout
-      are its P2)
+      apply-and-relaunch, CI publish/promote jobs behind S3 secrets, and a
+      manual-dispatch `update-e2e` CI job that verifies the full
+      self-update on macOS and Windows against an in-process mock S3.
+      Design record: `docs/auto-update-plan.md` (delta updates and staged
+      rollout are its P2)
 
 ### TODO
 

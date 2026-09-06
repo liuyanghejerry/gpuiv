@@ -8,8 +8,13 @@ description: S3-backed auto-update for packaged GPUIV apps — immutable version
 The update half of [packaging-plan.md](./packaging-plan.md). **P1 is
 implemented** (`@gpuiv/packager publish`/`promote`/`keygen`,
 `createUpdater` in `@gpuiv/vue`, per-platform apply, CI wiring behind
-secrets, the chat update banner); the implementation record is at the
-bottom. It assumes the P0 packaging pipeline exists (`bun run package` →
+secrets, the chat update banner) **and verified end-to-end in CI**: the
+manual-dispatch `update-e2e` job runs `examples/update-e2e.ts` on macOS
+and Windows — two packaged versions against an in-process mock S3, the
+v0.1.0 product auto-updates itself to the published v0.2.0 and the job
+asserts the on-disk executable hash, leftover cleanup, and that the feed
+actually served the download. The implementation record is at the bottom.
+It assumes the P0 packaging pipeline exists (`bun run package` →
 per-target zips).
 
 ## Goal
@@ -298,3 +303,9 @@ with no swap leftovers. What the build surfaced beyond the design:
   mocks) so the vitest suites cover semver, signature acceptance/rejection/
   rotation, feed decisions, and a real ditto-zipped `.app` swap without a
   GPU or a window.
+- **The e2e driver must spawn children asynchronously**: its mock S3 lives
+  in the same process, and a `spawnSync` child blocks the event loop that
+  has to serve the publish PUTs — the first run deadlocked into a fetch
+  timeout. The Windows swap deletes the `.old` exe at the replacement's
+  startup with a delayed retry (the dying process may still hold the lock
+  for a moment).
