@@ -1,0 +1,28 @@
+{
+  "name": "@gpuiv/packager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Package GPUIV apps into distributable desktop products (macOS .app, Windows portable exe) with bun compile.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "gpuiv-packager": "./bin/gpuiv-packager.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./icons": "./src/icons.ts"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "scripts": {
+    "test": "echo 'packager is verified end-to-end via examples packaging; no unit suite yet'"
+  },
+  "dependencies": {
+    "@gpuiv/vue": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.0"
+  }
+}

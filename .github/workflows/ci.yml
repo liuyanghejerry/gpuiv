@@ -202,6 +202,88 @@ jobs:
         run: bun run test
         working-directory: examples
 
+  # Desktop products for the chat example, built through @gpuiv/packager.
+  # Manual runs only (workflow_dispatch): the bindings come from the build
+  # matrix above, so no Rust is recompiled here. Each job's packager run
+  # smoke-tests its own artifacts through the automation protocol before
+  # anything is uploaded. Signing/notarization hooks are P1.
+  package-macos:
+    name: package-macos
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download darwin bindings
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/native
+          pattern: bindings-*-apple-darwin
+          merge-multiple: true
+
+      - name: Build @gpuiv/vue
+        run: bun run build
+        working-directory: packages/vue
+
+      # arm64 natively, x64 cross-compiled (the smoke test runs it under
+      # Rosetta on the arm64 runner).
+      - name: Package chat for darwin
+        run: bun run package --target darwin-arm64 --target darwin-x64
+        working-directory: examples
+
+      - name: Upload packaged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-darwin
+          path: examples/dist/package/
+          if-no-files-found: error
+
+  package-windows:
+    name: package-windows
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download Windows bindings
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/native
+          pattern: bindings-*-pc-windows-msvc
+          merge-multiple: true
+
+      - name: Build @gpuiv/vue
+        run: bun run build
+        working-directory: packages/vue
+
+      # Windows icon/version metadata needs host Windows APIs — this product
+      # cannot be cross-compiled from the macOS job.
+      - name: Package chat for win32
+        run: bun run package --target win32-x64
+        working-directory: examples
+        shell: bash
+
+      - name: Upload packaged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-win32
+          path: examples/dist/package/
+          if-no-files-found: error
+
   publish:
     name: publish
     # Publishing needs SIGILLO_TOKEN + npm rights that only the upstream

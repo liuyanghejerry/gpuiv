@@ -1,6 +1,8 @@
 // GPUIX Vue - Vue 3 bindings for GPUI
 export { createApp, createNativeRenderer, resetApp, startFrameLoop } from "./renderer.js"
 export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
+export { isPackaged, resourcesPath, resolveResourcesPath } from "./packaged.js"
+export type { ResourcesPathInput } from "./packaged.js"
 export { GPUIV_CONTEXT, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowSize, useWindowInsets } from "./hooks/use-window-size.js"
 export type { WindowSize, WindowSizeOptions, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"

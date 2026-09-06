@@ -142,6 +142,7 @@ Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)
 
 - **`@gpuiv/native`** — Rust/napi-rs bindings to GPUI. Contains `GpuixRenderer`, `RetainedTree`, `build_element()`, `apply_styles()`, and the event wiring.
 - **`@gpuiv/vue`** — Vue 3 custom renderer (`createRenderer` from `vue`), event registry, components, and TypeScript types. Implements the mutation API as the host config.
+- **`@gpuiv/packager`** — Bundles an app into a distributable desktop product (macOS `.app`, Windows portable exe) with `bun build --compile`; the napi binary is pinned and embedded into the executable.
 
 ## Building
 
@@ -2046,6 +2047,67 @@ session opened without an inspector rejects these methods with
 `Unsupported`; when Vue's internals shift under a future version, the walker
 answers `null` instead of failing the session.
 
+## Packaging
+
+`@gpuiv/packager` turns an app into a double-clickable product: one
+executable containing the JS bundle, every asset, and the native binding
+(extracted to a temp file on first run). Describe the product in
+`gpuiv.package.ts` next to the app entry:
+
+```ts
+import type { PackageConfig } from '@gpuiv/packager'
+
+export default {
+  entry: './chat.tsx',
+  productName: 'GPUIX Chat',   // executable name — also the macOS menu title
+  bundleId: 'dev.gpuiv.chat',
+  version: '0.1.0',
+  icon: { darwin: './dist/app-icon.icns', win32: './dist/app-icon.ico' },
+  targets: ['darwin-arm64', 'darwin-x64', 'win32-x64'],
+} satisfies PackageConfig
+```
+
+Then:
+
+```bash
+bun run icons    # once, on a dev machine: SVG → .icns/.ico (examples/icons.ts)
+bun run package  # host target by default, or --target darwin-x64 …
+```
+
+What comes out of `dist/package/`:
+
+- **macOS** — `Foo.app` (plist, icon, ad-hoc codesign) and a `ditto` zip.
+  Release signing/notarization is a CI step (P1).
+- **Windows** — a portable `Foo/` folder with a GUI-subsystem `Foo.exe`
+  (icon + version info) and a zip. Windows products must be built on a
+  Windows host — the icon/metadata flags call Windows APIs — so they build
+  in the `package-windows` CI job, never cross from macOS.
+
+Two guarantees the packager enforces:
+
+- **One binding per product.** The generated napi loader picks the binary at
+  runtime through a chain of try/catch requires, which a bundler cannot
+  embed. The packager stages a shim with a single literal require of the
+  chosen `.node`, so exactly one binary is embedded.
+- **The product proves it runs.** Every build launches the packaged
+  executable through the automation protocol with `GPUIX_BACKGROUND=1`,
+  waits for the root `testId` (`app-root` by default, configurable via
+  `smokeTestId`), and captures a screenshot (`smoke-<target>.png`). A
+  packaging failure surfaces here, not on a user's machine.
+
+Inside a packaged app:
+
+- `isPackaged()` — true inside a compiled product (`bun build --compile`).
+- `resourcesPath()` — the `extraResources` directory (`Contents/Resources`
+  on macOS, `resources/` beside the exe elsewhere); read-only shipped data,
+  not user state.
+- Assets imported `with { type: 'file' }` work unchanged out of the
+  executable's embedded filesystem.
+
+The design record — including the Bun findings that constrain it (no
+universal macOS target, Windows metadata needs a Windows host, bytecode
+limitations) — is in [docs/packaging-plan.md](./docs/packaging-plan.md).
+
 ## Testing
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).
@@ -2182,6 +2244,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
 - [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite, image data — pure TS; text APIs throw `NotSupported`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
+- [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
 - [ ] Vue HMR during `bun --hot` (ref state across saves; needs a Bun Fast Refresh-style runtime transform)

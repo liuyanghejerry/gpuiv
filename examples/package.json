@@ -10,11 +10,13 @@
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
     "infinite-chat": "bun --hot infinite-chat.tsx",
-    "compile": "bun compile-chat.ts",
+    "icons": "bun icons.ts",
+    "package": "gpuiv-packager build",
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
     "@gpuiv/native": "workspace:*",
+    "@gpuiv/packager": "workspace:*",
     "@gpuiv/vue": "workspace:*",
     "@kmamal/sdl": "^0.11.12",
     "diff": "^7.0.0",

@@ -14,6 +14,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@gpuiv/native": "workspace:*",
+        "@gpuiv/packager": "workspace:*",
         "@gpuiv/vue": "workspace:*",
         "@kmamal/sdl": "^0.11.12",
         "diff": "^7.0.0",
@@ -36,6 +37,19 @@
       "version": "0.4.0",
       "devDependencies": {
         "@napi-rs/cli": "^3.1.3",
+      },
+    },
+    "packages/packager": {
+      "name": "@gpuiv/packager",
+      "version": "0.1.0",
+      "bin": {
+        "gpuiv-packager": "./bin/gpuiv-packager.ts",
+      },
+      "dependencies": {
+        "@gpuiv/vue": "workspace:^",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.2.0",
       },
     },
     "packages/vue": {
@@ -140,6 +154,8 @@
     "@gpuiv/examples": ["@gpuiv/examples@workspace:examples"],
 
     "@gpuiv/native": ["@gpuiv/native@workspace:packages/native"],
+
+    "@gpuiv/packager": ["@gpuiv/packager@workspace:packages/packager"],
 
     "@gpuiv/vue": ["@gpuiv/vue@workspace:packages/vue"],
 

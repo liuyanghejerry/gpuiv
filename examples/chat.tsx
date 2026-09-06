@@ -23,6 +23,7 @@ import {
 import {
   applyMacCpuThrottleFromEnv,
   createApp,
+  isPackaged,
   motion,
   Select,
   SelectContent,
@@ -1941,6 +1942,9 @@ export const ChatApp = defineComponent({
             fontFamily: '.SystemUIFont',
             color: C.text,
           }}
+          // The packager's smoke test waits for this testId in the packaged
+          // binary (gpuiv.package.ts smokeTestId).
+          testId="app-root"
         >
           <motion.div
             initial={false}
@@ -2010,10 +2014,14 @@ export const ChatApp = defineComponent({
   },
 })
 
+// A bun-compiled product (bun build --compile) runs this file as the bundle
+// entry; Bun.main and import.meta.path both point into the embedded $bunfs,
+// so the compiled case is detected explicitly.
 const isEntryPoint =
-  typeof Bun !== 'undefined'
+  (typeof Bun !== 'undefined' && Bun.isStandaloneExecutable) ||
+  (typeof Bun !== 'undefined'
     ? Bun.main === import.meta.path
-    : process.argv[1]?.endsWith('chat.tsx')
+    : process.argv[1]?.endsWith('chat.tsx'))
 
 if (isEntryPoint) {
   applyMacCpuThrottleFromEnv()
@@ -2033,6 +2041,7 @@ if (isEntryPoint) {
     // An agent driving the app through automation sets GPUIX_BACKGROUND=1 so
     // the window opens behind whatever a human is typing in.
     focus: process.env.GPUIX_BACKGROUND !== '1',
-    debugFrameOverlay: 'full',
+    // The debug HUD is a development aid; keep it out of packaged products.
+    debugFrameOverlay: isPackaged() ? undefined : 'full',
   })
 }
