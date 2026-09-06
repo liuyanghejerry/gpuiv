@@ -14,6 +14,7 @@ import {
   computed,
   defineComponent,
   h,
+  onMounted,
   ref,
   watch,
   type PropType,
@@ -23,6 +24,7 @@ import {
 import {
   applyMacCpuThrottleFromEnv,
   createApp,
+  createUpdater,
   isPackaged,
   motion,
   Select,
@@ -2025,9 +2027,97 @@ const isEntryPoint =
 
 if (isEntryPoint) {
   applyMacCpuThrottleFromEnv()
+  // Define-injected by @gpuiv/packager when the config pins an update feed;
+  // absent in development, so the updater stays inert under `bun --hot`.
+  const updater = process.env.GPUIV_UPDATE_FEED_URL ? createUpdater() : null
+
   const Entry = defineComponent({
     setup() {
-      return () => <ChatApp turnCount={1_000} includeSafeMdx />
+      // 'idle' | 'downloading' | 'ready'
+      const updateState = ref('idle')
+      const updateProgress = ref(0)
+      const updateVersion = ref('')
+
+      onMounted(() => {
+        if (!updater) return
+        updater.on((event) => {
+          if (event.type === 'update-available') {
+            updateVersion.value = event.version
+            updateState.value = 'downloading'
+          } else if (event.type === 'download-progress') {
+            updateProgress.value = event.percent
+          } else if (event.type === 'downloaded') {
+            updateState.value = 'ready'
+          } else if (event.type === 'error') {
+            console.warn('[chat] updater:', event.message)
+          }
+        })
+        updater
+          .checkForUpdates()
+          .then((status) => (status.state === 'update-available' ? updater.downloadUpdate() : null))
+          .catch((error) => console.warn('[chat] update check:', error))
+      })
+
+      const restartToUpdate = () => {
+        updater?.applyAndRelaunch().catch((error: unknown) => console.warn('[chat] apply:', error))
+      }
+
+      return () => (
+        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+          <ChatApp turnCount={1_000} includeSafeMdx />
+          {updateState.value !== 'idle' ? (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: 'easeOut' }}
+              style={{
+                position: 'absolute',
+                top: 40,
+                right: 16,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 10,
+                paddingTop: 8,
+                paddingBottom: 8,
+                paddingLeft: 12,
+                paddingRight: 12,
+                borderRadius: 8,
+                background: 'rgba(24, 24, 27, 0.92)',
+                fontSize: 12,
+                color: C.text,
+                zIndex: 100,
+              }}
+              testId="update-banner"
+            >
+              {updateState.value === 'downloading' ? (
+                <span style={{ color: C.secondary }}>
+                  Downloading v{updateVersion.value}… {updateProgress.value}%
+                </span>
+              ) : (
+                <>
+                  <span>v{updateVersion.value} ready</span>
+                  <div
+                    style={{
+                      paddingTop: 4,
+                      paddingBottom: 4,
+                      paddingLeft: 10,
+                      paddingRight: 10,
+                      borderRadius: 6,
+                      background: '#10a37f',
+                      color: '#ffffff',
+                      cursor: 'pointer',
+                    }}
+                    testId="update-restart"
+                    onClick={restartToUpdate}
+                  >
+                    Restart
+                  </div>
+                </>
+              )}
+            </motion.div>
+          ) : null}
+        </div>
+      )
     },
   })
   createApp(Entry, {

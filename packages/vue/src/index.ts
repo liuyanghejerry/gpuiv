@@ -3,6 +3,26 @@ export { createApp, createNativeRenderer, resetApp, startFrameLoop } from "./ren
 export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
 export { isPackaged, resourcesPath, resolveResourcesPath } from "./packaged.js"
 export type { ResourcesPathInput } from "./packaged.js"
+export { createUpdater } from "./updater.js"
+export {
+  applyDarwinSwap,
+  applyWindowsSwap,
+  cleanWindowsLeftovers,
+  compareVersions,
+  decideUpdate,
+  parseUpdatePublicKey,
+  platformKey,
+  verifyArtifact,
+} from "./updater.js"
+export type {
+  ChannelPointer,
+  ReleaseManifest,
+  ReleasePlatformEntry,
+  UpdateStatus,
+  Updater,
+  UpdaterEvent,
+  UpdaterOptions,
+} from "./updater.js"
 export { GPUIV_CONTEXT, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowSize, useWindowInsets } from "./hooks/use-window-size.js"
 export type { WindowSize, WindowSizeOptions, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"

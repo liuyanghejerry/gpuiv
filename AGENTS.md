@@ -968,6 +968,12 @@ belong in README. This list is only the remaining engineering work.
       icon/version info), one pinned napi binding embedded per product,
       automation smoke test on every build, `package-macos`/`package-windows`
       CI jobs (manual dispatch). Design record: `docs/packaging-plan.md`
+- [x] Auto-update (`@gpuiv/packager publish/promote/keygen` +
+      `createUpdater` in `@gpuiv/vue`): S3-compatible signed feed, ed25519
+      pinned at package time, pure-TS updater with per-platform
+      apply-and-relaunch, CI publish/promote jobs behind S3 secrets. Design
+      record: `docs/auto-update-plan.md` (delta updates and staged rollout
+      are its P2)
 
 ### TODO
 

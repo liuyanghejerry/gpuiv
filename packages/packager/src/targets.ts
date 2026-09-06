@@ -70,11 +70,20 @@ export const TARGETS: Record<string, TargetSpec> = {
   },
 }
 
-export function getTarget(name: string): TargetSpec {
+/** Pure metadata lookup — safe from any host. Publish uses this: each
+ * platform's CI job publishes its own artifacts, and nothing about the
+ * lookup itself is host-dependent. */
+export function getTargetSpec(name: string): TargetSpec {
   const spec = TARGETS[name]
   if (!spec) {
     throw new Error(`Unknown target "${name}". Known targets: ${Object.keys(TARGETS).join(", ")}`)
   }
+  return spec
+}
+
+/** Build-time lookup: also enforces the host restriction. */
+export function getTarget(name: string): TargetSpec {
+  const spec = getTargetSpec(name)
   if (spec.requireHost && process.platform !== spec.requireHost) {
     throw new Error(
       `Target "${name}" must be built on ${spec.requireHost}: the Windows icon/version metadata is written with host Windows APIs and cannot be cross-compiled. Build it in the package-windows CI job.`,
@@ -104,23 +113,27 @@ export function resolveFromApp(
 
 /** Resolve the napi binary for a target.
  *
- * Order: explicit `--node-path`, the workspace/local `@gpuiv/native` build
- * (repo development and CI, where the bindings artifact is downloaded into
- * `packages/native/`), then the published per-platform optional package
- * (how end-user apps get foreign targets). */
+ * Order: explicit `--node-path`, then a `node_modules` walk-up from the
+ * config directory AND from the entry file's directory (a config may live
+ * outside the app tree — CI checkouts, /tmp e2e configs), looking for the
+ * workspace/local `@gpuiv/native` build first, then the published
+ * per-platform optional package. */
 export function resolveNodeFile(
   spec: TargetSpec,
-  opts: { explicitPath?: string; configDir: string },
+  opts: { explicitPath?: string; configDir: string; entryDir?: string },
 ): string {
   if (opts.explicitPath) return path.resolve(opts.explicitPath)
+  const roots = opts.entryDir && opts.entryDir !== opts.configDir ? [opts.configDir, opts.entryDir] : [opts.configDir]
   const searched: string[] = []
-  for (const packageName of ["@gpuiv/native", spec.nodePackage]) {
-    const resolved = resolveFromApp(opts.configDir, packageName, spec.nodeFile)
-    if (resolved) return resolved
-    searched.push(`${packageName}/${spec.nodeFile}`)
+  for (const root of roots) {
+    for (const packageName of ["@gpuiv/native", spec.nodePackage]) {
+      const resolved = resolveFromApp(root, packageName, spec.nodeFile)
+      if (resolved) return resolved
+      searched.push(`${packageName}/${spec.nodeFile} (from ${root})`)
+    }
   }
   throw new Error(
-    `Could not find ${spec.nodeFile} for target ${spec.name}. Searched node_modules from ${opts.configDir} upward for:\n` +
+    `Could not find ${spec.nodeFile} for target ${spec.name}. Searched node_modules upward from:\n` +
       searched.map((s) => `  - ${s}`).join("\n") +
       `\nBuild packages/native for this target, install ${spec.nodePackage}, or pass --node-path.`,
   )

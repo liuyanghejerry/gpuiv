@@ -4,6 +4,7 @@
  * to produce a named, versioned, iconned product on every platform. Paths are
  * resolved against the config file's directory. */
 
+import { existsSync, readFileSync } from "node:fs"
 import { dirname, isAbsolute, resolve as resolvePath } from "node:path"
 
 export interface PackageConfig {
@@ -39,6 +40,21 @@ export interface PackageConfig {
   /** Smoke-test timeout in ms. Default 60_000 (generous for Rosetta
    * cold-translation of a cross-compiled x64 product on a fresh runner). */
   smokeTimeoutMs?: number
+  /** Auto-update trust anchors (docs/auto-update-plan.md). ed25519 public
+   * keys (PEM or Sparkle-style base64 raw), accepted as an array for
+   * rotation: sign with the new key, keep the old accepted one cycle.
+   * `publish` refuses to sign without them. */
+  updatePublicKeys?: string[]
+  /** Feed base URL the packaged app polls, e.g.
+   * `https://cdn.example.com/chat`. Injected at package time. */
+  updateFeedUrl?: string
+  /** Channel the product follows. Default `stable`. */
+  updateChannel?: string
+  /** Oldest version allowed to auto-update to this release (manual install
+   * below it). Written into the release manifest. */
+  updateMinimumAutoupdateVersion?: string
+  /** Release notes for `publish` (or pass `--notes` per invocation). */
+  releaseNotes?: string
 }
 
 export interface ResolvedConfig extends Omit<PackageConfig, "entry" | "icon" | "outDir" | "extraResources"> {
@@ -71,7 +87,7 @@ export async function loadConfig(explicitPath?: string): Promise<{ config: Resol
   } else {
     for (const base of CONFIG_BASENAMES) {
       const candidate = `${process.cwd()}/${base}`
-      if (await Bun.file(candidate).exists()) {
+      if (existsSync(candidate)) {
         file = candidate
         break
       }
@@ -83,9 +99,11 @@ export async function loadConfig(explicitPath?: string): Promise<{ config: Resol
     )
   }
 
+  // node:fs, not Bun.file: the packager runs under bun but its unit tests
+  // run under vitest/node workers.
   const raw: PackageConfig =
     file.endsWith(".json")
-      ? await Bun.file(file).json()
+      ? JSON.parse(readFileSync(file, "utf8"))
       : (await import(file)).default
   validate(raw, file)
 

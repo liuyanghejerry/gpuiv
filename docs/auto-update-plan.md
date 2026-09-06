@@ -5,9 +5,12 @@ description: S3-backed auto-update for packaged GPUIV apps — immutable version
 
 # Auto-Update Plan
 
-The update half of [packaging-plan.md](./packaging-plan.md). Design only —
-no implementation yet. It assumes the P0 packaging pipeline exists
-(`bun run package` → per-target zips).
+The update half of [packaging-plan.md](./packaging-plan.md). **P1 is
+implemented** (`@gpuiv/packager publish`/`promote`/`keygen`,
+`createUpdater` in `@gpuiv/vue`, per-platform apply, CI wiring behind
+secrets, the chat update banner); the implementation record is at the
+bottom. It assumes the P0 packaging pipeline exists (`bun run package` →
+per-target zips).
 
 ## Goal
 
@@ -257,3 +260,41 @@ same tar swap).
 - **Stats** — download counts are the one thing static hosting cannot
   answer. If needed later: one signed PUT per update to a counter object,
   off by default.
+
+## Implementation record (P1)
+
+Verified end-to-end on macOS: two packaged versions of the chat example
+(v0.1.0 with a pinned local feed, v0.2.0 published through `publish` +
+`promote` to a mock S3), the v0.1.0 product launched through automation,
+auto-checked, auto-downloaded 31 MB, verified, and after clicking
+*Restart* its `.app` on disk became byte-identical to the v0.2.0 build
+with no swap leftovers. What the build surfaced beyond the design:
+
+- **`Bun.isStandaloneExecutable` is `undefined` on bun 1.3.14**, so
+  `isPackaged()` also detects the `$bunfs` virtual path in `Bun.main` —
+  the first packaged chat never updated because the updater's own guard
+  thought it was a development run.
+- **Publish writes per-target fragments (`manifest-<target>.json`), not a
+  partial `release.json`** — the design sketch had each platform job
+  writing the release manifest with only its platforms, which the second
+  job would overwrite. `promote` is the only writer of both the merged
+  `release.json` and the channel pointer.
+- **Binding resolution walks up from the entry file's directory too.** A
+  config can live outside the app tree (CI checkouts, scratch configs);
+  resolution from the config directory alone dead-ends in `/tmp`.
+- **The publish CLI takes S3 credentials from env only** (flags carry the
+  location: endpoint/region/bucket/prefix) — keys belong in CI secrets,
+  not in command lines.
+- **macOS swap deletes the old bundle after the new one is in place**
+  (not the design's "keep two backups"): an 80 MB product makes 2×80 MB of
+  retained backups hard to justify, and rollback-by-redownload matches
+  everything else here. A power loss mid-swap still leaves either the old
+  or the new bundle complete.
+- **Styles are `StyleDesc`, not CSS**: the first banner used
+  `padding: '8px 12px'` shorthand and the batch failed with
+  `invalid type: string "8px 12px", expected f64` — per-side numeric
+  padding only.
+- **The updater engine is node-safe** (no `Bun.*` globals, `node:http`
+  mocks) so the vitest suites cover semver, signature acceptance/rejection/
+  rotation, feed decisions, and a real ditto-zipped `.app` swap without a
+  GPU or a window.

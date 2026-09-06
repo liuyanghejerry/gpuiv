@@ -2108,6 +2108,26 @@ The design record — including the Bun findings that constrain it (no
 universal macOS target, Windows metadata needs a Windows host, bytecode
 limitations) — is in [docs/packaging-plan.md](./docs/packaging-plan.md).
 
+### Auto-update (S3-backed)
+
+Products can update themselves from any S3-compatible bucket
+([docs/auto-update-plan.md](./docs/auto-update-plan.md)). Trust is an
+ed25519 key pair: `gpuiv-packager keygen` makes it, the public key is
+pinned in `gpuiv.package.ts` (`updatePublicKeys`) and baked into every
+build, the private key stays in CI secrets. `gpuiv-packager publish`
+uploads signed immutable release objects for the targets it built,
+`gpuiv-packager promote` is the single writer that merges the platform
+fragments and flips `stable.json` — so concurrent macOS/Windows CI jobs
+never race the feed.
+
+Inside the app, `createUpdater()` (feed URL, channel and public keys are
+define-injected at package time) exposes `checkForUpdates()` /
+`downloadUpdate()` / `applyAndRelaunch()` with progress events; apply is a
+per-platform two-phase swap (`.app` rename dance on macOS, running-exe
+rename on Windows) that never leaves a half-written product on disk. The
+chat example ships a reference update banner; the engine is inert under
+`bun --hot`.
+
 ## Testing
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).

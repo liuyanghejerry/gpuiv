@@ -17,12 +17,14 @@
     "src"
   ],
   "scripts": {
-    "test": "echo 'packager is verified end-to-end via examples packaging; no unit suite yet'"
+    "test": "vitest run"
   },
   "dependencies": {
-    "@gpuiv/vue": "workspace:^"
+    "@gpuiv/vue": "workspace:^",
+    "aws4fetch": "^1.0.20"
   },
   "devDependencies": {
-    "@types/bun": "^1.2.0"
+    "@types/bun": "^1.2.0",
+    "vitest": "^5.0.0"
   }
 }

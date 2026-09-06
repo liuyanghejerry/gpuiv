@@ -12,6 +12,8 @@
     "infinite-chat": "bun --hot infinite-chat.tsx",
     "icons": "bun icons.ts",
     "package": "gpuiv-packager build",
+    "publish-release": "gpuiv-packager publish",
+    "promote-release": "gpuiv-packager promote",
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {

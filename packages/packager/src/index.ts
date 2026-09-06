@@ -93,7 +93,11 @@ export async function buildPackage(args: BuildPackageArgs): Promise<PackageResul
 async function buildOne(config: ResolvedConfig, spec: TargetSpec, args: BuildPackageArgs): Promise<PackageResult> {
   console.log(`[gpuiv-packager] === ${spec.name} ===`)
 
-  const nodeFile = resolveNodeFile(spec, { explicitPath: args.nodePath, configDir: config.configDir })
+  const nodeFile = resolveNodeFile(spec, {
+    explicitPath: args.nodePath,
+    configDir: config.configDir,
+    entryDir: path.dirname(config.entry),
+  })
   console.log(`[gpuiv-packager] binding: ${nodeFile}`)
 
   const stagingDir = path.join(config.outDir, ".staging", spec.name)

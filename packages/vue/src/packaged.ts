@@ -15,9 +15,12 @@ import path from "node:path"
  * `@gpuiv/packager` (or any `bun build --compile` product). */
 export function isPackaged(): boolean {
   // globalThis probe, not the `Bun` global type: this package also compiles
-  // under a plain node tsconfig.
-  const bun = globalThis as unknown as { Bun?: { isStandaloneExecutable?: boolean } }
-  return bun.Bun?.isStandaloneExecutable === true
+  // under a plain node tsconfig. `isStandaloneExecutable` only exists on
+  // bun ≥1.4; on 1.3.x the compiled entry lives in the $bunfs virtual
+  // filesystem, which is the version-independent signal.
+  const bun = globalThis as unknown as { Bun?: { isStandaloneExecutable?: boolean; main?: string } }
+  if (bun.Bun?.isStandaloneExecutable === true) return true
+  return typeof bun.Bun?.main === "string" && bun.Bun.main.startsWith("/$bunfs")
 }
 
 export interface ResourcesPathInput {

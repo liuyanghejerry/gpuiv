@@ -83,8 +83,27 @@ function buildOptions(opts: BundleOptions): Parameters<typeof Bun.build>[0] {
     // apps with top-level await ("await can only be used inside an async
     // function"). Revisit on bun ≥1.4, where ESM bytecode is supported.
     sourcemap: "linked",
-    define: { "process.env.NODE_ENV": '"production"' },
+    define: buildDefines(opts.config),
   }
+}
+
+/** Build-time constants baked into the product. The updater reads them from
+ * `process.env.GPUIV_*` — define-injected, so a compromised feed can never
+ * change what the app trusts. */
+function buildDefines(config: PackageConfig): Record<string, string> {
+  const defines: Record<string, string> = {
+    "process.env.NODE_ENV": '"production"',
+    "process.env.GPUIV_APP_VERSION": JSON.stringify(config.version),
+    "process.env.GPUIV_APP_BUNDLE_ID": JSON.stringify(config.bundleId),
+  }
+  if (config.updateFeedUrl) {
+    defines["process.env.GPUIV_UPDATE_FEED_URL"] = JSON.stringify(config.updateFeedUrl)
+    defines["process.env.GPUIV_UPDATE_CHANNEL"] = JSON.stringify(config.updateChannel ?? "stable")
+  }
+  if (config.updatePublicKeys?.length) {
+    defines["process.env.GPUIV_UPDATE_PUBLIC_KEYS"] = JSON.stringify(config.updatePublicKeys.join(","))
+  }
+  return defines
 }
 
 function isHostBuild(spec: TargetSpec): boolean {

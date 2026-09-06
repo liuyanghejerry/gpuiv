@@ -148,6 +148,10 @@ jobs:
         run: bun run test
         working-directory: packages/vue
 
+      - name: Run packager tests
+        run: bun run test
+        working-directory: packages/packager
+
       - name: Build Vue package
         run: bun run build
         working-directory: packages/vue
@@ -212,6 +216,14 @@ jobs:
     needs: build
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
+    env:
+      # Feed publishing is inert without these secrets (forks stay green).
+      GPUIV_S3_ENDPOINT: ${{ secrets.GPUIV_S3_ENDPOINT }}
+      GPUIV_S3_REGION: ${{ secrets.GPUIV_S3_REGION }}
+      GPUIV_S3_BUCKET: ${{ secrets.GPUIV_S3_BUCKET }}
+      GPUIV_S3_PREFIX: ${{ secrets.GPUIV_S3_PREFIX }}
+      GPUIV_S3_ACCESS_KEY_ID: ${{ secrets.GPUIV_S3_ACCESS_KEY_ID }}
+      GPUIV_S3_SECRET_ACCESS_KEY: ${{ secrets.GPUIV_S3_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -240,6 +252,13 @@ jobs:
         working-directory: examples
         timeout-minutes: 25
 
+      - name: Publish darwin release objects
+        if: ${{ env.GPUIV_S3_ENDPOINT != '' }}
+        working-directory: examples
+        env:
+          GPUIV_UPDATE_PRIVATE_KEY: ${{ secrets.GPUIV_UPDATE_PRIVATE_KEY }}
+        run: bun run publish-release -- --channel stable --target darwin-arm64 --target darwin-x64
+
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
         with:
@@ -252,6 +271,13 @@ jobs:
     needs: build
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
+    env:
+      GPUIV_S3_ENDPOINT: ${{ secrets.GPUIV_S3_ENDPOINT }}
+      GPUIV_S3_REGION: ${{ secrets.GPUIV_S3_REGION }}
+      GPUIV_S3_BUCKET: ${{ secrets.GPUIV_S3_BUCKET }}
+      GPUIV_S3_PREFIX: ${{ secrets.GPUIV_S3_PREFIX }}
+      GPUIV_S3_ACCESS_KEY_ID: ${{ secrets.GPUIV_S3_ACCESS_KEY_ID }}
+      GPUIV_S3_SECRET_ACCESS_KEY: ${{ secrets.GPUIV_S3_SECRET_ACCESS_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -280,12 +306,54 @@ jobs:
         shell: bash
         timeout-minutes: 25
 
+      - name: Publish win32 release objects
+        if: ${{ env.GPUIV_S3_ENDPOINT != '' }}
+        working-directory: examples
+        shell: bash
+        env:
+          GPUIV_UPDATE_PRIVATE_KEY: ${{ secrets.GPUIV_UPDATE_PRIVATE_KEY }}
+        run: bun run publish-release -- --channel stable --target win32-x64
+
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
         with:
           name: app-win32
           path: examples/dist/package/
           if-no-files-found: error
+
+  # The single writer of the channel pointer: after both platform jobs have
+  # published their immutable fragments, merge them and flip stable.json.
+  # Inert without the S3 secrets.
+  promote-release:
+    name: promote-release
+    needs:
+      - package-macos
+      - package-windows
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      GPUIV_S3_ENDPOINT: ${{ secrets.GPUIV_S3_ENDPOINT }}
+      GPUIV_S3_REGION: ${{ secrets.GPUIV_S3_REGION }}
+      GPUIV_S3_BUCKET: ${{ secrets.GPUIV_S3_BUCKET }}
+      GPUIV_S3_PREFIX: ${{ secrets.GPUIV_S3_PREFIX }}
+      GPUIV_S3_ACCESS_KEY_ID: ${{ secrets.GPUIV_S3_ACCESS_KEY_ID }}
+      GPUIV_S3_SECRET_ACCESS_KEY: ${{ secrets.GPUIV_S3_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Promote the channel pointer
+        if: ${{ env.GPUIV_S3_ENDPOINT != '' }}
+        shell: bash
+        run: |
+          bun install
+          VERSION=$(bun -e "console.log((await import('./examples/gpuiv.package.ts')).default.version)")
+          echo "promoting $VERSION"
+          cd examples
+          bun run promote-release -- --channel stable --version "$VERSION" \
+            --target darwin-arm64 --target darwin-x64 --target win32-x64
 
   publish:
     name: publish
