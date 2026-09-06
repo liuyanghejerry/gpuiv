@@ -233,10 +233,12 @@ jobs:
         working-directory: packages/vue
 
       # arm64 natively, x64 cross-compiled (the smoke test runs it under
-      # Rosetta on the arm64 runner).
+      # Rosetta on the arm64 runner). Bounded so a stalled runtime download
+      # fails the step instead of holding the job.
       - name: Package chat for darwin
         run: bun run package --target darwin-arm64 --target darwin-x64
         working-directory: examples
+        timeout-minutes: 25
 
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
@@ -276,6 +278,7 @@ jobs:
         run: bun run package --target win32-x64
         working-directory: examples
         shell: bash
+        timeout-minutes: 25
 
       - name: Upload packaged app
         uses: actions/upload-artifact@v4

@@ -3,8 +3,9 @@
  * JS, assets (`import … with { type: 'file' }`) and the pinned `.node`
  * binding all end up inside the executable's embedded filesystem; the first
  * run extracts the binding to a content-hashed temp file and reuses it.
- * Bytecode cuts startup on large bundles; the linked sourcemap is embedded
- * and applied to crash stacks automatically. */
+ * The linked sourcemap is embedded and applied to crash stacks
+ * automatically (bun ≥1.4; on ≤1.3 it lands beside the exe and the packager
+ * relocates it out of the product). */
 
 import path from "node:path"
 import type { PackageConfig } from "./config.js"
@@ -18,28 +19,49 @@ export interface BundleOptions {
   outfile: string
 }
 
+/** Cross-compilation downloads the target bun runtime; a stalled download
+ * must fail the build instead of hanging the job for hours. */
+const BUNDLE_TIMEOUT_MS = 10 * 60_000
+
 export async function bundleApp(opts: BundleOptions): Promise<void> {
+  const result = (await Promise.race([
+    Bun.build(buildOptions(opts)),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`bun build exceeded ${BUNDLE_TIMEOUT_MS / 1000}s (stalled runtime download?)`)),
+        BUNDLE_TIMEOUT_MS,
+      ).unref(),
+    ),
+  ])) as Awaited<ReturnType<typeof Bun.build>>
+  if (!result.success) {
+    throw new Error(`bun build --compile failed for ${opts.spec.name}:\n${result.logs.join("\n")}`)
+  }
+}
+
+/** The `windows` sub-object of Bun's compile options (icon optional). */
+interface WindowsCompileOptions {
+  icon?: string
+  hideConsole: boolean
+  title: string
+  publisher: string
+  version: string
+  description: string
+}
+
+function buildOptions(opts: BundleOptions): Parameters<typeof Bun.build>[0] {
   const isWindowsHost = process.platform === "win32"
   // Assembled conditionally: an `icon: undefined` key still trips Bun's
   // "windows.icon must be a valid path" validation, so the key must be
   // absent — not undefined — when no icon is available.
-  const windows = opts.config.icon?.win32
-    ? {
-        icon: opts.config.icon.win32,
-        hideConsole: true,
-        title: opts.config.productName,
-        publisher: opts.config.publisher ?? opts.config.bundleId,
-        version: normalizeWindowsVersion(opts.config.version),
-        description: opts.config.description ?? opts.config.productName,
-      }
-    : {
-        hideConsole: true,
-        title: opts.config.productName,
-        publisher: opts.config.publisher ?? opts.config.bundleId,
-        version: normalizeWindowsVersion(opts.config.version),
-        description: opts.config.description ?? opts.config.productName,
-      }
-  const result = await Bun.build({
+  const windows: WindowsCompileOptions = {
+    hideConsole: true,
+    title: opts.config.productName,
+    publisher: opts.config.publisher ?? opts.config.bundleId,
+    version: normalizeWindowsVersion(opts.config.version),
+    description: opts.config.description ?? opts.config.productName,
+    ...(opts.config.icon?.win32 ? { icon: opts.config.icon.win32 } : {}),
+  }
+  return {
     entrypoints: [opts.entry],
     // The host build compiles for the host bun; foreign targets use the
     // explicit cross spellings, which download the target bun runtime.
@@ -62,9 +84,6 @@ export async function bundleApp(opts: BundleOptions): Promise<void> {
     // function"). Revisit on bun ≥1.4, where ESM bytecode is supported.
     sourcemap: "linked",
     define: { "process.env.NODE_ENV": '"production"' },
-  })
-  if (!result.success) {
-    throw new Error(`bun build --compile failed for ${opts.spec.name}:\n${result.logs.join("\n")}`)
   }
 }
 
@@ -87,8 +106,10 @@ function hostArchSuffix(): string {
 export function normalizeWindowsVersion(version: string): string {
   const parts = version.split(".")
   while (parts.length < 4) parts.push("0")
-  const numeric = parts.map((p) => (/^\d+$/.test(p) ? p : "0")).slice(0, 4)
-  return numeric.join(".")
+  return parts
+    .map((p) => (/^\d+$/.test(p) ? p : "0"))
+    .slice(0, 4)
+    .join(".")
 }
 
 /** Where the compiled executable lands for a target. */
