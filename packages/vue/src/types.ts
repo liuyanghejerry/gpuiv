@@ -381,6 +381,24 @@ export interface ElementProps {
   autoFocus?: boolean
   /** Native GPUI tab order. Use 0 for normal keyboard focus. */
   tabIndex?: number
+  /**
+   * AccessKit role, as an ARIA token (`"button"`, `"heading"`).
+   * A node is in the accessibility tree only with both an id (always set)
+   * and a role. `"none"` / `"presentation"` produce no node.
+   */
+  role?: string
+  /** Accessible name. Maps to GPUI `aria_label`. */
+  "aria-label"?: string
+  /** Extra description announced after name, role, and value. */
+  "aria-description"?: string
+  /** Author id exposed as `AXIdentifier` / UIA AutomationId. */
+  "aria-id"?: string
+  "aria-expanded"?: boolean
+  "aria-selected"?: boolean
+  /** String value reported to assistive technology. */
+  "aria-valuetext"?: string
+  /** Heading level, 1-based. */
+  "aria-level"?: number
   /** Stable locator id for automation. */
   testId?: string
   /** Internal native animation description used by motion components. */
@@ -390,15 +408,23 @@ export interface ElementProps {
 // ── Virtual list props ───────────────────────────────────────────────
 
 type VirtualListShared = {
-  /** No `hover` or `active`: gpui's `List` has no interactive element identity,
-   *  so it cannot hold the pressed or hovered state those styles read. Put them
-   *  on a wrapping `<div>` instead. */
+  /** No `hover` or `active`: gpui's `List` has no pressed or hovered style
+   *  state. Put those on a wrapping `<div>` instead. */
   style?: Omit<StyleDesc, "hover" | "active"> | Record<string, unknown>
   children?: unknown
   alignment?: "top" | "bottom"
   followTail?: boolean
   overdraw?: number
   onVisibleRange?: (event: EventPayload) => void
+  role?: string
+  "aria-label"?: string
+  "aria-description"?: string
+  "aria-id"?: string
+  "aria-expanded"?: boolean
+  "aria-selected"?: boolean
+  "aria-valuetext"?: string
+  "aria-level"?: number
+  testId?: string
 }
 
 /** A variable-height list that builds only rows near its viewport.

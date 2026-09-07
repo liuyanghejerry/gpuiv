@@ -958,6 +958,55 @@ Set `padding` on the input style or on a parent wrapper. When the input has
 </div>
 ```
 
+## Accessibility
+
+GPUI talks to the **macOS AX tree**, Windows UIA, and Linux AT-SPI through
+AccessKit. GPUIV maps Vue props onto that API. A node is in the tree only
+when it has **both** a GPUI id (always set) and a **role**.
+
+Prop names match the DOM. Role **values** are ARIA tokens, not AccessKit
+PascalCase. `"none"` and `"presentation"` produce no node.
+
+```tsx
+<div
+  role="button"
+  aria-label="Delete note"
+  aria-description="Removes this note"
+  aria-id="notes.delete"
+  onClick={remove}
+>
+  Delete
+</div>
+```
+
+| Prop               | GPUI / AccessKit                          |
+| ------------------ | ----------------------------------------- |
+| `role`             | `.role(Role::…)`                          |
+| `aria-label`       | accessible name                           |
+| `aria-description` | extra description after name, role, value |
+| `aria-id`          | `AXIdentifier` / UIA AutomationId         |
+| `aria-expanded`    | expanded state                            |
+| `aria-selected`    | selected state                            |
+| `aria-valuetext`   | string value                              |
+| `aria-level`       | heading level                             |
+
+Native defaults, so common elements are not silent:
+
+| Element       | Default role            | Name / value                         |
+| ------------- | ----------------------- | ------------------------------------ |
+| `<text>`      | `Label`                 | content as `aria-valuetext`          |
+| `<input>`     | `TextInput`             | `value` and `placeholder`            |
+| `<textarea>`  | `MultilineTextInput`    | `value` and `placeholder`            |
+| `<img>`       | `Image`                 | `alt` as `aria-label`                |
+
+An explicit `role` wins over those defaults. A clickable `div` is **not** a
+button until you set `role="button"`. `onClick` registers AccessKit `Click`,
+so VoiceOver Press fires the same JS `click` handler.
+
+Tests can dump the tree with `renderer.getA11yTree()` on the test renderer;
+it activates the accessibility tree at construct so no screen reader is
+needed.
+
 ## Focus and keyboard navigation
 
 Focus is a **native GPUI concept**. GPUIV connects stable element IDs to
@@ -2293,6 +2342,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Click outside (`onMouseDownOutside`)
 - [x] Scroll wheel events with delta and touch phase
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
+- [x] Accessibility: `role` + `aria-*` props onto the AccessKit tree (macOS AX / Windows UIA / Linux AT-SPI), with per-element default roles and `getA11yTree()` test dumps
 - [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `getScrollOffset`)
 - [x] Keyboard events (keyDown, keyUp) with focus management
 - [x] Focus/blur events with automatic FocusHandle creation

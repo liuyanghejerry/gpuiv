@@ -51,6 +51,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
   simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
   getTreeJson(): string
+  getA11yTree(): string
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
   getRetainedElementCount(): number
@@ -160,6 +161,26 @@ export interface TestElement {
   parentId: number | null
   customProps?: Record<string, unknown>
   testId?: string | null
+}
+
+/** GPUI `debug_a11y_tree_json` dump. Node keys are ephemeral (`a`, `b`, …). */
+export interface A11yTreeNode {
+  aria?: {
+    role?: string
+    label?: string
+    description?: string
+    value?: string
+    author_id?: string
+    expanded?: boolean
+    selected?: boolean
+    level?: number
+    on_action?: string[]
+  }
+}
+
+export interface A11yTreeDump {
+  root?: string
+  nodes?: Record<string, A11yTreeNode>
 }
 
 // ── TestRenderer ─────────────────────────────────────────────────────
@@ -423,6 +444,11 @@ export class TestRenderer implements NativeRenderer {
 
   getAutomationTree(): string {
     return this.native.getAutomationTree()
+  }
+
+  /** GPUI accessibility dump from the last painted frame. */
+  getA11yTree(): A11yTreeDump {
+    return JSON.parse(this.native.getA11yTree()) as A11yTreeDump
   }
 
   getElementBounds(elementId: number): number[] | null {

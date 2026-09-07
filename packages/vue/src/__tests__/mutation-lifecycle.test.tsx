@@ -154,10 +154,13 @@ describeNative("mutation lifecycle", () => {
       expect(withoutText).toBe(withTextAndSubtree - 1)
 
       // A whole removed subtree frees every node in it, not just its root.
+      // `<text>deep</text>` counts three nodes: the wrapper div, the host
+      // `<text>`, and its `#text` instance — strings always live in text
+      // instances, matching the React binding's shape.
       deep.value = false
       await app.settle()
       expect(app.renderer.getAllText()).toEqual([])
-      expect(app.renderer.getRetainedElementCount()).toBe(withoutText - 2)
+      expect(app.renderer.getRetainedElementCount()).toBe(withoutText - 3)
     } finally {
       app.unmount()
     }

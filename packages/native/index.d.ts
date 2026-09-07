@@ -430,6 +430,11 @@ export declare class TestGpuixRenderer {
   getTreeJson(): string
   /** Tree JSON with last-paint bounds. Used by the automation locators. */
   getAutomationTree(): string
+  /**
+   * GPUI accessibility dump from the last painted frame.
+   * Empty until a11y is active; the test renderer turns that on at construct.
+   */
+  getA11yTree(): string
   /** Last painted bounds for an element, or null if it was not painted. */
   getElementBounds(id: number): Array<number> | null
   clockPause(): number

@@ -175,16 +175,21 @@ describeNative('chat example (vue)', () => {
 
     // The row div owns at fontSize 13.5 the title text; the header title is
     // fontSize 13, so the two occurrences of a title are distinguishable.
-    const rowOf = (title: string) => {
-      const titleEl = app.renderer
-        .findByType('text')
-        .find((el) => el.text === title && el.style.fontSize === 13.5)
-      return titleEl ? app.renderer.getElement(titleEl.parentId!) : undefined
+    // A string child lives in its own `#text` instance; the style sits on
+    // the host `<text>` above it, the row div above that.
+    const titledText = (title: string, fontSize: number) => {
+      for (const el of app.renderer.findByType('text')) {
+        if (el.text !== title) continue
+        const host = app.renderer.getElement(el.parentId!)
+        if (host?.style.fontSize === fontSize) return host
+      }
+      return undefined
     }
-    const headerTitle = () =>
-      app.renderer
-        .findByType('text')
-        .find((el) => el.text === 'Native SDK vs GPUI comparison' && el.style.fontSize === 13)
+    const rowOf = (title: string) => {
+      const host = titledText(title, 13.5)
+      return host ? app.renderer.getElement(host.parentId!) : undefined
+    }
+    const headerTitle = () => titledText('Native SDK vs GPUI comparison', 13)
 
     // c1 starts active: its row carries the C.item fill, the header shows its title.
     const c1Row = rowOf('give me a quick overview')
@@ -210,9 +215,7 @@ describeNative('chat example (vue)', () => {
     expect(headerTitle()).toBeDefined()
 
     // Clicking back to c1 restores the original state.
-    const c1Title = app.renderer
-      .findByType('text')
-      .find((el) => el.text === 'give me a quick overview' && el.style.fontSize === 13.5)
+    const c1Title = titledText('give me a quick overview', 13.5)
     const c1Bounds = app.renderer.getElementBounds(c1Title!.id)
     app.renderer.nativeSimulateClick(
       c1Bounds![0]! + c1Bounds![2]! / 2,
