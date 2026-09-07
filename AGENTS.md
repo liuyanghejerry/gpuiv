@@ -385,6 +385,12 @@ Details (THROTTLE CPU clamp, canvas WPT suite, asserting on native elements):
 
 ### Drive the live window
 
+When the user asks to **open an example so they can look**, start
+`bun --hot <file>.tsx` and **leave that session running**. A save remounts
+Vue on the same window. Do not relaunch without `--hot`. Do not kill the
+session after a screenshot. `bun --hot` still drops `ref` state on save;
+that is the desktop remount path, not Fast Refresh.
+
 **Do not use `usecomputer`, `screencapture`, or desktop clicks** — use the
 Playwright-like automation API (README **Automation** section). Mark targets with
 `testId`; `connectTest(app.renderer, app.settle)` in vitest, or
