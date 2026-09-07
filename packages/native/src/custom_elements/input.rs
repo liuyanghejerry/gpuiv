@@ -67,13 +67,28 @@ actions!(
 
 const INPUT_KEY_CONTEXT: &str = "GpuixInput";
 const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
+const TEXTAREA_SUBMIT_KEY_CONTEXT: &str = "GpuixTextareaSubmit";
 const CARET_BLINK_MS: u64 = 500;
+const CARET_WIDTH: Pixels = px(2.0);
+const CARET_HEIGHT_RATIO: f32 = 0.75;
 const DRAG_SCROLL_FRAME_MS: u64 = 16;
 const UNDO_COALESCE: Duration = Duration::from_millis(700);
 const UNDO_LIMIT: usize = 200;
 
 fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS) % 2 == 0
+}
+
+// Size the bar to cap height, not the line box. Default leading is phi, so a
+// full-height caret sticks out above and below the glyphs. Cap height is about
+// 0.75em; the em square itself still looks taller than the letters.
+fn caret_rect(origin: Point<Pixels>, line_height: Pixels, font_size: Pixels) -> Bounds<Pixels> {
+    let height = (font_size * CARET_HEIGHT_RATIO).min(line_height);
+    let y_offset = (line_height - height) / 2.;
+    Bounds::new(
+        point(origin.x, origin.y + y_offset),
+        size(CARET_WIDTH, height),
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,15 +148,28 @@ fn single_line_text(text: &str) -> String {
 }
 
 pub fn init(cx: &mut App) {
-    let mut bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false);
-    bindings.extend(text_editor_bindings(TEXTAREA_KEY_CONTEXT, true));
+    let mut bindings = text_editor_bindings(INPUT_KEY_CONTEXT, false, true);
+    bindings.extend(text_editor_bindings(TEXTAREA_KEY_CONTEXT, true, false));
+    bindings.extend(text_editor_bindings(
+        TEXTAREA_SUBMIT_KEY_CONTEXT,
+        true,
+        true,
+    ));
     cx.bind_keys(bindings);
 }
 
-fn text_editor_bindings(context: &'static str, multiline: bool) -> Vec<KeyBinding> {
+fn text_editor_bindings(
+    context: &'static str,
+    multiline: bool,
+    enter_submits: bool,
+) -> Vec<KeyBinding> {
     let context = Some(context);
     let mut bindings = vec![
-        KeyBinding::new("enter", Submit, context),
+        if enter_submits {
+            KeyBinding::new("enter", Submit, context)
+        } else {
+            KeyBinding::new("enter", Newline, context)
+        },
         KeyBinding::new("shift-enter", Newline, context),
         KeyBinding::new("backspace", Backspace, context),
         KeyBinding::new("delete", Delete, context),
@@ -318,6 +346,7 @@ impl CustomElement for TextEditorElement {
                     line_starts: vec![0],
                     last_bounds: None,
                     line_height: px(20.0),
+                    font_size: px(16.0),
                     content_height: 20.0,
                     content_width: 0.0,
                     display_is_placeholder: false,
@@ -336,9 +365,12 @@ impl CustomElement for TextEditorElement {
         state.update(cx, |state, cx| {
             state.callback = callback;
             state.emits_change = emits_change;
-            state.emits_submit = emits_submit;
             state.emits_key_down = emits_key_down;
             state.emits_key_up = emits_key_up;
+            if state.emits_submit != emits_submit {
+                state.emits_submit = emits_submit;
+                cx.notify();
+            }
             state.placeholder = self.placeholder.clone().into();
             state.read_only = self.read_only;
             state.min_rows = self.min_rows.max(1);
@@ -361,8 +393,16 @@ impl CustomElement for TextEditorElement {
             .w_full()
             .track_focus(&focus_handle)
             .child(state);
+        // Single-line inputs center text vertically when given extra height.
+        if !self.multiline {
+            editor = editor.items_center();
+        }
         if let Some(style) = ctx.style {
             editor = crate::renderer::apply_interactive_styles(editor, style);
+            // Clip text to rounded corners, matching HTML input behavior.
+            if style.border_radius.is_some() {
+                editor = editor.overflow_hidden();
+            }
         }
         if ctx
             .style
@@ -558,6 +598,7 @@ struct TextEditorState {
     line_starts: Vec<usize>,
     last_bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
+    font_size: Pixels,
     content_height: f32,
     content_width: f32,
     display_is_placeholder: bool,
@@ -1285,6 +1326,7 @@ impl TextEditorState {
             (SharedString::from(self.content.clone()), false)
         };
         let font_size = style.font_size.to_pixels(window.rem_size());
+        self.font_size = font_size;
         self.line_height = window.line_height();
         let color = if is_placeholder {
             gpui::rgba(0x8f8f8fff).into()
@@ -1501,12 +1543,13 @@ impl EntityInputHandler for TextEditorState {
     ) -> Option<Bounds<Pixels>> {
         let range = self.range_from_utf16(&range_utf16);
         let start = self.point_for_index(range.start)?;
-        Some(Bounds::new(
+        Some(caret_rect(
             point(
                 bounds.left() + start.x - px(self.scroll_left),
                 bounds.top() + start.y - px(self.scroll_top),
             ),
-            size(px(2.0), self.line_height),
+            self.line_height,
+            self.font_size,
         ))
     }
 
@@ -1547,10 +1590,12 @@ impl gpui::Render for TextEditorState {
         let key_up_callback = self.callback.clone();
         let element_id = self.element_id;
         div()
-            .key_context(if self.multiline {
-                TEXTAREA_KEY_CONTEXT
-            } else {
+            .key_context(if !self.multiline {
                 INPUT_KEY_CONTEXT
+            } else if self.emits_submit {
+                TEXTAREA_SUBMIT_KEY_CONTEXT
+            } else {
+                TEXTAREA_KEY_CONTEXT
             })
             .track_focus(&self.focus_handle)
             .cursor(CursorStyle::IBeam)
@@ -1698,9 +1743,10 @@ impl gpui::Element for EditorTextElement {
                 .point_for_index(input.cursor_offset())
                 .unwrap_or(point(px(0.0), px(0.0)));
             caret = Some(fill(
-                Bounds::new(
+                caret_rect(
                     point(origin.x + caret_point.x, origin.y + caret_point.y),
-                    size(px(2.0), input.line_height),
+                    input.line_height,
+                    input.font_size,
                 ),
                 input.caret_color,
             ));
@@ -1846,6 +1892,44 @@ mod tests {
         assert!(!caret_visible(CARET_BLINK_MS));
         assert!(!caret_visible(2 * CARET_BLINK_MS - 1));
         assert!(caret_visible(2 * CARET_BLINK_MS));
+    }
+
+    #[test]
+    fn caret_matches_the_font_size_inside_the_line() {
+        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0), px(16.0));
+        assert_eq!(bounds.origin, point(px(10.0), px(8.0)));
+        assert_eq!(bounds.size, size(px(2.0), px(12.0)));
+        assert_eq!(
+            caret_rect(point(px(0.0), px(0.0)), px(20.0), px(40.0))
+                .size
+                .height,
+            px(20.0)
+        );
+    }
+
+    fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {
+        let keystroke = gpui::Keystroke::parse(keystroke).unwrap();
+        bindings.iter().any(|binding| {
+            binding.match_keystrokes(std::slice::from_ref(&keystroke)) == Some(false)
+                && binding.action().partial_eq(action)
+        })
+    }
+
+    #[test]
+    fn textarea_enter_inserts_a_newline_unless_on_submit_is_set() {
+        let textarea = text_editor_bindings(TEXTAREA_KEY_CONTEXT, true, false);
+        assert!(has_binding(&textarea, "enter", &Newline));
+        assert!(has_binding(&textarea, "shift-enter", &Newline));
+        assert!(!has_binding(&textarea, "enter", &Submit));
+
+        let composer = text_editor_bindings(TEXTAREA_SUBMIT_KEY_CONTEXT, true, true);
+        assert!(has_binding(&composer, "enter", &Submit));
+        assert!(has_binding(&composer, "shift-enter", &Newline));
+        assert!(!has_binding(&composer, "enter", &Newline));
+
+        let input = text_editor_bindings(INPUT_KEY_CONTEXT, false, true);
+        assert!(has_binding(&input, "enter", &Submit));
+        assert!(!has_binding(&input, "enter", &Newline));
     }
 
     #[test]

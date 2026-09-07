@@ -365,6 +365,7 @@ export interface ElementProps {
   onChange?: (event: EventPayload) => void
   /** `onInput` is an alias for `onChange` in Vue (`v-model` friendly). */
   onInput?: (event: EventPayload) => void
+  /** Enter on `<input>`, or Enter on `<textarea>` when this listener is set. */
   onSubmit?: (event: EventPayload) => void
 
   // ── Native component events ─────────────────────────────────────

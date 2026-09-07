@@ -910,7 +910,10 @@ const Composer = defineComponent({
 })
 ```
 
-`Enter` emits `onSubmit`. In a `<textarea>`, `Shift+Enter` inserts a newline.
+`Enter` inserts a newline in a `<textarea>`. Pass **`onSubmit`** to emit that
+event on Enter instead; `Shift+Enter` still inserts a newline. An `<input>`
+always emits `onSubmit` on Enter. The editor updates natively first, then
+reports the complete value to Vue.
 The editor updates natively first, then reports the complete value to Vue.
 `value` changes can replace the native content, but keeping the same prop value
 does not reject an edit like a browser-controlled input.
@@ -925,6 +928,34 @@ inactive. Override its colour through the shared native theme:
 
 ```tsx
 <input theme={{ caret: '#22c55e' }} />
+```
+
+### Input in a search pill
+
+`<input>` has **no default inner padding** and paints text at the top of its
+box. A single-line input vertically centers its text when given extra height.
+Set `padding` on the input style or on a parent wrapper. When the input has
+`borderRadius`, text clips to the rounded shape automatically.
+
+```tsx
+<div style={{
+  display: 'flex',
+  flexDirection: 'row',
+  alignItems: 'center',
+  height: 32,
+  paddingLeft: 10,
+  paddingRight: 4,
+  borderRadius: 16,
+  backgroundColor: '#1a1a22',
+  borderWidth: 1,
+  borderColor: '#ffffff14',
+}}>
+  <input
+    value={query}
+    onChange={(e) => (query = e.value ?? '')}
+    style={{ flexGrow: 1, minWidth: 0, fontSize: 13, color: '#e8e8ed' }}
+  />
+</div>
 ```
 
 ## Focus and keyboard navigation
@@ -1664,6 +1695,24 @@ CSS-like styling via the `style` prop:
 
 Style objects follow the standard Vue shape: plain camelCase objects, kebab-case
 keys are camelized, and CSS strings and arrays of objects are accepted too.
+
+> **GPUIV styles look like CSS but are not CSS.** A few differences trip
+> everyone up on the first project:
+>
+> - **`div` is block, not flex.** Set `display: "flex"` before using
+>   `flexDirection`, `gap`, `alignItems`, or `alignSelf`. Without it those
+>   props are silently ignored.
+> - **A flex child that must shrink needs `minWidth: 0`.** Same rule as CSS,
+>   but easier to miss because there is no browser DevTools to inspect.
+> - **No shorthand values.** `padding`, `margin`, and `border` take numbers.
+>   CSS strings like `"0 16px"`, `"1px solid #fff"`, or `calc()` are ignored.
+> - **`boxShadow` is a structured object**, not a CSS string. See below.
+> - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
+> - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
+>   into one line. A `<text>` child of another `<text>` is a nested div.
+> - **`<input>` has no default inner padding.** Set `padding` on the input
+>   style, or pad the parent wrapper. The input clips to its own
+>   `borderRadius` automatically.
 
 **Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
 

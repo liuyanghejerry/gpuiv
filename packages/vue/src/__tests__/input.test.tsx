@@ -69,7 +69,86 @@ describeNative("native text editors (vue)", () => {
     expect(app.renderer.getPaintedText()).toContain("hi")
   })
 
-  it("supports multiline textarea editing and submission", async () => {
+  it("inserts a newline on enter in a textarea", async () => {
+    const Textarea = defineComponent({
+      setup() {
+        const text = ref("")
+        return () => (
+          <div style={{ width: 400, height: 160 }}>
+            <textarea
+              value={text.value}
+              placeholder="Write a message..."
+              minRows={1}
+              maxRows={4}
+              style={{ width: 300 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+            />
+            <text>{`Value: ${JSON.stringify(text.value)}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(Textarea)
+    const textarea = app.renderer.findByType("textarea")[0]
+
+    app.renderer.nativeSimulateKeystrokes(textarea.id, "h i enter t h e r e")
+    await app.settle()
+    expect(app.renderer.getAllText()).toEqual(['Value: "hi\\nthere"'])
+  })
+
+  it("inserts a newline in the middle of a textarea buffer", async () => {
+    const Textarea = defineComponent({
+      setup() {
+        const text = ref("ab")
+        return () => (
+          <div style={{ width: 400, height: 160 }}>
+            <textarea
+              value={text.value}
+              style={{ width: 300 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+            />
+            <text>{`Value: ${JSON.stringify(text.value)}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(Textarea)
+    const textarea = app.renderer.findByType("textarea")[0]
+
+    app.renderer.nativeSimulateKeystrokes(textarea.id, "left enter")
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain('Value: "a\\nb"')
+  })
+
+  it("replaces a textarea selection with a newline and undoes the edit", async () => {
+    const Textarea = defineComponent({
+      setup() {
+        const text = ref("abc")
+        return () => (
+          <div style={{ width: 400, height: 160 }}>
+            <textarea
+              value={text.value}
+              style={{ width: 300 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+            />
+            <text>{`Value: ${JSON.stringify(text.value)}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(Textarea)
+    const textarea = app.renderer.findByType("textarea")[0]
+
+    app.renderer.nativeSimulateKeystrokes(textarea.id, "shift-left enter")
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain('Value: "ab\\n"')
+
+    app.renderer.nativeSimulateKeystrokes(textarea.id, "cmd-z")
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain('Value: "abc"')
+  })
+
+  it("submits a textarea when onSubmit is set", async () => {
     const Textarea = defineComponent({
       setup() {
         const text = ref("")
@@ -78,7 +157,6 @@ describeNative("native text editors (vue)", () => {
           <div style={{ width: 400, height: 160 }}>
             <textarea
               value={text.value}
-              placeholder="Write a message..."
               minRows={1}
               maxRows={4}
               style={{ width: 300 }}
@@ -103,6 +181,49 @@ describeNative("native text editors (vue)", () => {
 
     app.renderer.nativeSimulateKeystrokes(textarea.id, "enter")
     await app.settle()
+    expect(app.renderer.getAllText()).toContain("Submits: 1")
+  })
+
+  it("switches enter between newline and submit when onSubmit is added", async () => {
+    const submit = ref(false)
+    const Textarea = defineComponent({
+      setup() {
+        const text = ref("ab")
+        const submits = ref(0)
+        return () => (
+          <div style={{ width: 400, height: 160 }}>
+            <textarea
+              value={text.value}
+              style={{ width: 300 }}
+              onChange={(event: EventPayload) => (text.value = event.value ?? "")}
+              onSubmit={submit.value ? () => (submits.value += 1) : undefined}
+            />
+            <text>{`Value: ${JSON.stringify(text.value)}`}</text>
+            <text>{`Submits: ${submits.value}`}</text>
+          </div>
+        )
+      },
+    })
+    app = createTestApp(Textarea)
+    const textarea = app.renderer.findByType("textarea")[0]
+
+    app.renderer.nativeSimulateKeystrokes(textarea.id, "left enter")
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain('Value: "a\\nb"')
+    expect(app.renderer.getAllText()).toContain("Submits: 0")
+
+    submit.value = true
+    await app.settle()
+    app.renderer.nativeSimulateKeystrokes(textarea.id, "enter")
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain('Value: "a\\nb"')
+    expect(app.renderer.getAllText()).toContain("Submits: 1")
+
+    submit.value = false
+    await app.settle()
+    app.renderer.nativeSimulateKeystrokes(textarea.id, "enter")
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain('Value: "a\\n\\nb"')
     expect(app.renderer.getAllText()).toContain("Submits: 1")
   })
 
