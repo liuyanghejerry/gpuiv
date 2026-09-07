@@ -109,6 +109,35 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     }
 }
 
+/// Same SVG the JS img tests write to disk. VisualTestAppContext starts with
+/// a 404 FakeHttpClient, and a real ReqwestClient would leave the GPUI
+/// test dispatcher parked while Tokio fetches. This answers every request
+/// immediately so `<img src="https://…">` exercises GPUI's URI loader.
+const TEST_IMAGE_SVG: &str = concat!(
+    r##"<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140" viewBox="0 0 240 140">"##,
+    r##"<rect x="0" y="0" width="240" height="140" fill="#1e2d59"/>"##,
+    r##"<rect x="16" y="16" width="208" height="108" rx="14" fill="#5ca9ff"/>"##,
+    r##"<circle cx="68" cy="70" r="24" fill="#ffd166"/>"##,
+    r##"<rect x="112" y="50" width="88" height="14" rx="7" fill="#20304f"/>"##,
+    r##"<rect x="112" y="74" width="70" height="12" rx="6" fill="#2a3c61"/>"##,
+    "</svg>",
+);
+
+fn install_test_image_http_client(cx: &mut gpui::App) {
+    let body = TEST_IMAGE_SVG.as_bytes().to_vec();
+    let client = gpui::http_client::FakeHttpClient::create(move |_req| {
+        let body = body.clone();
+        async move {
+            Ok(gpui::http_client::Response::builder()
+                .status(200)
+                .header("content-type", "image/svg+xml")
+                .body(body.into())
+                .unwrap())
+        }
+    });
+    cx.set_http_client(client);
+}
+
 // ── TestGpuixRenderer ────────────────────────────────────────────────
 
 /// Default offscreen test window: 1280x800. Wide enough that a centered
@@ -189,6 +218,7 @@ impl TestGpuixRenderer {
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
             crate::custom_elements::input::init(cx);
+            install_test_image_http_client(cx);
         });
 
         // Open an offscreen window at (-10000, -10000) — invisible but fully

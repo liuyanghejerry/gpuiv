@@ -32,6 +32,9 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 web-time = "1"
 pulldown-cmark = { version = "0.12", default-features = false }
 unicode-segmentation = "1"
+# Same client GPUI's image examples and Zed use. `img(SharedUri)` fetches
+# through `App::http_client`; without this, GPUI's NullHttpClient fails every URL.
+reqwest_client = { path = "../../zed/crates/reqwest_client" }
 # <canvas> pixel buffers wrap into gpui::RenderImage frames. Versions match
 # the zed workspace so cargo unifies them with gpui's own copies.
 image = { version = "0.25.1", default-features = false }

@@ -1,7 +1,11 @@
 /// Image custom elements for raster images and tintable SVG icons.
 ///
-/// This provides a native `<img>` for GPUIX React apps while keeping the same
+/// This provides a native `<img>` for GPUIV Vue apps while keeping the same
 /// custom-element prop pipeline (`setCustomProp`/`custom_props`).
+///
+/// HTTP(S) `src` is a GPUI URI resource. GPUI fetches it through the app
+/// `HttpClient` on a background task and paints once decode finishes. A
+/// definite `width` and `height` keep the layout box stable during that load.
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use base64::Engine as _;
 
@@ -71,6 +75,7 @@ enum ImgSource {
     #[default]
     Empty,
     Path(std::path::PathBuf),
+    Uri(gpui::SharedUri),
     Data(std::sync::Arc<gpui::Image>),
     Invalid,
 }
@@ -84,7 +89,8 @@ pub struct ImgElement {
 
 impl ImgElement {
     fn load_src(&mut self, src: &str) {
-        self.source = if src.trim().is_empty() {
+        let src = src.trim();
+        self.source = if src.is_empty() {
             ImgSource::Empty
         } else if src.starts_with("data:") {
             // TODO: Replace JSON data URLs with binary mutations to keep base64 decoding off paint.
@@ -93,9 +99,50 @@ impl ImgElement {
                     ImgSource::Data(std::sync::Arc::new(gpui::Image::from_bytes(format, bytes)))
                 })
                 .unwrap_or(ImgSource::Invalid)
+        } else if let Some(uri) = http_image_uri(src) {
+            ImgSource::Uri(uri)
         } else {
             ImgSource::Path(src.into())
         };
+    }
+}
+
+fn http_image_uri(src: &str) -> Option<gpui::SharedUri> {
+    let scheme_end = src.find("://")?;
+    let scheme = &src[..scheme_end];
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return None;
+    }
+    (src.len() > scheme_end + 3).then(|| gpui::SharedUri::from(src.to_string()))
+}
+
+/// Install the GPUI HTTP client so `<img src="https://…">` can fetch.
+///
+/// Desktop Application defaults to `NullHttpClient`, which fails every URI
+/// load. One client serves the whole process.
+pub fn init(cx: &mut gpui::App) {
+    match reqwest_client::ReqwestClient::user_agent("gpuiv") {
+        Ok(client) => cx.set_http_client(std::sync::Arc::new(client)),
+        Err(error) => log::error!(
+            "GPUIV HTTP client failed to start; <img src=\"http…\"> will not load: {error:#}"
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::http_image_uri;
+
+    #[test]
+    fn only_http_urls_become_uri_sources() {
+        assert!(http_image_uri("https://example.test/a.png").is_some());
+        assert!(http_image_uri("HTTP://localhost:9/a.png").is_some());
+        assert!(http_image_uri("HTTPS://example.test/a.png").is_some());
+        assert!(http_image_uri("/tmp/a.png").is_none());
+        assert!(http_image_uri("data:image/png;base64,xx").is_none());
+        assert!(http_image_uri("file:///tmp/a.png").is_none());
+        assert!(http_image_uri("https://").is_none());
+        assert!(http_image_uri("http://").is_none());
     }
 }
 
@@ -138,6 +185,7 @@ impl CustomElement for ImgElement {
 
         let el = match &self.source {
             ImgSource::Path(path) => gpui::img(path.clone()),
+            ImgSource::Uri(uri) => gpui::img(uri.clone()),
             ImgSource::Data(image) => gpui::img(image.clone()),
             ImgSource::Empty => return img_fallback(&ctx, &self.alt, "img: no src"),
             ImgSource::Invalid => return img_fallback(&ctx, &self.alt, "img: load failed"),
@@ -164,6 +212,18 @@ impl CustomElement for ImgElement {
 
         if let Some(style) = ctx.style {
             el = crate::renderer::apply_interactive_styles(el, style);
+            // GPUI fills `aspect_ratio` from the bitmap once it loads. That
+            // overrides a definite height and jumps the box. A CSS `<img>` with
+            // both width and height keeps that box; `objectFit` paints inside it.
+            if let (
+                Some(crate::style::DimensionValue::Pixels(width)),
+                Some(crate::style::DimensionValue::Pixels(height)),
+            ) = (style.width.as_ref(), style.height.as_ref())
+            {
+                if *width > 0.0 && *height > 0.0 {
+                    el = el.aspect_ratio((*width as f32) / (*height as f32));
+                }
+            }
         }
 
         let mut el =

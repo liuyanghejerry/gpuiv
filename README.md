@@ -1503,22 +1503,23 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `input`         | Native single-line text editor                   |
 | `textarea`      | Native multiline, auto-growing text editor       |
 | `virtual-list`  | Long collections; only visible rows are built    |
-| `img`           | Local raster or SVG images, or `data:` URLs      |
+| `img`           | Local, data URL, or http(s) raster or SVG images |
 | `svg`           | Tintable monochrome SVG icons from local files   |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | 2D context rasterized natively, painted as a GPU texture |
 
 ## Images and icons
 
-Both elements take a **filesystem path or a `data:` URL**. Resolve local files
-with `fileURLToPath` or `path.join` and pass that string as `src`, or encode
-in-memory bytes as a base64 data URL.
+Both elements take a **filesystem path, a `data:` URL, or (for `<img>`) an
+http(s) URL**. Resolve local files with `fileURLToPath` or `path.join` and pass
+that string as `src`, encode in-memory bytes as a base64 data URL, or pass a
+remote URL and let GPUI fetch it.
 
 ### `<img>`
 
 `<img>` paints through GPUI's image element. It loads **PNG, JPEG, WebP, GIF,
-SVG, BMP, TIFF, ICO, and Netpbm** from disk or data URLs. SVG here is a
-full-colour image, not a tintable icon.
+SVG, BMP, TIFF, ICO, and Netpbm** from disk, data URLs, or http(s). SVG here is
+a full-colour image, not a tintable icon.
 
 ```tsx
 <img
@@ -1531,12 +1532,26 @@ full-colour image, not a tintable icon.
 const src = `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`
 ```
 
+```tsx
+<img
+  src="https://example.com/avatar.png"
+  objectFit="cover"
+  style={{ width: 48, height: 48, borderRadius: 24 }}
+/>
+```
+
+Set **both** `width` and `height` on a remote image. GPUI fetches and decodes
+on a background task; the tree does not wait. Without a definite size the box
+is empty until decode, then jumps to the bitmap size.
+
 Data URLs accept base64 and percent-encoded payloads in every image format
-listed above.
+listed above. Remote URLs use the same GPUI image cache as disk files and are
+not written to a temp file.
 
 `objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
 `"scaleDown"`, or `"none"`. An empty `src` or a failed load shows a fallback
-placeholder instead of crashing.
+placeholder instead of crashing. A URL that is still loading paints an empty
+box of the declared size.
 
 ### `<svg>`
 
@@ -2349,7 +2364,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] GPU-backed test renderer with screenshot capture
 - [x] Standalone build (pinned GPUI platform dependencies)
 - [x] Native text input and multiline textarea
-- [x] Image and SVG elements (`<img>`, `<svg>`)
+- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`)
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>`)
 - [x] Cross-element text selection

@@ -103,6 +103,17 @@ Not in AGENTS.md — these are local-environment facts:
   from static.crates.io time out (~30s low-speed). Dependencies are pre-seeded
   in `~/.cargo/registry/cache/index.crates.io-…/`. If a genuinely new crate is
   required, fetch the `.crate` file by hand (`curl`) into that cache dir.
+- **New dependency trees can be fetched in one shot.** `~/.cargo/config.toml`
+  replaces crates.io with the rsproxy sparse mirror, and `git-fetch-with-cli`
+  is on, so after editing `Cargo.toml` run ONE plain `cargo fetch` (no offline
+  flag) in `packages/native` — the mirror and github git fetches are fast —
+  then go back to `CARGO_NET_OFFLINE=true` for every build. Proven with the
+  ~80-crate reqwest tree (PR #56).
+- **Vitest loads the release `.node`.** `cargo test --lib` builds the debug
+  lib and can pass while `packages/native/*.node` is stale. After ANY Rust
+  edit, run `bun run build` (release) in `packages/native` BEFORE running
+  `packages/vue` / `examples` tests, or you debug a ghost (PR #56 burned an
+  hour on a stale binary missing a test-only http client).
 - macOS has no `timeout` command.
 - Test runner is vitest — `bun run test`, never `bun test`.
 - `examples/chat.perf.test.tsx` mount budget is tight on CI's M1 runner; a
