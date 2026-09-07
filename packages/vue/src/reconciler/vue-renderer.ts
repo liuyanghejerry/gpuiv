@@ -81,6 +81,15 @@ const UNIVERSAL_PROPS = new Set([
   // Wheel zoom over a canvas: opt out of ancestor scrollers consuming the
   // same gesture. See the `scroll` wiring in wire_host_events.
   "stopWheelPropagation",
+  // Accessibility: names match the DOM (`aria-label`, not `ariaLabel`).
+  "role",
+  "aria-label",
+  "aria-description",
+  "aria-id",
+  "aria-expanded",
+  "aria-selected",
+  "aria-valuetext",
+  "aria-level",
 ])
 
 function eventTypeForProp(prop: string): string | null {
@@ -262,6 +271,17 @@ export function createGpuivRendererHost(
         removeNode(child)
       }
       node.children = []
+      // A host `<text>` never carries content of its own: Rust keys the
+      // Label default (and the text-instance exclusion that keeps a string
+      // from being announced twice) off `content.is_none()`, matching the
+      // React binding's shape. A single string child becomes a `#text`
+      // instance, exactly like an interpolation child.
+      if (node.type === "text") {
+        if (text !== "") {
+          insertNode(createHostNode("#text", ++ids.nextElementId, text), node, null)
+        }
+        return
+      }
       node.text = text
       if (node.created && node.id != null) {
         host.renderer.setText(node.id, text)

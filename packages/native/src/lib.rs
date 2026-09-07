@@ -11,6 +11,7 @@ use napi::bindgen_prelude::*;
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use napi_derive::napi;
 
+mod accessibility;
 mod automation;
 mod canvas;
 // Canvas 2D math, ported verbatim from packages/vue/src/canvas/. Public so

@@ -79,6 +79,7 @@ enum ImgSource {
 pub struct ImgElement {
     source: ImgSource,
     object_fit: ImgObjectFit,
+    alt: String,
 }
 
 impl ImgElement {
@@ -98,10 +99,10 @@ impl ImgElement {
     }
 }
 
-fn img_fallback(ctx: &CustomRenderContext, message: &str) -> gpui::AnyElement {
+fn img_fallback(ctx: &CustomRenderContext, alt: &str, message: &str) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let fallback = super::custom_surface(
+    let mut fallback = super::custom_surface(
         gpui::div()
             .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)))
             .flex()
@@ -113,6 +114,12 @@ fn img_fallback(ctx: &CustomRenderContext, message: &str) -> gpui::AnyElement {
             .text_color(gpui::rgba(0xa4accdff)),
         ctx,
     );
+    fallback = crate::accessibility::apply_accessibility(
+        fallback,
+        ctx.props,
+        Some(gpui::Role::Image),
+    );
+    fallback = crate::accessibility::apply_image_label(fallback, ctx.props, alt);
     // `chrome_text`, not a raw string: a raw child is invisible to
     // `getPaintedText()`, so this state could only be tested by screenshot.
     fallback
@@ -132,8 +139,8 @@ impl CustomElement for ImgElement {
         let el = match &self.source {
             ImgSource::Path(path) => gpui::img(path.clone()),
             ImgSource::Data(image) => gpui::img(image.clone()),
-            ImgSource::Empty => return img_fallback(&ctx, "img: no src"),
-            ImgSource::Invalid => return img_fallback(&ctx, "img: load failed"),
+            ImgSource::Empty => return img_fallback(&ctx, &self.alt, "img: no src"),
+            ImgSource::Invalid => return img_fallback(&ctx, &self.alt, "img: load failed"),
         };
         // The id is what makes gpui's `ImgState` persist. Without it `Img` has no
         // `GlobalElementId`, so the animated-GIF frame index and the delayed
@@ -159,6 +166,9 @@ impl CustomElement for ImgElement {
             el = crate::renderer::apply_interactive_styles(el, style);
         }
 
+        let mut el =
+            crate::accessibility::apply_accessibility(el, ctx.props, Some(gpui::Role::Image));
+        el = crate::accessibility::apply_image_label(el, ctx.props, &self.alt);
         let el = super::wire_standard_events(el, &ctx);
         crate::automation::track_own_bounds(el, ctx.id).into_any_element()
     }
@@ -172,12 +182,13 @@ impl CustomElement for ImgElement {
                     .map(ImgObjectFit::from_str)
                     .unwrap_or_default()
             }
+            "alt" => self.alt = value.as_str().unwrap_or_default().to_string(),
             _ => {}
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["src", "objectFit"]
+        &["src", "objectFit", "alt"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
@@ -282,6 +293,7 @@ impl CustomElement for SvgElement {
         if let Some(style) = ctx.style {
             icon = crate::renderer::apply_interactive_styles(icon, style);
         }
+        icon = crate::accessibility::apply_accessibility(icon, ctx.props, None);
         let icon = super::wire_standard_events(icon, &ctx);
         crate::automation::track_own_bounds(icon, ctx.id).into_any_element()
     }
