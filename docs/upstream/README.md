@@ -37,7 +37,7 @@ lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ledger
 
-Inventoried range: `367ef48..cbc3de0` (2026-09-04). Earlier history is in
+Inventoried range: `367ef48..6b4be86` (2026-09-08). Earlier history is in
 [Sync log](#sync-log) below.
 
 | Topic | Upstream commits | Status | Notes |
@@ -77,11 +77,19 @@ Inventoried range: `367ef48..cbc3de0` (2026-09-04). Earlier history is in
 | Events live across `bun --hot` | `1c4c67b` | synced | PR #43 — renderer-owned containers / element-ID allocators persist across module re-evaluation via a `Symbol.for` registry; render-level `onEvent` bound to the owning root; real `bun --hot` child-process regression (their #37) |
 | Tab key ownership | `10e1bb0` `3bb1ac6` | synced | PR #45 — breaking: process-wide Tab/Shift+Tab bindings removed; napi `focusNext`/`focusPrevious`/`setWindowKeyEvents` + window-level `onKeyDown`/`onKeyUp` with remount-safe generations; README keyboard reference from `3bb1ac6` (their #36) |
 | Live automation mouse lease fix | `e948b20` | synced | PR #44 — dispatch locator mouse input through `AnyWindowHandle` instead of holding the root view (nested lease aborts the process); child-process regression test clicks the live sidebar (their #38) |
+| Input / textarea refinements | `fa61d80` `4bea250` `ff3c1a2` | synced | PR #53 — Enter inserts a newline in `<textarea>` unless `onSubmit` is set (key-context swap when the listener appears/disappears), caret sized to ~0.75×fontSize centered in the line (IME bounds too), single-line input centers text in extra height and clips to `borderRadius`; upstream's pixel-diff padding test skipped (no pixel harness, PR #29 precedent) |
+| Accessibility `role` / `aria-*` | `8138d4c` `9e0db51` | synced | PR #54 — `accessibility.rs` ARIA-token→role map, default roles (`<text>` Label, input/textarea, `<img alt>` Image), AccessKit Click from `onClick`, virtual-list List id+role, anchored + empty-img fallback, `getA11yTree()` test dumps, zed `df3c9b7`→`1f9d1cd`; Vue host config normalizes a host `<text>`'s string child into a `#text` instance so `content.is_none()` ports verbatim |
+| `bun --hot` example-window guidance | `58397f4` | synced | PR #55 — AGENTS.md: leave `bun --hot` example windows running; a save remounts Vue on the same window |
+| `<img>` http(s) src | `0bb3c94` | pending | installs Zed's `reqwest_client` in the `.node` (Cargo.lock +914 lines) so `img(SharedUri)` can fetch, plus `aspect_ratio` from declared width/height; revisit when remote images are needed — the dependency/binary cost is the decision, and this machine's offline crate cache makes the first build non-trivial |
+| Runtime-error stack overlay | `5f066f3` | pending | React-renderer overlay (message + stack + Reload) over their PR-equivalent keep-alive; ours landed in PR #42 — needs a Vue reconciler design (our loop lives in `startFrameLoop`, not their `renderer.ts`) before porting |
+| iOS IPA shipping plan | `e082247` `6b4be86` | declined | [ios-ipa-plan.md](./ios-ipa-plan.md) — plan for their packaging surface; no iOS target here |
+| Hermes-node runtime docs | `2d6e599` | declined | [hermes-node-runtime.md](./hermes-node-runtime.md) — runtime we do not support; website half extends the declined web topic |
+| zod lockfile bump | `65fc1b1` | declined | their website lockfile hygiene; nothing here consumes that lockfile |
 
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8.
 
-**Last inventoried upstream head:** `cbc3de0` (2026-09-04)
+**Last inventoried upstream head:** `6b4be86` (2026-09-08)
 
 ## Sync log
 
@@ -121,6 +129,9 @@ from upstream through `367ef48`:
 | #43 | Hot-reload event liveness: `Symbol.for` renderer-state registry (container + id allocator), root-bound `onEvent` via `handleGpuixEvent` boolean, `bun --hot` child-process regression — upstream `1c4c67b` (windowKeyEventId persistence deferred to the Tab-key port) |
 | #44 | Live automation mouse: `AnyWindowHandle` dispatch in `UiCommand::DispatchMouse`, macOS `simulate_*` via `update_window_without_view`, web twin helper, live child-process click regression — upstream `e948b20` |
 | #45 | Tab key ownership: bindings removed, `focusNext`/`focusPrevious`/`setWindowKeyEvents` napi + UiCommand, per-root key generations, render-level `onKeyDown`/`onKeyUp`, README keyboard docs — upstream `10e1bb0` + keyboard half of `3bb1ac6` |
+| #53 | Input/textarea refinements: textarea Enter→newline unless `onSubmit` (key-context swap on listener add/remove), caret at ~0.75×fontSize centered in the line, single-line input centers text and clips to `borderRadius` — upstream `fa61d80` `4bea250` `ff3c1a2` |
+| #54 | Accessibility: `role`/`aria-*` onto AccessKit (`accessibility.rs`), default roles + alt/value/placeholder, a11y Click from `onClick`, virtual-list List id+role, `getA11yTree()` test dumps, zed `df3c9b7`→`1f9d1cd`, host `<text>` string children normalized into `#text` instances — upstream `8138d4c` `9e0db51` |
+| #55 | Ledger round `cbc3de0..6b4be86`: AGENTS.md bun --hot example-window guidance, declined-topic files (iOS IPA plan, hermes-node), pending rows (img http src, error overlay) — upstream `58397f4` + recording |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
