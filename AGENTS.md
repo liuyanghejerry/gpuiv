@@ -27,7 +27,7 @@ do, the order is:
 
 1. Find the GPUI API that already does it. Search `zed/crates/gpui` for the symbol
 2. Search `zed-industries/zed` issues and PRs. Someone may have shipped it already
-3. Fix it in the `remorses/zed` fork as a normal GPUI change, and bump the submodule
+3. Fix it in the GPUI fork — PR to `remorses/zed` (`gpuix`) first so upstream GPUIX gets it too; our own zed fork only as a recorded divergence — then bump the submodule (see [zed-workflow](./docs/agents/zed-workflow.md))
 4. Only then, add GPUIV code
 
 **Never paper over GPUI in `packages/native`.** A workaround that re-applies state after

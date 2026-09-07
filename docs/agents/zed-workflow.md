@@ -1,8 +1,15 @@
 # Working with the Zed fork
 
-The `zed/` submodule tracks the `gpuix` branch of `remorses/zed`. This file
-covers searching upstream before writing code, fixing GPUI in the fork, bumping
-the submodule, and opening PRs to Zed.
+GPUIV sits at the end of a fork chain:
+
+```
+zed-industries/zed (main)  →  remorses/zed (gpuix)  →  this repo's zed/ submodule
+```
+
+The `zed/` submodule tracks the `gpuix` branch of `remorses/zed` (until a
+recorded divergence repoints it at our own fork — see below). This file covers
+searching upstream before writing code, fixing GPUI, bumping the submodule, and
+opening PRs to Zed.
 
 ## Search Zed before you touch GPUI
 
@@ -52,40 +59,61 @@ next session does not repeat the search.
 
 ## Fixing GPUI for GPUIV
 
-The `remorses/zed` fork is part of GPUIV's implementation boundary. Fix GPUI in
-the fork when a reusable GPUI API or platform correction keeps GPUIV simpler and
-avoids embedded-platform or event-routing workarounds. Do not keep a hack in
-`packages/native` only because the required API is missing upstream.
+The `remorses/zed` fork is part of GPUIV's implementation boundary — but we are
+a **fork of GPUIX**, without write access to `remorses/zed`, and every commit we
+carry on our own zed fork is one more thing to rebase at every upstream sync.
+So the order for a GPUI fix is:
 
-Fork-only fixes must be normal commits on a `gpuix`-based branch and must be
-pushed to a **reachable remote branch** before this submodule points at them.
-Never pin GPUIV to a detached commit. This checkout tracks `remorses/zed`; if
-you cannot push there (no write access), fork `remorses/zed` under your account,
-branch from `gpuix`, and repoint `.gitmodules` at your fork. Use a separate Zed
-worktree for the change; do not develop or commit inside the `zed/` build
+1. **PR to `zed-industries/zed` main** when it is a general GPUI improvement or
+   platform correction (see "PRs to Zed" below). It flows into `remorses/zed`'s
+   `gpuix` branch on the next upstream merge, and into GPUIV with a submodule
+   bump.
+2. **PR to `remorses/zed` `gpuix`** (from a branch on our own fork of
+   `remorses/zed`) when the fix serves the embedded/binding use case — the same
+   things upstream GPUIX needs. Once merged, upstream GPUIX bumps its zed
+   pointer and our next sync brings the fix in with **zero divergence**.
+3. **Carry it in our own zed fork** only when neither upstream will take it, the
+   fix is genuinely GPUIV-specific, or we cannot wait. Fork `remorses/zed` under
+   our account, keep one branch based on `gpuix` (e.g. `gpuix-gpuiv`), repoint
+   `.gitmodules` at the fork, and **record the patch stack in `docs/upstream/`**
+   as a diverged topic with revisit triggers. Keep that stack tiny: each
+   upstream sync that moves the `gpuix` pointer means rebasing it.
+
+Whichever tier lands the fix, the rules are the same. Normal commits on a
+`gpuix`-based branch, pushed to a **reachable remote branch** before this
+submodule points at them — never pin GPUIV to a detached commit. Do the work in
+a separate Zed worktree; do not develop or commit inside the `zed/` build
 checkout.
 
 ```bash
-# from a local clone of remorses/zed (or your fork)
+# from a local clone of our zed fork (or a fresh fork of remorses/zed)
 git fetch origin gpuix
 git worktree add ../zed-gpuix-<change> -b gpuix-<change> origin/gpuix
 
-# from the Zed worktree, after review
-git push origin HEAD:gpuix   # or HEAD:gpuix-<change> on your own fork
+# after review: open the PR against remorses/zed gpuix, or push to our own fork
+git push origin HEAD:gpuix-<change>
 
-# then update this repository to that reachable commit
+# once the commit is reachable on the remote this submodule tracks
 git -C zed fetch origin gpuix && git -C zed switch gpuix
-git -C zed merge --ff-only origin/gpuix
+git -C zed merge --ff-only origin/gpuix   # or origin/gpuix-gpuiv while diverged
 ```
 
 Commit the resulting `zed` submodule pointer in GPUIV with the code that uses
-the new API. The `.gitmodules` branch stays `gpuix` (or your fork's equivalent).
+the new API. While diverged, `.gitmodules` points at our fork; otherwise it
+stays on `remorses/zed`, branch `gpuix`.
 
 ## Bumping the gpui revision
 
+Steps 1–2 happen upstream in `remorses/zed`; if we need them done, that is a PR
+there, not a local operation:
+
 1. Merge upstream Zed into the `gpuix` branch in `remorses/zed`.
 2. Resolve any embedded `gpui_macos` conflicts in a new commit; do not rewrite history.
-3. Fast-forward the `zed/` submodule to the updated `gpuix` branch.
+
+Then in this repository:
+
+3. Fast-forward the `zed/` submodule to the updated `gpuix` branch — or, while
+   diverged, rebase our `gpuix-gpuiv` patch stack onto it.
 4. Match `rust-toolchain.toml` to `zed/rust-toolchain.toml`.
 5. Run `cargo check --all-targets`, `bun run build`, and the test suites.
 
