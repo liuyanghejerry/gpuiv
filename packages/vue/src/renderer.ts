@@ -45,10 +45,10 @@ export function installRuntimeErrorHandlers(): void {
   if (typeof process === "undefined" || runtimeErrorHandlers()) return
   const handlers: RuntimeErrorHandlers = {
     uncaughtException: (error) => {
-      scheduleRuntimeError(error)
+      scheduleRuntimeError(error, "uncaught exception")
     },
     unhandledRejection: (reason) => {
-      scheduleRuntimeError(reason)
+      scheduleRuntimeError(reason, "unhandled rejection")
     },
   }
   process.on("uncaughtException", handlers.uncaughtException)
@@ -81,7 +81,7 @@ export function createNativeRenderer(): GpuixRenderer {
       try {
         handleGpuixEvent(event, renderer)
       } catch (error) {
-        scheduleRuntimeError(error)
+        scheduleRuntimeError(error, "native event handler")
       }
     }
   })
@@ -156,7 +156,7 @@ export function startFrameLoop(
     try {
       running = renderer.tick()
     } catch (error) {
-      scheduleRuntimeError(error)
+      scheduleRuntimeError(error, "frame loop tick")
     }
     if (running === false) {
       stop()
@@ -241,11 +241,24 @@ function componentChainOf(
 
 /** Route every runtime error to one place: the app errorHandler, the native
  *  event-callback catch, the frame-loop tick catch, and the process-level
- *  handlers all call this. With no mounted app there is nothing to overlay,
- *  so the error lands on the console only. */
-function scheduleRuntimeError(error: unknown, errorContext?: string): void {
+ *  handlers all call this. `info` names the source ("render function",
+ *  "native event handler", …) and is what onRuntimeError observers get. With
+ *  no mounted app there is nothing to overlay, so the error lands on the
+ *  console only. */
+function scheduleRuntimeError(
+  error: unknown,
+  info?: string,
+  componentChain?: string
+): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
   const thrown = thrownToError(error)
+  if (info !== undefined && slot?.lastOptions?.onRuntimeError) {
+    try {
+      slot.lastOptions.onRuntimeError(thrown, info)
+    } catch (observerError) {
+      console.error("[gpuiv] onRuntimeError:", observerError)
+    }
+  }
   if (!slot || slot.mountSerial === undefined) {
     console.error("[gpuiv] runtime error:", thrown)
     return
@@ -254,16 +267,18 @@ function scheduleRuntimeError(error: unknown, errorContext?: string): void {
   queueMicrotask(() => {
     const current = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
     if (!current?.handle || current.mountSerial !== failedSerial) return
-    showRuntimeError(thrown, errorContext)
+    showRuntimeError(thrown, [info, componentChain].filter(Boolean).join("\n") || undefined)
   })
 }
 
 function showRuntimeError(thrown: Error | string, errorContext?: string): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
-  if (!slot || slot.overlayShown) return
+  if (!slot) return
   const formatted = formatRuntimeError(thrown, errorContext)
   console.error("[gpuiv] runtime error:", thrown)
   console.error(formatted.stack)
+  if (slot.lastOptions?.errorOverlay === false) return
+  if (slot.overlayShown) return
   slot.overlayShown = true
   try {
     mountTree(slot, runtimeErrorOverlay(formatted, () => reloadApp(slot)), slot.lastOptions ?? {})
@@ -368,6 +383,12 @@ export interface RenderOptions extends WindowOptions, WindowKeyEventHandlers {
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through layout. */
   debugFrameOverlay?: DebugFrameOverlayMode
+  /** Observe every routed runtime error — render, event handlers, frame-loop
+   *  ticks, process-level throws — in parallel with the overlay. The
+   *  Sentry-style integration point: report, do not render. */
+  onRuntimeError?: (error: unknown, info: string) => void
+  /** Paint the runtime error overlay over a failed tree. Default true. */
+  errorOverlay?: boolean
 }
 
 export function resetApp(): void {
@@ -396,6 +417,8 @@ export function createApp(
     onKeyUp,
     renderer: injected,
     debugFrameOverlay,
+    onRuntimeError: _onRuntimeError,
+    errorOverlay: _errorOverlay,
     ...windowOptions
   } = options
   const slot = renderSlot()
@@ -480,7 +503,7 @@ function mountTree(
   }
   const app = gpuivHost.vue.createApp(rootComponent)
   app.config.errorHandler = (err, instance, info) => {
-    scheduleRuntimeError(err, [info, componentChainOf(instance)].filter(Boolean).join("\n"))
+    scheduleRuntimeError(err, info, componentChainOf(instance))
   }
   // App code only ever sees application commands (scroll, window, debug) —
   // never the commit facade — so provide the raw renderer.
