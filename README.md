@@ -29,6 +29,7 @@ cd examples && bun --hot chat.tsx
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
+| **error-handling** | `bun --hot error-handling.tsx` | The runtime error story end to end: overlay + Reload, an `onErrorCaptured` boundary, and an `onRuntimeError` report log |
 
 All of them live in [`examples/`](./examples) and use hardcoded data.
 
@@ -406,7 +407,10 @@ createApp(App, {
 Any ancestor component can swallow errors from a subtree the way the official
 Vue error-boundary pattern does: `onErrorCaptured` returning `false` stops
 propagation, so the overlay never fires for that subtree. This covers render
-errors **and** event-handler throws.
+errors **and** event-handler throws. Note the boundary only sees **descendant
+components** — a throw from the boundary's own inline template sails past it,
+so keep the risky markup in a child component (slots and wrappers do this
+naturally).
 
 ```tsx
 const Boundary = defineComponent({
@@ -421,6 +425,10 @@ const Boundary = defineComponent({
   },
 })
 ```
+
+A runnable tour of all of this — the overlay + Reload, the boundary, and an
+`onRuntimeError` log — lives in `examples/error-handling.tsx`
+(`bun run error-handling` in `examples/`).
 
 ## Hot reload
 
