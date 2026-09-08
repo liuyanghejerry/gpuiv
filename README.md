@@ -361,6 +361,28 @@ THROTTLE=utility bun run test chat.perf.test.tsx
 THROTTLE=utility bun --hot chat.tsx
 ```
 
+## Runtime errors
+
+A throw in a component render, in an event handler, in a frame-loop `tick()`,
+or a process-level `uncaughtException` / `unhandledRejection` does not kill the
+window. The process stays alive and the tree is replaced by an overlay with the
+error message, the stack, and a **Reload** button that remounts the last tree.
+Under automation the pieces carry the test ids `runtime-error-overlay`,
+`runtime-error-stack`, and `runtime-error-reload`.
+
+- Every path funnels into one scheduler: the Vue `app.config.errorHandler`, the
+  native event-callback catch, the frame-loop tick catch, and the `process`
+  handlers all route to the same overlay.
+- The overlay is scheduled on a microtask keyed to the failing mount. If a
+  newer remount already happened (a `bun --hot` save, a Reload), the stale
+  overlay is dropped instead of painted over the new tree.
+- The first error paints the overlay; further errors while it is up only log.
+- Saving a file under `bun --hot` still remounts — overlay state never
+  outlives a remount.
+- Errors with no mounted app (before `createApp()`, or in scripts that only
+  use `startFrameLoop()`) keep the process alive and log to the console.
+- `resetApp()` uninstalls the process-level handlers.
+
 ## Hot reload
 
 ### 1. End the file with `createApp()`
