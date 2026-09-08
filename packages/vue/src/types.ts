@@ -1,3 +1,4 @@
+import type { ComponentInternalInstance } from "vue"
 import type { EventPayload } from "@gpuiv/native"
 
 export type DimensionValue = number | string
@@ -462,6 +463,10 @@ export interface HostNode {
   children: HostNode[]
   /** Whether createElement has been sent to Rust for this node. */
   created: boolean
+  /** Component whose patch registered this node's event handlers — the
+   *  `parentComponent` patchProp receives. Kept so the deferred materialize()
+   *  can still wrap handlers with the owning instance. */
+  eventOwner?: ComponentInternalInstance | null
 }
 
 /// Native renderer transport. The Vue host config sends one atomic batch per

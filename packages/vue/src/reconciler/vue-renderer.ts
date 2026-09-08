@@ -7,7 +7,14 @@
 /// has finished its jobs. `flushMutations()` drains the queue synchronously for
 /// callers that need the Rust tree current (mount, tests, clock-pinned frames).
 
-import { createRenderer, type Renderer, type RendererOptions } from "vue"
+import {
+  callWithAsyncErrorHandling,
+  createRenderer,
+  ErrorCodes,
+  type Renderer,
+  type RendererOptions,
+} from "vue"
+import type { ComponentInternalInstance } from "vue"
 import type { EventPayload } from "@gpuiv/native"
 import type {
   Container,
@@ -312,9 +319,11 @@ export function createGpuivRendererHost(
       node: HostNode,
       key: string,
       _prev: unknown,
-      next: unknown
+      next: unknown,
+      _namespace: unknown,
+      parentComponent?: ComponentInternalInstance | null
     ): void {
-      patchNodeProp(node, key, next)
+      patchNodeProp(node, key, next, parentComponent)
     },
 
     querySelector(): null {
@@ -390,7 +399,7 @@ export function createGpuivRendererHost(
       } else {
         const eventType = eventTypeForProp(key)
         if (eventType && isHandler(value)) {
-          applyEvent(node, eventType, value)
+          applyEvent(node, eventType, value, node.eventOwner)
         } else if (shouldForwardProp(node, key)) {
           r.setCustomProp(node.id, key, serializeValue(value))
         }
@@ -406,23 +415,43 @@ export function createGpuivRendererHost(
     return value as string | number | boolean | object
   }
 
-  function applyEvent(node: HostNode, eventType: string, value: unknown): void {
+  function applyEvent(
+    node: HostNode,
+    eventType: string,
+    value: unknown,
+    instance?: ComponentInternalInstance | null
+  ): void {
     if (node.id == null) return
     if (value == null) {
       unregisterEventHandler(container.eventHandlers, node.id, eventType)
       host.renderer.setEventListener(node.id, eventType, false)
       return
     }
-    const handler: (event: EventPayload) => void = Array.isArray(value)
+    const raw: (event: EventPayload) => void = Array.isArray(value)
       ? (payload) => {
           for (const fn of value) (fn as (p: EventPayload) => void)(payload)
         }
       : (value as (event: EventPayload) => void)
+    // Web `v-on` wraps every listener in callWithAsyncErrorHandling, so a
+    // throw runs the errorCaptured chain and lands in app.config.errorHandler
+    // instead of escaping the listener. Mirror that contract: an onErrorCaptured
+    // returning false can swallow a handler error locally, and what survives
+    // reaches the runtime error overlay's funnel.
+    const handler = instance
+      ? (payload: EventPayload) => {
+          callWithAsyncErrorHandling(raw, instance, ErrorCodes.NATIVE_EVENT_HANDLER, [payload])
+        }
+      : raw
     registerEventHandler(container.eventHandlers, node.id, eventType, handler)
     host.renderer.setEventListener(node.id, eventType, true)
   }
 
-  function patchNodeProp(node: HostNode, key: string, next: unknown): void {
+  function patchNodeProp(
+    node: HostNode,
+    key: string,
+    next: unknown,
+    instance?: ComponentInternalInstance | null
+  ): void {
     if (node.id == null) return
     if (key === "class") return
     if (key === "style") {
@@ -438,7 +467,8 @@ export function createGpuivRendererHost(
         if (node.created) applyEvent(node, eventType, null)
       } else {
         node.props[key] = next
-        if (node.created) applyEvent(node, eventType, next)
+        if (instance != null) node.eventOwner = instance
+        if (node.created) applyEvent(node, eventType, next, instance ?? node.eventOwner)
       }
       return
     }

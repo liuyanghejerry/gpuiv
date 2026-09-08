@@ -371,8 +371,9 @@ Under automation the pieces carry the test ids `runtime-error-overlay`,
 `runtime-error-stack`, and `runtime-error-reload`.
 
 - Every path funnels into one scheduler: the Vue `app.config.errorHandler`, the
-  native event-callback catch, the frame-loop tick catch, and the `process`
-  handlers all route to the same overlay.
+  frame-loop tick catch, and the `process` handlers all route to the same
+  overlay. Event handlers are wrapped like web `v-on`: a throw runs the
+  `onErrorCaptured` chain first and only what survives reaches the overlay.
 - The overlay is scheduled on a microtask keyed to the failing mount. If a
   newer remount already happened (a `bun --hot` save, a Reload), the stale
   overlay is dropped instead of painted over the new tree.
@@ -382,6 +383,44 @@ Under automation the pieces carry the test ids `runtime-error-overlay`,
 - Errors with no mounted app (before `createApp()`, or in scripts that only
   use `startFrameLoop()`) keep the process alive and log to the console.
 - `resetApp()` uninstalls the process-level handlers.
+
+### Observing and disabling
+
+`createApp()` options mirror the roles the Vue community splits between
+`errorHandler` and the dev-server overlay:
+
+```ts
+createApp(App, {
+  // Report every routed error — render, event handlers, frame-loop ticks,
+  // process-level throws — in parallel with the overlay. `info` names the
+  // source ("render function", "native event handler", ...). The
+  // Sentry-style integration point.
+  onRuntimeError: (error, info) => report(error, info),
+  // Turn the overlay off; errors still log and still reach onRuntimeError.
+  errorOverlay: process.env.NODE_ENV === 'production',
+})
+```
+
+### Local fallback instead of the global overlay
+
+Any ancestor component can swallow errors from a subtree the way the official
+Vue error-boundary pattern does: `onErrorCaptured` returning `false` stops
+propagation, so the overlay never fires for that subtree. This covers render
+errors **and** event-handler throws.
+
+```tsx
+const Boundary = defineComponent({
+  setup(_, { slots }) {
+    const failed = ref(false)
+    onErrorCaptured((error) => {
+      report(error)
+      failed.value = true
+      return false
+    })
+    return () => (failed.value ? <text>Something went wrong</text> : slots.default!())
+  },
+})
+```
 
 ## Hot reload
 
