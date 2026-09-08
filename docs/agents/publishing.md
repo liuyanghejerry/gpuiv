@@ -10,4 +10,4 @@ Publish order is required. `@gpuiv/vue` depends on `@gpuiv/native` (`workspace:^
 2. `npm publish` publishes `@gpuiv/native`
 3. `npm publish` publishes `@gpuiv/vue`
 
-NPM tokens are fetched through Sigillo (`SIGILLO_TOKEN` secret); CI never stores the npm token directly. The publish steps skip versions already on npm. To release: bump versions via changesets, push to `main`.
+NPM tokens are a plain GitHub secret: `NPM_TOKEN` holds an npm **granular access token** with publish rights on the `gpuiv` org (granular is required for `--provenance`; classic/automation tokens cannot sign provenance). The publish steps skip versions already on npm. To release: bump versions via changesets, push to `main`.
