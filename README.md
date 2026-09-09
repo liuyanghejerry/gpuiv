@@ -1713,8 +1713,11 @@ Supported: the path vocabulary (`moveTo` … `roundRect`, arcs, béziers),
 stack (`save`/`restore`/`translate`/`rotate`/`scale`/`setTransform`…,
 `reset`), linear and radial gradients, line styles including dashes and miter
 joins, anti-aliased rasterization, `globalAlpha`, every composite operation
-name the DOM accepts (Porter-Duff modes rasterize natively; the separable
-blend modes currently render as `source-over`), `clearRect`,
+the rasterizer implements — the Porter-Duff modes plus the eleven separable
+blend modes (`multiply`, `screen`, `overlay`, `darken`, `lighten`,
+`color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`,
+`exclusion`), blended in straight colour space and composited over the
+premultiplied buffer per the W3C *Compositing and Blending* spec — `clearRect`,
 `getImageData`/`putImageData`/`createImageData` plus the `ImageData`
 constructor, and `drawImage` with another `GpuixCanvas` as the source
 (nearest or bilinear sampling via `imageSmoothingEnabled`).
@@ -1729,6 +1732,9 @@ Deliberately not implemented:
 
 - `fillText` / `strokeText` / `measureText` — they **throw**. Glyph
   rasterization needs a font pipeline that does not exist JS-side yet.
+- The non-separable blend modes (`hue`, `saturation`, `color`, `luminosity`
+  as `globalCompositeOperation`) — assigning one **throws**. They mix colour
+  channels, which the separable blend pipeline does not rasterize.
 - `toDataURL` / `toBlob`, shadows, `filter`, `createPattern`, `Path2D`,
   conic gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
   never sees decoded `<img>` pixels).
@@ -2445,7 +2451,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
-- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite, image data — pure TS; text APIs throw `NotSupported`)
+- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. separable blend modes, image data — text APIs and non-separable blend modes throw `NotSupported`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
 - [ ] Multiple windows
