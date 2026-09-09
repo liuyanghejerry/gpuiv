@@ -105,6 +105,23 @@ pub(crate) fn to_element_id(id: f64) -> Result<u64> {
     raw_element_id(id).map_err(Error::from_reason)
 }
 
+/// Normalize the JS `[x, y, w, h]` dirty rect of a canvas upload. `None`
+/// (or anything malformed) means "the whole canvas".
+pub(crate) fn parse_dirty_rect(dirty: Option<Vec<f64>>) -> Option<(u32, u32, u32, u32)> {
+    let values = dirty?;
+    if values.len() != 4 {
+        return None;
+    }
+    let [x, y, w, h] = [values[0], values[1], values[2], values[3]];
+    if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite()) {
+        return None;
+    }
+    if w < 0.0 || h < 0.0 {
+        return None;
+    }
+    Some((x as u32, y as u32, w as u32, h as u32))
+}
+
 thread_local! {
     #[cfg(target_os = "macos")]
     static MAC_PLATFORM: RefCell<Option<Rc<gpui_macos::MacPlatform>>> = const { RefCell::new(None) };
@@ -1227,7 +1244,9 @@ impl GpuixRenderer {
     /// Deliberately outside `applyBatch`: a canvas repaint moves megabytes of
     /// pixels, and the batch JSON would escape and re-parse every byte. JS
     /// keeps its own copy as the source of truth; this store only feeds the
-    /// GPU paint and `readCanvasPixels`.
+    /// GPU paint and `readCanvasPixels`. The optional `dirty` rect —
+    /// `[x, y, w, h]` in buffer pixels — restricts the GPU upload to the
+    /// tiles it intersects; omit it to replace the whole canvas.
     #[napi]
     pub fn upload_canvas_pixels(
         &self,
@@ -1235,10 +1254,12 @@ impl GpuixRenderer {
         width: f64,
         height: f64,
         pixels: Uint8Array,
+        dirty: Option<Vec<f64>>,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let rect = parse_dirty_rect(dirty);
         self.canvas_surfaces
-            .upload(id, width as u32, height as u32, &pixels)
+            .upload_region(id, width as u32, height as u32, &pixels, rect)
             .map_err(Error::from_reason)?;
         drop(pixels);
         self.request_invalidate()
@@ -1247,7 +1268,10 @@ impl GpuixRenderer {
     /// Upload a `<canvas>` element's pixels straight from its 2D context
     /// core — Rust to Rust, no byte round-trip through JS — and repaint.
     /// The core materializes its pending display list as part of the
-    /// handoff, so one call per flush is the whole upload path.
+    /// handoff, splicing only the dirty region into the store's mirror, so
+    /// one call per flush is the whole upload path and its cost tracks the
+    /// dirty area, not the canvas size. A flush with nothing pending skips
+    /// the repaint.
     #[napi]
     pub fn upload_canvas_from_context(
         &self,
@@ -1255,12 +1279,11 @@ impl GpuixRenderer {
         ctx: &crate::canvas2d::context::GpuixCanvas2DCore,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
-        let (width, height) = ctx.dimensions();
-        let rgba = ctx.straight_rgba();
-        self.canvas_surfaces
-            .upload(id, width, height, &rgba)
-            .map_err(Error::from_reason)?;
-        self.request_invalidate()
+        if self.canvas_surfaces.upload_from_core(id, ctx).map_err(Error::from_reason)? {
+            self.request_invalidate()
+        } else {
+            Ok(())
+        }
     }
 
     /// Read back the last uploaded buffer, converted back to RGBA.
@@ -3947,6 +3970,15 @@ impl gpui::Render for GpuixView {
         use gpui::IntoElement;
 
         window.set_window_title(&self.window_title);
+
+        // Free atlas tiles replaced or orphaned by canvas flushes. They are
+        // unreferenced by the tree being built below, so removing them
+        // before painting is safe; without this the atlas would grow by one
+        // tile per dirty flush.
+        let surfaces = self.canvas_surfaces.clone();
+        surfaces.drain_retired(|image| {
+            let _ = window.drop_image(image);
+        });
 
         // Clone Arc so we don't borrow self.tree — frees self for focus_handles access.
         let tree_arc = self.tree.clone();

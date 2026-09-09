@@ -513,12 +513,22 @@ export interface NativeRenderer {
   // ── Canvas API ─────────────────────────────────────────────────
   /** Upload a full RGBA pixel buffer for a `<canvas>` element and repaint.
    *  `pixels.length` must be `width * height * 4`. Pixels never travel through
-   *  `applyBatch` — they would be escaped and re-parsed as JSON. */
-  uploadCanvasPixels?(elementId: number, width: number, height: number, pixels: Uint8Array): void
+   *  `applyBatch` — they would be escaped and re-parsed as JSON. The optional
+   *  `dirty` rect (`[x, y, w, h]` in buffer pixels) restricts the GPU upload
+   *  to the tiles it intersects; omit it to replace the whole canvas. */
+  uploadCanvasPixels?(
+    elementId: number,
+    width: number,
+    height: number,
+    pixels: Uint8Array,
+    dirty?: [number, number, number, number],
+  ): void
   /** Upload a `<canvas>` element's pixels straight from its 2D context core
    *  (Rust to Rust — no byte round-trip through JS) and repaint. The core
-   *  materializes its pending display list as part of the handoff; this is
-   *  the path the `CanvasRenderingContext2D` facade flushes on. */
+   *  materializes its pending display list and splices only the dirty region
+   *  into the store's mirror, so the upload cost tracks the dirty area, not
+   *  the canvas size; this is the path the `CanvasRenderingContext2D` facade
+   *  flushes on. */
   uploadCanvasFromContext?(elementId: number, ctx: unknown): void
   /** Read back the last uploaded buffer as RGBA, or null if nothing uploaded. */
   readCanvasPixels?(elementId: number): Uint8Array | null

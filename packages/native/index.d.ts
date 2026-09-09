@@ -107,14 +107,19 @@ export declare class GpuixRenderer {
    * Deliberately outside `applyBatch`: a canvas repaint moves megabytes of
    * pixels, and the batch JSON would escape and re-parse every byte. JS
    * keeps its own copy as the source of truth; this store only feeds the
-   * GPU paint and `readCanvasPixels`.
+   * GPU paint and `readCanvasPixels`. The optional `dirty` rect —
+   * `[x, y, w, h]` in buffer pixels — restricts the GPU upload to the
+   * tiles it intersects; omit it to replace the whole canvas.
    */
-  uploadCanvasPixels(elementId: number, width: number, height: number, pixels: Uint8Array): void
+  uploadCanvasPixels(elementId: number, width: number, height: number, pixels: Uint8Array, dirty?: Array<number> | undefined | null): void
   /**
    * Upload a `<canvas>` element's pixels straight from its 2D context
    * core — Rust to Rust, no byte round-trip through JS — and repaint.
    * The core materializes its pending display list as part of the
-   * handoff, so one call per flush is the whole upload path.
+   * handoff, splicing only the dirty region into the store's mirror, so
+   * one call per flush is the whole upload path and its cost tracks the
+   * dirty area, not the canvas size. A flush with nothing pending skips
+   * the repaint.
    */
   uploadCanvasFromContext(elementId: number, ctx: GpuixCanvas2DCore): void
   /** Read back the last uploaded buffer, converted back to RGBA. */
@@ -258,15 +263,26 @@ export declare class TestGpuixRenderer {
    * Returns accumulated destroyed IDs from all destroyElement ops.
    */
   applyBatch(json: string): Array<number>
-  /** Upload a full RGBA buffer (`uploadCanvasPixels`) and repaint. */
-  uploadCanvasPixels(elementId: number, width: number, height: number, pixels: Uint8Array): void
+  /**
+   * Upload a full RGBA buffer (`uploadCanvasPixels`) and repaint. The
+   * optional `dirty` rect restricts the GPU upload to the tiles it
+   * intersects.
+   */
+  uploadCanvasPixels(elementId: number, width: number, height: number, pixels: Uint8Array, dirty?: Array<number> | undefined | null): void
   /**
    * Upload a `<canvas>` element's pixels straight from its 2D context
    * core — Rust to Rust, no byte round-trip through JS — and repaint.
    * Mirrors `uploadCanvasPixels`; the core materializes its pending
-   * display list as part of the handoff.
+   * display list and splices only the dirty region into the store's
+   * mirror. A flush with nothing pending skips the repaint.
    */
   uploadCanvasFromContext(elementId: number, ctx: GpuixCanvas2DCore): void
+  /**
+   * Bytes built into canvas tile images so far — what the GPU renderer's
+   * atlas uploads. Lets tests pin upload cost to the dirty area instead
+   * of wall-clock time.
+   */
+  canvasUploadedBytes(): number
   /** Read back the last uploaded buffer, converted to RGBA. */
   readCanvasPixels(elementId: number): Buffer | null
   /** Arm gpui pointer capture on the element for its next press. */

@@ -31,7 +31,9 @@ use super::geom::matrix::{
     scaling_matrix, translation_matrix, Matrix2D,
 };
 use super::geom::path::{flatten_path, PathBuilder, Poly};
-use super::geom::raster::{coverage_bbox, point_in_polys, rasterize_coverage, CoverageBuffer, FillRule};
+use super::geom::raster::{
+    coverage_bbox, point_in_polys, rasterize_coverage, CoveredBBox, CoverageBuffer, FillRule,
+};
 use super::geom::stroke::{build_stroke_geometry, StrokeCap, StrokeJoin, StrokeParams};
 
 /// Every composite mode the DOM accepts; the separable/non-separable blend
@@ -463,6 +465,10 @@ struct ContextCore {
     path: PathBuilder,
     ops: Vec<Op>,
     dirty: bool,
+    /// Union of the buffer regions touched since the last upload flush, as
+    /// exclusive pixel bounds `(x0, y0, x1, y1)`. Rasterization feeds it;
+    /// `flush_dirty_bgra` consumes it so the store uploads only what changed.
+    pending_dirty: Option<(usize, usize, usize, usize)>,
 }
 
 impl ContextCore {
@@ -478,6 +484,7 @@ impl ContextCore {
             path: PathBuilder::default(),
             ops: Vec::new(),
             dirty: false,
+            pending_dirty: None,
         }
     }
 
@@ -495,6 +502,7 @@ impl ContextCore {
         self.path = PathBuilder::default();
         self.ops.clear();
         self.dirty = false;
+        self.pending_dirty = Some((0, 0, w, h));
     }
 
     /// DOM `reset()`: cleared bitmap, default state, empty path — keeping
@@ -507,6 +515,26 @@ impl ContextCore {
         self.stack.clear();
         self.path = PathBuilder::default();
         self.dirty = false;
+        self.pending_dirty = Some((0, 0, self.width, self.height));
+    }
+
+    /// Mark a device-space bbox (inclusive pixel bounds, already clamped to
+    /// the buffer by `rasterize_coverage`) as pending upload.
+    fn mark_dirty_bbox(&mut self, bbox: &CoveredBBox) {
+        let next = (
+            bbox.min_x as usize,
+            bbox.min_y as usize,
+            bbox.max_x as usize + 1,
+            bbox.max_y as usize + 1,
+        );
+        self.union_pending_dirty(next);
+    }
+
+    fn union_pending_dirty(&mut self, rect: (usize, usize, usize, usize)) {
+        self.pending_dirty = Some(match self.pending_dirty {
+            Some((x0, y0, x1, y1)) => (x0.min(rect.0), y0.min(rect.1), x1.max(rect.2), y1.max(rect.3)),
+            None => rect,
+        });
     }
 
     /// Replay pending ops into the buffer. Idempotent between mutations.
@@ -559,6 +587,9 @@ impl ContextCore {
         };
         if composite == Composite::Copy {
             self.premul.fill(0);
+            self.union_pending_dirty((0, 0, self.width, self.height));
+        } else {
+            self.mark_dirty_bbox(&bbox);
         }
 
         let width = self.cover.width;
@@ -616,6 +647,7 @@ impl ContextCore {
             Some(bbox) => bbox,
             None => return,
         };
+        self.mark_dirty_bbox(&bbox);
         let width = self.cover.width;
         let data = &self.cover.data;
         for row in bbox.min_y as i64..=bbox.max_y as i64 {
@@ -668,6 +700,9 @@ impl ContextCore {
         };
         if composite == Composite::Copy {
             self.premul.fill(0);
+            self.union_pending_dirty((0, 0, self.width, self.height));
+        } else {
+            self.mark_dirty_bbox(&bbox);
         }
 
         let width = self.cover.width;
@@ -720,6 +755,13 @@ impl ContextCore {
         x1: i64,
         y1: i64,
     ) {
+        let dst_x0 = (dx + x0).max(0).min(self.width as i64) as usize;
+        let dst_x1 = (dx + x1).max(0).min(self.width as i64) as usize;
+        let dst_y0 = (dy + y0).max(0).min(self.height as i64) as usize;
+        let dst_y1 = (dy + y1).max(0).min(self.height as i64) as usize;
+        if dst_x0 < dst_x1 && dst_y0 < dst_y1 {
+            self.union_pending_dirty((dst_x0, dst_y0, dst_x1, dst_y1));
+        }
         for row in y0..y1 {
             let dst_y = dy + row;
             if dst_y < 0 || dst_y >= self.height as i64 {
@@ -922,6 +964,42 @@ impl ContextCore {
             i += 4;
         }
         straight
+    }
+
+    /// Splice the pending dirty region into `mirror` — the canvas store's
+    /// full-size straight-alpha BGRA copy — converting only the rows that
+    /// changed. Returns the spliced region (exclusive pixel bounds), or
+    /// `None` when nothing has touched the buffer since the last flush, so
+    /// the caller skips the upload and the repaint entirely.
+    fn flush_dirty_bgra(
+        &mut self,
+        mirror: &mut [u8],
+    ) -> Option<(usize, usize, usize, usize)> {
+        debug_assert_eq!(mirror.len(), self.premul.len(), "mirror must match the core buffer");
+        self.materialize();
+        let (x0, y0, x1, y1) = self.pending_dirty.take()?;
+        let width = self.width;
+        for row in y0..y1 {
+            let base = (row * width + x0) * 4;
+            for col in 0..(x1 - x0) {
+                let i = base + col * 4;
+                let a = self.premul[i + 3];
+                if a == 0 {
+                    mirror[i] = 0;
+                    mirror[i + 1] = 0;
+                    mirror[i + 2] = 0;
+                    mirror[i + 3] = 0;
+                } else {
+                    let af = a as f64;
+                    // BGRA: R and B swap channels on the way out.
+                    mirror[i] = unpremultiply(self.premul[i + 2] as f64, af);
+                    mirror[i + 1] = unpremultiply(self.premul[i + 1] as f64, af);
+                    mirror[i + 2] = unpremultiply(self.premul[i] as f64, af);
+                    mirror[i + 3] = a;
+                }
+            }
+        }
+        Some((x0, y0, x1, y1))
     }
 
     /// `getImageData` over a normalized positive rect, materializing first.
@@ -1603,6 +1681,19 @@ impl GpuixCanvas2DCore {
     pub fn straight_rgba(&self) -> Vec<u8> {
         self.lock().straight_rgba()
     }
+
+    /// The dirty-aware upload path: splice only the pending region into the
+    /// store's BGRA mirror and report which rectangle that was. `None`
+    /// means the mirror is already current and the caller can skip the
+    /// upload. `mirror` must be `width * height * 4` bytes.
+    pub fn flush_dirty_bgra(
+        &self,
+        mirror: &mut [u8],
+    ) -> Option<(u32, u32, u32, u32)> {
+        self.lock()
+            .flush_dirty_bgra(mirror)
+            .map(|(x0, y0, x1, y1)| (x0 as u32, y0 as u32, x1 as u32, y1 as u32))
+    }
 }
 
 /// A one-rectangle path builder, the shared shape of `fillRect`,
@@ -1689,6 +1780,63 @@ mod tests {
         core.apply_put_image(&data, 2, 1, 0, 0, 0, 0, 2, 1);
         let read = core.read_image_data(0, 0, 2, 1);
         assert_eq!(read, data);
+    }
+
+    #[test]
+    fn dirty_region_unions_op_bboxes_and_takes_on_flush() {
+        let mut core = core_8x8();
+        core.state.fill = Paint::Solid { r: 255.0, g: 0.0, b: 0.0, a: 1.0 };
+        assert!(core.record_paint(
+            flatten_path(&rect_builder(2.0, 2.0, 2.0, 2.0, identity_matrix()).subpaths, 0.15),
+            FillRule::NonZero,
+            &core.state.fill.clone(),
+        ));
+        assert!(core.record_paint(
+            flatten_path(&rect_builder(4.0, 5.0, 2.0, 2.0, identity_matrix()).subpaths, 0.15),
+            FillRule::NonZero,
+            &core.state.fill.clone(),
+        ));
+        let mut mirror = vec![0u8; 8 * 8 * 4];
+        // The rasterizer's covered bbox is conservative by construction —
+        // an axis-aligned rect ending on a pixel boundary still scans the
+        // row its bottom edge touches.
+        assert_eq!(core.flush_dirty_bgra(&mut mirror), Some((2, 2, 6, 8)));
+        // Taken, not peeked: a clean flush reports nothing.
+        assert_eq!(core.flush_dirty_bgra(&mut mirror), None);
+    }
+
+    #[test]
+    fn copy_composite_and_resize_mark_the_whole_canvas_dirty() {
+        let mut core = core_8x8();
+        core.state.fill = Paint::Solid { r: 255.0, g: 0.0, b: 0.0, a: 1.0 };
+        core.state.composite = Composite::Copy;
+        assert!(core.record_paint(
+            flatten_path(&rect_builder(2.0, 2.0, 2.0, 2.0, identity_matrix()).subpaths, 0.15),
+            FillRule::NonZero,
+            &core.state.fill.clone(),
+        ));
+        let mut mirror = vec![0u8; 8 * 8 * 4];
+        assert_eq!(core.flush_dirty_bgra(&mut mirror), Some((0, 0, 8, 8)));
+
+        core.resize(4.0, 4.0);
+        assert_eq!(core.flush_dirty_bgra(&mut vec![0u8; 4 * 4 * 4]), Some((0, 0, 4, 4)));
+
+        core.reset();
+        assert_eq!(core.flush_dirty_bgra(&mut vec![0u8; 4 * 4 * 4]), Some((0, 0, 4, 4)));
+    }
+
+    #[test]
+    fn flush_dirty_bgra_splices_straight_bgra() {
+        let mut core = core_8x8();
+        // Red, half-transparent, one pixel at (1, 2).
+        core.apply_put_image(&[255, 0, 0, 128], 1, 1, 1, 2, 0, 0, 1, 1);
+        let mut mirror = vec![9u8; 8 * 8 * 4];
+        assert_eq!(core.flush_dirty_bgra(&mut mirror), Some((1, 2, 2, 3)));
+        // Premul r = round-half-even(127.5) = 128; straight = 128*255/128.
+        let index = (2 * 8 + 1) * 4;
+        assert_eq!(&mirror[index..index + 4], &[0, 0, 255, 128]);
+        // Outside the splice the mirror is untouched.
+        assert_eq!(&mirror[0..4], &[9, 9, 9, 9]);
     }
 
     #[test]

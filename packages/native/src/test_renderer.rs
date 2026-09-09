@@ -22,8 +22,8 @@ use gpui::AppContext as _;
 use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
-    parse_debug_frame_overlay_mode, to_element_id, DebugFrameOverlayStats, EventCallback,
-    GpuixView,
+    parse_debug_frame_overlay_mode, parse_dirty_rect, to_element_id, DebugFrameOverlayStats,
+    EventCallback, GpuixView,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -291,7 +291,9 @@ impl TestGpuixRenderer {
 
     // ── <canvas> pixel bridge ─────────────────────────────────────────
 
-    /// Upload a full RGBA buffer (`uploadCanvasPixels`) and repaint.
+    /// Upload a full RGBA buffer (`uploadCanvasPixels`) and repaint. The
+    /// optional `dirty` rect restricts the GPU upload to the tiles it
+    /// intersects.
     #[napi]
     pub fn upload_canvas_pixels(
         &self,
@@ -299,10 +301,12 @@ impl TestGpuixRenderer {
         width: f64,
         height: f64,
         pixels: Uint8Array,
+        dirty: Option<Vec<f64>>,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let rect = parse_dirty_rect(dirty);
         self.canvas_surfaces
-            .upload(id, width as u32, height as u32, &pixels)
+            .upload_region(id, width as u32, height as u32, &pixels, rect)
             .map_err(Error::from_reason)?;
         drop(pixels);
         self.flush()
@@ -311,7 +315,8 @@ impl TestGpuixRenderer {
     /// Upload a `<canvas>` element's pixels straight from its 2D context
     /// core — Rust to Rust, no byte round-trip through JS — and repaint.
     /// Mirrors `uploadCanvasPixels`; the core materializes its pending
-    /// display list as part of the handoff.
+    /// display list and splices only the dirty region into the store's
+    /// mirror. A flush with nothing pending skips the repaint.
     #[napi]
     pub fn upload_canvas_from_context(
         &self,
@@ -319,12 +324,19 @@ impl TestGpuixRenderer {
         ctx: &crate::canvas2d::context::GpuixCanvas2DCore,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
-        let (width, height) = ctx.dimensions();
-        let rgba = ctx.straight_rgba();
-        self.canvas_surfaces
-            .upload(id, width, height, &rgba)
-            .map_err(Error::from_reason)?;
-        self.flush()
+        if self.canvas_surfaces.upload_from_core(id, ctx).map_err(Error::from_reason)? {
+            self.flush()
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Bytes built into canvas tile images so far — what the GPU renderer's
+    /// atlas uploads. Lets tests pin upload cost to the dirty area instead
+    /// of wall-clock time.
+    #[napi]
+    pub fn canvas_uploaded_bytes(&self) -> f64 {
+        self.canvas_surfaces.uploaded_bytes() as f64
     }
 
     /// Read back the last uploaded buffer, converted to RGBA.
