@@ -101,10 +101,11 @@ jobs:
         run: |
           # The runner image ships Google's chrome-stable apt repo, whose
           # Packages.gz hash mismatches while their CDN syncs. Nothing below
-          # needs Chrome: retry first, then drop that repo and update again.
+          # needs Chrome: retry first, then drop every apt source that points
+          # at dl.google.com and update again.
           sudo apt-get update -o Acquire::Retries=3 || {
             echo '::warning::apt update failed; retrying without the Google Chrome repo'
-            sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+            sudo grep -rl 'dl.google.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f
             sudo apt-get update
           }
           sudo apt-get install -y \
