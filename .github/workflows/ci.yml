@@ -99,7 +99,15 @@ jobs:
         if: contains(matrix.settings.target, 'linux')
         working-directory: .
         run: |
-          sudo apt-get update && sudo apt-get install -y \
+          # The runner image ships Google's chrome-stable apt repo, whose
+          # Packages.gz hash mismatches while their CDN syncs. Nothing below
+          # needs Chrome: retry first, then drop that repo and update again.
+          sudo apt-get update -o Acquire::Retries=3 || {
+            echo '::warning::apt update failed; retrying without the Google Chrome repo'
+            sudo rm -f /etc/apt/sources.list.d/google-chrome.list
+            sudo apt-get update
+          }
+          sudo apt-get install -y \
             gcc g++ clang \
             libfontconfig-dev \
             libwayland-dev \
