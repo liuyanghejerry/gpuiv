@@ -399,18 +399,31 @@ jobs:
         run: bun run update-e2e
         timeout-minutes: 20
 
-  publish:
-    name: publish
-    # Publishing needs the NPM_TOKEN secret (npm granular token with
-    # publish rights on the gpuiv org). Skip on forks so CI stays green.
+  # Publishing uses npm Trusted Publishing (OIDC): no npm token is stored
+  # anywhere. Every package's trusted publisher must be configured on
+  # npmjs.com (org/user liuyanghejerry, repository gpuiv, workflow ci.yml)
+  # before its first OIDC publish. Each package publishes in its own job
+  # because every `npm publish` requests an OIDC token from GitHub.
+  publish-platform:
+    name: publish @gpuiv/native-${{ matrix.target }}
     if: github.repository == 'liuyanghejerry/gpuiv'
     runs-on: ubuntu-latest
     needs:
       - build
       - test
       - test-windows
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - darwin-arm64
+          - darwin-x64
+          - linux-x64-gnu
+          - linux-arm64-gnu
+          - win32-x64-msvc
+          - win32-arm64-msvc
     permissions:
-      contents: write
+      contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
@@ -419,7 +432,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org/
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
@@ -432,45 +444,111 @@ jobs:
         with:
           path: packages/native/artifacts
 
-      - name: Create npm dirs and move artifacts
+      - name: Assemble per-platform packages
         run: |
           bunx @napi-rs/cli create-npm-dirs
           bunx @napi-rs/cli artifacts
         working-directory: packages/native
 
-      - name: List packages
-        run: ls -R packages/native/npm/
-        shell: bash
-
-      # NPM_TOKEN is an npm granular access token with publish rights on
-      # the gpuiv org (granular is required for --provenance).
-      - name: Publish @gpuiv/native
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish @gpuiv/native-${{ matrix.target }}
         run: |
-          CURRENT_VERSION=$(node -p "require('./packages/native/package.json').version")
+          CURRENT_VERSION=$(node -p "require('../package.json').version")
+          if npm view "@gpuiv/native-${{ matrix.target }}@${CURRENT_VERSION}" version 2>/dev/null; then
+            echo "@gpuiv/native-${{ matrix.target }}@${CURRENT_VERSION} already published, skipping"
+          else
+            echo "Publishing @gpuiv/native-${{ matrix.target }}@${CURRENT_VERSION}"
+            npm publish --access public --provenance
+          fi
+        working-directory: packages/native/npm/${{ matrix.target }}
+
+  publish-native:
+    name: publish @gpuiv/native
+    if: github.repository == 'liuyanghejerry/gpuiv'
+    runs-on: ubuntu-latest
+    needs:
+      - publish-platform
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/native/artifacts
+
+      - name: Assemble per-platform packages
+        run: |
+          bunx @napi-rs/cli create-npm-dirs
+          bunx @napi-rs/cli artifacts
+        working-directory: packages/native
+
+      # Writes the per-platform optionalDependencies into packages/native/
+      # package.json and copies the .node files. --skip-optional-publish
+      # leaves the platform publishes to the publish-platform matrix.
+      - name: Write optionalDependencies
+        run: bunx @napi-rs/cli pre-publish -t npm --no-gh-release --skip-optional-publish
+        working-directory: packages/native
+
+      # --ignore-scripts skips prepublishOnly, whose napi pre-publish would
+      # re-run the platform publishes that publish-platform already did.
+      - name: Publish @gpuiv/native
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
           if npm view "@gpuiv/native@${CURRENT_VERSION}" version 2>/dev/null; then
             echo "@gpuiv/native@${CURRENT_VERSION} already published, skipping"
           else
             echo "Publishing @gpuiv/native@${CURRENT_VERSION}"
-            cd packages/native
-            npm publish --access public --provenance
+            npm publish --ignore-scripts --access public --provenance
           fi
+        working-directory: packages/native
+
+  publish-vue:
+    name: publish @gpuiv/vue
+    if: github.repository == 'liuyanghejerry/gpuiv'
+    runs-on: ubuntu-latest
+    needs:
+      - publish-native
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
 
       - name: Build @gpuiv/vue
         run: bun run build
         working-directory: packages/vue
 
       - name: Publish @gpuiv/vue
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          CURRENT_VERSION=$(node -p "require('./packages/vue/package.json').version")
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
           if npm view "@gpuiv/vue@${CURRENT_VERSION}" version 2>/dev/null; then
             echo "@gpuiv/vue@${CURRENT_VERSION} already published, skipping"
           else
             echo "Publishing @gpuiv/vue@${CURRENT_VERSION}"
-            cd packages/vue
             node -e "
               const fs = require('fs')
               const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
@@ -480,3 +558,4 @@ jobs:
             "
             npm publish --access public --provenance
           fi
+        working-directory: packages/vue
