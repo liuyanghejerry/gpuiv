@@ -401,9 +401,9 @@ jobs:
 
   publish:
     name: publish
-    # Publishing needs SIGILLO_TOKEN + npm rights that only the upstream
-    # repo (remorses/gpuix) has. Skip on forks so CI stays green there.
-    if: github.repository == 'remorses/gpuix'
+    # Publishing needs the NPM_TOKEN secret (npm granular token with
+    # publish rights on the gpuiv org). Skip on forks so CI stays green.
+    if: github.repository == 'liuyanghejerry/gpuiv'
     runs-on: ubuntu-latest
     needs:
       - build
@@ -419,6 +419,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          registry-url: https://registry.npmjs.org/
 
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
@@ -441,13 +442,11 @@ jobs:
         run: ls -R packages/native/npm/
         shell: bash
 
-      # NPM_TOKEN lives in Sigillo (npm/tokens, prod). CI only stores
-      # SIGILLO_TOKEN. Rotate the npm token in one place.
+      # NPM_TOKEN is an npm granular access token with publish rights on
+      # the gpuiv org (granular is required for --provenance).
       - name: Publish @gpuiv/native
         env:
-          SIGILLO_TOKEN: ${{ secrets.SIGILLO_TOKEN }}
-          SIGILLO_PROJECT: ${{ vars.SIGILLO_PROJECT }}
-          SIGILLO_ENVIRONMENT: prod
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           CURRENT_VERSION=$(node -p "require('./packages/native/package.json').version")
           if npm view "@gpuiv/native@${CURRENT_VERSION}" version 2>/dev/null; then
@@ -455,7 +454,7 @@ jobs:
           else
             echo "Publishing @gpuiv/native@${CURRENT_VERSION}"
             cd packages/native
-            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuiv-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuiv-npmrc npm publish --access public --provenance'
+            npm publish --access public --provenance
           fi
 
       - name: Build @gpuiv/vue
@@ -464,9 +463,7 @@ jobs:
 
       - name: Publish @gpuiv/vue
         env:
-          SIGILLO_TOKEN: ${{ secrets.SIGILLO_TOKEN }}
-          SIGILLO_PROJECT: ${{ vars.SIGILLO_PROJECT }}
-          SIGILLO_ENVIRONMENT: prod
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           CURRENT_VERSION=$(node -p "require('./packages/vue/package.json').version")
           if npm view "@gpuiv/vue@${CURRENT_VERSION}" version 2>/dev/null; then
@@ -481,5 +478,5 @@ jobs:
               pkg.dependencies['@gpuiv/native'] = '^' + native
               fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
             "
-            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuiv-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuiv-npmrc npm publish --access public --provenance'
+            npm publish --access public --provenance
           fi
