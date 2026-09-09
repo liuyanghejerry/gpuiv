@@ -641,6 +641,35 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Simulate one pinch gesture step at the given position.
+    /// delta is the zoom delta (0.1 ≈ a 10% zoom-in); phase is "started",
+    /// "moved", "ended" or "cancelled" (default "moved"), the same
+    /// vocabulary as the pinch event payload.
+    #[napi]
+    pub fn simulate_pinch(
+        &self,
+        x: f64,
+        y: f64,
+        delta: f64,
+        phase: Option<String>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let phase = crate::automation::parse_touch_phase(phase.as_deref());
+        with_test_state(|cx, window, _view| {
+            cx.simulate_event(
+                window,
+                gpui::PinchEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    delta: delta as f32,
+                    modifiers,
+                    phase,
+                },
+            );
+            Ok(())
+        })
+    }
+
     // ── Selection API ──────────────────────────────────────────────────
 
     /// The current text selection joined in document order, or null.

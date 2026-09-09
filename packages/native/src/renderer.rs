@@ -352,6 +352,13 @@ enum MouseInput {
         delta_y: f64,
         modifiers: gpui::Modifiers,
     },
+    Pinch {
+        x: f64,
+        y: f64,
+        delta: f64,
+        phase: gpui::TouchPhase,
+        modifiers: gpui::Modifiers,
+    },
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -695,6 +702,17 @@ async fn run_ui_commands(
                             } => {
                                 crate::automation::dispatch_scroll_wheel(
                                     window, cx, x, y, delta_x, delta_y, modifiers,
+                                );
+                            }
+                            MouseInput::Pinch {
+                                x,
+                                y,
+                                delta,
+                                phase,
+                                modifiers,
+                            } => {
+                                crate::automation::dispatch_pinch(
+                                    window, cx, x, y, delta, phase, modifiers,
                                 );
                             }
                         }
@@ -2145,6 +2163,49 @@ impl GpuixRenderer {
         }
     }
 
+    /// Simulate one pinch gesture step at the given position. `delta` is the
+    /// zoom delta (0.1 ≈ a 10% zoom-in); `phase` is "started", "moved",
+    /// "ended" or "cancelled", the same vocabulary as the event payload.
+    #[napi]
+    pub fn simulate_pinch(
+        &self,
+        x: f64,
+        y: f64,
+        delta: f64,
+        phase: Option<String>,
+        modifiers: Option<String>,
+    ) -> Result<()> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let phase = crate::automation::parse_touch_phase(phase.as_deref());
+
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::automation::dispatch_pinch(window, cx, x, y, delta, phase, modifiers);
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_mouse_input(MouseInput::Pinch {
+            x,
+            y,
+            delta,
+            phase,
+            modifiers,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (x, y, delta, phase, modifiers);
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn dispatch_key_input(&self, input: KeyInput) -> Result<()> {
         let (response_sender, response_receiver) = sync_channel(1);
@@ -2833,6 +2894,28 @@ impl WebGpuixRenderer {
     ) -> Result<(), wasm_bindgen::JsValue> {
         update_web_window_without_view(move |window, cx| {
             crate::automation::dispatch_scroll_wheel(window, cx, x, y, delta_x, delta_y);
+        })
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = simulatePinch)]
+    pub fn simulate_pinch(
+        &self,
+        x: f64,
+        y: f64,
+        delta: f64,
+        phase: Option<String>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let phase = crate::automation::parse_touch_phase(phase.as_deref());
+        update_web_window_without_view(move |window, cx| {
+            crate::automation::dispatch_pinch(
+                window,
+                cx,
+                x,
+                y,
+                delta,
+                phase,
+                gpui::Modifiers::default(),
+            );
         })
     }
 
@@ -4745,6 +4828,25 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
                         p.delta_y = Some(f64::from(f32::from(pixel_delta.y)));
 
                         p.touch_phase = Some(match scroll_event.touch_phase {
+                            gpui::TouchPhase::Started => "started".to_string(),
+                            gpui::TouchPhase::Moved => "moved".to_string(),
+                            gpui::TouchPhase::Ended => "ended".to_string(),
+                            gpui::TouchPhase::Cancelled => "cancelled".to_string(),
+                        });
+                    });
+                });
+            }
+
+            // ── Pinch (trackpad zoom, touchscreen pinch) ────────
+            "pinch" => {
+                el = el.on_pinch(move |pinch_event, _window, _cx| {
+                    emit_event_full(&callback, id, "pinch", |p| {
+                        let (x, y) = point_to_xy(pinch_event.position);
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.modifiers = Some(pinch_event.modifiers.into());
+                        p.zoom_delta = Some(f64::from(pinch_event.delta));
+                        p.touch_phase = Some(match pinch_event.phase {
                             gpui::TouchPhase::Started => "started".to_string(),
                             gpui::TouchPhase::Moved => "moved".to_string(),
                             gpui::TouchPhase::Ended => "ended".to_string(),

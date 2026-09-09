@@ -47,6 +47,13 @@ interface NativeTestRendererApi extends NativeRenderer {
     deltaY: number,
     modifiers?: string
   ): void
+  simulatePinch(
+    x: number,
+    y: number,
+    delta: number,
+    phase?: string,
+    modifiers?: string
+  ): void
   simulateMouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void
   simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
   simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
@@ -317,6 +324,22 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
     this.dispatchNativeEvents()
+  }
+
+  /** End-to-end: simulate one pinch step through GPUI → dispatch resulting
+   *  events to the registry. `delta` is the zoom delta (0.1 ≈ +10%); `phase`
+   *  defaults to "moved"; send "started"/"ended" to bracket a gesture. */
+  nativeSimulatePinch(
+    x: number,
+    y: number,
+    delta: number,
+    phase?: string,
+    modifiers?: string
+  ): void {
+    this.native.flush()
+    this.native.simulatePinch(x, y, delta, phase, modifiers)
+    this.dispatchNativeEvents()
+    this.native.flush()
   }
 
   dispatchScrollWheel(

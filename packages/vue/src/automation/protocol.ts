@@ -198,6 +198,14 @@ export const methods = {
     }),
     result: okSchema,
   },
+  pinch: {
+    params: pointSchema.extend({
+      delta: z.number(),
+      phase: z.enum(["started", "moved", "ended", "cancelled"]).optional(),
+      modifiers: modifiersSchema,
+    }),
+    result: okSchema,
+  },
   keystrokes: {
     params: z.object({
       keys: z.string(),
