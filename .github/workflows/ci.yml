@@ -452,7 +452,7 @@ jobs:
 
       - name: Publish @gpuiv/native-${{ matrix.target }}
         run: |
-          CURRENT_VERSION=$(node -p "require('../package.json').version")
+          CURRENT_VERSION=$(node -p "require('../../package.json').version")
           if npm view "@gpuiv/native-${{ matrix.target }}@${CURRENT_VERSION}" version 2>/dev/null; then
             echo "@gpuiv/native-${{ matrix.target }}@${CURRENT_VERSION} already published, skipping"
           else
