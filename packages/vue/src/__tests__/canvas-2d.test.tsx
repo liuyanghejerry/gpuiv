@@ -11,10 +11,10 @@ import {
   createTestApp,
   hasNativeTestRenderer,
   type GpuixCanvasInstance,
+  type GpuixCompositeOperation,
   type GpuixCanvasRenderingContext2D,
-  type GpuixImageData,
 } from "../index.js"
-import { GpuixCanvasRenderingContext2D as Context2D } from "../canvas/context2d.js"
+import { GpuixImageData, GpuixCanvasRenderingContext2D as Context2D } from "../canvas/context2d.js"
 import { SHOTS_DIR, expectScreenshotsDiffer } from "./test-utils.js"
 import fs from "fs"
 
@@ -345,6 +345,119 @@ describe("canvas 2d context (pure rasterizer)", () => {
     expect(copy.globalCompositeOperation).toBe("xor")
   })
 
+  it("rasterizes every separable blend mode per the compositing spec", () => {
+    // Opaque red blended over an opaque blue backdrop; the expected bytes
+    // are W3C Compositing and Blending Level 1 §5.1 evaluated per channel.
+    const cases: Array<[GpuixCompositeOperation, [number, number, number, number]]> = [
+      ["multiply", [0, 0, 0, 255]],
+      ["screen", [255, 0, 255, 255]],
+      ["overlay", [0, 0, 255, 255]],
+      ["darken", [0, 0, 0, 255]],
+      ["lighten", [255, 0, 255, 255]],
+      ["color-dodge", [0, 0, 255, 255]],
+      ["color-burn", [0, 0, 255, 255]],
+      ["hard-light", [255, 0, 0, 255]],
+      ["soft-light", [0, 0, 255, 255]],
+      ["difference", [255, 0, 255, 255]],
+      ["exclusion", [255, 0, 255, 255]],
+    ]
+    for (const [mode, expected] of cases) {
+      const { ctx } = makeContext(8, 8)
+      ctx.fillStyle = "#0000ff"
+      ctx.fillRect(0, 0, 8, 8)
+      ctx.globalCompositeOperation = mode
+      expect(ctx.globalCompositeOperation).toBe(mode)
+      ctx.fillStyle = "#ff0000"
+      ctx.fillRect(0, 0, 8, 8)
+      expectPixelClose(px(ctx, 3, 3), expected, 0)
+
+      // Mid-grey pairs pin the piecewise branches away from the extremes.
+      const piece = makeContext(8, 8).ctx
+      piece.fillStyle = "#3c3c3c" // 60
+      piece.fillRect(0, 0, 8, 8)
+      piece.globalCompositeOperation = mode
+      piece.fillStyle = "#c8c8c8" // 200
+      piece.fillRect(0, 0, 8, 8)
+      const mid = px(piece, 3, 3)
+      // multiply-family modes keep grey-on-grey grey.
+      expect(mid[0]).toBe(mid[1])
+      expect(mid[1]).toBe(mid[2])
+      expect(mid[3]).toBe(255)
+    }
+    // Spot anchors for those mid-grey values (from the spec formulas).
+    const spot: Array<[GpuixCompositeOperation, [number, number, number, number]]> = [
+      ["overlay", [94, 94, 94, 255]],
+      ["hard-light", [171, 171, 171, 255]],
+      ["soft-light", [96, 96, 96, 255]],
+      ["color-burn", [6, 6, 6, 255]],
+      ["color-dodge", [255, 255, 255, 255]],
+    ]
+    for (const [mode, expected] of spot) {
+      const { ctx } = makeContext(8, 8)
+      ctx.fillStyle = "#3c3c3c"
+      ctx.fillRect(0, 0, 8, 8)
+      ctx.globalCompositeOperation = mode
+      ctx.fillStyle = "#c8c8c8"
+      ctx.fillRect(0, 0, 8, 8)
+      expectPixelClose(px(ctx, 3, 3), expected, 0)
+    }
+  })
+
+  it("keeps blend-mode alpha semantics on transparent and translucent backdrops", () => {
+    // A transparent backdrop has nothing to blend: the source lands as-is.
+    const fresh = makeContext(8, 8).ctx
+    fresh.globalCompositeOperation = "multiply"
+    fresh.fillStyle = "#ff4020"
+    fresh.fillRect(0, 0, 8, 8)
+    expectPixelClose(px(fresh, 3, 3), [255, 64, 32, 255], 0)
+
+    // A translucent backdrop keeps its share: multiply opaque blue over
+    // straight (255,0,0,128) — red dies (Cb·Cs = 0), blue keeps
+    // (1−αb)·255 = 127 of the source.
+    const half = makeContext(8, 8).ctx
+    half.putImageData(new GpuixImageData(new Uint8ClampedArray([255, 0, 0, 128]), 1, 1), 3, 3)
+    half.globalCompositeOperation = "multiply"
+    half.fillStyle = "#0000ff"
+    half.fillRect(0, 0, 8, 8)
+    expectPixelClose(px(half, 3, 3), [0, 0, 127, 255], 1)
+
+    // globalAlpha mixes the blend result with the backdrop, per §5.1.
+    const alpha = makeContext(8, 8).ctx
+    alpha.fillStyle = "#ffffff"
+    alpha.fillRect(0, 0, 8, 8)
+    alpha.globalAlpha = 0.5
+    alpha.globalCompositeOperation = "multiply"
+    alpha.fillStyle = "#ff0000"
+    alpha.fillRect(0, 0, 8, 8)
+    expectPixelClose(px(alpha, 3, 3), [255, 128, 128, 255], 1)
+
+    // drawImage composites through the same blend path as fills.
+    const source = makeContext(4, 4).ctx
+    source.fillStyle = "#ff0000"
+    source.fillRect(0, 0, 4, 4)
+    const sourceHandle = { getContext: (type: string) => (type === "2d" ? source : null) }
+    const image = makeContext(8, 8).ctx
+    image.fillStyle = "#0000ff"
+    image.fillRect(0, 0, 8, 8)
+    image.globalCompositeOperation = "multiply"
+    image.drawImage(sourceHandle, 0, 0, 4, 4, 0, 0, 8, 8)
+    expectPixelClose(px(image, 3, 3), [0, 0, 0, 255], 0)
+  })
+
+  it("throws on non-separable blend modes instead of degrading", () => {
+    const { ctx } = makeContext(8, 8)
+    for (const mode of ["hue", "saturation", "color", "luminosity"]) {
+      expect(() => {
+        ctx.globalCompositeOperation = mode as never
+      }).toThrow(/non-separable/)
+    }
+    // A rejected assignment leaves the state untouched.
+    expect(ctx.globalCompositeOperation).toBe("source-over")
+    // Separable modes still round-trip through the getter.
+    ctx.globalCompositeOperation = "color-dodge"
+    expect(ctx.globalCompositeOperation).toBe("color-dodge")
+  })
+
   it("clears rectangles through the clip mask", () => {
     const { ctx } = makeContext(16, 16)
     ctx.fillStyle = "#ff0000"
@@ -515,6 +628,32 @@ describeNative("canvas 2d context (native bridge)", () => {
     expect(native).not.toBeNull()
     const local = ctx.getImageData(0, 0, 8, 8).data
     expect(Array.from(native!)).toEqual(Array.from(local))
+    app.unmount()
+  })
+
+  it("blend-mode pixels reach the native store byte-identical", async () => {
+    const canvas = ref<GpuixCanvasInstance | null>(null)
+    const App = defineComponent({
+      setup() {
+        return () => <GpuixCanvas ref={canvas} width={8} height={8} style={{ width: 64, height: 64 }} />
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+
+    const ctx = canvas.value!.getContext("2d")!
+    ctx.fillStyle = "#0000ff"
+    ctx.fillRect(0, 0, 8, 8)
+    ctx.globalCompositeOperation = "multiply"
+    ctx.fillStyle = "#ff0000"
+    ctx.fillRect(0, 0, 8, 8)
+    await app.settle()
+
+    const native = app.renderer.readCanvasPixels(canvas.value!.id!)
+    expect(native).not.toBeNull()
+    expect(Array.from(native!)).toEqual(Array.from(ctx.getImageData(0, 0, 8, 8).data))
+    // multiply(red, blue) = black — the blended bytes survive the GPU store.
+    expect(Array.from(native!.slice(0, 4))).toEqual([0, 0, 0, 255])
     app.unmount()
   })
 

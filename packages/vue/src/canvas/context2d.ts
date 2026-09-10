@@ -18,7 +18,9 @@
  *
  * Deliberately NOT implemented (documented in README "Canvas"): text
  * (`fillText`/`strokeText`/`measureText` — they throw, glyph rasterization
- * is a separate project), `toDataURL`/`toBlob`, shadows, `filter`,
+ * is a separate project), the non-separable blend modes
+ * (`hue`/`saturation`/`color`/`luminosity` as `globalCompositeOperation` —
+ * assigning one throws), `toDataURL`/`toBlob`, shadows, `filter`,
  * `createPattern`, conic gradients, WebGL, and `HTMLImageElement` as a
  * `drawImage` source (JS never sees decoded `<img>` pixels).
  */
@@ -36,9 +38,10 @@ export type GpuixLineCap = "butt" | "round" | "square"
 export type GpuixLineJoin = "round" | "bevel" | "miter"
 export type GpuixFillRule = "nonzero" | "evenodd"
 
-/** Every composite mode the DOM accepts as a `globalCompositeOperation`
- *  value. The separable/non-separable blend modes are accepted (the getter
- *  must echo them back) but currently rasterize as `source-over`. */
+/** Every composite mode `globalCompositeOperation` rasterizes. The
+ *  Porter-Duff operators and the eleven **separable** blend modes are
+ *  implemented; the non-separable blend modes (hue, saturation, color,
+ *  luminosity) are not — assigning one throws, like the text APIs do. */
 export type GpuixCompositeOperation =
   | "source-over"
   | "source-in"
@@ -63,10 +66,6 @@ export type GpuixCompositeOperation =
   | "soft-light"
   | "difference"
   | "exclusion"
-  | "hue"
-  | "saturation"
-  | "color"
-  | "luminosity"
 
 const COMPOSITE_OPERATIONS: ReadonlySet<string> = new Set([
   "source-over",
@@ -92,6 +91,11 @@ const COMPOSITE_OPERATIONS: ReadonlySet<string> = new Set([
   "soft-light",
   "difference",
   "exclusion",
+])
+
+/** DOM-valid values with no rasterizer — assigning one throws instead of
+ *  silently degrading to source-over. */
+const NON_SEPARABLE_BLEND_MODES: ReadonlySet<string> = new Set([
   "hue",
   "saturation",
   "color",
@@ -150,6 +154,11 @@ interface ShadowState {
 const NOT_SUPPORTED_TEXT =
   "GpuixCanvas: text rendering (fillText/strokeText/measureText) is not implemented. " +
   "Glyph rasterization is tracked as follow-up work; see the README Canvas section."
+
+const NOT_SUPPORTED_BLEND_MODE =
+  "GpuixCanvas: non-separable blend modes (hue/saturation/color/luminosity) are not " +
+  "implemented. They mix colour channels, which the separable blend pipeline does not " +
+  "rasterize; see the README Canvas section."
 
 function finite(...values: number[]): boolean {
   return values.every((v) => Number.isFinite(v))
@@ -486,6 +495,9 @@ export class GpuixCanvasRenderingContext2D {
   }
 
   set globalCompositeOperation(value: GpuixCompositeOperation) {
+    if (typeof value === "string" && NON_SEPARABLE_BLEND_MODES.has(value)) {
+      throw new Error(NOT_SUPPORTED_BLEND_MODE)
+    }
     if (typeof value === "string" && COMPOSITE_OPERATIONS.has(value)) {
       this.state.composite = value
       this.native.setComposite(value)

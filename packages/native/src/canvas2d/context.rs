@@ -20,6 +20,10 @@
 //! premul write goes through [`to_u8_clamp`] to reproduce that exactly;
 //! `Math.round` in `unpremultiply` is round-half-away-from-zero for the
 //! non-negative values it sees, which `f64::round` matches.
+//!
+//! The separable blend modes are native Rust (no TS original): the math
+//! follows W3C *Compositing and Blending Level 1* §5.1, see
+//! [`SeparableBlend`].
 
 use std::sync::{Arc, Mutex};
 
@@ -36,9 +40,89 @@ use super::geom::raster::{
 };
 use super::geom::stroke::{build_stroke_geometry, StrokeCap, StrokeJoin, StrokeParams};
 
-/// Every composite mode the DOM accepts; the separable/non-separable blend
-/// names are accepted by the TS facade but rasterize as `source-over`, so
-/// they collapse here. Parsed from the validated JS string.
+/// The separable blend modes of W3C *Compositing and Blending Level 1*
+/// §5.1, rasterized channel-by-channel (each output channel depends only
+/// on the same input channel). Non-separable modes (hue, saturation, color,
+/// luminosity) mix channels and are rejected at parse time.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum SeparableBlend {
+    Multiply,
+    Screen,
+    Overlay,
+    Darken,
+    Lighten,
+    ColorDodge,
+    ColorBurn,
+    HardLight,
+    SoftLight,
+    Difference,
+    Exclusion,
+}
+
+impl SeparableBlend {
+    /// The blend step `B(Cb, Cs)` on one channel, both operands normalized
+    /// to 0–1, per §5.1 of the spec. `overlay` is `hard-light` with the
+    /// operands swapped; the piecewise definitions below are transcribed
+    /// from the spec formulas verbatim.
+    fn channel(self, cb: f64, cs: f64) -> f64 {
+        fn hard_light(cb: f64, cs: f64) -> f64 {
+            if cs <= 0.5 {
+                cb * (2.0 * cs)
+            } else {
+                screen(cb, 2.0 * cs - 1.0)
+            }
+        }
+        fn screen(cb: f64, cs: f64) -> f64 {
+            cb + cs - cb * cs
+        }
+        match self {
+            SeparableBlend::Multiply => cb * cs,
+            SeparableBlend::Screen => screen(cb, cs),
+            SeparableBlend::Overlay => hard_light(cs, cb),
+            SeparableBlend::Darken => cb.min(cs),
+            SeparableBlend::Lighten => cb.max(cs),
+            SeparableBlend::ColorDodge => {
+                if cb <= 0.0 {
+                    0.0
+                } else if cs >= 1.0 {
+                    1.0
+                } else {
+                    (cb / (1.0 - cs)).min(1.0)
+                }
+            }
+            SeparableBlend::ColorBurn => {
+                if cb >= 1.0 {
+                    1.0
+                } else if cs <= 0.0 {
+                    0.0
+                } else {
+                    1.0 - ((1.0 - cb) / cs).min(1.0)
+                }
+            }
+            SeparableBlend::HardLight => hard_light(cb, cs),
+            SeparableBlend::SoftLight => {
+                if cs <= 0.5 {
+                    cb - (1.0 - 2.0 * cs) * cb * (1.0 - cb)
+                } else {
+                    // D(Cb): the spec's luminance-shaped modifier curve.
+                    let d = if cb <= 0.25 {
+                        ((16.0 * cb - 12.0) * cb + 4.0) * cb
+                    } else {
+                        cb.sqrt()
+                    };
+                    cb + (2.0 * cs - 1.0) * (d - cb)
+                }
+            }
+            SeparableBlend::Difference => (cb - cs).abs(),
+            SeparableBlend::Exclusion => cb + cs - 2.0 * cb * cs,
+        }
+    }
+}
+
+/// Every composite mode that rasterizes: the Porter-Duff operators plus the
+/// separable blend modes. Parsed from the validated JS string; a name this
+/// enum does not cover (including the non-separable blend modes) is an
+/// error, never a silent fallback to `source-over`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Composite {
     SourceOver,
@@ -53,26 +137,41 @@ enum Composite {
     Copy,
     Xor,
     Clear,
+    Blend(SeparableBlend),
 }
 
 impl Composite {
-    fn parse(value: &str) -> Composite {
+    fn parse(value: &str) -> Option<Composite> {
         match value {
-            "source-in" => Composite::SourceIn,
-            "source-out" => Composite::SourceOut,
-            "source-atop" => Composite::SourceAtop,
-            "destination-over" => Composite::DestinationOver,
-            "destination-in" => Composite::DestinationIn,
-            "destination-out" => Composite::DestinationOut,
-            "destination-atop" => Composite::DestinationAtop,
-            "lighter" => Composite::Lighter,
-            "copy" => Composite::Copy,
-            "xor" => Composite::Xor,
-            "clear" => Composite::Clear,
-            // "source-over" and every blend-mode name — the TS facade only
-            // forwards validated DOM names; anything else degrades to the
-            // default composite instead of failing the draw.
-            _ => Composite::SourceOver,
+            "source-over" => Some(Composite::SourceOver),
+            "source-in" => Some(Composite::SourceIn),
+            "source-out" => Some(Composite::SourceOut),
+            "source-atop" => Some(Composite::SourceAtop),
+            "destination-over" => Some(Composite::DestinationOver),
+            "destination-in" => Some(Composite::DestinationIn),
+            "destination-out" => Some(Composite::DestinationOut),
+            "destination-atop" => Some(Composite::DestinationAtop),
+            "lighter" => Some(Composite::Lighter),
+            "copy" => Some(Composite::Copy),
+            "xor" => Some(Composite::Xor),
+            "clear" => Some(Composite::Clear),
+            "multiply" => Some(Composite::Blend(SeparableBlend::Multiply)),
+            "screen" => Some(Composite::Blend(SeparableBlend::Screen)),
+            "overlay" => Some(Composite::Blend(SeparableBlend::Overlay)),
+            "darken" => Some(Composite::Blend(SeparableBlend::Darken)),
+            "lighten" => Some(Composite::Blend(SeparableBlend::Lighten)),
+            "color-dodge" => Some(Composite::Blend(SeparableBlend::ColorDodge)),
+            "color-burn" => Some(Composite::Blend(SeparableBlend::ColorBurn)),
+            "hard-light" => Some(Composite::Blend(SeparableBlend::HardLight)),
+            "soft-light" => Some(Composite::Blend(SeparableBlend::SoftLight)),
+            "difference" => Some(Composite::Blend(SeparableBlend::Difference)),
+            "exclusion" => Some(Composite::Blend(SeparableBlend::Exclusion)),
+            // Unknown and non-separable names (hue/saturation/color/
+            // luminosity): `set_composite` turns this into a napi error —
+            // the facade throws before the call for the names the DOM
+            // defines, so reaching here means an unsupported value reached
+            // the bridge anyway.
+            _ => None,
         }
     }
 }
@@ -1123,13 +1222,41 @@ fn composite_pixel(premul: &mut [u8], p: usize, rgb: [f64; 3], e: f64, composite
             premul[p + 2] = to_u8_clamp(out_b);
             premul[p + 3] = to_u8_clamp(255.0 * out_a);
         }
-        // source-over (and every blend name the facade folded into it).
+        // source-over (the default).
         Composite::SourceOver => {
             let ia = 1.0 - e;
             premul[p] = to_u8_clamp(rgb[0] * e + premul[p] as f64 * ia);
             premul[p + 1] = to_u8_clamp(rgb[1] * e + premul[p + 1] as f64 * ia);
             premul[p + 2] = to_u8_clamp(rgb[2] * e + premul[p + 2] as f64 * ia);
             premul[p + 3] = to_u8_clamp(255.0 * e + premul[p + 3] as f64 * ia);
+        }
+        // Separable blend modes: W3C Compositing and Blending Level 1 §5
+        // composites a blended source over the backdrop,
+        //
+        //   Co = αs·(1−αb)·Cs + αs·αb·B(Cb, Cs) + (1−αs)·αb·Cb
+        //   αo = αs + αb·(1−αs)
+        //
+        // with Cs/Cb straight (un-premultiplied) colours, B the per-mode
+        // blend step, and Co the premultiplied result this buffer stores.
+        // The formula degenerates to plain source-over when B = Cs. `e`
+        // already carries coverage × style × globalAlpha, so αs = e; a
+        // transparent backdrop has no colour to blend with, and the αb
+        // factors zero those terms out, so Cb = 0 is exact there.
+        Composite::Blend(mode) => {
+            let src_a = e;
+            let cb = [
+                if dst_a > 0.0 { premul[p] as f64 / dst_a } else { 0.0 },
+                if dst_a > 0.0 { premul[p + 1] as f64 / dst_a } else { 0.0 },
+                if dst_a > 0.0 { premul[p + 2] as f64 / dst_a } else { 0.0 },
+            ];
+            let back = src_a * dst_a;
+            let dst_only = (1.0 - src_a) * dst_a;
+            for ch in 0..3 {
+                let blended = mode.channel(cb[ch] / 255.0, rgb[ch] / 255.0) * 255.0;
+                let out = src_a * (1.0 - dst_a) * rgb[ch] + back * blended + dst_only * cb[ch];
+                premul[p + ch] = to_u8_clamp(out);
+            }
+            premul[p + 3] = to_u8_clamp(255.0 * (src_a + dst_a * (1.0 - src_a)));
         }
     }
 }
@@ -1360,9 +1487,15 @@ impl GpuixCanvas2DCore {
     }
 
     #[napi]
-    pub fn set_composite(&self, value: String) {
-        let mut core = self.lock();
-        core.state.composite = Composite::parse(&value);
+    pub fn set_composite(&self, value: String) -> Result<()> {
+        let composite = Composite::parse(&value).ok_or_else(|| {
+            Error::from_reason(format!(
+                "GpuixCanvas: composite operation '{value}' is not implemented \
+                 (non-separable blend modes are not rasterized yet)"
+            ))
+        })?;
+        self.lock().state.composite = composite;
+        Ok(())
     }
 
     #[napi]
@@ -1894,5 +2027,188 @@ mod tests {
         let straight = core.straight_rgba();
         // 255 * 128/255 clamps back to 255; 128 stays 128.
         assert_eq!(&straight[0..4], &[255, 128, 0, 128]);
+    }
+
+    // ── Separable blend modes (W3C Compositing and Blending Level 1) ─────
+
+    /// Fill a full-canvas rect with the current state and materialize.
+    fn fill_all(core: &mut ContextCore) {
+        assert!(core.record_paint(
+            flatten_path(&rect_builder(0.0, 0.0, 8.0, 8.0, identity_matrix()).subpaths, 0.15),
+            FillRule::NonZero,
+            &core.state.fill.clone(),
+        ));
+        core.materialize();
+    }
+
+    /// An opaque blue backdrop, then the mode blending opaque red over it.
+    fn blend_red_over_blue(mode: SeparableBlend) -> ContextCore {
+        let mut core = core_8x8();
+        core.state.fill = Paint::Solid { r: 0.0, g: 0.0, b: 255.0, a: 1.0 };
+        fill_all(&mut core);
+        core.state.fill = Paint::Solid { r: 255.0, g: 0.0, b: 0.0, a: 1.0 };
+        core.state.composite = Composite::Blend(mode);
+        fill_all(&mut core);
+        core
+    }
+
+    /// Channel math against values derived from the spec formulas — the
+    /// piecewise modes on their explicit branches, the smooth ones on
+    /// exact rational inputs. 200/255 and 60/255 exercise hard-light's and
+    /// soft-light's both-sides-of-0.5 paths.
+    #[test]
+    fn separable_blend_channel_matches_spec() {
+        use SeparableBlend::*;
+        let ch = |m: SeparableBlend, cb: f64, cs: f64| m.channel(cb, cs);
+        // multiply / screen / darken / lighten on the extremes.
+        assert_eq!(ch(Multiply, 0.25, 0.5), 0.125);
+        assert_eq!(ch(Screen, 0.25, 0.5), 0.625);
+        assert_eq!(ch(Darken, 0.25, 0.5), 0.25);
+        assert_eq!(ch(Lighten, 0.25, 0.5), 0.5);
+        // difference / exclusion.
+        assert_eq!(ch(Difference, 0.25, 0.75), 0.5);
+        assert_eq!(ch(Exclusion, 0.25, 0.5), 0.5);
+        // color-dodge: black backdrop stays black, white source forces
+        // white, otherwise min(1, Cb/(1−Cs)).
+        assert_eq!(ch(ColorDodge, 0.0, 0.5), 0.0);
+        assert_eq!(ch(ColorDodge, 0.25, 1.0), 1.0);
+        assert_eq!(ch(ColorDodge, 0.25, 0.5), 0.5);
+        assert_eq!(ch(ColorDodge, 0.5, 0.75), 1.0);
+        // color-burn: mirror image of dodge (burn(Cb,Cs) = 1 − dodge(1−Cb,1−Cs)).
+        assert_eq!(ch(ColorBurn, 1.0, 0.5), 1.0);
+        assert_eq!(ch(ColorBurn, 0.5, 0.0), 0.0);
+        assert_eq!(ch(ColorBurn, 0.75, 0.5), 0.5);
+        assert_eq!(ch(ColorBurn, 0.25, 0.5), 0.0);
+        // hard-light: source below 0.5 multiplies, above screens (with the
+        // doubled source remapped into 0–1).
+        assert_eq!(ch(HardLight, 0.5, 0.25), 0.25);
+        assert_eq!(ch(HardLight, 0.5, 0.75), 0.75);
+        // overlay is hard-light with the operands swapped.
+        assert_eq!(ch(Overlay, 0.25, 0.75), ch(HardLight, 0.75, 0.25));
+        assert_eq!(ch(Overlay, 0.5, 0.25), 0.25);
+        // soft-light: low source darkens by a parabola, high source bends
+        // through D(Cb) (sqrt above 0.25, the cubic below).
+        assert_eq!(ch(SoftLight, 0.5, 0.25), 0.5 - 0.5 * 0.5 * 0.5);
+        assert_eq!(ch(SoftLight, 0.5, 0.75), 0.5 + 0.5 * (0.5f64.sqrt() - 0.5));
+        assert_eq!(
+            ch(SoftLight, 0.25, 0.75),
+            0.25 + 0.5 * (((16.0 * 0.25 - 12.0) * 0.25 + 4.0) * 0.25 - 0.25)
+        );
+    }
+
+    /// Opaque red blended over an opaque blue backdrop, per mode — the
+    /// reference bytes come from the spec formula evaluated in exact f64
+    /// and stored through `Uint8ClampedArray` rounding.
+    #[test]
+    fn blend_modes_rasterize_over_opaque_backdrop() {
+        use SeparableBlend::*;
+        let expected: &[(SeparableBlend, [u8; 4])] = &[
+            (Multiply, [0, 0, 0, 255]),
+            (Screen, [255, 0, 255, 255]),
+            (Overlay, [0, 0, 255, 255]),
+            (Darken, [0, 0, 0, 255]),
+            (Lighten, [255, 0, 255, 255]),
+            (ColorDodge, [0, 0, 255, 255]),
+            (ColorBurn, [0, 0, 255, 255]),
+            (HardLight, [255, 0, 0, 255]),
+            (SoftLight, [0, 0, 255, 255]),
+            (Difference, [255, 0, 255, 255]),
+            (Exclusion, [255, 0, 255, 255]),
+        ];
+        for &(mode, want) in expected {
+            let core = blend_red_over_blue(mode);
+            assert_eq!(pixel(&core, 3, 3), want, "mode {mode:?}");
+        }
+        // Mid-grey pairs pin the piecewise branches away from the extremes.
+        for &(mode, dst, src, want) in &[
+            (Overlay, 60.0, 200.0, [94, 94, 94, 255]),
+            (Overlay, 200.0, 60.0, [171, 171, 171, 255]),
+            (HardLight, 60.0, 200.0, [171, 171, 171, 255]),
+            (HardLight, 200.0, 60.0, [94, 94, 94, 255]),
+            (SoftLight, 60.0, 200.0, [96, 96, 96, 255]),
+            (SoftLight, 200.0, 60.0, [177, 177, 177, 255]),
+            (ColorBurn, 60.0, 200.0, [6, 6, 6, 255]),
+            (ColorBurn, 200.0, 60.0, [21, 21, 21, 255]),
+            (ColorDodge, 60.0, 200.0, [255, 255, 255, 255]),
+            (ColorDodge, 200.0, 60.0, [255, 255, 255, 255]),
+        ] {
+            let mut core = core_8x8();
+            core.state.fill = Paint::Solid { r: dst, g: dst, b: dst, a: 1.0 };
+            fill_all(&mut core);
+            core.state.fill = Paint::Solid { r: src, g: src, b: src, a: 1.0 };
+            core.state.composite = Composite::Blend(mode);
+            fill_all(&mut core);
+            assert_eq!(pixel(&core, 3, 3), want, "mode {mode:?} dst {dst} src {src}");
+        }
+    }
+
+    /// A transparent backdrop has no colour to blend with: every blend mode
+    /// lands the source unmodified, exactly like source-over.
+    #[test]
+    fn blend_over_transparent_backdrop_paints_the_source() {
+        for mode in [
+            SeparableBlend::Multiply,
+            SeparableBlend::Screen,
+            SeparableBlend::Overlay,
+            SeparableBlend::SoftLight,
+        ] {
+            let mut core = core_8x8();
+            core.state.fill = Paint::Solid { r: 255.0, g: 64.0, b: 32.0, a: 1.0 };
+            core.state.composite = Composite::Blend(mode);
+            fill_all(&mut core);
+            assert_eq!(pixel(&core, 3, 3), [255, 64, 32, 255], "mode {mode:?}");
+        }
+    }
+
+    /// The α-terms of §5.1: a half-transparent backdrop keeps its share of
+    /// the backdrop colour, and `globalAlpha` mixes the blend toward the
+    /// backdrop like any source alpha would.
+    #[test]
+    fn blend_respects_source_and_backdrop_alpha() {
+        // Straight (255,0,0,128) backdrop via putImageData → premul 128,0,0,128.
+        let mut core = core_8x8();
+        core.apply_put_image(&[255, 0, 0, 128], 1, 1, 2, 3, 0, 0, 1, 1);
+        core.state.fill = Paint::Solid { r: 0.0, g: 0.0, b: 255.0, a: 1.0 };
+        core.state.composite = Composite::Blend(SeparableBlend::Multiply);
+        fill_all(&mut core);
+        // out = αs·(1−αb)·Cs + αs·αb·(Cb·Cs) : red dies (Cb·Cs = 0), blue
+        // keeps (1−128/255)·255 = 127 of the source.
+        assert_eq!(pixel(&core, 2, 3), [0, 0, 127, 255]);
+
+        // globalAlpha 0.5, multiply red over opaque white: the blend result
+        // (red) and the backdrop (white) mix 50/50 per channel.
+        let mut core = core_8x8();
+        core.state.fill = Paint::Solid { r: 255.0, g: 255.0, b: 255.0, a: 1.0 };
+        fill_all(&mut core);
+        core.state.fill = Paint::Solid { r: 255.0, g: 0.0, b: 0.0, a: 1.0 };
+        core.state.global_alpha = 0.5;
+        core.state.composite = Composite::Blend(SeparableBlend::Multiply);
+        fill_all(&mut core);
+        assert_eq!(pixel(&core, 3, 3), [255, 128, 128, 255]);
+    }
+
+    /// Every implemented name parses; the non-separable modes are errors,
+    /// never a silent source-over fallback.
+    #[test]
+    fn composite_parse_accepts_blends_and_rejects_non_separable() {
+        for name in [
+            "source-over",
+            "multiply",
+            "screen",
+            "overlay",
+            "darken",
+            "lighten",
+            "color-dodge",
+            "color-burn",
+            "hard-light",
+            "soft-light",
+            "difference",
+            "exclusion",
+        ] {
+            assert!(Composite::parse(name).is_some(), "{name} should parse");
+        }
+        for name in ["hue", "saturation", "color", "luminosity", "Multiply", "multiply\0", "nope"] {
+            assert!(Composite::parse(name).is_none(), "{name:?} must not parse");
+        }
     }
 }
