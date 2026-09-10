@@ -538,23 +538,27 @@ export class TestRenderer implements NativeRenderer {
   // ── Canvas API ──────────────────────────────────────────────────
 
   /** Upload a full RGBA buffer for a `<canvas>` element and repaint. The
-   *  native side validates the length and flushes the frame itself. */
+   *  native side validates the length and flushes the frame itself. The
+   *  optional `dirty` rect (`[x, y, w, h]` in buffer pixels) restricts the
+   *  GPU upload to the tiles it intersects. */
   uploadCanvasPixels(
     elementId: number,
     width: number,
     height: number,
     pixels: Uint8Array | Uint8ClampedArray,
+    dirty?: [number, number, number, number],
   ): void {
     // ImageData.data is Uint8ClampedArray; native takes a plain Uint8Array.
     const bytes =
       pixels instanceof Uint8ClampedArray
         ? new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength)
         : pixels
-    this.native.uploadCanvasPixels?.(elementId, width, height, bytes)
+    this.native.uploadCanvasPixels?.(elementId, width, height, bytes, dirty)
   }
 
   /** Upload a `<canvas>` element's pixels straight from its 2D context core
-   *  (Rust to Rust) and repaint — the path the context facade flushes on. */
+   *  (Rust to Rust) and repaint — the path the context facade flushes on.
+   *  Only the core's pending dirty region crosses into the store. */
   uploadCanvasFromContext(elementId: number, ctx: unknown): void {
     this.native.uploadCanvasFromContext?.(elementId, ctx)
   }
@@ -563,6 +567,14 @@ export class TestRenderer implements NativeRenderer {
    *  A bridge round-trip, not a GPU readback. */
   readCanvasPixels(elementId: number): Uint8Array | null {
     return this.native.readCanvasPixels?.(elementId) ?? null
+  }
+
+  /** Bytes built into canvas tile images so far — the upload cost the GPU
+   *  renderer pays. Test-renderer only; lets tests pin upload bytes to the
+   *  dirty area instead of wall-clock time. */
+  canvasUploadedBytes(): number {
+    const native = this.native as { canvasUploadedBytes?(): number }
+    return native.canvasUploadedBytes?.() ?? 0
   }
 
   // ── Pointer capture API ─────────────────────────────────────────

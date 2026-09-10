@@ -1647,11 +1647,19 @@ The chat example builds every sidebar and composer icon this way.
 
 ## Canvas
 
-`<canvas>` is a pixel buffer GPUI paints as a GPU texture every frame. The
+`<canvas>` is a pixel buffer GPUI paints as GPU textures every frame. The
 buffer lives in the native core — exactly like a DOM canvas owns its backing
 store — and uploads go Rust to Rust, so pixel bytes never cross the FFI
 boundary and never travel through the mutation JSON (a canvas repaint moves
 megabytes; the batch would escape and re-parse every byte).
+
+Uploads are **dirty-rect**: the store keeps a CPU mirror of the canvas and
+paints it as a grid of 256×256 texture tiles. A flush splices only the
+region the ops touched into the mirror and re-uploads only the tiles that
+region intersects, so upload cost scales with the dirty area, not the
+canvas size — a 64×64 brush dab on a 2880×1920 canvas moves ~0.4 MB instead
+of the full ~22 MB, and a flush with nothing pending uploads nothing and
+skips the repaint.
 
 The Vue wrapper is `GpuixCanvas`. A template ref exposes `uploadPixels`,
 `readPixels`, and the host `id`:
@@ -1671,11 +1679,13 @@ canvas.value?.uploadPixels(imageData.data)
   by `devicePixelRatio` yourself for sharp output.
 - Before the first upload the element paints a placeholder box but still
   receives every event and records its bounds, so it is clickable on mount.
-- `renderer.uploadCanvasPixels(elementId, width, height, pixels)` and
+- `renderer.uploadCanvasPixels(elementId, width, height, pixels, dirty?)` and
   `renderer.readCanvasPixels(elementId)` are available without the wrapper
-  for manual buffer control; the 2D context flushes itself through
-  `renderer.uploadCanvasFromContext(elementId, ctx)`. `readCanvasPixels`
-  returns the **last upload**, not a GPU readback.
+  for manual buffer control; pass `dirty` as `[x, y, w, h]` in buffer pixels
+  to restrict the upload to that rect. The 2D context flushes itself through
+  `renderer.uploadCanvasFromContext(elementId, ctx)`, which tracks its own
+  dirty region. `readCanvasPixels` returns the **last upload**, not a GPU
+  readback.
 
 ### The 2D context
 

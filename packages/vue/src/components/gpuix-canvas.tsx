@@ -72,7 +72,10 @@ export const GpuixCanvas = defineComponent({
       return context
     }
 
-    function uploadPixels(pixels: Uint8Array | Uint8ClampedArray): void {
+    function uploadPixels(
+      pixels: Uint8Array | Uint8ClampedArray,
+      dirty?: [number, number, number, number],
+    ): void {
       const id = requireId()
       const renderer = gpuix.renderer
       if (!renderer?.uploadCanvasPixels) {
@@ -85,7 +88,7 @@ export const GpuixCanvas = defineComponent({
         pixels instanceof Uint8ClampedArray
           ? new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength)
           : pixels
-      renderer.uploadCanvasPixels(id, props.width, props.height, bytes)
+      renderer.uploadCanvasPixels(id, props.width, props.height, bytes, dirty)
     }
 
     function readPixels(): Uint8Array | null {

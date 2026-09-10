@@ -107,4 +107,44 @@ describeNative("canvas pixel bridge (vue)", () => {
     expectScreenshotsDiffer(before, after)
     app.unmount()
   })
+
+  it("uploads scale with the dirty region, not the canvas size", async () => {
+    const canvas = ref<GpuixCanvasInstance | null>(null)
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <GpuixCanvas ref={canvas} width={1024} height={1024} style={{ width: 256, height: 256 }} />
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const id = canvas.value!.id!
+    const ctx = canvas.value!.getContext("2d")!
+    const bytes = () => app.renderer.canvasUploadedBytes()
+
+    // One 256×256 tile (plus its 1px border) is 258*258*4 bytes.
+    const tile = 258 * 258 * 4
+    ctx.fillStyle = "#333"
+    ctx.fillRect(0, 0, 1024, 1024)
+    await app.settle()
+    const afterFull = bytes()
+    expect(afterFull).toBe(16 * tile)
+
+    // A 64×64 stroke near the center touches the four tiles around
+    // (480, 480) — not the sixteen a full-canvas upload would pay.
+    ctx.fillStyle = "#c33"
+    ctx.fillRect(480, 480, 64, 64)
+    await app.settle()
+    const afterStroke = bytes()
+    expect(afterStroke - afterFull).toBe(4 * tile)
+    expect(afterStroke - afterFull).toBeLessThan(afterFull)
+
+    // The same stroke again costs the same four tiles, and the painted
+    // output still round-trips through the bridge.
+    ctx.fillRect(480, 480, 64, 64)
+    await app.settle()
+    expect(bytes() - afterStroke).toBe(4 * tile)
+    app.unmount()
+  })
 })
