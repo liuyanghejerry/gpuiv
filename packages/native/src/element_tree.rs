@@ -70,8 +70,15 @@ pub struct EventPayload {
     pub precise: Option<bool>,
 
     /// Touch phase for scroll: "started", "moved", "ended".
-    /// Populated for: scroll (trackpad gestures).
+    /// Populated for: scroll (trackpad gestures), pinch.
     pub touch_phase: Option<String>,
+
+    // ── Pinch ────────────────────────────────────────────────────────
+    /// Zoom delta of one pinch step: positive zooms in, negative zooms out
+    /// (0.1 ≈ a 10% zoom-in). Accumulate it into a scale factor, like a
+    /// browser wheel-zoom handler does.
+    /// Populated for: pinch.
+    pub zoom_delta: Option<f64>,
 
     // ── Hover ────────────────────────────────────────────────────────
     /// true = mouse entered element, false = mouse left element.
@@ -125,6 +132,7 @@ impl Default for EventPayload {
             delta_y: None,
             precise: None,
             touch_phase: None,
+            zoom_delta: None,
             hovered: None,
             value: None,
             old_line: None,

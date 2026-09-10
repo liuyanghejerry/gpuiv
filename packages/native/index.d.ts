@@ -222,6 +222,12 @@ export declare class GpuixRenderer {
   simulateMouseUp(x: number, y: number, button?: number | undefined | null, modifiers?: string | undefined | null): void
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
+  /**
+   * Simulate one pinch gesture step at the given position. `delta` is the
+   * zoom delta (0.1 ≈ a 10% zoom-in); `phase` is "started", "moved",
+   * "ended" or "cancelled", the same vocabulary as the event payload.
+   */
+  simulatePinch(x: number, y: number, delta: number, phase?: string | undefined | null, modifiers?: string | undefined | null): void
   /** Simulate space-separated keystrokes through the focused element's input pipeline. */
   simulateKeystrokes(keystrokes: string): void
   /** Simulate a single key down through the focused element's input pipeline. */
@@ -359,6 +365,13 @@ export declare class TestGpuixRenderer {
    * delta_x and delta_y are in pixels (negative = scroll up/left).
    */
   simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
+  /**
+   * Simulate one pinch gesture step at the given position.
+   * delta is the zoom delta (0.1 ≈ a 10% zoom-in); phase is "started",
+   * "moved", "ended" or "cancelled" (default "moved"), the same
+   * vocabulary as the pinch event payload.
+   */
+  simulatePinch(x: number, y: number, delta: number, phase?: string | undefined | null, modifiers?: string | undefined | null): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection. */
@@ -554,9 +567,16 @@ export interface EventPayload {
   precise?: boolean
   /**
    * Touch phase for scroll: "started", "moved", "ended".
-   * Populated for: scroll (trackpad gestures).
+   * Populated for: scroll (trackpad gestures), pinch.
    */
   touchPhase?: string
+  /**
+   * Zoom delta of one pinch step: positive zooms in, negative zooms out
+   * (0.1 ≈ a 10% zoom-in). Accumulate it into a scale factor, like a
+   * browser wheel-zoom handler does.
+   * Populated for: pinch.
+   */
+  zoomDelta?: number
   /**
    * true = mouse entered element, false = mouse left element.
    * Populated for: mouseEnter, mouseLeave.

@@ -408,6 +408,40 @@ pub fn dispatch_scroll_wheel(
     );
 }
 
+/// Touch phase of a simulated gesture step, in the same vocabulary the event
+/// payload uses ("started", "moved", "ended", "cancelled"). An unknown or
+/// missing value means `Moved` — the phase of a mid-gesture sample — so a
+/// typo weakens the gesture instead of failing the whole automation call.
+pub fn parse_touch_phase(phase: Option<&str>) -> gpui::TouchPhase {
+    match phase.map(|phase| phase.trim().to_ascii_lowercase()).as_deref() {
+        Some("started") => gpui::TouchPhase::Started,
+        Some("ended") => gpui::TouchPhase::Ended,
+        Some("cancelled") | Some("canceled") => gpui::TouchPhase::Cancelled,
+        _ => gpui::TouchPhase::Moved,
+    }
+}
+
+pub fn dispatch_pinch(
+    window: &mut Window,
+    cx: &mut App,
+    x: f64,
+    y: f64,
+    delta: f64,
+    phase: gpui::TouchPhase,
+    modifiers: Modifiers,
+) {
+    window.dispatch_event(
+        gpui::PinchEvent {
+            position: point(px(x as f32), px(y as f32)),
+            delta: delta as f32,
+            modifiers,
+            phase,
+        }
+        .to_platform_input(),
+        cx,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

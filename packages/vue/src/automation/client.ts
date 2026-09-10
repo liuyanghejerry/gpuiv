@@ -89,6 +89,13 @@ export interface TestAutomationRenderer {  nativeSimulateClick(
     deltaY: number,
     modifiers?: string
   ): void
+  nativeSimulatePinch(
+    x: number,
+    y: number,
+    delta: number,
+    phase?: string,
+    modifiers?: string
+  ): void
   simulateKeystrokes(keystrokes: string): void
   nativeSimulateKeystrokes(elementId: number, keystrokes: string): void
   nativeSimulateKeyDown(
@@ -193,6 +200,17 @@ export class InProcessBackend extends ValidatedAutomationBackend {
         params.y,
         params.deltaX,
         params.deltaY,
+        params.modifiers
+      )
+      await this.settle?.()
+      return { ok: true as const }
+    },
+    pinch: async (params) => {
+      this.renderer.nativeSimulatePinch(
+        params.x,
+        params.y,
+        params.delta,
+        params.phase,
         params.modifiers
       )
       await this.settle?.()
@@ -416,6 +434,16 @@ export interface DragOptions extends MouseOptions {
   offset?: { x: number; y: number }
 }
 
+/** Phase of a simulated pinch step. A gesture is "started", several "moved",
+ *  then "ended" (or "cancelled"). */
+export type PinchPhase = "started" | "moved" | "ended" | "cancelled"
+
+export interface PinchOptions {
+  phase?: PinchPhase
+  /** Held modifiers in `press()` syntax: `"cmd"`, `"cmd-shift"`, `"alt"`. */
+  modifiers?: string
+}
+
 function centerOf(bounds: ElementBounds): { x: number; y: number } {
   return { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 }
 }
@@ -495,6 +523,12 @@ export class Locator {
   /** Send one wheel event over the centre of this element. */
   async wheel(deltaX: number, deltaY: number, options: MouseOptions = {}): Promise<void> {
     await this.app.mouse.wheel(await this.center(), deltaX, deltaY, options)
+  }
+
+  /** Send one pinch step over the centre of this element. Send a "started"
+   *  step, several plain steps, then an "ended" step for a full gesture. */
+  async pinch(delta: number, options: PinchOptions = {}): Promise<void> {
+    await this.app.mouse.pinch(await this.center(), delta, options)
   }
 
   /** Press on this element, travel to `target`, release there. */
@@ -587,6 +621,11 @@ export class App {
       deltaY: number,
       options?: MouseOptions
     ) => Promise<void>
+    pinch: (
+      target: PointTarget,
+      delta: number,
+      options?: PinchOptions
+    ) => Promise<void>
     drag: (from: PointTarget, to: PointTarget, options?: DragOptions) => Promise<void>
   }
 
@@ -630,6 +669,15 @@ export class App {
           ...point,
           deltaX,
           deltaY,
+          modifiers: options.modifiers,
+        })
+      },
+      pinch: async (target, delta, options = {}) => {
+        const point = await this.resolvePoint(target)
+        await this.call("pinch", {
+          ...point,
+          delta,
+          phase: options.phase,
           modifiers: options.modifiers,
         })
       },
@@ -726,6 +774,13 @@ export interface LiveAutomationRenderer {
     deltaY: number,
     modifiers?: string
   ): void
+  simulatePinch(
+    x: number,
+    y: number,
+    delta: number,
+    phase?: string,
+    modifiers?: string
+  ): void
   simulateKeystrokes?(keystrokes: string): void
   simulateKeyDown?(keystroke: string, isHeld?: boolean): void
   simulateKeyUp?(keystroke: string): void
@@ -772,6 +827,10 @@ export function liveRendererAsTest(
     },
     nativeSimulateScrollWheel(x, y, deltaX, deltaY, modifiers) {
       renderer.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
+      afterInput()
+    },
+    nativeSimulatePinch(x, y, delta, phase, modifiers) {
+      renderer.simulatePinch(x, y, delta, phase, modifiers)
       afterInput()
     },
     simulateKeystrokes(keys) {

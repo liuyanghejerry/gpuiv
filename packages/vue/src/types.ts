@@ -362,6 +362,12 @@ export interface ElementProps {
   // ── Scroll events ──────────────────────────────────────────────
   onScroll?: (event: EventPayload) => void
 
+  // ── Pinch (trackpad zoom, touchscreen pinch) ────────────────────
+  /** One step of a pinch gesture. `zoomDelta` is the per-step zoom delta
+   *  (0.1 ≈ +10%); accumulate it into a scale like a browser zoom handler.
+   *  `touchPhase` brackets the gesture: "started" → "moved"* → "ended". */
+  onPinch?: (event: EventPayload) => void
+
   // ── Text editor events ─────────────────────────────────────────
   onChange?: (event: EventPayload) => void
   /** `onInput` is an alias for `onChange` in Vue (`v-model` friendly). */

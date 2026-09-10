@@ -1773,6 +1773,22 @@ wheel-zoom needs over a canvas inside a scroller.
 </div>
 ```
 
+### Pinch to zoom
+
+Trackpad and touchscreen pinches arrive as `onPinch` (GPUI's `PinchEvent`).
+Each step carries a `zoomDelta` — 0.1 is a 10% zoom-in — so a handler
+accumulates it into a scale the way a browser zoom does. `touchPhase` brackets
+the gesture: `"started"`, several `"moved"`, then `"ended"` (or
+`"cancelled"`).
+
+```tsx
+let scale = 1
+<div onPinch={(e) => { scale *= 1 + (e.zoomDelta ?? 0) }} />
+```
+
+In tests and automation, `app.mouse.pinch(target, delta, { phase, modifiers })`
+dispatches synthetic pinch steps through the GPUI input pipeline.
+
 ## Pointer capture
 
 `renderer.setPointerCapture(elementId)` arms GPUI pointer capture on the
@@ -1812,6 +1828,7 @@ tracking.
 | Focus | `onFocus` | — |
 | Blur | `onBlur` | — |
 | Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
+| Pinch | `onPinch` | `x`, `y`, `zoomDelta`, `touchPhase`, `modifiers` — one step per event; accumulate `zoomDelta` into a scale |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
