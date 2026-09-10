@@ -321,6 +321,67 @@ pub fn should_occlude(style: &StyleDesc) -> bool {
     }
 }
 
+/// Map a CSS cursor keyword onto the gpui [`gpui::CursorStyle`] it controls.
+///
+/// Keywords named by the gpui variants map 1:1. The approximations follow
+/// gpui's own tailwind-style helpers: `move` is `ClosedHand` and `no-drop` is
+/// `OperationNotAllowed`. The single-direction diagonals reuse the matching
+/// double-headed diagonal (`ne`/`sw` → NESW, `nw`/`se` → NWSE), which is what
+/// macOS renders either way. `auto` resolves to the platform default, like an
+/// unset cursor.
+///
+/// Returns `None` for anything else — including CSS keywords with no gpui
+/// counterpart (`none`, `url(..)`, `wait`, `progress`, `help`, `cell`,
+/// `zoom-in`, `zoom-out`) — so the caller can warn instead of staying silent.
+pub fn parse_cursor_style(value: &str) -> Option<gpui::CursorStyle> {
+    let style = match value {
+        "auto" | "default" => gpui::CursorStyle::Arrow,
+        "pointer" => gpui::CursorStyle::PointingHand,
+        "text" => gpui::CursorStyle::IBeam,
+        "vertical-text" => gpui::CursorStyle::IBeamCursorForVerticalLayout,
+        "crosshair" => gpui::CursorStyle::Crosshair,
+        "grab" | "all-scroll" => gpui::CursorStyle::OpenHand,
+        "grabbing" | "move" => gpui::CursorStyle::ClosedHand,
+        "context-menu" => gpui::CursorStyle::ContextualMenu,
+        "not-allowed" | "no-drop" => gpui::CursorStyle::OperationNotAllowed,
+        "alias" => gpui::CursorStyle::DragLink,
+        "copy" => gpui::CursorStyle::DragCopy,
+        "col-resize" => gpui::CursorStyle::ResizeColumn,
+        "row-resize" => gpui::CursorStyle::ResizeRow,
+        "ew-resize" => gpui::CursorStyle::ResizeLeftRight,
+        "ns-resize" => gpui::CursorStyle::ResizeUpDown,
+        "nesw-resize" | "ne-resize" | "sw-resize" => gpui::CursorStyle::ResizeUpRightDownLeft,
+        "nwse-resize" | "nw-resize" | "se-resize" => gpui::CursorStyle::ResizeUpLeftDownRight,
+        "n-resize" => gpui::CursorStyle::ResizeUp,
+        "e-resize" => gpui::CursorStyle::ResizeRight,
+        "s-resize" => gpui::CursorStyle::ResizeDown,
+        "w-resize" => gpui::CursorStyle::ResizeLeft,
+        _ => return None,
+    };
+    Some(style)
+}
+
+/// Styles are re-applied on every frame, so an unsupported cursor value would
+/// warn per frame. Deduplicate and warn once per distinct value. Returns
+/// whether this call was the first one for `value`.
+pub fn warn_unsupported_cursor(value: &str) -> bool {
+    use std::collections::HashSet;
+    use std::sync::{Mutex, OnceLock};
+    static WARNED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let mut warned = WARNED
+        .get_or_init(|| Mutex::new(HashSet::new()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !warned.insert(value.to_owned()) {
+        return false;
+    }
+    log::warn!(
+        "ignoring unsupported cursor {value:?}: CSS cursors without a gpui counterpart \
+         (none, url(..), wait, progress, help, cell, zoom-in, zoom-out) are not applied"
+    );
+    true
+}
+
 /// Padding + border pixels on each side of an element's box.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct EdgeInsets {
@@ -444,5 +505,78 @@ mod tests {
     #[test]
     fn bounds_insets_defaults_to_zero() {
         assert_eq!(bounds_insets(&StyleDesc::default()), BoundsInsets::default());
+    }
+
+    #[test]
+    fn cursor_keywords_map_to_gpui_styles() {
+        let cases = [
+            ("auto", gpui::CursorStyle::Arrow),
+            ("default", gpui::CursorStyle::Arrow),
+            ("pointer", gpui::CursorStyle::PointingHand),
+            ("text", gpui::CursorStyle::IBeam),
+            (
+                "vertical-text",
+                gpui::CursorStyle::IBeamCursorForVerticalLayout,
+            ),
+            ("crosshair", gpui::CursorStyle::Crosshair),
+            ("grab", gpui::CursorStyle::OpenHand),
+            ("all-scroll", gpui::CursorStyle::OpenHand),
+            ("grabbing", gpui::CursorStyle::ClosedHand),
+            ("move", gpui::CursorStyle::ClosedHand),
+            ("context-menu", gpui::CursorStyle::ContextualMenu),
+            ("not-allowed", gpui::CursorStyle::OperationNotAllowed),
+            ("no-drop", gpui::CursorStyle::OperationNotAllowed),
+            ("alias", gpui::CursorStyle::DragLink),
+            ("copy", gpui::CursorStyle::DragCopy),
+            ("col-resize", gpui::CursorStyle::ResizeColumn),
+            ("row-resize", gpui::CursorStyle::ResizeRow),
+            ("ew-resize", gpui::CursorStyle::ResizeLeftRight),
+            ("ns-resize", gpui::CursorStyle::ResizeUpDown),
+            ("nesw-resize", gpui::CursorStyle::ResizeUpRightDownLeft),
+            ("ne-resize", gpui::CursorStyle::ResizeUpRightDownLeft),
+            ("sw-resize", gpui::CursorStyle::ResizeUpRightDownLeft),
+            ("nwse-resize", gpui::CursorStyle::ResizeUpLeftDownRight),
+            ("nw-resize", gpui::CursorStyle::ResizeUpLeftDownRight),
+            ("se-resize", gpui::CursorStyle::ResizeUpLeftDownRight),
+            ("n-resize", gpui::CursorStyle::ResizeUp),
+            ("e-resize", gpui::CursorStyle::ResizeRight),
+            ("s-resize", gpui::CursorStyle::ResizeDown),
+            ("w-resize", gpui::CursorStyle::ResizeLeft),
+        ];
+        for (keyword, expected) in cases {
+            assert_eq!(
+                parse_cursor_style(keyword),
+                Some(expected),
+                "keyword {keyword}"
+            );
+        }
+    }
+
+    #[test]
+    fn unsupported_cursor_keywords_map_to_none() {
+        let cases = [
+            "none",
+            "wait",
+            "progress",
+            "help",
+            "cell",
+            "zoom-in",
+            "zoom-out",
+            "url(cursor.png)",
+            "pointer ",
+            "",
+            "Pointer",
+        ];
+        for keyword in cases {
+            assert_eq!(parse_cursor_style(keyword), None, "keyword {keyword:?}");
+        }
+    }
+
+    #[test]
+    fn unsupported_cursor_warning_fires_once_per_value() {
+        // The dedupe set is process-wide, so probe with values unique to this test.
+        assert!(warn_unsupported_cursor("cursor-tests-once"));
+        assert!(!warn_unsupported_cursor("cursor-tests-once"));
+        assert!(warn_unsupported_cursor("cursor-tests-once-again"));
     }
 }

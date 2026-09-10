@@ -58,6 +58,40 @@ export interface LinearGradientBackground {
   colorSpace?: "srgb" | "oklab"
 }
 
+/** CSS cursor keywords gpuiv maps onto gpui's cursor styles. Unsupported
+ *  keywords (`none`, `url(..)`, `wait`, `progress`, `help`, `cell`, `zoom-in`,
+ *  `zoom-out`) log a one-time dev warning and are ignored. */
+export type CursorStyle =
+  | "auto"
+  | "default"
+  | "pointer"
+  | "text"
+  | "vertical-text"
+  | "crosshair"
+  | "grab"
+  | "grabbing"
+  | "move"
+  | "all-scroll"
+  | "context-menu"
+  | "not-allowed"
+  | "no-drop"
+  | "alias"
+  | "copy"
+  | "col-resize"
+  | "row-resize"
+  | "ew-resize"
+  | "ns-resize"
+  | "nesw-resize"
+  | "nwse-resize"
+  | "n-resize"
+  | "e-resize"
+  | "s-resize"
+  | "w-resize"
+  | "ne-resize"
+  | "nw-resize"
+  | "se-resize"
+  | "sw-resize"
+
 export interface StyleDesc {
   display?: string
   visibility?: string
@@ -134,7 +168,7 @@ export interface StyleDesc {
   overflowX?: string
   overflowY?: string
 
-  cursor?: string
+  cursor?: CursorStyle
   /** `"auto"` blocks hits behind this element. `"none"` never does. Unset blocks when the element paints a fill or is absolutely positioned. */
   pointerEvents?: "auto" | "none"
 

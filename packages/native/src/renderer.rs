@@ -5297,10 +5297,13 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(opacity) = style.opacity {
         el = el.opacity(opacity as f32);
     }
-    match style.cursor.as_deref() {
-        Some("pointer") => el = el.cursor_pointer(),
-        Some("default") => el = el.cursor_default(),
-        _ => {}
+    if let Some(value) = style.cursor.as_deref() {
+        match crate::style::parse_cursor_style(value) {
+            Some(cursor) => el = el.cursor(cursor),
+            None => {
+                crate::style::warn_unsupported_cursor(value);
+            }
+        }
     }
     // Overflow: hidden is on the Styled trait, so we handle it here.
     // overflow: "scroll" requires StatefulInteractiveElement — handled in build_host_container().

@@ -131,6 +131,7 @@ export { handleGpuixEvent } from "./reconciler/event-registry.js"
 // Re-export types
 export type {
   BoxShadow,
+  CursorStyle,
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   DimensionValue,

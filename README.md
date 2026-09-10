@@ -1890,6 +1890,20 @@ keys are camelized, and CSS strings and arrays of objects are accepted too.
 
 **Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
 
+### Cursor
+
+`cursor` accepts the CSS keywords GPUI can show: `default` (and `auto`),
+`pointer`, `text`, `vertical-text`, `crosshair`, `grab`, `grabbing`, `move`,
+`all-scroll`, `context-menu`, `not-allowed` (and `no-drop`), `alias`, `copy`,
+`col-resize`, `row-resize`, the double-headed `ew-resize` / `ns-resize` /
+`nesw-resize` / `nwse-resize`, and the directional `n` / `e` / `s` / `w` /
+`ne` / `nw` / `se` / `sw` resize keywords (diagonals share the matching
+double-headed cursor).
+
+`none`, `url(..)`, `wait`, `progress`, `help`, `cell`, `zoom-in`, and
+`zoom-out` have no GPUI counterpart yet: they log a one-time dev warning and
+are ignored.
+
 ### Colors
 
 Every color-bearing style field accepts the same string grammar. GPUIV native
