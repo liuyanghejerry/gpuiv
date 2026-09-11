@@ -171,6 +171,12 @@ export declare class GpuixRenderer {
   focusNext(): void
   /** Move focus to the previous GPUI tab stop. */
   focusPrevious(): void
+  /** Host id of the focused element, or null when nothing is focused. */
+  getFocusedElementId(): number | null
+  /** Move focus to the next tab stop inside `element_id`, wrapping in that subtree. */
+  focusNextWithin(elementId: number): void
+  /** Move focus to the previous tab stop inside `element_id`, wrapping in that subtree. */
+  focusPreviousWithin(elementId: number): void
   /** Enable the window key events requested by the JS renderer. */
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   /** The current text selection joined in document order, or null. */
@@ -470,6 +476,12 @@ export declare class TestGpuixRenderer {
    * Empty until a11y is active; the test renderer turns that on at construct.
    */
   getA11yTree(): string
+  /** Host id of the focused element, or null when nothing is focused. */
+  getFocusedElementId(): number | null
+  /** Move focus to the next tab stop inside `element_id`, wrapping in that subtree. */
+  focusNextWithin(elementId: number): void
+  /** Move focus to the previous tab stop inside `element_id`, wrapping in that subtree. */
+  focusPreviousWithin(elementId: number): void
   /** Last painted bounds for an element, or null if it was not painted. */
   getElementBounds(id: number): Array<number> | null
   clockPause(): number

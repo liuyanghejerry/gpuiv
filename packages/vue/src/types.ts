@@ -530,6 +530,12 @@ export interface NativeRenderer {
    *  traversal policy. */
   focusNext?(): void
   focusPrevious?(): void
+  /** Host id of the focused element, or null when nothing is focused. */
+  getFocusedElementId?(): number | null
+  /** Move focus to the next / previous tab stop inside a subtree, wrapping in
+   *  that subtree only — the primitive behind modal focus traps. */
+  focusNextWithin?(elementId: number): void
+  focusPreviousWithin?(elementId: number): void
   /** Enable window-level key events for the owning root. The event id is a
    *  generation: queued events from an old root carry a stale id and are
    *  rejected before reaching handlers. */
