@@ -449,6 +449,13 @@ impl CustomElement for TextEditorElement {
                 });
             });
         }
+        if ctx.events.contains("fileDrop") {
+            let callback = ctx.event_callback.clone();
+            let id = ctx.id;
+            editor = editor.on_drop(move |dropped: &gpui::ExternalPaths, window, _cx| {
+                crate::renderer::emit_file_drop(&callback, id, dropped, window.mouse_position());
+            });
+        }
         // Custom elements paint themselves, so nothing registers their box for
         // automation unless the builder does it. Without this, a locator on an
         // editor fails with "Element has no painted bounds" and `click()` has
@@ -499,7 +506,7 @@ impl CustomElement for TextEditorElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
-            "change", "submit", "click", "keyDown", "keyUp", "focus", "blur",
+            "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
         ]
     }
 

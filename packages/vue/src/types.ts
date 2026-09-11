@@ -375,6 +375,12 @@ export interface ElementProps {
    *  Right-button presses still reach `onMouseDown` with `button: 2`. */
   onContextMenu?: (event: EventPayload) => void
 
+  // ── File drop (Finder / OS paths) ───────────────────────────────
+  /** Fires when the user drops files from Finder / the OS onto this element.
+   *  `paths` carries absolute filesystem paths; drops with empty or
+   *  non-Unicode paths never fire. Desktop only. */
+  onFileDrop?: (event: EventPayload) => void
+
   // ── Text search ────────────────────────────────────────────────────
   /**
    * Wash matches under this subtree. Scoped by tree position: the nearest

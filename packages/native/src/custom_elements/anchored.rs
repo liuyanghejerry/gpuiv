@@ -409,7 +409,7 @@ impl CustomElement for AnchoredElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["click", "mouseEnter", "mouseLeave"]
+        &["click", "mouseEnter", "mouseLeave", "fileDrop"]
     }
 
     fn destroy(&mut self) {}

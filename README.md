@@ -1829,6 +1829,7 @@ tracking.
 | Blur | `onBlur` | — |
 | Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
 | Pinch | `onPinch` | `x`, `y`, `zoomDelta`, `touchPhase`, `modifiers` — one step per event; accumulate `zoomDelta` into a scale |
+| File drop | `onFileDrop` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS; desktop only |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
