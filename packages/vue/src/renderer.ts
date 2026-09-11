@@ -275,8 +275,7 @@ function showRuntimeError(thrown: Error | string, errorContext?: string): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
   if (!slot) return
   const formatted = formatRuntimeError(thrown, errorContext)
-  console.error("[gpuiv] runtime error:", thrown)
-  console.error(formatted.stack)
+  console.error("[gpuiv] runtime error:", formatted.stack)
   if (slot.lastOptions?.errorOverlay === false) return
   if (slot.overlayShown) return
   slot.overlayShown = true
@@ -293,11 +292,33 @@ function reloadApp(slot: RenderSlot): void {
   createApp(slot.rootComponent, slot.lastOptions ?? {})
 }
 
+const OVERLAY_MONO =
+  process.platform === "win32"
+    ? "Consolas"
+    : process.platform === "darwin"
+      ? "Menlo"
+      : "DejaVu Sans Mono"
+
+/** Webpack-style stack: drop empty and duplicate message lines, indent the
+ *  `at …` frames, and fall back to the bare message when there is no stack. */
+function overlayStackLines(error: { message: string; stack: string }): string[] {
+  const lines = error.stack.length === 0 ? [error.message] : error.stack.split("\n")
+  const frames = lines.flatMap((line) => {
+    const trimmed = line.trim()
+    if (trimmed.length === 0) return []
+    if (trimmed === error.message) return []
+    if (trimmed === `Error: ${error.message}`) return []
+    if (/^at\s/.test(line)) return [`    ${line}`]
+    return [line]
+  })
+  return frames.length > 0 ? frames : [error.message]
+}
+
 function runtimeErrorOverlay(
   error: { message: string; stack: string },
   onReload: () => void
 ): Component {
-  const lines = error.stack.length === 0 ? [error.message] : error.stack.split("\n")
+  const lines = overlayStackLines(error)
   return () =>
     h(
       "div",
@@ -309,16 +330,24 @@ function runtimeErrorOverlay(
           width: "100%",
           height: "100%",
           padding: 32,
-          gap: 16,
-          backgroundColor: "#1c0b0b",
+          paddingBottom: 40,
+          gap: 20,
+          backgroundColor: "#000000e6",
           pointerEvents: "auto",
         },
       },
       [
         h(
           "text",
-          { style: { fontSize: 22, fontWeight: 700, color: "#f87171" } },
-          "Runtime error"
+          {
+            style: {
+              fontSize: 32,
+              fontWeight: 700,
+              color: "#e83b46",
+              flexShrink: 0,
+            },
+          },
+          "Uncaught runtime errors:"
         ),
         h(
           "div",
@@ -327,19 +356,47 @@ function runtimeErrorOverlay(
             style: {
               display: "flex",
               flexDirection: "column",
-              flexGrow: 1,
+              flexGrow: 0,
+              flexShrink: 1,
               minHeight: 0,
               overflowY: "scroll",
-              gap: 2,
+              padding: 16,
+              paddingBottom: 24,
+              backgroundColor: "#ce11261a",
+              borderRadius: 4,
+              gap: 4,
             },
           },
-          lines.map((line) =>
+          [
             h(
               "text",
-              { style: { fontSize: 13, color: "#fecaca" } },
-              line === "" ? " " : line
-            )
-          )
+              {
+                style: {
+                  fontSize: 20,
+                  fontWeight: 700,
+                  color: "#e83b46",
+                  marginBottom: 12,
+                  flexShrink: 0,
+                },
+              },
+              error.message
+            ),
+            ...lines.map((line) =>
+              h(
+                "text",
+                {
+                  style: {
+                    fontSize: 13,
+                    lineHeight: 20,
+                    color: "#fccfcf",
+                    fontFamily: OVERLAY_MONO,
+                    whiteSpace: "nowrap",
+                  },
+                },
+                line
+              )
+            ),
+          ]
         ),
         h(
           "div",
@@ -351,15 +408,15 @@ function runtimeErrorOverlay(
               padding: 10,
               paddingLeft: 16,
               paddingRight: 16,
-              borderRadius: 8,
-              backgroundColor: "#7f1d1d",
-              hover: { backgroundColor: "#991b1b" },
+              borderRadius: 4,
+              backgroundColor: "#e83b46",
+              hover: { backgroundColor: "#c92a34" },
             },
           },
           [
             h(
               "text",
-              { style: { fontSize: 14, fontWeight: 600, color: "#fee2e2" } },
+              { style: { fontSize: 14, fontWeight: 700, color: "#ffffff" } },
               "Reload"
             ),
           ]
