@@ -29,8 +29,8 @@ function bounds(app: TestApp, testId: string) {
   const element = app.renderer.findByTestId(testId)
   expect(element, `missing testId ${testId}`).toBeDefined()
   const rect = app.renderer.getElementBounds(element!.id)
-  expect(rect, `no painted bounds for ${testId}`).toEqual(expect.any(Array))
-  return { x: rect![0], y: rect![1], width: rect![2], height: rect![3] }
+  expect(rect, `no painted bounds for ${testId}`).toEqual(expect.any(Object))
+  return rect!
 }
 
 describeNative("text element identity", () => {

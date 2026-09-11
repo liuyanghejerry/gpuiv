@@ -96,7 +96,7 @@ describeNative("native text elements (vue)", () => {
     const node = app.renderer.findByType("code")[0]!
     const bounds = app.renderer.getElementBounds(node.id)!
     // Exactly three rows at the default line height: no padding of its own.
-    expect(bounds[3]).toBe(3 * 18)
+    expect(bounds.height).toBe(3 * 18)
     app.unmount()
   })
 
@@ -113,7 +113,7 @@ describeNative("native text elements (vue)", () => {
     const app = createTestApp(App)
     const node = app.renderer.findByType("code")[0]!
     const bounds = app.renderer.getElementBounds(node.id)!
-    expect(bounds[3]).toBe(3 * 18 + 40)
+    expect(bounds.height).toBe(3 * 18 + 40)
     app.unmount()
   })
 
@@ -131,7 +131,7 @@ describeNative("native text elements (vue)", () => {
     const node = app.renderer.findByType("code")[0]!
     const bounds = app.renderer.getElementBounds(node.id)!
     // The row height follows style.lineHeight, so tall glyphs are never clipped.
-    expect(bounds[3]).toBe(3 * 30)
+    expect(bounds.height).toBe(3 * 30)
     app.unmount()
   })
 
@@ -149,7 +149,7 @@ describeNative("native text elements (vue)", () => {
     const node = app.renderer.findByType("code")[0]!
     const bounds = app.renderer.getElementBounds(node.id)!
     // Double the glyphs and the rows must double too, or the lines overlap.
-    expect(bounds[3]).toBe(3 * 2 * 18)
+    expect(bounds.height).toBe(3 * 2 * 18)
     app.unmount()
   })
 

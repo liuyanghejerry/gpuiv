@@ -51,7 +51,7 @@ describeNative("runtime error overlay (vue)", () => {
       expect(reload).toBeDefined()
       const bounds = renderer.getElementBounds(reload!.id)
       expect(bounds).not.toBeNull()
-      renderer.nativeSimulateClick(bounds![0] + 8, bounds![1] + 8)
+      renderer.nativeSimulateClick(bounds!.x + 8, bounds!.y + 8)
       await new Promise((resolve) => setTimeout(resolve, 0))
       renderer.flush()
       expect(renderer.getAllText()).toEqual(["ok"])
@@ -133,7 +133,7 @@ describeNative("runtime error overlay (vue)", () => {
       // own bounds rather than at the window origin.
       const go = renderer.findByTestId("go")!
       const goBounds = renderer.getElementBounds(go.id)!
-      renderer.nativeSimulateClick(goBounds[0] + 10, goBounds[1] + 10)
+      renderer.nativeSimulateClick(goBounds.x + 10, goBounds.y + 10)
       await new Promise((resolve) => setTimeout(resolve, 0))
       renderer.flush()
 

@@ -90,8 +90,8 @@ describeNative("combobox and tooltip (vue)", () => {
 
     const trigger = app.renderer.findByText("Hover me")
     const bounds = app.renderer.getElementBounds(trigger!.id)!
-    const cx = bounds[0] + bounds[2] / 2
-    const cy = bounds[1] + bounds[3] / 2
+    const cx = bounds.x + bounds.width / 2
+    const cy = bounds.y + bounds.height / 2
 
     app.renderer.nativeSimulateMouseMove(cx, cy)
     // scheduleOpen() uses setTimeout(0) — let the timer fire, then settle.

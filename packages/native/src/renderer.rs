@@ -1960,11 +1960,9 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_element_bounds(&self, id: f64) -> Result<Option<Vec<f64>>> {
+    pub fn get_element_bounds(&self, id: f64) -> Result<Option<ElementBounds>> {
         let id = to_element_id(id)?;
-        Ok(self
-            .element_bounds(id)?
-            .map(|bounds| vec![bounds.x, bounds.y, bounds.width, bounds.height]))
+        Ok(self.element_bounds(id)?.map(ElementBounds::from_painted))
     }
 
     #[napi]
@@ -2836,12 +2834,7 @@ impl WebGpuixRenderer {
         let Some(bounds) = crate::automation::get_bounds(web_element_id(element_id)?) else {
             return Ok(wasm_bindgen::JsValue::NULL);
         };
-        Ok(web_number_array([
-            bounds.x,
-            bounds.y,
-            bounds.width,
-            bounds.height,
-        ]))
+        element_bounds_js(bounds)
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getAllText)]
@@ -5837,6 +5830,47 @@ fn window_insets_js(
         ("effective", edge_insets_js(effective)?),
     ] {
         js_sys::Reflect::set(&object, &wasm_bindgen::JsValue::from_str(key), &value)?;
+    }
+    Ok(object.into())
+}
+
+/// Last painted box for a host element.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ElementBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+impl ElementBounds {
+    pub(crate) fn from_painted(bounds: crate::automation::ElementBounds) -> Self {
+        Self {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+        }
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+fn element_bounds_js(
+    bounds: crate::automation::ElementBounds,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    let object = js_sys::Object::new();
+    for (key, value) in [
+        ("x", bounds.x),
+        ("y", bounds.y),
+        ("width", bounds.width),
+        ("height", bounds.height),
+    ] {
+        js_sys::Reflect::set(
+            &object,
+            &wasm_bindgen::JsValue::from_str(key),
+            &wasm_bindgen::JsValue::from_f64(value),
+        )?;
     }
     Ok(object.into())
 }

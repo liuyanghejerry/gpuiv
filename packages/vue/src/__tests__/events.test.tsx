@@ -234,7 +234,7 @@ describeNative("events (vue)", () => {
     const app = createTestApp(App)
     const target = app.renderer.findByText("target")!
     const bounds = app.renderer.getElementBounds(target.id)!
-    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5)
+    app.renderer.nativeSimulateClick(bounds.x + 5, bounds.y + 5)
     await app.settle()
     expect(log.value).toEqual(["down", "click"])
     app.unmount()
@@ -267,12 +267,12 @@ describeNative("events (vue)", () => {
     const app = createTestApp(App)
     const target = app.renderer.findByText("target")!
     const bounds = app.renderer.getElementBounds(target.id)!
-    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5, 2)
+    app.renderer.nativeSimulateClick(bounds.x + 5, bounds.y + 5, 2)
     await app.settle()
     expect(log.value).toEqual(["auxClick"])
     expect(aux.value?.isRightClick).toBe(true)
     // A left click still goes to onClick only.
-    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5)
+    app.renderer.nativeSimulateClick(bounds.x + 5, bounds.y + 5)
     await app.settle()
     expect(log.value).toEqual(["auxClick", "click"])
     app.unmount()
@@ -399,8 +399,8 @@ describeNative("events (vue)", () => {
     const app = createTestApp(App)
     const box = app.renderer.findByText("box")!
     const bounds = app.renderer.getElementBounds(box.id)!
-    const cx = bounds[0] + bounds[2] / 2
-    const cy = bounds[1] + bounds[3] / 2
+    const cx = bounds.x + bounds.width / 2
+    const cy = bounds.y + bounds.height / 2
 
     app.renderer.nativeSimulateMouseMove(cx, cy)
     await app.settle()
@@ -435,7 +435,7 @@ describeNative("events (vue)", () => {
     const app = createTestApp(App)
     const elsewhere = app.renderer.findByText("elsewhere")!
     const bounds = app.renderer.getElementBounds(elsewhere.id)!
-    app.renderer.nativeSimulateClick(bounds[0] + 10, bounds[1] + 10)
+    app.renderer.nativeSimulateClick(bounds.x + 10, bounds.y + 10)
     await app.settle()
     expect(outside.value).toBeGreaterThanOrEqual(1)
     app.unmount()
@@ -521,13 +521,13 @@ describeNative("events (vue)", () => {
     const handle = app.renderer.findByText("handle")!
     const bounds = app.renderer.getElementBounds(handle.id)!
 
-    app.renderer.nativeSimulateMouseDown(bounds[0] + 20, bounds[1] + 20)
+    app.renderer.nativeSimulateMouseDown(bounds.x + 20, bounds.y + 20)
     await app.settle()
-    app.renderer.nativeSimulateMouseMove(bounds[0] + 200, bounds[1] + 20, 0)
+    app.renderer.nativeSimulateMouseMove(bounds.x + 200, bounds.y + 20, 0)
     await app.settle()
-    app.renderer.nativeSimulateMouseUp(bounds[0] + 200, bounds[1] + 20, 0)
+    app.renderer.nativeSimulateMouseUp(bounds.x + 200, bounds.y + 20, 0)
     await app.settle()
-    expect(received.value).toEqual(["down", `move:${Math.round(bounds[0] + 200)},0`, "up"])
+    expect(received.value).toEqual(["down", `move:${Math.round(bounds.x + 200)},0`, "up"])
     app.unmount()
   })
 
@@ -552,9 +552,9 @@ describeNative("events (vue)", () => {
     const press = app.renderer.findByText("press")!
     const bounds = app.renderer.getElementBounds(press.id)!
 
-    app.renderer.nativeSimulateMouseDown(bounds[0] + 20, bounds[1] + 20)
+    app.renderer.nativeSimulateMouseDown(bounds.x + 20, bounds.y + 20)
     await app.settle()
-    app.renderer.nativeSimulateMouseUp(bounds[0] + 200, bounds[1] + 20, 0)
+    app.renderer.nativeSimulateMouseUp(bounds.x + 200, bounds.y + 20, 0)
     await app.settle()
     expect(received.value).toEqual(["down"])
     app.unmount()

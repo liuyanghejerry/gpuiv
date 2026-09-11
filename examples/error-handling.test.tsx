@@ -16,7 +16,7 @@ function clickCenter(renderer: TestRenderer, testId: string): void {
   if (!element) throw new Error(`missing testId: ${testId}`)
   const bounds = renderer.getElementBounds(element.id)
   if (!bounds) throw new Error(`no bounds for testId: ${testId}`)
-  renderer.nativeSimulateClick(bounds[0] + bounds[2] / 2, bounds[1] + bounds[3] / 2)
+  renderer.nativeSimulateClick(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
 }
 
 async function settleOverlay(): Promise<void> {

@@ -40,7 +40,7 @@ function fakeRenderer(): TestAutomationRenderer {
         bounds: { x: 0, y: 0, width: 40, height: 20 },
         children: [{ id: 2, type: "text", text: `clicks:${clicks}` }],
       }),
-    getElementBounds: () => [0, 0, 40, 20],
+    getElementBounds: () => ({ x: 0, y: 0, width: 40, height: 20 }),
     clockPause: () => 0,
     clockSet: (nowMs) => nowMs,
     clockFastForward: (deltaMs) => deltaMs,
