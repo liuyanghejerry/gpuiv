@@ -44,7 +44,7 @@ describeNative("runtime error overlay (vue)", () => {
       renderer.flush()
 
       const text = renderer.getAllText().join("\n")
-      expect(text).toContain("Runtime error")
+      expect(text).toContain("Uncaught runtime errors:")
       expect(text).toContain("kaboom")
       expect(renderer.getPaintedText().join("\n")).toContain("kaboom")
       const reload = renderer.findByTestId("runtime-error-reload")
@@ -142,7 +142,7 @@ describeNative("runtime error overlay (vue)", () => {
       expect(seen[0][1]).toContain("native event handler")
       const text = renderer.getAllText().join("\n")
       expect(text).toContain("fallback")
-      expect(text).not.toContain("Runtime error")
+      expect(text).not.toContain("Uncaught runtime errors:")
     } finally {
       resetApp()
     }
@@ -167,7 +167,7 @@ describeNative("runtime error overlay (vue)", () => {
       expect(observed[0].message).toContain("observed boom")
       expect(observed[0].info).toContain("render function")
       // The overlay runs in parallel with the observer.
-      expect(renderer.getAllText().join("\n")).toContain("Runtime error")
+      expect(renderer.getAllText().join("\n")).toContain("Uncaught runtime errors:")
     } finally {
       resetApp()
     }
@@ -191,7 +191,7 @@ describeNative("runtime error overlay (vue)", () => {
       renderer.flush()
       expect(observed).toHaveLength(1)
       expect(observed[0]).toContain("quiet boom")
-      expect(renderer.getAllText().join("\n")).not.toContain("Runtime error")
+      expect(renderer.getAllText().join("\n")).not.toContain("Uncaught runtime errors:")
     } finally {
       resetApp()
     }
