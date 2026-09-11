@@ -74,6 +74,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAllText(): string[]
   focusNext(): void
   focusPrevious(): void
+  getFocusedElementId(): number | null
+  focusNextWithin(elementId: number): void
+  focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
@@ -209,6 +212,9 @@ export class TestRenderer implements NativeRenderer {
   readonly applyBatch: NativeRenderer["applyBatch"]
   readonly focusNext: () => void
   readonly focusPrevious: () => void
+  readonly getFocusedElementId: () => number | null
+  readonly focusNextWithin: (elementId: number) => void
+  readonly focusPreviousWithin: (elementId: number) => void
   readonly setWindowKeyEvents: (
     keyDown: boolean,
     keyUp: boolean,
@@ -225,6 +231,9 @@ export class TestRenderer implements NativeRenderer {
     this.applyBatch = this.native.applyBatch.bind(this.native)
     this.focusNext = this.native.focusNext.bind(this.native)
     this.focusPrevious = this.native.focusPrevious.bind(this.native)
+    this.getFocusedElementId = this.native.getFocusedElementId.bind(this.native)
+    this.focusNextWithin = this.native.focusNextWithin.bind(this.native)
+    this.focusPreviousWithin = this.native.focusPreviousWithin.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
   }
 
@@ -274,6 +283,13 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.focusElement(elementId)
     this.native.simulateKeystrokes(keystrokes)
+    this.dispatchNativeEvents()
+  }
+
+  /** Focus a host element by id (through its GPUI FocusHandle) and dispatch
+   *  the resulting focus/blur events to the registry. */
+  focusElement(elementId: number): void {
+    this.native.focusElement(elementId)
     this.dispatchNativeEvents()
   }
 
@@ -517,12 +533,6 @@ export class TestRenderer implements NativeRenderer {
    *  Use this for caret blink, input drag autoscroll, and list edge scroll. */
   advanceTime(milliseconds: number): void {
     this.native.advanceTime(milliseconds)
-    this.dispatchNativeEvents()
-  }
-
-  focusElement(elementId: number): void {
-    this.native.flush()
-    this.native.focusElement(elementId)
     this.dispatchNativeEvents()
   }
 
