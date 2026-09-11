@@ -338,6 +338,12 @@ export declare class TestGpuixRenderer {
    */
   simulateKeyUp(keystroke: string): void
   /**
+   * Simulate a Finder-style file drop at the given window coordinates.
+   * Dispatches FileDropEvent::Entered then Submit, matching GPUI's OS drop
+   * path, so `onFileDrop` fires on the hovered hitbox.
+   */
+  simulateFileDrop(x: number, y: number, paths: Array<string>): void
+  /**
    * Simulate a mouse move to the given coordinates.
    * pressed_button: optional mouse button held during move (0=left, 1=middle, 2=right).
    * Used to simulate drag events.
@@ -604,6 +610,11 @@ export interface EventPayload {
    * Populated for: highlight.
    */
   matchCount?: number
+  /**
+   * Absolute filesystem paths from a Finder / OS file drop.
+   * Populated for: fileDrop.
+   */
+  paths?: Array<string>
   modifiers?: EventModifiers
 }
 
