@@ -1037,11 +1037,10 @@ impl TestGpuixRenderer {
 
     /// Last painted bounds for an element, or null if it was not painted.
     #[napi]
-    pub fn get_element_bounds(&self, id: f64) -> Result<Option<Vec<f64>>> {
+    pub fn get_element_bounds(&self, id: f64) -> Result<Option<crate::renderer::ElementBounds>> {
         let id = to_element_id(id)?;
         self.flush()?;
-        Ok(crate::automation::get_bounds(id)
-            .map(|bounds| vec![bounds.x, bounds.y, bounds.width, bounds.height]))
+        Ok(crate::automation::get_bounds(id).map(crate::renderer::ElementBounds::from_painted))
     }
 
     #[napi]

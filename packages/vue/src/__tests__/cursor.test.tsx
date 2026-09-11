@@ -88,7 +88,7 @@ describeNative("cursor styles (vue)", () => {
     const target = app.renderer.findByText("target")!
     const bounds = app.renderer.getElementBounds(target.id)!
 
-    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5, 0)
+    app.renderer.nativeSimulateClick(bounds.x + 5, bounds.y + 5, 0)
     await app.settle()
     expect(clicks.value).toEqual(["target"])
   })
@@ -114,7 +114,7 @@ describeNative("cursor styles (vue)", () => {
     const target = app.renderer.findByText("brush")!
     const bounds = app.renderer.getElementBounds(target.id)!
 
-    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5, 0)
+    app.renderer.nativeSimulateClick(bounds.x + 5, bounds.y + 5, 0)
     await app.settle()
     expect(clicks.value).toBe(1)
     expect(app.renderer.getAllText()).toContain("brush")

@@ -20,10 +20,12 @@ import type { EventPayload, HighlightMatch } from "@gpuiv/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  ElementBounds,
   HostNode,
   NativeRenderer,
   WindowKeyEventHandlers,
 } from "./types.js"
+export type { ElementBounds }
 import { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
 import {
   handleGpuixEvent,
@@ -60,7 +62,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getTreeJson(): string
   getA11yTree(): string
   getAutomationTree(): string
-  getElementBounds(elementId: number): number[] | null
+  getElementBounds(elementId: number): ElementBounds | null
   getRetainedElementCount(): number
   clockPause(): number
   clockSet(nowMs: number): number
@@ -474,7 +476,7 @@ export class TestRenderer implements NativeRenderer {
     return JSON.parse(this.native.getA11yTree()) as A11yTreeDump
   }
 
-  getElementBounds(elementId: number): number[] | null {
+  getElementBounds(elementId: number): ElementBounds | null {
     return this.native.getElementBounds(elementId)
   }
 

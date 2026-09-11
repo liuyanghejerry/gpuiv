@@ -53,7 +53,7 @@ describeNative("element bounds (vue)", () => {
     })
     const app = createTestApp(App)
     const row = app.renderer.findByTestId("row")!
-    const [bx, by, bw, bh] = app.renderer.getElementBounds(row.id)!
+    const { x: bx, y: by, width: bw, height: bh } = app.renderer.getElementBounds(row.id)!
 
     // The recorded origin is the real border-box origin: the scroll container's
     // left padding puts the row at x=10, y=0. Before the fix the origin was the
@@ -109,9 +109,9 @@ describeNative("element bounds (vue)", () => {
     // The border box grows by the border on each side; width stays the
     // stretched window width. Before the fix the recorded width was short by
     // the border on both sides and the height by the top+bottom border.
-    expect(borderedBounds[2]).toBe(plainBounds[2])
-    expect(borderedBounds[3]).toBe(plainBounds[3]! + 4)
-    expect(borderedBounds[0]).toBe(plainBounds[0])
-    expect(borderedBounds[1]).toBe(plainBounds[1])
+    expect(borderedBounds.width).toBe(plainBounds.width)
+    expect(borderedBounds.height).toBe(plainBounds.height! + 4)
+    expect(borderedBounds.x).toBe(plainBounds.x)
+    expect(borderedBounds.y).toBe(plainBounds.y)
   })
 })

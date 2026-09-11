@@ -35,8 +35,8 @@ describeNative("native text editors (vue)", () => {
 
     const input = app.renderer.findByType("input")[0]
     const bounds = app.renderer.getElementBounds(input.id)!
-    app.renderer.nativeSimulateMouseDown(bounds[0] + 10, bounds[1] + 10, 0)
-    app.renderer.nativeSimulateMouseUp(bounds[0] + 10, bounds[1] + 10, 0)
+    app.renderer.nativeSimulateMouseDown(bounds.x + 10, bounds.y + 10, 0)
+    app.renderer.nativeSimulateMouseUp(bounds.x + 10, bounds.y + 10, 0)
     await app.settle()
     expect(click).toMatchObject({ button: 0, isRightClick: false })
     app.unmount()
@@ -381,8 +381,7 @@ describeNative("native text editors (vue)", () => {
       },
     })
     app = createTestApp(App)
-    // bounds: [x, y, width, height]
-    expect(editorBounds("textarea")[3]).toBe(30)
+    expect(editorBounds("textarea").height).toBe(30)
   })
 
   it("multiplies lineHeight by minRows", () => {
@@ -399,7 +398,7 @@ describeNative("native text editors (vue)", () => {
       },
     })
     app = createTestApp(App)
-    expect(editorBounds("textarea")[3]).toBe(90)
+    expect(editorBounds("textarea").height).toBe(90)
   })
 
   it("scales a row from fontSize when lineHeight is unset", () => {
@@ -410,7 +409,7 @@ describeNative("native text editors (vue)", () => {
     })
     app = createTestApp(App)
     // GPUI default leading is phi, so 28px * 1.618 rounds to 45.
-    expect(editorBounds("input")[3]).toBe(45)
+    expect(editorBounds("input").height).toBe(45)
   })
 
   it("uses lineHeight on a single-line input", () => {
@@ -420,6 +419,6 @@ describeNative("native text editors (vue)", () => {
       },
     })
     app = createTestApp(App)
-    expect(editorBounds("input")[3]).toBe(22)
+    expect(editorBounds("input").height).toBe(22)
   })
 })

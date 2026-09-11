@@ -92,6 +92,14 @@ export type CursorStyle =
   | "se-resize"
   | "sw-resize"
 
+/** Last painted box for a host element, in window pixels. */
+export interface ElementBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface StyleDesc {
   display?: string
   visibility?: string

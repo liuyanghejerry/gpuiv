@@ -54,7 +54,7 @@ describeNative("pointer semantics (vue)", () => {
 
     // auxClick and contextMenu are both right-button-up events; their relative
     // order is not part of the contract, only that both fire.
-    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5, 2)
+    app.renderer.nativeSimulateClick(bounds.x + 5, bounds.y + 5, 2)
     await app.settle()
     expect(log.value.sort()).toEqual(["auxClick", "contextMenu"])
     expect(payload.value?.button).toBe(2)
@@ -62,7 +62,7 @@ describeNative("pointer semantics (vue)", () => {
 
     // A left click must not fire contextMenu.
     log.value = []
-    app.renderer.nativeSimulateClick(bounds[0] + 5, bounds[1] + 5)
+    app.renderer.nativeSimulateClick(bounds.x + 5, bounds.y + 5)
     await app.settle()
     expect(log.value).toEqual(["click"])
     app.unmount()
@@ -100,11 +100,11 @@ describeNative("pointer semantics (vue)", () => {
     // would never see a move that leaves its bounds.
     app.renderer.setPointerCapture(captured.id)
     app.renderer.nativeSimulateMouseDown(
-      capturedBounds[0] + capturedBounds[2] / 2,
-      capturedBounds[1] + capturedBounds[3] / 2,
+      capturedBounds.x + capturedBounds.width / 2,
+      capturedBounds.y + capturedBounds.height / 2,
       0,
     )
-    app.renderer.nativeSimulateMouseMove(freeBounds[0] + 10, freeBounds[1] + 10)
+    app.renderer.nativeSimulateMouseMove(freeBounds.x + 10, freeBounds.y + 10)
     app.renderer.nativeSimulateMouseMove(20, 20)
     await app.settle()
     expect(moves.value.some((move) => move.startsWith("captured:"))).toBe(true)
@@ -113,8 +113,8 @@ describeNative("pointer semantics (vue)", () => {
     moves.value = []
     app.renderer.releasePointerCapture()
     app.renderer.nativeSimulateMouseDown(
-      capturedBounds[0] + capturedBounds[2] / 2,
-      capturedBounds[1] + capturedBounds[3] / 2,
+      capturedBounds.x + capturedBounds.width / 2,
+      capturedBounds.y + capturedBounds.height / 2,
       0,
     )
     app.renderer.nativeSimulateMouseMove(20, 20)
@@ -150,8 +150,8 @@ describeNative("pointer semantics (vue)", () => {
     const scroller = findByTestId(tree, "scroller")!
     const stopper = findByTestId(tree, "stopper")!
     const stopperBounds = app.renderer.getElementBounds(stopper.id)!
-    const cx = stopperBounds[0] + stopperBounds[2] / 2
-    const cy = stopperBounds[1] + stopperBounds[3] / 2
+    const cx = stopperBounds.x + stopperBounds.width / 2
+    const cy = stopperBounds.y + stopperBounds.height / 2
 
     // Wheel over the stopper: the scroller must not move.
     app.renderer.nativeSimulateScrollWheel(cx, cy, 0, -40)

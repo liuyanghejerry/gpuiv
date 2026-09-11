@@ -111,8 +111,8 @@ describeNative('chat example (vue)', () => {
     const bounds = app.renderer.getElementBounds(trigger!.id)
     expect(bounds).not.toBeNull()
     app.renderer.nativeSimulateClick(
-      bounds![0]! + bounds![2]! / 2,
-      bounds![1]! + bounds![3]! / 2
+      bounds!.x! + bounds!.width! / 2,
+      bounds!.y! + bounds!.height! / 2
     )
     await app.settle()
     expect(app.renderer.getPaintedText()).toContain('Claude Opus 4.6')
@@ -206,7 +206,7 @@ describeNative('chat example (vue)', () => {
     const c2Row = rowOf('Native SDK vs GPUI comparison')
     const bounds = app.renderer.getElementBounds(c2Row!.id)
     expect(bounds).not.toBeNull()
-    app.renderer.nativeSimulateClick(bounds![0]! + 3, bounds![1]! + bounds![3]! - 3)
+    app.renderer.nativeSimulateClick(bounds!.x! + 3, bounds!.y! + bounds!.height! - 3)
     await app.settle()
 
     // The highlight moves to c2, c1 loses it, and the header follows.
@@ -218,8 +218,8 @@ describeNative('chat example (vue)', () => {
     const c1Title = titledText('give me a quick overview', 13.5)
     const c1Bounds = app.renderer.getElementBounds(c1Title!.id)
     app.renderer.nativeSimulateClick(
-      c1Bounds![0]! + c1Bounds![2]! / 2,
-      c1Bounds![1]! + c1Bounds![3]! / 2,
+      c1Bounds!.x! + c1Bounds!.width! / 2,
+      c1Bounds!.y! + c1Bounds!.height! / 2,
     )
     await app.settle()
     expect(rowOf('give me a quick overview')!.style.backgroundColor).toBe(activeFill)
