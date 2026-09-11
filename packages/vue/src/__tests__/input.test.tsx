@@ -360,4 +360,66 @@ describeNative("native text editors (vue)", () => {
 
     expect(app.renderer.getAllText()).toContain("Value: abcd")
   })
+
+  function editorBounds(type: "input" | "textarea") {
+    const node = app!.renderer.findByType(type)[0]
+    expect(node).toBeDefined()
+    return app!.renderer.getElementBounds(node.id)!
+  }
+
+  it("sizes a row from style.lineHeight", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <textarea
+            value="one"
+            minRows={1}
+            maxRows={8}
+            style={{ width: 300, lineHeight: 30 }}
+          />
+        )
+      },
+    })
+    app = createTestApp(App)
+    // bounds: [x, y, width, height]
+    expect(editorBounds("textarea")[3]).toBe(30)
+  })
+
+  it("multiplies lineHeight by minRows", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <textarea
+            value="one"
+            minRows={3}
+            maxRows={8}
+            style={{ width: 300, lineHeight: 30 }}
+          />
+        )
+      },
+    })
+    app = createTestApp(App)
+    expect(editorBounds("textarea")[3]).toBe(90)
+  })
+
+  it("scales a row from fontSize when lineHeight is unset", () => {
+    const App = defineComponent({
+      setup() {
+        return () => <input value="one" style={{ width: 300, fontSize: 28 }} />
+      },
+    })
+    app = createTestApp(App)
+    // GPUI default leading is phi, so 28px * 1.618 rounds to 45.
+    expect(editorBounds("input")[3]).toBe(45)
+  })
+
+  it("uses lineHeight on a single-line input", () => {
+    const App = defineComponent({
+      setup() {
+        return () => <input value="one" style={{ width: 300, lineHeight: 22 }} />
+      },
+    })
+    app = createTestApp(App)
+    expect(editorBounds("input")[3]).toBe(22)
+  })
 })

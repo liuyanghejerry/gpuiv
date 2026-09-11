@@ -1343,9 +1343,15 @@ impl TextEditorState {
         } else {
             (SharedString::from(self.content.clone()), false)
         };
-        let font_size = style.font_size.to_pixels(window.rem_size());
+        let rem_size = window.rem_size();
+        let font_size = style.font_size.to_pixels(rem_size);
         self.font_size = font_size;
-        self.line_height = window.line_height();
+        // Taffy measures after the parent `with_text_style` is gone, so
+        // `window.line_height()` here is always 16×φ no matter what the
+        // element style says. Use the TextStyle captured during
+        // request_layout: an explicit lineHeight sets the row in pixels,
+        // and without one a larger fontSize still grows the box.
+        self.line_height = style.line_height_in_pixels(rem_size);
         let color = if is_placeholder {
             gpui::rgba(0x8f8f8fff).into()
         } else {
