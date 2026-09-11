@@ -37,7 +37,7 @@ lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ledger
 
-Inventoried range: `367ef48..6b4be86` (2026-09-08). Earlier history is in
+Inventoried range: `367ef48..18e695e` (2026-09-11). Earlier history is in
 [Sync log](#sync-log) below.
 
 | Topic | Upstream commits | Status | Notes |
@@ -86,13 +86,24 @@ Inventoried range: `367ef48..6b4be86` (2026-09-08). Earlier history is in
 | `<img>` http(s) src | `0bb3c94` | synced | PR #56 — `ImgSource::Uri` + `reqwest_client` path dep (Zed's client, UA `gpuiv`), `img::init` on both desktop app paths, aspect-ratio pin from definite width/height, `FakeHttpClient` in the test renderer serving the shared SVG fixture; the offline-crate concern dissolved — the rsproxy mirror in `~/.cargo/config.toml` fetched the tree in one `cargo fetch` |
 | Runtime-error stack overlay | `5f066f3` | synced | PR #57 — Vue port: `app.config.errorHandler` replaces root `onUncaughtError` (componentStack approximated by an instance-chain walk + Vue `info`), mount-serial keying replaces root-identity keying (Vue completes a mount even when render throws; React rethrows), `mountTree()` split out of `createApp()` shared by Reload and the overlay, globalThis-keyed process handlers uninstall on `resetApp()`, console fallback when no app is mounted (upstream drops silently). Follow-up PR #58 (fork-side, community-aligned): native event handlers wrapped in `callWithAsyncErrorHandling` like web `v-on` so `onErrorCaptured` boundaries work, plus `onRuntimeError` observer and `errorOverlay: false` options |
 | iOS IPA shipping plan | `e082247` `6b4be86` | declined | [ios-ipa-plan.md](./ios-ipa-plan.md) — plan for their packaging surface; no iOS target here |
-| Hermes-node runtime docs | `2d6e599` | declined | [hermes-node-runtime.md](./hermes-node-runtime.md) — runtime we do not support; website half extends the declined web topic |
+| Hermes-node runtime docs | `2d6e599` `1da015e` | declined | [hermes-node-runtime.md](./hermes-node-runtime.md) — runtime we do not support; website half extends the declined web topic; `1da015e` extends the same guide (packing, .node shrinking, fetch) |
 | zod lockfile bump | `65fc1b1` | declined | their website lockfile hygiene; nothing here consumes that lockfile |
+| PNG encode opt-level in debug | `7cb458e` | synced | PR #68 — `[profile.dev.package.*]` opt-level 3 for png/image/fdeflate/flate2/miniz_oxide so screenshot encoding doesn't starve vitest workers in debug builds; release unchanged; no changeset (not user-facing) |
+| Input/textarea row from fontSize/lineHeight | `18e695e` | synced | PR #69 — `layout_text` read `window.line_height()` after Taffy measure, so the row was pinned at 16×φ (their #63); the row now comes from the TextStyle captured at `request_layout` (`line_height_in_pixels`), min/maxRows still multiply, explicit height wins; applied to our diverged input.rs |
+| `onFileDrop` for Finder / OS file drops | `833d77f` | synced | PR #70 — `build_host_container` fileDrop arm + `emit_file_drop` (strict `Path::to_str`: empty / non-Unicode drops never fire), custom elements declare `fileDrop` in `supported_events`, input attaches `on_drop` directly, test renderer `simulateFileDrop` (GPUI Entered→Submit), Vue `EVENT_TYPES` + `nativeSimulateFileDrop`; virtual-list excluded (not a host div); desktop only |
+| `getElementBounds` object shape | `eac7181` | synced | PR #71 — breaking: `ElementBounds {x,y,width,height}` napi object shared by napi / test renderer / Vue testing facade / automation client (wasm twin ported for source parity though we don't build web); every test call site migrated |
+| Focus-within APIs + `visibility:hidden`→`invisible()` | `846de94` (native half) `a8141d6` | synced | PR #72 — zed `1f9d1cd`→`81c99f8` fast-forward (`focus_next_among`/`focus_prev_among`, `FocusHandle::id`, in-place dynamic image updates; toolchain pin unchanged), `getFocusedElementId`/`focusNextWithin`/`focusPreviousWithin` filtering the painted TabStopMap by RetainedTree descendants (Win/Linux via UiCommand), `apply_styles` invisible mapping, focus-within Vue tests; the React Select half of `846de94` is the pending Select row |
+| Runtime-error overlay webpack restyle | `2e20b1b` | synced | PR #73 — "Uncaught runtime errors:" title, red-tinted message scroll pane, mono webpack-indent frames (`overlayStackLines` strips empty/duplicate message lines), `#000000e6` overlay + red Reload, single console.error; screenshot-writing test skipped (no pixel harness, PR #29 precedent) |
+| Select follows Base UI | `846de94` (Select half) | pending | our `select.tsx` has the same child-sniffing wart (`collectItems` by `node.type === SelectItem`); the port is a Vue component redesign — registration-based item collection (provide/inject registry filled on mount), disabled on Item, late-mounted selected item becomes the highlight — not mechanical |
+| hide/unhide style retention | `2e77997` | declined | [hide-instance-style.md](./hide-instance-style.md) — React host-config `hideInstance`/`unhideInstance` has no Vue counterpart; our `patchProp` always sends the full style |
+| Floating barrel + `useFocusTrap` removal | `f24d270` `e02a607` | declined | [floating-barrel-usefocustrap.md](./floating-barrel-usefocustrap.md) — React package export surface; Vue never had `useFocusTrap` and upstream deleted the feature; subtree focus confinement is covered natively by PR #72 |
+| cargo-packager configs / Dock icon | `e892721` | declined | [cargo-packager-dock-icon.md](./cargo-packager-dock-icon.md) — their cargo-packager flow; our `packages/packager` bundles the app and icons itself. Revisit if we adopt cargo-packager (packaging P1/P2) |
+| Native `checkUpdate()` (GitHub Releases) | `246a160` `fa53608` | diverged | upstream ships a native updater parsing GitHub Releases (napi `checkUpdate()`, `updater.rs`); `docs/auto-update-plan.md` pins S3-compatible static storage + a pure-TS updater for our feed. Revisit at packaging P1/P2 if the native plumbing earns its keep |
 
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8.
 
-**Last inventoried upstream head:** `6b4be86` (2026-09-08)
+**Last inventoried upstream head:** `18e695e` (2026-09-11)
 
 ## Sync log
 
@@ -137,6 +148,13 @@ from upstream through `367ef48`:
 | #55 | Ledger round `cbc3de0..6b4be86`: AGENTS.md bun --hot example-window guidance, declined-topic files (iOS IPA plan, hermes-node), pending rows (img http src, error overlay) — upstream `58397f4` + recording |
 | #56 | `<img>` http(s) src: `ImgSource::Uri`, reqwest_client path dep (UA `gpuiv`), aspect-ratio pin from width+height, FakeHttpClient test fixture; deps fetched via the local rsproxy mirror — upstream `0bb3c94` |
 | #57 | Runtime-error overlay: message + stack + Reload replacing the failed tree; all error paths (errorHandler, event catch, tick catch, process handlers) funnel into one microtask scheduler keyed by mount serial; `mountTree()` extracted from `createApp()` — upstream `5f066f3` |
+| #68 | PNG encode opt-level 3 for the image crate chain in `profile.dev` so screenshot tests don't starve vitest workers; release unchanged — upstream `7cb458e` |
+| #69 | Input/textarea rows sized from the captured TextStyle (`line_height_in_pixels`) instead of the always-16×φ `window.line_height()` at measure time; 4 Vue height assertions — upstream `18e695e` (their #63) |
+| #70 | `onFileDrop` for Finder / OS drops: host-container fileDrop arm + `emit_file_drop` (strict `Path::to_str`), `EventPayload.paths`, custom-element `supported_events` wiring, test `simulateFileDrop` (Entered→Submit), Vue `EVENT_TYPES` + `nativeSimulateFileDrop`, 6 e2e cases — upstream `833d77f` |
+| #71 | Breaking: `getElementBounds` returns `ElementBounds {x,y,width,height}` shared by napi/test renderer/Vue facade/automation client; all call sites migrated — upstream `eac7181` |
+| #72 | Focus-within: `getFocusedElementId`/`focusNextWithin`/`focusPreviousWithin` (RetainedTree descendant filter over the painted TabStopMap), zed `1f9d1cd`→`81c99f8` fast-forward, `visibility:hidden`→`invisible()`; React Select half kept pending — upstream `846de94` (native half) + `a8141d6` |
+| #73 | Runtime-error overlay webpack restyle: new title, red message scroll pane, mono indent frames with line filtering, `#000000e6` bg, red Reload, single console.error — upstream `2e20b1b` |
+| — | Ledger round `6b4be86..18e695e`: rows for the six synced topics, pending Select row, declined files (hide-instance-style, floating-barrel-usefocustrap, cargo-packager-dock-icon), diverged checkUpdate row, hermes docs extension |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
