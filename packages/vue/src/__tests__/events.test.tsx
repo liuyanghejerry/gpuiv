@@ -559,4 +559,159 @@ describeNative("events (vue)", () => {
     expect(received.value).toEqual(["down"])
     app.unmount()
   })
+
+  describeNative("file drop events", () => {
+    it("delivers the dropped paths in the payload", async () => {
+      const received = ref<EventPayload[]>([])
+      const App = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{ width: 200, height: 200 }}
+              onFileDrop={(event: EventPayload) => received.value.push(event)}
+            >
+              <text>drop</text>
+            </div>
+          )
+        },
+      })
+      const app = createTestApp(App)
+      app.renderer.nativeSimulateFileDrop(100, 100, ["/tmp/gpuix-drop-a.txt"])
+      await app.settle()
+
+      expect(received.value).toHaveLength(1)
+      expect(received.value[0]!.eventType).toBe("fileDrop")
+      expect(received.value[0]!.paths).toEqual(["/tmp/gpuix-drop-a.txt"])
+      expect(received.value[0]!.x).toBe(100)
+      expect(received.value[0]!.y).toBe(100)
+      app.unmount()
+    })
+
+    it("delivers every path in one drop", async () => {
+      const received = ref<string[][]>([])
+      const App = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{ width: 200, height: 200 }}
+              onFileDrop={(event: EventPayload) => received.value.push(event.paths ?? [])}
+            />
+          )
+        },
+      })
+      const app = createTestApp(App)
+      app.renderer.nativeSimulateFileDrop(40, 40, [
+        "/tmp/gpuix-drop-a.txt",
+        "/tmp/gpuix-drop-b.png",
+      ])
+      await app.settle()
+
+      expect(received.value).toEqual([["/tmp/gpuix-drop-a.txt", "/tmp/gpuix-drop-b.png"]])
+      app.unmount()
+    })
+
+    it("delivers a nested drop to the inner listener only", async () => {
+      const received = ref<string[]>([])
+      const App = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{
+                width: 400,
+                height: 400,
+                display: "flex",
+                flexDirection: "column",
+              }}
+              onFileDrop={() => received.value.push("outer")}
+            >
+              <div
+                style={{ width: 100, height: 100 }}
+                onFileDrop={() => received.value.push("inner")}
+              />
+            </div>
+          )
+        },
+      })
+      const app = createTestApp(App)
+      app.renderer.nativeSimulateFileDrop(50, 50, ["/tmp/gpuix-drop-inner.txt"])
+      await app.settle()
+      expect(received.value).toEqual(["inner"])
+
+      app.renderer.nativeSimulateFileDrop(200, 200, ["/tmp/gpuix-drop-outer.txt"])
+      await app.settle()
+      expect(received.value).toEqual(["inner", "outer"])
+      app.unmount()
+    })
+
+    it("does not fire an empty drop", async () => {
+      const received = ref<EventPayload[]>([])
+      const App = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{ width: 200, height: 200 }}
+              onFileDrop={(event: EventPayload) => received.value.push(event)}
+            />
+          )
+        },
+      })
+      const app = createTestApp(App)
+      app.renderer.nativeSimulateFileDrop(40, 40, [])
+      await app.settle()
+
+      expect(received.value).toEqual([])
+      app.unmount()
+    })
+
+    it("delivers a drop on a child to the ancestor listener", async () => {
+      const received = ref<string[]>([])
+      const App = defineComponent({
+        setup() {
+          return () => (
+            <div
+              style={{
+                width: 200,
+                height: 200,
+                display: "flex",
+                flexDirection: "column",
+              }}
+              onFileDrop={() => received.value.push("outer")}
+            >
+              <div style={{ width: 100, height: 100 }} />
+            </div>
+          )
+        },
+      })
+      const app = createTestApp(App)
+      app.renderer.nativeSimulateFileDrop(40, 40, ["/tmp/gpuix-drop-child.txt"])
+      await app.settle()
+
+      expect(received.value).toEqual(["outer"])
+      app.unmount()
+    })
+
+    it("delivers a drop on a loaded img leaf", async () => {
+      const received = ref<string[][]>([])
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8"><rect width="8" height="8" fill="#5ca9ff"/></svg>'
+      const src = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+      const App = defineComponent({
+        setup() {
+          return () => (
+            <img
+              src={src}
+              style={{ width: 220, height: 120 }}
+              onFileDrop={(event: EventPayload) => received.value.push(event.paths ?? [])}
+            />
+          )
+        },
+      })
+      const app = createTestApp(App)
+      app.renderer.nativeSimulateFileDrop(80, 40, ["/tmp/gpuix-drop-img.txt"])
+      await app.settle()
+
+      expect(received.value).toEqual([["/tmp/gpuix-drop-img.txt"]])
+      app.unmount()
+    })
+  })
 })

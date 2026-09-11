@@ -110,6 +110,10 @@ pub struct EventPayload {
     /// Populated for: highlight.
     pub match_count: Option<f64>,
 
+    /// Absolute filesystem paths from a Finder / OS file drop.
+    /// Populated for: fileDrop.
+    pub paths: Option<Vec<String>>,
+
     // ── Modifiers ────────────────────────────────────────────────────
     pub modifiers: Option<EventModifiers>,
 }
@@ -140,6 +144,7 @@ impl Default for EventPayload {
             start_index: None,
             end_index: None,
             match_count: None,
+            paths: None,
             modifiers: None,
         }
     }

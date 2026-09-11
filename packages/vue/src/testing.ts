@@ -57,6 +57,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateMouseMove(x: number, y: number, pressedButton?: number, modifiers?: string): void
   simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
   simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
+  simulateFileDrop(x: number, y: number, paths: string[]): void
   getTreeJson(): string
   getA11yTree(): string
   getAutomationTree(): string
@@ -338,6 +339,15 @@ export class TestRenderer implements NativeRenderer {
   ): void {
     this.native.flush()
     this.native.simulatePinch(x, y, delta, phase, modifiers)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** End-to-end: Finder-style file drop through GPUI → `onFileDrop`.
+   *  Dispatches FileDrop Entered then Submit at the given window coordinates. */
+  nativeSimulateFileDrop(x: number, y: number, paths: string[]): void {
+    this.native.flush()
+    this.native.simulateFileDrop(x, y, paths)
     this.dispatchNativeEvents()
     this.native.flush()
   }

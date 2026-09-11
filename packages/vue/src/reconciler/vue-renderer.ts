@@ -67,6 +67,7 @@ const EVENT_TYPES = new Set([
   "blur",
   "scroll",
   "pinch",
+  "fileDrop",
   "change",
   "submit",
   "toggleFile",

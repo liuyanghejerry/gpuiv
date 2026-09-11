@@ -184,6 +184,16 @@ pub(crate) fn wire_standard_events<E: gpui::StatefulInteractiveElement>(
                     });
                 }
             }
+            "fileDrop" => {
+                el = el.on_drop(move |dropped: &gpui::ExternalPaths, window, _cx| {
+                    crate::renderer::emit_file_drop(
+                        &callback,
+                        id,
+                        dropped,
+                        window.mouse_position(),
+                    );
+                });
+            }
             _ => {}
         }
     }
