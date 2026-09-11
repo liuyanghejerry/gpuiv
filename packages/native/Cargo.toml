@@ -79,3 +79,21 @@ path = "examples/bench_serde.rs"
 
 [profile.release]
 lto = true
+
+# Screenshot capture encodes a png on every visual test. The encoder is
+# too slow at opt-level 0 and vitest kills the worker, so build the
+# image crates with opt-level 3 in debug builds too.
+[profile.dev.package.png]
+opt-level = 3
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.fdeflate]
+opt-level = 3
+
+[profile.dev.package.flate2]
+opt-level = 3
+
+[profile.dev.package.miniz_oxide]
+opt-level = 3
