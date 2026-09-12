@@ -23,6 +23,7 @@ import {
 } from 'vue'
 import {
   applyMacCpuThrottleFromEnv,
+  connectVueDevtools,
   createApp,
   createUpdater,
   finishPendingWindowsUpdate,
@@ -2043,6 +2044,9 @@ if (isEntryPoint) {
   // before any UI exists; a no-op everywhere else.
   await finishPendingWindowsUpdate()
   applyMacCpuThrottleFromEnv()
+  // Dev-only: connect to a standalone Vue DevTools server (`bun x vue-devtools`)
+  // before the app exists so the hook is installed in time.
+  if (process.env.GPUIV_DEVTOOLS === '1') await connectVueDevtools()
   // Define-injected by @gpuiv/packager when the config pins an update feed;
   // absent in development, so the updater stays inert under `bun --hot`.
   const updater = process.env.GPUIV_UPDATE_FEED_URL ? createUpdater() : null

@@ -6,7 +6,7 @@
     "counter": "bun --hot counter.tsx",
     "blurred-window": "bun --hot blurred-window.tsx",
     "diff": "bun --hot diff.tsx",
-  "error-handling": "bun --hot error-handling.tsx",
+    "error-handling": "bun --hot error-handling.tsx",
     "test": "vitest run",
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
@@ -35,6 +35,7 @@
     "tsx": "^4.19.0",
     "vitest": "^4.0.18",
     "@types/node": "^25.3.3",
-    "@types/bun": "^1.2.0"
+    "@types/bun": "^1.2.0",
+    "@vue/devtools": "^8.2.1"
   }
 }

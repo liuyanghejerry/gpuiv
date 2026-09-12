@@ -2316,6 +2316,41 @@ session opened without an inspector rejects these methods with
 `Unsupported`; when Vue's internals shift under a future version, the walker
 answers `null` instead of failing the session.
 
+## Vue DevTools
+
+The standalone [Vue DevTools](https://devtools.vuejs.org/) app inspects a
+running GPUIV app: component tree, props, and `setup()` state. Those are
+framework-level features, so they work without a browser DOM. Features that
+need one (element highlight, select-element, scroll-into-view,
+open-in-editor) stay inert.
+
+1. Add `@vue/devtools` as a dev dependency and start its server (an Electron
+   shell hosting the devtools UI plus a middleware socket):
+
+   ```sh
+   bun x vue-devtools
+   ```
+
+2. Connect the app before `createApp()`, so the devtools hook is installed
+   in time:
+
+   ```ts
+   import { connectVueDevtools, createApp } from '@gpuiv/vue'
+
+   if (process.env.GPUIV_DEVTOOLS === '1') await connectVueDevtools()
+   createApp(App)
+   ```
+
+   `connectVueDevtools({ host, port })` defaults to `http://localhost:8098`
+   (the `PORT` env of the `vue-devtools` CLI). It is safe under `bun --hot` —
+   repeated calls after a reload no-op — and returns `false` with a console
+   hint when `@vue/devtools` is not installed. `examples/chat.tsx` wires it
+   behind `GPUIV_DEVTOOLS=1`.
+
+Because there is no browser, the integration shims `window`/`document` for
+the devtools client before connecting (`window` **is** globalThis, so the
+devtools hook lands where Vue reads it; the DOM-only calls become no-ops).
+
 ## Packaging
 
 `@gpuiv/packager` turns an app into a double-clickable product: one
@@ -2538,6 +2573,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
 - [x] Vue Fast Refresh during `bun --hot` (HMR preload: edited components reload in place, the rest of the tree keeps `ref` state)
+- [x] Vue DevTools (`connectVueDevtools()` + the standalone devtools server: component tree and `setup()` state)
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
 
