@@ -614,6 +614,9 @@ export interface NativeRenderer {
   cycleDebugFrameOverlay?(): string
   resetDebugFrameOverlayStats?(): void
   getDebugFrameOverlayStats?(): DebugFrameOverlayStats
+
+  /** Hand a URL to the user's default browser / handler. */
+  openUrl?(url: string): void
 }
 
 /** Commit-phase facade used only by the Vue host config. */

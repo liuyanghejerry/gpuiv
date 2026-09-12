@@ -164,6 +164,8 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /** Hand a URL to the user's default browser / handler. */
+  openUrl(url: string): void
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
@@ -307,6 +309,13 @@ export declare class TestGpuixRenderer {
   focusPrevious(): void
   /** Enable the window key events requested by the JS renderer. */
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
+  /**
+   * Record the URL; the platform's own recorder is not reachable from
+   * the bridge, so `getLastOpenedUrl` reads this instead.
+   */
+  openUrl(url: string): void
+  /** The last URL handed to `openUrl`. */
+  getLastOpenedUrl(): string | null
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.

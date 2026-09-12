@@ -465,6 +465,7 @@ enum UiCommand {
         response: SyncSender<std::result::Result<(), String>>,
     },
     Blur,
+    OpenUrl(String),
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -804,6 +805,9 @@ async fn run_ui_commands(
                 window.refresh();
             }),
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
+            UiCommand::OpenUrl(url) => window.update(cx, move |_view, _window, cx| {
+                cx.open_url(&url);
+            }),
         };
         if let Err(error) = result {
             // The last window can close mid-command; logging `window not found`
@@ -1643,6 +1647,36 @@ impl GpuixRenderer {
         Err(Error::from_reason(
             "The production GPUIX renderer does not support this operating system",
         ))
+    }
+
+    /// Hand a URL to the user's default browser / handler.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| cx.open_url(&url));
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::OpenUrl(url));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = url;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
     }
 
     #[napi]

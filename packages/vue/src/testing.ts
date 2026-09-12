@@ -94,6 +94,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  openUrl(url: string): void
+  getLastOpenedUrl(): string | null
 }
 
 interface NativeTestRendererConstructor {
@@ -612,6 +614,16 @@ export class TestRenderer implements NativeRenderer {
    *  A bridge round-trip, not a GPU readback. */
   readCanvasPixels(elementId: number): Uint8Array | null {
     return this.native.readCanvasPixels?.(elementId) ?? null
+  }
+
+  /** Hand a URL to the default handler. The test bridge records it; assert
+   *  with `getLastOpenedUrl`. */
+  openUrl(url: string): void {
+    this.native.openUrl?.(url)
+  }
+
+  getLastOpenedUrl(): string | null {
+    return this.native.getLastOpenedUrl?.() ?? null
   }
 
   /** Bytes built into canvas tile images so far — the upload cost the GPU

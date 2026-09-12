@@ -183,6 +183,10 @@ pub struct TestGpuixRenderer {
     selection: crate::text::SharedSelection,
     /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
     canvas_surfaces: crate::canvas::CanvasStore,
+    /// The last URL handed to `openUrl`. The test platform records its own
+    /// copy where the bridge cannot read it (`pub(crate)`), so tests assert
+    /// here.
+    last_opened_url: RefCell<Option<String>>,
 }
 
 #[napi]
@@ -264,6 +268,7 @@ impl TestGpuixRenderer {
             events,
             selection,
             canvas_surfaces,
+            last_opened_url: RefCell::new(None),
         })
     }
 
@@ -428,6 +433,20 @@ impl TestGpuixRenderer {
     }
 
     // ── Test-specific methods ────────────────────────────────────────
+
+    /// Record the URL; the platform's own recorder is not reachable from
+    /// the bridge, so `getLastOpenedUrl` reads this instead.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        *self.last_opened_url.borrow_mut() = Some(url);
+        Ok(())
+    }
+
+    /// The last URL handed to `openUrl`.
+    #[napi]
+    pub fn get_last_opened_url(&self) -> Option<String> {
+        self.last_opened_url.borrow().clone()
+    }
 
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.
