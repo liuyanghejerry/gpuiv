@@ -19,10 +19,20 @@
       "types": "./dist/automation/index.d.ts",
       "import": "./dist/automation/index.js",
       "default": "./dist/automation/index.js"
+    },
+    "./hmr": {
+      "types": "./dist/hmr/index.d.ts",
+      "import": "./dist/hmr/index.js",
+      "default": "./dist/hmr/index.js"
+    },
+    "./hmr-preload": {
+      "import": "./hmr-preload.js",
+      "default": "./hmr-preload.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "hmr-preload.js"
   ],
   "repository": {
     "type": "git",

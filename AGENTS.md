@@ -365,7 +365,6 @@ user-facing APIs belong there. This list is only the remaining engineering work.
       universal-macOS `lipo` spike. See `docs/packaging-plan.md` phasing
 - [ ] **Window controls** - resize, minimize (title already works)
 - [ ] **Multiple windows** - Support multiple GPUI windows
-- [ ] **Vue HMR** - keep `ref` state across saves. Needs Bun to run the Fast Refresh transform during `bun --hot`
 - [ ] **Native hot reload** - cannot unload a `.node`. `bun run dev` rebuilds and restarts
 - [ ] **DevTools** - Vue DevTools integration
 
@@ -399,8 +398,10 @@ Details (THROTTLE CPU clamp, canvas WPT suite, asserting on native elements):
 When the user asks to **open an example so they can look**, start
 `bun --hot <file>.tsx` and **leave that session running**. A save remounts
 Vue on the same window. Do not relaunch without `--hot`. Do not kill the
-session after a screenshot. `bun --hot` still drops `ref` state on save;
-that is the desktop remount path, not Fast Refresh.
+session after a screenshot. With `examples/bunfig.toml` preloading
+`@gpuiv/vue/hmr-preload`, a save reloads the edited components in place
+(Vue Fast Refresh: only the edited component's local `ref` state resets);
+without the preload it is the classic full remount.
 
 **Do not use `usecomputer`, `screencapture`, or desktop clicks** — use the
 Playwright-like automation API (README **Automation** section). Mark targets with

@@ -461,26 +461,53 @@ bun --hot app.tsx
 cd examples && bun --hot chat.tsx
 ```
 
-### 3. Save the file
+### 3. Save the file — Fast Refresh
+
+Register the HMR preload once per app (`bunfig.toml` next to the entry):
+
+```toml
+preload = ["./node_modules/@gpuiv/vue/hmr-preload.js"]
+```
+
+Then a save does Vue Fast Refresh instead of a full remount:
 
 ```
-save .tsx  ►  bun re-evaluates the entry  ►  createApp() remounts Vue
+save .tsx  ►  bun re-evaluates the entry  ►  edited components reload in place
                      │
                      ▼
-              GpuixRenderer, window, GPU stay
+              GpuixRenderer, window, GPU stay; createApp() keeps the live tree
 ```
 
-The first `createApp()` creates the native host and stores it on `globalThis`.
-Each save unmounts the Vue app and mounts a new one on that same host.
+The preload injects a registration call after every top-level
+`const X = defineComponent(...)`. On a save, each re-registered component is
+compared by source hash and reloaded through Vue's HMR runtime. Vue's reload
+remounts the **edited component** in place — its local `ref` state resets —
+while its ancestors, siblings, and their subtrees keep theirs. A change to
+module-level code around the components (constants, helpers, imports) reloads
+every component in that file. `createApp()` then keeps the live tree instead
+of remounting.
 
-**Stays:** window, GPU device, native `.node` addon, GPUI scroll physics.
+**Stays:** window, GPU device, native `.node` addon, GPUI scroll physics,
+and every unedited component's `ref` state.
 
-**Resets:** `ref` state, focus, Vue event listeners.
+**Resets:** the edited component's local state (Vue reload semantics), or
+everything when a save has no reloadable component change (the classic
+remount path).
 
-This is a remount, not Vue HMR. Keeping ref state needs Bun to inject a
-Fast Refresh-style transform during `--hot`. The transform that exists today is
-`bun build --react-fast-refresh` only. Tracked in
-[oven-sh/bun#40179](https://github.com/oven-sh/bun/issues/40179).
+Constraints:
+
+- Only top-level `const X = defineComponent(...)` statements get an HMR id.
+  Components created inside factories remount with their parent.
+- `createApp(...)` option edits do not apply on a hot turn — restart for
+  window option changes.
+- The transform is a source scanner, not a full parser; a file it cannot
+  scan cleanly falls back to the classic remount.
+- Production builds are unaffected: `Bun.build` does not run the preload,
+  and the injected calls no-op without Vue's dev HMR runtime.
+
+Without the preload, a save is the classic remount: the entry re-evaluates
+and `createApp()` mounts a fresh app on the same native host (window, GPU,
+and `.node` stay; all `ref` state resets).
 
 Native `.node` edits still need a rebuild. See [Developing the Rust side](#developing-the-rust-side).
 
@@ -2510,7 +2537,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
 - [ ] Multiple windows
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
-- [ ] Vue HMR during `bun --hot` (ref state across saves; needs a Bun Fast Refresh-style runtime transform)
+- [x] Vue Fast Refresh during `bun --hot` (HMR preload: edited components reload in place, the rest of the tree keeps `ref` state)
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
 

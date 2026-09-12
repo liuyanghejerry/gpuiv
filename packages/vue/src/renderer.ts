@@ -16,6 +16,7 @@ import {
   nextWindowKeyEventId,
 } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
+import { hmrReloadCount } from "./hmr/runtime.js"
 import {
   InProcessBackend,
   liveRendererAsTest,
@@ -188,6 +189,8 @@ type RenderSlot = {
   rootComponent?: Component
   lastOptions?: RenderOptions
   overlayShown?: boolean
+  /** Watermark of the HMR reload counter at the last createApp call. */
+  hmrReloadsSeen?: number
   /** Bumped on every mount. A pending overlay microtask keys on it, so an
    *  error scheduled against an older tree cannot paint over a newer one. */
   mountSerial?: number
@@ -511,7 +514,18 @@ export function createApp(
   }
   slot.rootComponent = rootComponent
   slot.lastOptions = options
+  const overlayWasShown = slot.overlayShown
   slot.overlayShown = false
+  const reloadCount = hmrReloadCount()
+  const reloadedSinceLastMount = reloadCount > (slot.hmrReloadsSeen ?? 0)
+  slot.hmrReloadsSeen = reloadCount
+  if (slot.handle && !overlayWasShown && reloadedSinceLastMount) {
+    // A `bun --hot` save already reloaded the edited components through
+    // Vue's HMR runtime, so the live tree keeps its state. The entry still
+    // re-ran above, refreshing rootComponent/lastOptions for the overlay's
+    // Reload button; the mount itself stays.
+    return slot.handle
+  }
   return mountTree(slot, rootComponent, options)
 }
 
