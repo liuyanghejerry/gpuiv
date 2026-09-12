@@ -1795,12 +1795,29 @@ Deliberately not implemented:
 - The non-separable blend modes (`hue`, `saturation`, `color`, `luminosity`
   as `globalCompositeOperation`) — assigning one **throws**. They mix colour
   channels, which the separable blend pipeline does not rasterize.
-- `toDataURL` / `toBlob`, shadows, `filter`, `createPattern`, `Path2D`,
+- Shadows, `filter`, `createPattern`, `Path2D`,
   conic gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
   never sees decoded `<img>` pixels).
 
 Changing the `width`/`height` props resets the bitmap and the context
 state, like setting those properties on a DOM canvas.
+
+### PNG export
+
+`toDataURL()` and `toBlob(callback)` on the canvas instance encode the last
+uploaded buffer as PNG (`canvasToPng(elementId)` on the renderer, encoded by
+Rust's `image` crate). Any requested `type` falls back to PNG — the DOM's
+unsupported-type behavior — and `quality` is accepted but ignored, as on the
+DOM for PNG. Before the first upload both return `null` / call back with
+`null` (the DOM would encode a transparent bitmap; there is no GPU-side
+surface to encode yet):
+
+```tsx
+const url = canvas.value!.toDataURL()          // data:image/png;base64,…
+canvas.value!.toBlob((blob) => {
+  if (blob) saveBlob(blob)                     // image/png Blob
+})
+```
 
 `examples/canvas-paint.tsx` is a small drawing pad built on the context.
 `examples/paint.tsx` is a full drawing app — brush/eraser/line/rect/ellipse
@@ -2581,6 +2598,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
 - [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. separable blend modes, image data — text APIs and non-separable blend modes throw `NotSupported`)
+- [x] Canvas PNG export (`toDataURL`, `toBlob`, renderer `canvasToPng`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
 - [ ] Multiple windows

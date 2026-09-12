@@ -1331,6 +1331,20 @@ impl GpuixRenderer {
         Ok(self.canvas_surfaces.read(id).map(Buffer::from))
     }
 
+    /// The last uploaded canvas buffer encoded as a PNG byte stream, or
+    /// null before the first upload. This is the `toDataURL`/`toBlob`
+    /// export path; encoding runs here, on the JS thread.
+    #[napi]
+    pub fn canvas_to_png(&self, element_id: f64) -> Result<Option<Buffer>> {
+        let id = to_element_id(element_id)?;
+        match self.canvas_surfaces.to_png(id) {
+            Some(png) => Ok(Some(Buffer::from(
+                png.map_err(|error| Error::from_reason(format!("PNG encode failed: {error}")))?,
+            ))),
+            None => Ok(None),
+        }
+    }
+
     /// Arm gpui pointer capture on the element from its next press on, like
     /// `setPointerCapture` requested before the press: move and up keep
     /// targeting the element after the pointer leaves its bounds. Capture

@@ -614,6 +614,12 @@ export class TestRenderer implements NativeRenderer {
     return this.native.readCanvasPixels?.(elementId) ?? null
   }
 
+  /** The last uploaded buffer as PNG bytes, or null before the first
+   *  upload — same store the production renderer reads. */
+  canvasToPng(elementId: number): Uint8Array | null {
+    return this.native.canvasToPng?.(elementId) ?? null
+  }
+
   /** Bytes built into canvas tile images so far — the upload cost the GPU
    *  renderer pays. Test-renderer only; lets tests pin upload bytes to the
    *  dirty area instead of wall-clock time. */

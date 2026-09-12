@@ -592,6 +592,9 @@ export interface NativeRenderer {
   uploadCanvasFromContext?(elementId: number, ctx: unknown): void
   /** Read back the last uploaded buffer as RGBA, or null if nothing uploaded. */
   readCanvasPixels?(elementId: number): Uint8Array | null
+  /** The last uploaded buffer encoded as PNG bytes, or null if nothing
+   *  uploaded. The `toDataURL` / `toBlob` export path. */
+  canvasToPng?(elementId: number): Uint8Array | null
 
   // ── Pointer capture API ────────────────────────────────────────
   /** Arm pointer capture on the element from its next press on: mouse move
