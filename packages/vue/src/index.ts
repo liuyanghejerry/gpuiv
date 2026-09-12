@@ -1,6 +1,13 @@
 // GPUIX Vue - Vue 3 bindings for GPUI
 export { createApp, createNativeRenderer, resetApp, startFrameLoop } from "./renderer.js"
 export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
+export { promptForPaths, promptForNewPath } from "./dialogs.js"
+export type {
+  NewPathPromptOptions,
+  NewPathPromptOutcome,
+  PathPromptOptions,
+  PathPromptOutcome,
+} from "./types.js"
 export { isPackaged, resourcesPath, resolveResourcesPath } from "./packaged.js"
 export type { ResourcesPathInput } from "./packaged.js"
 export { createUpdater } from "./updater.js"
