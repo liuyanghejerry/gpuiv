@@ -164,6 +164,17 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /**
+   * Open the platform's file-selection dialog. The callback receives
+   * `(error, outcome)`; `outcome.paths` is `null` when the user cancelled.
+   */
+  promptForPaths(options: PathPromptOptionsDesc, callback: ((err: Error | null, arg: PathPromptOutcome) => any)): void
+  /**
+   * Open the platform's save dialog starting in `directory` (defaults to
+   * the process working directory). The callback receives `(error,
+   * outcome)`; `outcome.path` is `null` when the user cancelled.
+   */
+  promptForNewPath(directory: string | undefined | null, suggestedName: string | undefined | null, callback: ((err: Error | null, arg: NewPathPromptOutcome) => any)): void
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
@@ -307,6 +318,23 @@ export declare class TestGpuixRenderer {
   focusPrevious(): void
   /** Enable the window key events requested by the JS renderer. */
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
+  /**
+   * Test stand-in for the production `promptForPaths`: records the options
+   * and answers with the queued response, or "cancelled" when the queue is
+   * empty. GPUI's test platform keeps its prompt queue `pub(crate)`, so the
+   * bridge cannot drive the real one.
+   */
+  promptForPaths(options: PathPromptOptionsDesc, callback: ((err: Error | null, arg: PathPromptOutcome) => any)): void
+  /** Queue the next answer for `promptForPaths`; `null` means cancelled. */
+  setNextPathPromptResponse(paths?: Array<string> | undefined | null): void
+  /** The options the last `promptForPaths` call received. */
+  getLastPathPromptOptions(): PathPromptOptionsDesc | null
+  /** Test stand-in for the production `promptForNewPath`. */
+  promptForNewPath(directory: string | undefined | null, suggestedName: string | undefined | null, callback: ((err: Error | null, arg: NewPathPromptOutcome) => any)): void
+  /** Queue the next answer for `promptForNewPath`; `null` means cancelled. */
+  setNextNewPathResponse(path?: string | undefined | null): void
+  /** The request the last `promptForNewPath` call received. */
+  getLastNewPathPrompt(): NewPathPromptRequest | null
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
@@ -689,6 +717,36 @@ export interface HighlightRect {
   y: number
   width: number
   height: number
+}
+
+/**
+ * Outcome of `promptForNewPath` — `path` is `null` when the dialog was
+ * cancelled.
+ */
+export interface NewPathPromptOutcome {
+  path?: string
+}
+
+/** The request the last test `promptForNewPath` call received. */
+export interface NewPathPromptRequest {
+  directory: string
+  suggestedName?: string
+}
+
+/** Options for the platform file-selection dialog (`promptForPaths`). */
+export interface PathPromptOptionsDesc {
+  files: boolean
+  directories: boolean
+  multiple: boolean
+  prompt?: string
+}
+
+/**
+ * Outcome of `promptForPaths` — `paths` is `null` when the dialog was
+ * cancelled.
+ */
+export interface PathPromptOutcome {
+  paths?: Array<string>
 }
 
 export interface WindowInsets {
