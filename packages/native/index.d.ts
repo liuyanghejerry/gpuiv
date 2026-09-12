@@ -164,6 +164,13 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /** Put a straight-alpha RGBA image on the clipboard as PNG. */
+  writeClipboardImage(data: Buffer, width: number, height: number): void
+  /**
+   * Read an image from the clipboard, decoded to straight-alpha RGBA.
+   * Returns null when the clipboard holds no image.
+   */
+  readClipboardImage(): ClipboardImage | null
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
@@ -307,6 +314,17 @@ export declare class TestGpuixRenderer {
   focusPrevious(): void
   /** Enable the window key events requested by the JS renderer. */
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
+  /**
+   * Put a straight-alpha RGBA image on the platform's in-memory test
+   * clipboard, mirroring the production encoder path.
+   */
+  writeClipboardImage(data: Buffer, width: number, height: number): void
+  /**
+   * Read an image from the test clipboard, decoded to RGBA. The round
+   * trip through the real `ClipboardItem::Image` entry is the point:
+   * production reads whatever bytes the platform stored.
+   */
+  readClipboardImage(): ClipboardImage | null
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
@@ -492,6 +510,13 @@ export declare class TestGpuixRenderer {
   advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
+}
+
+/** A clipboard image decoded to straight-alpha RGBA. */
+export interface ClipboardImage {
+  data: Buffer
+  width: number
+  height: number
 }
 
 /** Recorded draw times from the debug frame overlay. */

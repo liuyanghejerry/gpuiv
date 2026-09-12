@@ -23,7 +23,7 @@ use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
     parse_debug_frame_overlay_mode, parse_dirty_rect, to_element_id, DebugFrameOverlayStats,
-    EventCallback, GpuixView,
+    EventCallback, GpuixView, decode_clipboard_image, encode_rgba_png,
 };
 use crate::retained_tree::RetainedTree;
 
@@ -428,6 +428,38 @@ impl TestGpuixRenderer {
     }
 
     // ── Test-specific methods ────────────────────────────────────────
+
+    /// Put a straight-alpha RGBA image on the platform's in-memory test
+    /// clipboard, mirroring the production encoder path.
+    #[napi]
+    pub fn write_clipboard_image(&self, data: Buffer, width: u32, height: u32) -> Result<()> {
+        let png = encode_rgba_png(&data, width, height)?;
+        with_test_state(|cx, _window, _view| {
+            cx.update(|cx| {
+                let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, png);
+                cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image));
+            });
+            Ok(())
+        })
+    }
+
+    /// Read an image from the test clipboard, decoded to RGBA. The round
+    /// trip through the real `ClipboardItem::Image` entry is the point:
+    /// production reads whatever bytes the platform stored.
+    #[napi]
+    pub fn read_clipboard_image(&self) -> Result<Option<crate::renderer::ClipboardImage>> {
+        let png = with_test_state(|cx, _window, _view| {
+            Ok(cx.update(|cx| {
+                cx.read_from_clipboard().and_then(|item| {
+                    item.entries.into_iter().find_map(|entry| match entry {
+                        gpui::ClipboardEntry::Image(image) => Some(image.bytes),
+                        _ => None,
+                    })
+                })
+            }))
+        })?;
+        decode_clipboard_image(png)
+    }
 
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.

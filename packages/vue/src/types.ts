@@ -614,6 +614,20 @@ export interface NativeRenderer {
   cycleDebugFrameOverlay?(): string
   resetDebugFrameOverlayStats?(): void
   getDebugFrameOverlayStats?(): DebugFrameOverlayStats
+
+  // ── Clipboard ──────────────────────────────────────────────────
+  /** Put a straight-alpha RGBA image on the clipboard as PNG. */
+  writeClipboardImage?(data: Uint8Array, width: number, height: number): void
+  /** Read an image from the clipboard as straight-alpha RGBA. Returns null
+   *  when the clipboard holds no image. */
+  readClipboardImage?(): ClipboardImage | null
+}
+
+/** A clipboard image decoded to straight-alpha RGBA. */
+export interface ClipboardImage {
+  data: Uint8Array
+  width: number
+  height: number
 }
 
 /** Commit-phase facade used only by the Vue host config. */
