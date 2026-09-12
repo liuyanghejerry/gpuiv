@@ -106,4 +106,137 @@ describeNative("combobox and tooltip (vue)", () => {
     expect(app.renderer.getPaintedText().join("\n")).not.toContain("Tooltip text")
     app.unmount()
   })
+
+  it("keeps a controlled open prop reactive", async () => {
+    const open = ref(false)
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 24 }}>
+            <Combobox
+              items={["DeepSeek V4", "Claude Opus"]}
+              open={open.value}
+              onOpenChange={(next) => (open.value = next)}
+              itemToStringValue={(item) => item}
+            >
+              <div style={{ position: "relative", display: "flex" }}>
+                <ComboboxInput testId="input" style={{ width: 300 }} placeholder="Pick a model" />
+                <ComboboxContent
+                  testId="content"
+                  side="bottom"
+                  sideOffset={4}
+                  style={{ backgroundColor: "#222" }}
+                >
+                  <ComboboxList
+                    renderItem={(item: string) => (
+                      <ComboboxItem key={item} value={item} style={{ padding: 6 }}>
+                        <text>{item}</text>
+                      </ComboboxItem>
+                    )}
+                  />
+                </ComboboxContent>
+              </div>
+            </Combobox>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeUndefined()
+
+    // Focusing the input asks for open; the controlled prop is what opens.
+    const input = app.renderer.findByTestId("input")!
+    app.renderer.nativeSimulateKeystrokes(input.id, "c")
+    await app.settle()
+    expect(open.value).toBe(true)
+    expect(app.renderer.findByTestId("content")).toBeDefined()
+
+    // The prop alone closes the popup.
+    open.value = false
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeUndefined()
+    app.unmount()
+  })
+
+  it("invokes a user onKeyDown passed to ComboboxInput once per key", async () => {
+    const keyDowns: string[] = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 24 }}>
+            <Combobox
+              items={["DeepSeek V4", "Claude Opus"]}
+              itemToStringValue={(item) => item}
+            >
+              <div style={{ position: "relative", display: "flex" }}>
+                <ComboboxInput
+                  testId="input"
+                  style={{ width: 300 }}
+                  placeholder="Pick a model"
+                  onKeyDown={() => keyDowns.push("keyDown")}
+                />
+                <ComboboxContent
+                  testId="content"
+                  side="bottom"
+                  sideOffset={4}
+                  style={{ backgroundColor: "#222" }}
+                >
+                  <ComboboxList
+                    renderItem={(item: string) => (
+                      <ComboboxItem key={item} value={item} style={{ padding: 6 }}>
+                        <text>{item}</text>
+                      </ComboboxItem>
+                    )}
+                  />
+                </ComboboxContent>
+              </div>
+            </Combobox>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const input = app.renderer.findByTestId("input")!
+    app.renderer.nativeSimulateKeystrokes(input.id, "down")
+    await app.settle()
+    expect(keyDowns).toHaveLength(1)
+    app.unmount()
+  })
+
+  it("invokes a user onMouseEnter passed to TooltipTrigger once per hover", async () => {
+    const enters: string[] = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <TooltipProvider delayDuration={0}>
+            <div style={{ display: "flex", width: "100%", height: "100%", padding: 30 }}>
+              <Tooltip>
+                <TooltipTrigger
+                  testId="tt-trigger"
+                  style={{ padding: 8, backgroundColor: "#333", cursor: "pointer" }}
+                  onMouseEnter={() => enters.push("enter")}
+                >
+                  <text>Hover me</text>
+                </TooltipTrigger>
+                <TooltipContent side="top" sideOffset={6} style={{ backgroundColor: "#000" }}>
+                  <text>Tooltip text</text>
+                </TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const trigger = app.renderer.findByTestId("tt-trigger")!
+    const bounds = app.renderer.getElementBounds(trigger.id)!
+    app.renderer.nativeSimulateMouseMove(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    await app.settle()
+    expect(app.renderer.getPaintedText().join("\n")).toContain("Tooltip text")
+    expect(enters).toHaveLength(1)
+    app.unmount()
+  })
 })

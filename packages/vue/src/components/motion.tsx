@@ -9,6 +9,7 @@ import type { MotionProps, MotionStyle } from "../types.js"
  */
 export const motion = {
   div: defineComponent({
+    inheritAttrs: false,
     props: {
       initial: {
         type: [Object, Boolean] as PropType<MotionStyle | false>,

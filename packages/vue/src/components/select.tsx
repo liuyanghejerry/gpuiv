@@ -76,6 +76,10 @@ export interface SelectProps {
 }
 
 export const Select = defineComponent({
+  // Attrs are forwarded by hand below. Without this, Vue also merges them
+  // onto the root vnode, where every handler this file overrides is chained
+  // with the user's copy — firing that handler twice per event.
+  inheritAttrs: false,
   props: {
     items: { type: Array as PropType<readonly SelectItemData[]>, default: undefined },
     value: { type: String, default: undefined },
@@ -197,7 +201,9 @@ export const Select = defineComponent({
       const item = registeredItems.value.find((candidate) => candidate.value === nextValue)
       if (!item || item.disabled) return
       setValue(nextValue)
-      setOpenState(false)
+      // Close through `setOpen`, not the raw setter: selecting destroys the
+      // focused content div, so focus has to go back to the trigger.
+      setOpen(false)
     }
 
     context.setOpen = setOpen
@@ -240,6 +246,7 @@ export interface SelectTriggerProps {
 }
 
 export const SelectTrigger = defineComponent({
+  inheritAttrs: false,
   props: {
     disabled: { type: Boolean, default: undefined },
     tabIndex: { type: Number, default: undefined },
@@ -314,6 +321,7 @@ export interface SelectValueProps {
 }
 
 export const SelectValue = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     const context = useSelectContext("SelectValue")
     return () => {
@@ -331,6 +339,7 @@ export interface SelectContentProps extends FloatingContentProps {
 }
 
 export const SelectContent = defineComponent({
+  inheritAttrs: false,
   props: {
     side: { type: String, default: undefined },
     sideOffset: { type: Number, default: undefined },
@@ -405,6 +414,7 @@ export interface SelectItemProps {
 }
 
 export const SelectItem = defineComponent({
+  inheritAttrs: false,
   props: {
     value: { type: String, required: true },
     disabled: { type: Boolean, default: false },
@@ -454,30 +464,35 @@ export const SelectItem = defineComponent({
 })
 
 export const SelectGroup = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     return () => h("div", attrs, slots.default?.())
   },
 })
 
 export const SelectLabel = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     return () => h("div", attrs, slots.default?.())
   },
 })
 
 export const SelectSeparator = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs }) {
     return () => h("div", attrs)
   },
 })
 
 export const SelectScrollUpButton = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     return () => h("div", attrs, slots.default?.())
   },
 })
 
 export const SelectScrollDownButton = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     return () => h("div", attrs, slots.default?.())
   },

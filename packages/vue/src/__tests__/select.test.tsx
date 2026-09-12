@@ -338,4 +338,234 @@ describeNative("select (vue)", () => {
     expect(app.renderer.getAllText()).toContain("Value: one")
     app.unmount()
   })
+
+  it("returns focus to the trigger after a keyboard selection and reopens on ArrowDown", async () => {
+    const value = ref("alpha")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select
+              items={[
+                { value: "alpha", label: "Alpha" },
+                { value: "beta", label: "Beta" },
+              ]}
+              value={value.value}
+              onValueChange={(next) => (value.value = next)}
+            >
+              <SelectTrigger testId="trigger" style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent testId="content" sideOffset={4} style={contentStyle}>
+                <SelectItem value="alpha" style={itemStyle}>Alpha</SelectItem>
+                <SelectItem value="beta" style={itemStyle}>Beta</SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const triggerId = app.renderer.findByTestId("trigger")!.id
+
+    // Opening moves focus into the popup (autoFocus on the content div).
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+    expect(app.renderer.getFocusedElementId()).toBe(app.renderer.findByTestId("content")!.id)
+
+    // Enter selects and destroys the focused content div — focus must land
+    // back on the trigger, not vanish with the destroyed focus handle.
+    app.renderer.simulateKeystrokes("down")
+    await app.settle()
+    app.renderer.simulateKeystrokes("enter")
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain("Value: beta")
+    expect(app.renderer.findByTestId("content")).toBeUndefined()
+    expect(app.renderer.getFocusedElementId()).toBe(triggerId)
+
+    // The trigger still has focus, so ArrowDown reopens the popup.
+    app.renderer.simulateKeystrokes("down")
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeDefined()
+    app.unmount()
+  })
+
+  it("returns focus to the trigger when Escape closes the popup", async () => {
+    const value = ref("alpha")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select
+              items={[
+                { value: "alpha", label: "Alpha" },
+                { value: "beta", label: "Beta" },
+              ]}
+              value={value.value}
+              onValueChange={(next) => (value.value = next)}
+            >
+              <SelectTrigger testId="trigger" style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent testId="content" sideOffset={4} style={contentStyle}>
+                <SelectItem value="alpha" style={itemStyle}>Alpha</SelectItem>
+                <SelectItem value="beta" style={itemStyle}>Beta</SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const triggerId = app.renderer.findByTestId("trigger")!.id
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+
+    app.renderer.simulateKeystrokes("escape")
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeUndefined()
+    expect(app.renderer.getFocusedElementId()).toBe(triggerId)
+    app.unmount()
+  })
+
+  it("follows a controlled open prop", async () => {
+    const value = ref("alpha")
+    const open = ref(false)
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select
+              items={[
+                { value: "alpha", label: "Alpha" },
+                { value: "beta", label: "Beta" },
+              ]}
+              value={value.value}
+              onValueChange={(next) => (value.value = next)}
+              open={open.value}
+              onOpenChange={(next) => (open.value = next)}
+            >
+              <SelectTrigger testId="trigger" style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent testId="content" sideOffset={4} style={contentStyle}>
+                <SelectItem value="alpha" style={itemStyle}>Alpha</SelectItem>
+                <SelectItem value="beta" style={itemStyle}>Beta</SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeUndefined()
+
+    // The trigger asks for open; the parent's prop is what opens the popup.
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+    expect(open.value).toBe(true)
+    expect(app.renderer.findByTestId("content")).toBeDefined()
+
+    // The prop alone closes and reopens the popup.
+    open.value = false
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeUndefined()
+    open.value = true
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeDefined()
+    app.unmount()
+  })
+
+  it("unmounts cleanly while the popup is open", async () => {
+    const value = ref("alpha")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select
+              items={[
+                { value: "alpha", label: "Alpha" },
+                { value: "beta", label: "Beta" },
+              ]}
+              value={value.value}
+              onValueChange={(next) => (value.value = next)}
+            >
+              <SelectTrigger testId="trigger" style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent testId="content" sideOffset={4} style={contentStyle}>
+                <SelectItem value="alpha" style={itemStyle}>Alpha</SelectItem>
+                <SelectItem value="beta" style={itemStyle}>Beta</SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+    expect(app.renderer.findByTestId("content")).toBeDefined()
+
+    app.unmount()
+    expect(app.renderer.findByTestId("content")).toBeUndefined()
+    expect(app.renderer.findByTestId("trigger")).toBeUndefined()
+    expect(app.renderer.getFocusedElementId()).toBeNull()
+  })
+
+  it("invokes a user onKeyDown passed to SelectContent once per key", async () => {
+    const value = ref("alpha")
+    const keyDowns: string[] = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select
+              items={[
+                { value: "alpha", label: "Alpha" },
+                { value: "beta", label: "Beta" },
+              ]}
+              value={value.value}
+              onValueChange={(next) => (value.value = next)}
+            >
+              <SelectTrigger testId="trigger" style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent
+                testId="content"
+                sideOffset={4}
+                style={contentStyle}
+                onKeyDown={() => keyDowns.push("keyDown")}
+              >
+                <SelectItem value="alpha" style={itemStyle}>Alpha</SelectItem>
+                <SelectItem value="beta" style={itemStyle}>Beta</SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+
+    app.renderer.simulateKeystrokes("down")
+    await app.settle()
+    expect(keyDowns).toHaveLength(1)
+
+    app.renderer.simulateKeystrokes("escape")
+    await app.settle()
+    expect(keyDowns).toHaveLength(2)
+    app.unmount()
+  })
 })

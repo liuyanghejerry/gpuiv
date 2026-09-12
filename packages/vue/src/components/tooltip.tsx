@@ -85,6 +85,10 @@ export interface TooltipProps {
 }
 
 export const Tooltip = defineComponent({
+  // Attrs are forwarded by hand below. Without this, Vue also merges them
+  // onto the root vnode, where every handler this file overrides is chained
+  // with the user's copy — firing that handler twice per event.
+  inheritAttrs: false,
   props: {
     open: { type: Boolean, default: undefined },
     defaultOpen: { type: Boolean, default: false },
@@ -95,7 +99,11 @@ export const Tooltip = defineComponent({
   setup(props, { attrs, slots }) {
     const provider = inject(TooltipProviderContextKey, defaultProvider())
     const [open, setOpenState] = useControllableState({
-      value: props.open,
+      // A getter keeps the controlled prop reactive — reading `props.open`
+      // once here would pin the state to the mount-time value.
+      get value() {
+        return props.open
+      },
       defaultValue: props.defaultOpen,
       onChange: props.onOpenChange,
     })
@@ -179,6 +187,7 @@ export interface TooltipTriggerProps {
 }
 
 export const TooltipTrigger = defineComponent({
+  inheritAttrs: false,
   props: {
     tabIndex: { type: Number, default: undefined },
   },
@@ -225,24 +234,27 @@ export const TooltipTrigger = defineComponent({
 export interface TooltipContentProps extends FloatingContentProps {}
 
 export const TooltipContent = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     const context = useTooltipContext("TooltipContent")
-    const layerProps: Record<string, unknown> = {
-      side: attrs.side ?? "top",
-      align: attrs.align ?? "center",
-      sideOffset: attrs.sideOffset ?? 0,
-      ...(attrs as Record<string, unknown>),
-      onMouseEnter: (event: EventPayload) => {
-        ;(attrs.onMouseEnter as ((event: EventPayload) => void) | undefined)?.(event)
-        if (!context.disableHoverableContent) context.cancelClose()
-      },
-      onMouseLeave: (event: EventPayload) => {
-        ;(attrs.onMouseLeave as ((event: EventPayload) => void) | undefined)?.(event)
-        context.scheduleClose()
-      },
-    }
     return () => {
       if (!context.open) return null
+      // Built per render, not once in setup: attrs used to be refreshed on
+      // every render by the automatic fallthrough onto `FloatingLayer`.
+      const layerProps: Record<string, unknown> = {
+        side: attrs.side ?? "top",
+        align: attrs.align ?? "center",
+        sideOffset: attrs.sideOffset ?? 0,
+        ...(attrs as Record<string, unknown>),
+        onMouseEnter: (event: EventPayload) => {
+          ;(attrs.onMouseEnter as ((event: EventPayload) => void) | undefined)?.(event)
+          if (!context.disableHoverableContent) context.cancelClose()
+        },
+        onMouseLeave: (event: EventPayload) => {
+          ;(attrs.onMouseLeave as ((event: EventPayload) => void) | undefined)?.(event)
+          context.scheduleClose()
+        },
+      }
       return h(FloatingLayer, layerProps, slots.default?.())
     }
   },
