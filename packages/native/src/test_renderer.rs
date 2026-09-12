@@ -194,6 +194,10 @@ pub struct TestGpuixRenderer {
     selection: crate::text::SharedSelection,
     /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
     canvas_surfaces: crate::canvas::CanvasStore,
+    /// The last URL handed to `openUrl`. The test platform records its own
+    /// copy where the bridge cannot read it (`pub(crate)`), so tests assert
+    /// here.
+    last_opened_url: RefCell<Option<String>>,
     /// Canned answers for `promptForPaths`: each call pops one; an empty
     /// queue answers "cancelled". The real platform queue behind GPUI's test
     /// platform is `pub(crate)`, so the bridge keeps its own.
@@ -282,6 +286,7 @@ impl TestGpuixRenderer {
             events,
             selection,
             canvas_surfaces,
+            last_opened_url: RefCell::new(None),
             path_prompt_answers: RefCell::new(Default::default()),
             last_path_prompt_options: RefCell::new(None),
             new_path_prompt_answers: RefCell::new(Default::default()),
@@ -523,6 +528,20 @@ impl TestGpuixRenderer {
     }
 
     // ── Test-specific methods ────────────────────────────────────────
+
+    /// Record the URL; the platform's own recorder is not reachable from
+    /// the bridge, so `getLastOpenedUrl` reads this instead.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        *self.last_opened_url.borrow_mut() = Some(url);
+        Ok(())
+    }
+
+    /// The last URL handed to `openUrl`.
+    #[napi]
+    pub fn get_last_opened_url(&self) -> Option<String> {
+        self.last_opened_url.borrow().clone()
+    }
 
     /// Put a straight-alpha RGBA image on the platform's in-memory test
     /// clipboard, mirroring the production encoder path.

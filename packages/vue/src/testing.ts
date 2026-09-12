@@ -97,6 +97,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  openUrl(url: string): void
+  getLastOpenedUrl(): string | null
   writeClipboardImage(data: Uint8Array, width: number, height: number): void
   readClipboardImage(): { data: Uint8Array; width: number; height: number } | null
   promptForPaths(
@@ -667,6 +669,16 @@ export class TestRenderer implements NativeRenderer {
    *  A bridge round-trip, not a GPU readback. */
   readCanvasPixels(elementId: number): Uint8Array | null {
     return this.native.readCanvasPixels?.(elementId) ?? null
+  }
+
+  /** Hand a URL to the default handler. The test bridge records it; assert
+   *  with `getLastOpenedUrl`. */
+  openUrl(url: string): void {
+    this.native.openUrl?.(url)
+  }
+
+  getLastOpenedUrl(): string | null {
+    return this.native.getLastOpenedUrl?.() ?? null
   }
 
   /** Put a straight-alpha RGBA image on the platform's in-memory test

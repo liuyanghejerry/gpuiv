@@ -615,6 +615,9 @@ export interface NativeRenderer {
   resetDebugFrameOverlayStats?(): void
   getDebugFrameOverlayStats?(): DebugFrameOverlayStats
 
+  /** Hand a URL to the user's default browser / handler. */
+  openUrl?(url: string): void
+
   // ── Clipboard ──────────────────────────────────────────────────
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */
   writeClipboardImage?(data: Uint8Array, width: number, height: number): void

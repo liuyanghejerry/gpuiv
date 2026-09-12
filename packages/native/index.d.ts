@@ -164,6 +164,8 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /** Hand a URL to the user's default browser / handler. */
+  openUrl(url: string): void
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */
   writeClipboardImage(data: Buffer, width: number, height: number): void
   /**
@@ -342,6 +344,13 @@ export declare class TestGpuixRenderer {
   setNextNewPathResponse(path?: string | undefined | null): void
   /** The request the last `promptForNewPath` call received. */
   getLastNewPathPrompt(): NewPathPromptRequest | null
+  /**
+   * Record the URL; the platform's own recorder is not reachable from
+   * the bridge, so `getLastOpenedUrl` reads this instead.
+   */
+  openUrl(url: string): void
+  /** The last URL handed to `openUrl`. */
+  getLastOpenedUrl(): string | null
   /**
    * Put a straight-alpha RGBA image on the platform's in-memory test
    * clipboard, mirroring the production encoder path.

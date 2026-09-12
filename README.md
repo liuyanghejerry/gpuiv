@@ -322,6 +322,18 @@ id, and one event map, so mounting a second root on a renderer that already has
 one throws. `createApp()` unmounts the previous tree before remounting, so only
 code that builds its own host with `createGpuivRendererHost()` can hit this.
 
+## Opening URLs
+
+`openUrl(url)` hands a URL to the user's default handler — the system browser
+for `https://`, the registered app for custom schemes. It is a renderer
+command (`useGpuixRequired()` reaches it), for links that must leave the app
+such as OAuth callbacks or payment pages.
+
+```tsx
+const renderer = useGpuixRequired()
+<div onClick={() => renderer.openUrl?.('https://gpuiv.dev/docs')}>Docs</div>
+```
+
 ## File dialogs
 
 `promptForPaths` opens the platform's file-selection panel and
@@ -2642,6 +2654,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
+- [x] Opening external URLs (`openUrl`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
