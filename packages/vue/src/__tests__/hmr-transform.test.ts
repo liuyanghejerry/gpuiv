@@ -146,6 +146,65 @@ describe("transformHmrSource", () => {
     expect(transform(source)).toBe(source)
   })
 
+  it("declines tails that would leave the injected registration mid-expression", () => {
+    const component = "defineComponent({ setup: () => () => null })"
+    const tails = [
+      `const A = ${component} satisfies unknown`,
+      `const A = ${component} as unknown`,
+      `const A = ${component}, B = ${component}`,
+      `const A = ${component} || fallback`,
+      `const A = ${component} ? a : b`,
+      `export default ${component} as unknown`,
+    ]
+    for (const source of tails) {
+      expect(transform(source)).toBe(source)
+    }
+  })
+
+  it("declines the whole file when one statement has an unsupported tail", () => {
+    const source = [
+      'import { defineComponent } from "vue"',
+      "const A = defineComponent({ setup: () => () => null })",
+      "const B = defineComponent({ setup: () => () => null }) satisfies unknown",
+    ].join("\n")
+    expect(transform(source)).toBe(source)
+  })
+
+  it("still registers a semicolon-free file, whatever statement follows", () => {
+    const statements = [
+      "const A = defineComponent({ setup: () => () => null })\n",
+      "const A = defineComponent({ setup: () => () => null })\nconst B = 1\n",
+      "const A = defineComponent({ setup: () => () => null })\nexport default A\n",
+      "const A = defineComponent({ setup: () => () => null })\ntype T = unknown\n",
+      "const A = defineComponent({ setup: () => () => null })\nfunction helper() {}\n",
+      "const A = defineComponent({ setup: () => () => null })\nif (A) console.log(A)\n",
+      "const A = defineComponent({ setup: () => () => null });console.log(A)\n",
+      "const A = defineComponent({ setup: () => () => null }).chain()\nconst B = 1\n",
+      // The shape every app entry ends with: a call whose callee is an
+      // identifier, which only a statement boundary can explain.
+      "const A = defineComponent({ setup: () => () => null })\ncreateApp(A, { renderer })\n",
+      "const A = defineComponent({ setup: () => () => null })\nconsole.log(A)\n",
+    ]
+    for (const source of statements) {
+      expect(transform(source)).toContain(";A.__hmrId =")
+      expect(transform(source)).toContain(";__gpuivHmrComponent(")
+    }
+  })
+
+  it("declines expression tails that keep the statement open", () => {
+    const component = "defineComponent({ setup: () => () => null })"
+    const tails = [
+      // `(` continues the expression: a call on the component definition.
+      `const A = ${component}({})`,
+      `const A = ${component}\n({})`,
+      `const A = ${component}\n?? fallback`,
+      `const A = ${component}\ninstanceof Other`,
+    ]
+    for (const source of tails) {
+      expect(transform(source)).toBe(source)
+    }
+  })
+
   it("keeps a shebang first", () => {
     const source = "#!/usr/bin/env bun\nconst View = defineComponent({ setup: () => () => null })\n"
     const out = transform(source)

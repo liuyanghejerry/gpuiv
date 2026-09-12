@@ -10,6 +10,16 @@ import { createTestApp, hasNativeTestRenderer, TestRenderer } from "../testing.j
 import { createApp, resetApp, type GpuivAppHandle } from "../renderer.js"
 import { __gpuivHmrComponent, __gpuivHmrFile } from "../hmr/runtime.js"
 
+/** The runtime half keeps its pinned runtime and file records here. */
+const HMR_STATE_KEY = "__gpuivHmr"
+
+/** vue's own HMR runtime, as a fresh process has it installed. The tests
+ *  swap in stand-ins for later `bun --hot` generations; this is the original
+ *  to hand back afterwards. */
+const realHmrRuntime = Reflect.get(globalThis, "__VUE_HMR_RUNTIME__") as
+  | { reload: (id: string, component: unknown) => void }
+  | undefined
+
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 /** A stateful labeled component factory — the two versions of one "edited"
@@ -41,6 +51,13 @@ function clickTestId(app: { renderer: TestRenderer }, testId: string): void {
 
 describeNative("vue hmr runtime", () => {
   afterEach(() => {
+    // The pinned runtime is shared global state: hand vue's own copy back so
+    // a test that swapped in stand-in generations cannot leak into the next.
+    Reflect.set(globalThis, "__VUE_HMR_RUNTIME__", realHmrRuntime)
+    const state = Reflect.get(globalThis, HMR_STATE_KEY) as
+      | { runtime?: unknown }
+      | undefined
+    if (state) state.runtime = realHmrRuntime
     resetApp()
   })
 
@@ -129,6 +146,103 @@ describeNative("vue hmr runtime", () => {
     await app.settle()
     expect(app.renderer.getAllText()).toEqual(["aaa v2 0", "bbb v2 0"])
     app.unmount()
+  })
+
+  it("keeps reloading after a classic remount mounted a newer vue copy", async () => {
+    const url = "/virtual/hmr-runtime/entry-d.tsx"
+    const childId = "test_RemountChild"
+    const ChildV1 = makeCounter("child", "v1")
+    const ChildV2 = makeCounter("child", "v2")
+    ;(ChildV1 as { __hmrId?: string }).__hmrId = childId
+    ;(ChildV2 as { __hmrId?: string }).__hmrId = childId
+
+    // Each bun --hot generation re-evaluates vue and installs a fresh
+    // __VUE_HMR_RUNTIME__ whose component map starts empty, and Vue records a
+    // tree in the copy that mounted it. Stand in for three generations:
+    // gen1 mounted the first tree and its instances were unregistered by the
+    // remount's unmount (a reload through it finds nothing — the stale pin's
+    // behaviour), gen2 mounted the live tree, gen3 is the copy the next save
+    // installs before the injected calls run.
+    type Runtime = {
+      createRecord: (id: string, initialDef: unknown) => boolean
+      rerender: (id: string, newRender: unknown) => void
+      reload: (id: string, newComp: unknown) => void
+    }
+    const real = Reflect.get(globalThis, "__VUE_HMR_RUNTIME__") as Runtime
+    let gen1Calls = 0
+    let gen1Live = true
+    let gen2Calls = 0
+    let gen3Calls = 0
+    const delegate = (count: () => void, live: () => boolean): Runtime => ({
+      createRecord: real.createRecord,
+      rerender: (id, render) => {
+        count()
+        if (live()) real.rerender(id, render)
+      },
+      reload: (id, component) => {
+        count()
+        if (live()) real.reload(id, component)
+      },
+    })
+    const gen1 = delegate(() => (gen1Calls += 1), () => gen1Live)
+    const gen2 = delegate(() => (gen2Calls += 1), () => true)
+    const gen3 = delegate(() => (gen3Calls += 1), () => true)
+    // A fresh process starts with no pinned runtime and no file records.
+    Reflect.deleteProperty(globalThis, HMR_STATE_KEY)
+
+    const makeEntry = (child: Component): Component => ({
+      setup: () => () => h("div", { style: { width: 300, height: 200 } }, [h(child)]),
+    })
+    const renderer = new TestRenderer()
+    const settle = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      renderer.flush()
+    }
+    const clickChild = async () => {
+      const el = renderer.findByTestId("child")!
+      const bounds = renderer.getElementBounds(el.id)!
+      renderer.nativeSimulateClick(bounds.x + 4, bounds.y + 4)
+      await settle()
+    }
+
+    // Generation 1 cold start: register, mount. mountTree pins gen1.
+    Reflect.set(globalThis, "__VUE_HMR_RUNTIME__", gen1)
+    __gpuivHmrFile(url, "body-1")
+    __gpuivHmrComponent(url, childId, ChildV1, "stmt-1")
+    const first = createApp(makeEntry(ChildV1), { renderer })
+    renderer.flush()
+    expect(renderer.getAllText()).toEqual(["child v1 0"])
+    await clickChild()
+    expect(renderer.getAllText()).toEqual(["child v1 1"])
+
+    // A save that changes no reloadable component (an asset edit): the entry
+    // re-evaluates into generation 2, createApp sees no reloads, and the tree
+    // remounts — registered in gen2's map now.
+    gen1Live = false
+    Reflect.set(globalThis, "__VUE_HMR_RUNTIME__", gen2)
+    const second = createApp(makeEntry(ChildV1), { renderer })
+    renderer.flush()
+    expect(second).not.toBe(first)
+    expect(renderer.getAllText()).toEqual(["child v1 0"])
+    await clickChild()
+    expect(renderer.getAllText()).toEqual(["child v1 1"])
+
+    // The next save edits the component: generation 3 installs its runtime,
+    // then the injected calls must reload through the copy that owns the live
+    // tree (gen2) so createApp keeps it.
+    Reflect.set(globalThis, "__VUE_HMR_RUNTIME__", gen3)
+    __gpuivHmrFile(url, "body-1")
+    __gpuivHmrComponent(url, childId, ChildV2, "stmt-2")
+    const third: GpuivAppHandle = createApp(makeEntry(ChildV2), { renderer })
+    expect(third).toBe(second)
+    expect(gen1Calls).toBe(0)
+    expect(gen2Calls).toBe(1)
+    expect(gen3Calls).toBe(0)
+    await settle()
+    // The edit applied in place: the child remounted with fresh state, the
+    // tree (and its parent state) stayed.
+    expect(renderer.getAllText()).toEqual(["child v2 0"])
+    resetApp()
   })
 
   it("createApp keeps the live tree when a hot turn reloaded components", async () => {

@@ -18,9 +18,13 @@
  * Two bun --hot traps shape this file:
  *
  * - A save re-instantiates every module, including vue itself, and the fresh
- *   vue instance's HMR component map is empty. The runtime therefore pins
- *   the FIRST generation's __VUE_HMR_RUNTIME__ in the globalThis state and
- *   always reloads through the instance that mounted the live app.
+ *   vue instance's HMR component map is empty. Vue records a mounted tree in
+ *   the copy that mounted it, so this runtime reloads through a pinned
+ *   __VUE_HMR_RUNTIME__ — the copy that owns the live tree — and noteHmrMount()
+ *   re-pins it on every mount. A classic remount (an asset save, the error
+ *   overlay's Reload button) mounts the new tree from the newest copy, so
+ *   without the re-pin every later reload would go to a copy with no live
+ *   instances and silently do nothing.
  *
  * - An entry with a top-level await (chat.tsx awaits the updater leg before
  *   createApp) suspends the module body across microtasks, so a "turn" has
@@ -49,9 +53,10 @@ interface HmrState {
   files: Map<string, FileRecord>
   /** Monotonic count of reloads issued since process start. */
   reloadCount: number
-  /** The first generation's __VUE_HMR_RUNTIME__, pinned: it is the instance
-   *  that mounted the live app, and the only one whose component map is
-   *  populated. */
+  /** The __VUE_HMR_RUNTIME__ of the vue copy that mounted the live tree:
+   *  Vue records mounted instances in the copy that mounted them, so a reload
+   *  through any other copy finds no instances. Re-pinned by noteHmrMount()
+   *  whenever a tree mounts. */
   runtime?: VueHmrRuntime
 }
 
@@ -82,6 +87,23 @@ function vueHmrRuntime(): VueHmrRuntime | undefined {
     state.runtime = runtime
   }
   return state.runtime
+}
+
+/** Called by the mount path right before a tree mounts. At that moment
+ *  `globalThis.__VUE_HMR_RUNTIME__` is the mounting generation's copy — the
+ *  one whose component map the new tree registers into — so this is where the
+ *  pin moves after a classic remount (an asset save, the error overlay's
+ *  Reload button). The previous pin belongs to the tree that just unmounted.
+ *
+ *  The keep-the-live-tree path in createApp must NOT call this: that tree is
+ *  still registered in the pinned copy, and re-pinning to a newer one would
+ *  make the next reload a no-op. */
+export function noteHmrMount(): void {
+  const runtime = Reflect.get(globalThis, "__VUE_HMR_RUNTIME__") as
+    | VueHmrRuntime
+    | undefined
+  if (!runtime) return
+  hmrState().runtime = runtime
 }
 
 /** Injected at the top of a transformed module body. The first evaluation

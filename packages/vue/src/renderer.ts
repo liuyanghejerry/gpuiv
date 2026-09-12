@@ -16,7 +16,7 @@ import {
   nextWindowKeyEventId,
 } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
-import { hmrReloadCount } from "./hmr/runtime.js"
+import { hmrReloadCount, noteHmrMount } from "./hmr/runtime.js"
 import {
   InProcessBackend,
   liveRendererAsTest,
@@ -524,6 +524,14 @@ export function createApp(
     // Vue's HMR runtime, so the live tree keeps its state. The entry still
     // re-ran above, refreshing rootComponent/lastOptions for the overlay's
     // Reload button; the mount itself stays.
+    //
+    // The reload counter is the only signal a turn changed anything: a save
+    // whose component hashes come out identical (bun --hot evaluating one
+    // save twice, or a module edit that touches no reloadable component)
+    // looks exactly like a turn with no reloads and takes the remount below,
+    // resetting state. Deciding on module identity instead would be worse —
+    // an edited asset re-evaluates the entry with unchanged component hashes,
+    // and that remount is the only thing that applies the new data.
     return slot.handle
   }
   return mountTree(slot, rootComponent, options)
@@ -579,6 +587,10 @@ function mountTree(
   // App code only ever sees application commands (scroll, window, debug) —
   // never the commit facade — so provide the raw renderer.
   app.provide(GPUIV_CONTEXT, { renderer: host })
+  // The HMR runtime pin follows the tree: this mount registers its components
+  // in the current generation's vue copy, which is the one
+  // globalThis.__VUE_HMR_RUNTIME__ points at until the next save.
+  noteHmrMount()
   app.mount(gpuivHost.container)
   gpuivHost.flushMutations()
   // Component state over the automation protocol. Reattached on every mount
