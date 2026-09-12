@@ -47,7 +47,11 @@ describe("devtools shims", () => {
       delete g.window
       delete g.document
       delete g.addEventListener
-      installDevtoolsShims()
+      const installed = installDevtoolsShims()
+      // The return value is what a failed connect rolls back.
+      expect(installed).toContain("window")
+      expect(installed).toContain("document")
+      expect(installed).toContain("addEventListener")
       // window must BE globalThis: @vue/devtools-shared computes its global
       // target as window ?? globalThis, and the hook has to land where Vue
       // reads it.
@@ -55,17 +59,33 @@ describe("devtools shims", () => {
       expect(typeof g.addEventListener).toBe("function")
       expect(typeof g.removeEventListener).toBe("function")
       const doc = g.document as {
-        createElement: () => { style: Record<string, unknown> }
+        createElement: () => {
+          style: Record<string, unknown>
+          scrollIntoView: (options?: { behavior?: string }) => void
+        }
+        body: { appendChild: (node: unknown) => void; removeChild: (node: unknown) => void }
         querySelectorAll: () => unknown[]
         getElementById: () => unknown
       }
       expect(doc.querySelectorAll()).toEqual([])
       expect(doc.getElementById()).toBeNull()
       expect(doc.createElement().style).toEqual({})
-      // Idempotent, and never clobbers an existing window.
+
+      // `scrollToComponent` in @vue/devtools-electron@8.2.1
+      // (dist/user-app.js, inlined in dist/index.js) falls back to exactly
+      // this when the inspected component's root element has no
+      // scrollIntoView — the stub has to survive it, not raise.
+      const scrollTarget = doc.createElement()
+      Object.assign(scrollTarget.style, { position: "absolute" })
+      doc.body.appendChild(scrollTarget)
+      expect(() => scrollTarget.scrollIntoView({ behavior: "smooth" })).not.toThrow()
+      doc.body.removeChild(scrollTarget)
+
+      // Idempotent, never clobbers an existing window, and installs nothing
+      // the second time (so a rollback can never delete a foreign global).
       const marker = { custom: true }
       g.window = marker
-      installDevtoolsShims()
+      expect(installDevtoolsShims()).toEqual([])
       expect(g.window).toBe(marker)
     } finally {
       if (previousWindow === undefined) delete g.window

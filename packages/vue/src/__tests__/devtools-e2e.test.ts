@@ -1,11 +1,11 @@
 /** End-to-end Vue DevTools: a fixture app connects through
  *  connectVueDevtools() to a live devtools middleware. The middleware here is
- *  the server half of @vue/devtools-electron's app.cjs — same socket.io
- *  server and electron-preset RPC proxy — minus the Electron shell, which is
- *  heavy and unreliable in CI and irrelevant to what is asserted: the app
- *  completes the socket handshake and registers with the devtools backend
- *  (hook.apps). The official Electron flow is covered by dogfooding through
- *  examples/chat.tsx behind GPUIV_DEVTOOLS=1. */
+ *  the server half of @vue/devtools-electron@8.2.1's dist/app.cjs — same
+ *  socket.io server and electron-preset RPC proxy — minus the Electron shell,
+ *  which is heavy and unreliable in CI and irrelevant to what is asserted:
+ *  the app completes the socket handshake and registers with the devtools
+ *  backend (hook.apps). The official Electron flow is covered by dogfooding
+ *  through examples/chat.tsx behind GPUIV_DEVTOOLS=1. */
 
 import { spawn } from "node:child_process"
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
@@ -20,6 +20,11 @@ const describeNative = hasNativeTestRenderer ? describe : describe.skip
 const srcDir = fileURLToPath(new URL("..", import.meta.url))
 const PORT = 8907
 
+/** Mirror of the middleware half of @vue/devtools-electron@8.2.1's
+ *  dist/app.cjs (`S()`): same socket.io server and electron-preset RPC proxy,
+ *  minus the user-app.iife route, the `disconnect` relay and the Electron
+ *  BrowserWindow, plus the "MIDDLEWARE_LISTENING" marker this test waits for.
+ *  Re-check it when that dependency moves. */
 function middlewareSource(): string {
   return `
 import { createServer } from "node:http"
