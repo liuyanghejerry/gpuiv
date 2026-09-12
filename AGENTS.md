@@ -39,6 +39,17 @@ GPUI call makes it safe.
 Prefer the smallest translation. Fewer moving parts is more important than matching any
 other framework's behaviour.
 
+## Built-in components follow Base UI
+
+Headless controls in `@gpuiv/vue` (`select`, `combobox`, `tooltip`, and any
+new primitive) should match [Base UI](https://base-ui.com/react/components/select)
+first: same split between Root data and children.
+
+For Select, `items` on Root is optional. It is only a label lookup for
+`SelectValue` while the popup is closed. Keyboard nav and clicks read the
+mounted `SelectItem` children (a provide/inject registry filled on mount). Do
+not walk `child.type`. Do not require `items` for the menu to work.
+
 ## Architecture
 
 ```

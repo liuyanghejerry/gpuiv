@@ -1,16 +1,18 @@
 /** Headless shadcn-shaped Select components rendered with GPUIX host elements. */
 
 import {
+  computed,
   defineComponent,
   h,
   inject,
-  isVNode,
+  onBeforeUnmount,
+  onMounted,
   provide,
   reactive,
-  Text,
+  ref,
+  watch,
   type InjectionKey,
   type PropType,
-  type VNode,
   type VNodeChild,
 } from "vue"
 import type { EventPayload } from "@gpuiv/native"
@@ -24,12 +26,16 @@ import {
 } from "./floating.js"
 import type { FloatingContentProps, StateStyle } from "./floating.js"
 
-interface SelectItemRecord {
+export interface SelectItemData {
   value: string
   // `unknown` instead of VNodeChild — Vue's VNodeChild is a recursive conditional
   // type that triggers TS2589 on deep instantiations.
-  label: unknown
-  textValue: string
+  label?: unknown
+  textValue?: string
+}
+
+interface SelectItemRecord {
+  value: string
   disabled: boolean
 }
 
@@ -37,7 +43,7 @@ interface SelectContextValue {
   open: boolean
   value: string | undefined
   disabled: boolean
-  items: SelectItemRecord[]
+  labels: Map<string, unknown>
   activeValue: string | null
   triggerPressedWhileOpen: boolean
   dismissedByOutsidePress: boolean
@@ -46,6 +52,7 @@ interface SelectContextValue {
   setActiveValue: (value: string | null) => void
   moveActive: (delta: number) => void
   selectValue: (value: string) => void
+  registerItem: (item: SelectItemRecord & { mounted: boolean }) => void
 }
 
 const SelectContextKey: InjectionKey<SelectContextValue> = Symbol("gpuiv-select")
@@ -56,60 +63,8 @@ function useSelectContext(name: string): SelectContextValue {
   return context
 }
 
-function textContent(node: unknown): string {
-  if (typeof node === "string" || typeof node === "number") return String(node)
-  if (!isVNode(node)) return ""
-  if (node.type === Text) return String(node.children ?? "")
-  const children = childList(node as VNode)
-  return children.map(textContent).join("")
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function childList(vnode: VNode): any[] {
-  const children = vnode.children
-  if (Array.isArray(children)) return children as any[]
-  if (typeof children === "function") return [children]
-  if (children && typeof children === "object") {
-    const slotsObj = children as Record<string, (args?: unknown) => unknown>
-    if (typeof slotsObj.default === "function") {
-      const out = slotsObj.default({})
-      return Array.isArray(out) ? out : [out]
-    }
-  }
-  return []
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function collectItems(node: any, items: SelectItemRecord[] = []): SelectItemRecord[] {
-  if (Array.isArray(node)) {
-    for (const child of node) collectItems(child, items)
-    return items
-  }
-  if (!isVNode(node)) return items
-  if (node.type === SelectItem) {
-    const props = node.props as {
-      value: string
-      disabled?: boolean
-      textValue?: string
-      children?: unknown
-    }
-    const raw = childList(node)
-    const hasRenderProp = typeof raw[0] === "function"
-    items.push({
-      value: props.value,
-      label: hasRenderProp ? props.textValue : (node.children as unknown),
-      textValue:
-        props.textValue ??
-        (hasRenderProp ? "" : textContent(node.children)),
-      disabled: props.disabled ?? false,
-    })
-    return items
-  }
-  for (const child of childList(node)) collectItems(child, items)
-  return items
-}
-
 export interface SelectProps {
+  items?: readonly SelectItemData[]
   value?: string
   defaultValue?: string
   onValueChange?: (value: string) => void
@@ -122,6 +77,7 @@ export interface SelectProps {
 
 export const Select = defineComponent({
   props: {
+    items: { type: Array as PropType<readonly SelectItemData[]>, default: undefined },
     value: { type: String, default: undefined },
     defaultValue: { type: String, default: undefined },
     onValueChange: { type: Function as PropType<(value: string) => void>, default: undefined },
@@ -133,15 +89,20 @@ export const Select = defineComponent({
   setup(props, { attrs, slots }) {
     const gpuix = useGpuix()
     const [value, setValue] = useControllableState<string | undefined>({
-      value: props.value,
-      // `defaultValue` may be undefined — keep the ref's type safe.
+      // Getters keep the controlled props reactive — reading `props.value`
+      // once here would pin the state to the mount-time value.
+      get value() {
+        return props.value
+      },
       defaultValue: props.defaultValue,
       onChange: (nextValue) => {
         if (nextValue !== undefined) props.onValueChange?.(nextValue)
       },
     })
     const [open, setOpenState] = useControllableState({
-      value: props.open,
+      get value() {
+        return props.open
+      },
       defaultValue: props.defaultOpen,
       onChange: props.onOpenChange,
     })
@@ -150,7 +111,7 @@ export const Select = defineComponent({
       open: false,
       value: undefined,
       disabled: props.disabled,
-      items: [],
+      labels: new Map(),
       activeValue: null,
       triggerPressedWhileOpen: false,
       dismissedByOutsidePress: false,
@@ -159,23 +120,71 @@ export const Select = defineComponent({
       setActiveValue: () => {},
       moveActive: () => {},
       selectValue: () => {},
+      registerItem: () => {},
     }
     const context = reactive(contextInitial)
 
+    // Mounted SelectItem children in mount (= document) order. Keyboard nav
+    // and clicks read this registry; `items` on Root is only a label lookup
+    // for SelectValue while the popup is closed.
+    const registeredItems = ref<SelectItemRecord[]>([])
+
+    const labels = computed(() => {
+      const next = new Map<string, unknown>()
+      for (const item of props.items ?? []) {
+        next.set(item.value, item.label ?? item.textValue ?? item.value)
+      }
+      return next
+    })
+
     const setOpen = (nextOpen: boolean) => {
       setOpenState(nextOpen)
-      if (nextOpen) {
-        const selected = context.items.find(
-          (item) => item.value === value.value && !item.disabled,
-        )
-        context.activeValue = selected?.value ?? null
-      } else if (context.triggerRef.current != null) {
+      if (!nextOpen && context.triggerRef.current != null) {
         gpuix.renderer?.focusElement?.(context.triggerRef.current)
       }
     }
 
+    const registerItem = ({
+      value: itemValue,
+      disabled: itemDisabled,
+      mounted,
+    }: SelectItemRecord & { mounted: boolean }) => {
+      const existing = registeredItems.value.findIndex((item) => item.value === itemValue)
+      if (!mounted) {
+        if (existing < 0) return
+        registeredItems.value = registeredItems.value.filter(
+          (item) => item.value !== itemValue,
+        )
+        return
+      }
+      if (existing >= 0) {
+        registeredItems.value[existing] = { value: itemValue, disabled: itemDisabled }
+        return
+      }
+      registeredItems.value = [
+        ...registeredItems.value,
+        { value: itemValue, disabled: itemDisabled },
+      ]
+    }
+
+    // The highlight follows the selected item, so a selected item that mounts
+    // after the popup opened becomes the highlight (React: useLayoutEffect on
+    // [open, value, itemsVersion]).
+    watch(
+      [open, value, registeredItems],
+      () => {
+        if (!open.value) return
+        const selected = registeredItems.value.find(
+          (item) => item.value === value.value && !item.disabled,
+        )
+        context.activeValue = selected?.value ?? null
+      },
+      { flush: "sync" },
+    )
+
     const moveActive = (delta: number) => {
-      const enabled = context.items.filter((item) => !item.disabled)
+      if (context.disabled) return
+      const enabled = registeredItems.value.filter((item) => !item.disabled)
       if (enabled.length === 0) return
       const currentIndex = enabled.findIndex((item) => item.value === context.activeValue)
       const start = currentIndex < 0 ? (delta > 0 ? -1 : 0) : currentIndex
@@ -184,7 +193,8 @@ export const Select = defineComponent({
     }
 
     const selectValue = (nextValue: string) => {
-      const item = context.items.find((candidate) => candidate.value === nextValue)
+      if (context.disabled) return
+      const item = registeredItems.value.find((candidate) => candidate.value === nextValue)
       if (!item || item.disabled) return
       setValue(nextValue)
       setOpenState(false)
@@ -196,6 +206,7 @@ export const Select = defineComponent({
     }
     context.moveActive = moveActive
     context.selectValue = selectValue
+    context.registerItem = registerItem
 
     // `as any` — the reactive SelectContextValue type is too deep for
     // provide's generic inference on some TS versions.
@@ -203,16 +214,14 @@ export const Select = defineComponent({
     provide(SelectContextKey as any, context)
 
     return () => {
-      const children = (slots.default?.() ?? []) as unknown[]
-      const collected: SelectItemRecord[] = collectItems(children);
-      ;(context as unknown as { items: SelectItemRecord[] }).items = collected
+      context.labels = labels.value
       context.open = open.value
       context.value = value.value
       context.disabled = props.disabled
       return h(
         "div",
         { ...attrs, style: floatingRootStyle(attrs.style as StyleDesc | undefined) },
-        children as VNodeChild[],
+        (slots.default?.() ?? []) as VNodeChild[],
       )
     }
   },
@@ -282,13 +291,13 @@ export const SelectTrigger = defineComponent({
             (event.key === "n" && event.modifiers?.ctrl)
           ) {
             if (!context.open) context.setOpen(true)
-            context.moveActive(1)
+            else context.moveActive(1)
           } else if (
             event.key === "up" ||
             (event.key === "p" && event.modifiers?.ctrl)
           ) {
             if (!context.open) context.setOpen(true)
-            context.moveActive(-1)
+            else context.moveActive(-1)
           } else if (event.key === "enter" || event.key === "space") {
             context.setOpen(!context.open)
           }
@@ -308,8 +317,10 @@ export const SelectValue = defineComponent({
   setup(_, { attrs, slots }) {
     const context = useSelectContext("SelectValue")
     return () => {
-      const item = context.items.find((candidate) => candidate.value === context.value)
-      const content = slots.default?.() ?? item?.label ?? (attrs.placeholder ?? null)
+      const label =
+        context.value === undefined ? undefined : context.labels.get(context.value)
+      const content =
+        slots.default?.() ?? label ?? context.value ?? attrs.placeholder ?? null
       return h("div", attrs as Record<string, unknown>, [content as VNodeChild])
     }
   },
@@ -355,7 +366,10 @@ export const SelectContent = defineComponent({
           if (event.key === "escape") {
             ;(attrs.onEscapeKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
             context.setOpen(false)
-          } else if (
+            return
+          }
+          if (context.disabled) return
+          if (
             event.key === "down" ||
             (event.key === "n" && event.modifiers?.ctrl)
           ) {
@@ -387,7 +401,6 @@ export interface SelectItemState {
 export interface SelectItemProps {
   value: string
   disabled?: boolean
-  textValue?: string
   style?: StateStyle<SelectItemState>
 }
 
@@ -395,10 +408,25 @@ export const SelectItem = defineComponent({
   props: {
     value: { type: String, required: true },
     disabled: { type: Boolean, default: false },
-    textValue: { type: String, default: undefined },
   },
   setup(props, { attrs, slots }) {
     const context = useSelectContext("SelectItem")
+    // Register in mount hooks, not on every render, so a middle item that
+    // re-renders alone keeps its place in keyboard order (React:
+    // useLayoutEffect, not a callback ref).
+    onMounted(() => {
+      context.registerItem({ value: props.value, disabled: props.disabled, mounted: true })
+    })
+    onBeforeUnmount(() => {
+      context.registerItem({ value: props.value, disabled: props.disabled, mounted: false })
+    })
+    watch(
+      () => [props.value, props.disabled] as const,
+      ([value, disabled], [oldValue, oldDisabled]) => {
+        context.registerItem({ value: oldValue, disabled: oldDisabled, mounted: false })
+        context.registerItem({ value, disabled, mounted: true })
+      },
+    )
     return () => {
       const state: SelectItemState = {
         selected: context.value === props.value,
@@ -413,11 +441,11 @@ export const SelectItem = defineComponent({
         ),
         onMouseEnter: (event: EventPayload) => {
           ;(attrs.onMouseEnter as ((event: EventPayload) => void) | undefined)?.(event)
-          if (!props.disabled) context.setActiveValue(props.value)
+          if (!props.disabled && !context.disabled) context.setActiveValue(props.value)
         },
         onClick: (event: EventPayload) => {
           ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
-          if (!props.disabled) context.selectValue(props.value)
+          if (!props.disabled && !context.disabled) context.selectValue(props.value)
         },
       }
       return h("div", itemProps, slots.default?.(state))
