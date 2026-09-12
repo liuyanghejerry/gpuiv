@@ -59,6 +59,7 @@ function initialWindow(options: {
 
 /** Mounts only the visible window of a virtual list in the component tree. */
 export const VirtualList = defineComponent({
+  inheritAttrs: false,
   props: {
     itemCount: { type: Number, required: true },
     renderItem: { type: Function as PropType<(index: number) => unknown>, required: true },

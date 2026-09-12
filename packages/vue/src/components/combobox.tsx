@@ -90,6 +90,10 @@ export interface ComboboxProps {
 }
 
 export const Combobox = defineComponent({
+  // Attrs are forwarded by hand below. Without this, Vue also merges them
+  // onto the root vnode, where every handler this file overrides is chained
+  // with the user's copy — firing that handler twice per event.
+  inheritAttrs: false,
   props: {
     items: { type: Array as PropType<readonly string[]>, default: () => [] },
     value: { type: null, default: undefined },
@@ -111,17 +115,25 @@ export const Combobox = defineComponent({
   setup(props, { attrs, slots }) {
     const gpuix = useGpuix()
     const [value, setValue] = useControllableState<ComboboxValue>({
-      value: props.value as ComboboxValue | undefined,
+      // Getters keep the controlled props reactive — reading `props.value`
+      // once here would pin the state to the mount-time value.
+      get value() {
+        return props.value as ComboboxValue | undefined
+      },
       defaultValue: props.defaultValue as ComboboxValue,
       onChange: props.onValueChange,
     })
     const [inputValue, setInputValueState] = useControllableState({
-      value: props.inputValue,
+      get value() {
+        return props.inputValue
+      },
       defaultValue: props.defaultInputValue,
       onChange: props.onInputValueChange,
     })
     const [open, setOpenState] = useControllableState({
-      value: props.open,
+      get value() {
+        return props.open
+      },
       defaultValue: props.defaultOpen,
       onChange: props.onOpenChange,
     })
@@ -199,7 +211,7 @@ export const Combobox = defineComponent({
       }
       setValue(item)
       setInputValueState(itemToString(item))
-      setOpenState(false)
+      setOpen(false)
       context.activeIndex = null
     }
 
@@ -250,6 +262,7 @@ export interface ComboboxInputProps {
 }
 
 export const ComboboxInput = defineComponent({
+  inheritAttrs: false,
   props: {
     disabled: { type: Boolean, default: undefined },
     placeholder: { type: String, default: undefined },
@@ -319,6 +332,7 @@ export interface ComboboxTriggerProps {
 }
 
 export const ComboboxTrigger = defineComponent({
+  inheritAttrs: false,
   props: {
     disabled: { type: Boolean, default: undefined },
     tabIndex: { type: Number, default: undefined },
@@ -351,6 +365,7 @@ export interface ComboboxValueProps {
 }
 
 export const ComboboxValue = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     const context = useComboboxContext("ComboboxValue")
     return () => {
@@ -371,22 +386,25 @@ export const ComboboxValue = defineComponent({
 })
 
 export const ComboboxContent = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     const context = useComboboxContext("ComboboxContent")
-    const layerProps: Record<string, unknown> = {
-      side: attrs.side ?? "bottom",
-      sideOffset: attrs.sideOffset ?? 4,
-      align: attrs.align ?? "start",
-      alignOffset: attrs.alignOffset ?? 0,
-      collisionPadding: attrs.collisionPadding ?? 8,
-      ...(attrs as Record<string, unknown>),
-      onMouseDownOutside: (event: EventPayload) => {
-        ;(attrs.onMouseDownOutside as ((event: EventPayload) => void) | undefined)?.(event)
-        context.setOpen(false)
-      },
-    }
     return () => {
       if (!context.open) return null
+      // Built per render, not once in setup: attrs used to be refreshed on
+      // every render by the automatic fallthrough onto `FloatingLayer`.
+      const layerProps: Record<string, unknown> = {
+        side: attrs.side ?? "bottom",
+        sideOffset: attrs.sideOffset ?? 4,
+        align: attrs.align ?? "start",
+        alignOffset: attrs.alignOffset ?? 0,
+        collisionPadding: attrs.collisionPadding ?? 8,
+        ...(attrs as Record<string, unknown>),
+        onMouseDownOutside: (event: EventPayload) => {
+          ;(attrs.onMouseDownOutside as ((event: EventPayload) => void) | undefined)?.(event)
+          context.setOpen(false)
+        },
+      }
       return h(FloatingLayer, layerProps, slots.default?.())
     }
   },
@@ -399,6 +417,7 @@ export interface ComboboxListProps {
 }
 
 export const ComboboxList = defineComponent({
+  inheritAttrs: false,
   props: {
     renderItem: { type: Function as PropType<(item: string) => unknown>, default: undefined },
   },
@@ -426,6 +445,7 @@ export interface ComboboxItemProps {
 }
 
 export const ComboboxItem = defineComponent({
+  inheritAttrs: false,
   props: {
     value: { type: String, required: true },
     disabled: { type: Boolean, default: false },
@@ -467,6 +487,7 @@ export const ComboboxItem = defineComponent({
 })
 
 export const ComboboxEmpty = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     const context = useComboboxContext("ComboboxEmpty")
     return () =>
@@ -477,18 +498,21 @@ export const ComboboxEmpty = defineComponent({
 })
 
 export const ComboboxGroup = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     return () => h("div", attrs as Record<string, unknown>, slots.default?.())
   },
 })
 
 export const ComboboxLabel = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs, slots }) {
     return () => h("div", attrs as Record<string, unknown>, slots.default?.())
   },
 })
 
 export const ComboboxSeparator = defineComponent({
+  inheritAttrs: false,
   setup(_, { attrs }) {
     return () => h("div", attrs as Record<string, unknown>)
   },

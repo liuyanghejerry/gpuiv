@@ -33,6 +33,7 @@ export interface GpuixCanvasInstance {
 }
 
 export const GpuixCanvas = defineComponent({
+  inheritAttrs: false,
   props: {
     /** Buffer width in pixels. Size the element box with `style`; the buffer
      *  stretches to it (`objectFit` defaults to `"fill"`, the `drawImage`
