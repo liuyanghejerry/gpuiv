@@ -126,6 +126,7 @@ export type {
 export type { VirtualListProps } from "./types.js"
 
 export { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
+export { connectVueDevtools, installDevtoolsShims } from "./devtools.js"
 export type { GpuivRendererHost } from "./reconciler/vue-renderer.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
 

@@ -366,7 +366,6 @@ user-facing APIs belong there. This list is only the remaining engineering work.
 - [ ] **Window controls** - resize, minimize (title already works)
 - [ ] **Multiple windows** - Support multiple GPUI windows
 - [ ] **Native hot reload** - cannot unload a `.node`. `bun run dev` rebuilds and restarts
-- [ ] **DevTools** - Vue DevTools integration
 
 ## Testing
 
