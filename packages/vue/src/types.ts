@@ -614,6 +614,13 @@ export interface NativeRenderer {
   cycleDebugFrameOverlay?(): string
   resetDebugFrameOverlayStats?(): void
   getDebugFrameOverlayStats?(): DebugFrameOverlayStats
+
+  /** Toggle the window between normal and fullscreen. */
+  toggleFullscreen?(): void
+  /** Whether the window is currently fullscreen. */
+  isFullscreen?(): boolean
+  /** Minimize the window to the taskbar / Dock. */
+  minimizeWindow?(): void
 }
 
 /** Commit-phase facade used only by the Vue host config. */

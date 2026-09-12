@@ -614,6 +614,22 @@ export class TestRenderer implements NativeRenderer {
     return this.native.readCanvasPixels?.(elementId) ?? null
   }
 
+  toggleFullscreen(): void {
+    this.native.toggleFullscreen?.()
+  }
+
+  isFullscreen(): boolean {
+    return this.native.isFullscreen?.() ?? false
+  }
+
+  minimizeWindow(): void {
+    this.native.minimizeWindow?.()
+  }
+
+  getMinimizeCalls(): number {
+    return (this.native as { getMinimizeCalls?(): number }).getMinimizeCalls?.() ?? 0
+  }
+
   /** Bytes built into canvas tile images so far — the upload cost the GPU
    *  renderer pays. Test-renderer only; lets tests pin upload bytes to the
    *  dirty area instead of wall-clock time. */

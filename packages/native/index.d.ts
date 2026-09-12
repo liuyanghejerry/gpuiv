@@ -164,6 +164,12 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /** Toggle the window between normal and fullscreen. */
+  toggleFullscreen(): void
+  /** Whether the window is currently fullscreen. */
+  isFullscreen(): boolean
+  /** Minimize the window to the platform's taskbar / Dock. */
+  minimizeWindow(): void
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
   blur(): void
@@ -307,6 +313,22 @@ export declare class TestGpuixRenderer {
   focusPrevious(): void
   /** Enable the window key events requested by the JS renderer. */
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
+  /**
+   * Toggle the window's fullscreen state. The test window is a real
+   * offscreen platform window whose fullscreen transition runs through
+   * async AppKit animation, so the bridge tracks the requested parity
+   * instead of reading it back.
+   */
+  toggleFullscreen(): void
+  /** The fullscreen parity `toggleFullscreen` has requested so far. */
+  isFullscreen(): boolean
+  /**
+   * Record a minimize request — the real TestWindow path would run the
+   * platform `minimize`, which the test window does not implement.
+   */
+  minimizeWindow(): void
+  /** How many times `minimizeWindow` was called. */
+  getMinimizeCalls(): number
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
