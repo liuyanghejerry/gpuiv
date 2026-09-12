@@ -465,6 +465,11 @@ enum UiCommand {
         response: SyncSender<std::result::Result<(), String>>,
     },
     Blur,
+    ToggleFullscreen,
+    MinimizeWindow,
+    IsFullscreen {
+        response: SyncSender<bool>,
+    },
     OpenUrl(String),
     WriteClipboardImage {
         png: Vec<u8>,
@@ -872,6 +877,15 @@ async fn run_ui_commands(
                 window.refresh();
             }),
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
+            UiCommand::ToggleFullscreen => {
+                window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
+            }
+            UiCommand::MinimizeWindow => {
+                window.update(cx, |_view, window, _cx| window.minimize_window())
+            }
+            UiCommand::IsFullscreen { response } => window.update(cx, move |_view, window, _cx| {
+                response.send(window.is_fullscreen());
+            }),
             UiCommand::OpenUrl(url) => window.update(cx, move |_view, _window, cx| {
                 cx.open_url(&url);
             }),
@@ -1734,6 +1748,70 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ActivateWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Toggle the window between normal and fullscreen.
+    #[napi]
+    pub fn toggle_fullscreen(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.toggle_fullscreen());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ToggleFullscreen);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Whether the window is currently fullscreen.
+    #[napi]
+    pub fn is_fullscreen(&self) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.is_fullscreen());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::IsFullscreen { response })?;
+            return recv_ui_response(receiver, "the fullscreen query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Minimize the window to the platform's taskbar / Dock.
+    #[napi]
+    pub fn minimize_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.minimize_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::MinimizeWindow);
 
         #[cfg(not(any(
             target_os = "macos",

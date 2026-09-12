@@ -194,6 +194,11 @@ pub struct TestGpuixRenderer {
     selection: crate::text::SharedSelection,
     /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
     canvas_surfaces: crate::canvas::CanvasStore,
+    /// Window-control requests the bridge records instead of driving: the
+    /// offscreen platform window applies fullscreen through async AppKit
+    /// animation and does not implement minimize.
+    fullscreen: RefCell<bool>,
+    minimize_calls: RefCell<usize>,
     /// The last URL handed to `openUrl`. The test platform records its own
     /// copy where the bridge cannot read it (`pub(crate)`), so tests assert
     /// here.
@@ -286,6 +291,8 @@ impl TestGpuixRenderer {
             events,
             selection,
             canvas_surfaces,
+            fullscreen: RefCell::new(false),
+            minimize_calls: RefCell::new(0),
             last_opened_url: RefCell::new(None),
             path_prompt_answers: RefCell::new(Default::default()),
             last_path_prompt_options: RefCell::new(None),
@@ -528,6 +535,38 @@ impl TestGpuixRenderer {
     }
 
     // ── Test-specific methods ────────────────────────────────────────
+
+    /// Toggle the window's fullscreen state. The test window is a real
+    /// offscreen platform window whose fullscreen transition runs through
+    /// async AppKit animation, so the bridge tracks the requested parity
+    /// instead of reading it back.
+    #[napi]
+    pub fn toggle_fullscreen(&self) -> Result<()> {
+        let mut fullscreen = self.fullscreen.borrow_mut();
+        *fullscreen = !*fullscreen;
+        drop(fullscreen);
+        Ok(())
+    }
+
+    /// The fullscreen parity `toggleFullscreen` has requested so far.
+    #[napi]
+    pub fn is_fullscreen(&self) -> Result<bool> {
+        Ok(*self.fullscreen.borrow())
+    }
+
+    /// Record a minimize request — the real TestWindow path would run the
+    /// platform `minimize`, which the test window does not implement.
+    #[napi]
+    pub fn minimize_window(&self) -> Result<()> {
+        *self.minimize_calls.borrow_mut() += 1;
+        Ok(())
+    }
+
+    /// How many times `minimizeWindow` was called.
+    #[napi]
+    pub fn get_minimize_calls(&self) -> u32 {
+        *self.minimize_calls.borrow() as u32
+    }
 
     /// Record the URL; the platform's own recorder is not reachable from
     /// the bridge, so `getLastOpenedUrl` reads this instead.

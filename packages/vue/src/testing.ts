@@ -671,6 +671,22 @@ export class TestRenderer implements NativeRenderer {
     return this.native.readCanvasPixels?.(elementId) ?? null
   }
 
+  toggleFullscreen(): void {
+    this.native.toggleFullscreen?.()
+  }
+
+  isFullscreen(): boolean {
+    return this.native.isFullscreen?.() ?? false
+  }
+
+  minimizeWindow(): void {
+    this.native.minimizeWindow?.()
+  }
+
+  getMinimizeCalls(): number {
+    return (this.native as { getMinimizeCalls?(): number }).getMinimizeCalls?.() ?? 0
+  }
+
   /** Hand a URL to the default handler. The test bridge records it; assert
    *  with `getLastOpenedUrl`. */
   openUrl(url: string): void {

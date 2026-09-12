@@ -615,6 +615,13 @@ export interface NativeRenderer {
   resetDebugFrameOverlayStats?(): void
   getDebugFrameOverlayStats?(): DebugFrameOverlayStats
 
+  /** Toggle the window between normal and fullscreen. */
+  toggleFullscreen?(): void
+  /** Whether the window is currently fullscreen. */
+  isFullscreen?(): boolean
+  /** Minimize the window to the taskbar / Dock. */
+  minimizeWindow?(): void
+
   /** Hand a URL to the user's default browser / handler. */
   openUrl?(url: string): void
 

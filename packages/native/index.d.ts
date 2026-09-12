@@ -164,6 +164,12 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /** Toggle the window between normal and fullscreen. */
+  toggleFullscreen(): void
+  /** Whether the window is currently fullscreen. */
+  isFullscreen(): boolean
+  /** Minimize the window to the platform's taskbar / Dock. */
+  minimizeWindow(): void
   /** Hand a URL to the user's default browser / handler. */
   openUrl(url: string): void
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */
@@ -344,6 +350,22 @@ export declare class TestGpuixRenderer {
   setNextNewPathResponse(path?: string | undefined | null): void
   /** The request the last `promptForNewPath` call received. */
   getLastNewPathPrompt(): NewPathPromptRequest | null
+  /**
+   * Toggle the window's fullscreen state. The test window is a real
+   * offscreen platform window whose fullscreen transition runs through
+   * async AppKit animation, so the bridge tracks the requested parity
+   * instead of reading it back.
+   */
+  toggleFullscreen(): void
+  /** The fullscreen parity `toggleFullscreen` has requested so far. */
+  isFullscreen(): boolean
+  /**
+   * Record a minimize request — the real TestWindow path would run the
+   * platform `minimize`, which the test window does not implement.
+   */
+  minimizeWindow(): void
+  /** How many times `minimizeWindow` was called. */
+  getMinimizeCalls(): number
   /**
    * Record the URL; the platform's own recorder is not reachable from
    * the bridge, so `getLastOpenedUrl` reads this instead.

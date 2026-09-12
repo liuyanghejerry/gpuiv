@@ -322,6 +322,20 @@ id, and one event map, so mounting a second root on a renderer that already has
 one throws. `createApp()` unmounts the previous tree before remounting, so only
 code that builds its own host with `createGpuivRendererHost()` can hit this.
 
+## Window controls
+
+`toggleFullscreen()`, `isFullscreen()`, and `minimizeWindow()` drive the
+window at runtime — the same commands the traffic-light and taskbar chrome
+use. They are renderer commands (`useGpuixRequired()` reaches them):
+
+```tsx
+const renderer = useGpuixRequired()
+<div onClick={() => renderer.toggleFullscreen?.()}>Fullscreen</div>
+```
+
+`minimizeWindow()` complements the built-in `⌘M` menu item for custom
+chrome. Resizing by edge drag and window zoom are not exposed yet.
+
 ## Opening URLs
 
 `openUrl(url)` hands a URL to the user's default handler — the system browser
@@ -2652,6 +2666,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
+- [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
 - [x] Opening external URLs (`openUrl`)
