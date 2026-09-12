@@ -164,11 +164,18 @@ export declare class GpuixRenderer {
    * with `show: false` or `focus: false` is revealed later.
    */
   activateWindow(): void
+  /** Put a straight-alpha RGBA image on the clipboard as PNG. */
+  writeClipboardImage(data: Buffer, width: number, height: number): void
   /**
    * Open the platform's file-selection dialog. The callback receives
    * `(error, outcome)`; `outcome.paths` is `null` when the user cancelled.
    */
   promptForPaths(options: PathPromptOptionsDesc, callback: ((err: Error | null, arg: PathPromptOutcome) => any)): void
+  /**
+   * Read an image from the clipboard, decoded to straight-alpha RGBA.
+   * Returns null when the clipboard holds no image.
+   */
+  readClipboardImage(): ClipboardImage | null
   /**
    * Open the platform's save dialog starting in `directory` (defaults to
    * the process working directory). The callback receives `(error,
@@ -335,6 +342,17 @@ export declare class TestGpuixRenderer {
   setNextNewPathResponse(path?: string | undefined | null): void
   /** The request the last `promptForNewPath` call received. */
   getLastNewPathPrompt(): NewPathPromptRequest | null
+  /**
+   * Put a straight-alpha RGBA image on the platform's in-memory test
+   * clipboard, mirroring the production encoder path.
+   */
+  writeClipboardImage(data: Buffer, width: number, height: number): void
+  /**
+   * Read an image from the test clipboard, decoded to RGBA. The round
+   * trip through the real `ClipboardItem::Image` entry is the point:
+   * production reads whatever bytes the platform stored.
+   */
+  readClipboardImage(): ClipboardImage | null
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
@@ -520,6 +538,13 @@ export declare class TestGpuixRenderer {
   advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
+}
+
+/** A clipboard image decoded to straight-alpha RGBA. */
+export interface ClipboardImage {
+  data: Buffer
+  width: number
+  height: number
 }
 
 /** Recorded draw times from the debug frame overlay. */

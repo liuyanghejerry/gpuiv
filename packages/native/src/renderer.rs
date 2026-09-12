@@ -465,6 +465,12 @@ enum UiCommand {
         response: SyncSender<std::result::Result<(), String>>,
     },
     Blur,
+    WriteClipboardImage {
+        png: Vec<u8>,
+    },
+    ReadClipboardImage {
+        response: SyncSender<Option<Vec<u8>>>,
+    },
     PromptForPaths {
         options: PathPromptOptionsDesc,
         callback: ThreadsafeFunction<PathPromptOutcome>,
@@ -865,6 +871,23 @@ async fn run_ui_commands(
                 window.refresh();
             }),
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
+            UiCommand::WriteClipboardImage { png } => {
+                window.update(cx, move |_view, _window, cx| {
+                    let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, png);
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image));
+                })
+            }
+            UiCommand::ReadClipboardImage { response } => {
+                window.update(cx, move |_view, _window, cx| {
+                    let png = cx.read_from_clipboard().and_then(|item| {
+                        item.entries.into_iter().find_map(|entry| match entry {
+                            gpui::ClipboardEntry::Image(image) => Some(image.bytes),
+                            _ => None,
+                        })
+                    });
+                    response.send(png);
+                })
+            }
             UiCommand::PromptForPaths { options, callback } => window.update(cx, move |_view, _window, cx| {
                 let receiver = cx.prompt_for_paths(options.to_gpui());
                 resolve_path_prompt(cx, receiver, callback);
@@ -1719,6 +1742,41 @@ impl GpuixRenderer {
         ))
     }
 
+    /// Put a straight-alpha RGBA image on the clipboard as PNG.
+    #[napi]
+    pub fn write_clipboard_image(&self, data: Buffer, width: u32, height: u32) -> Result<()> {
+        let png = encode_rgba_png(&data, width, height)?;
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, png);
+                cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image));
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::WriteClipboardImage { png });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = png;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
     /// Open the platform's file-selection dialog. The callback receives
     /// `(error, outcome)`; `outcome.paths` is `null` when the user cancelled.
     #[napi]
@@ -1756,6 +1814,41 @@ impl GpuixRenderer {
                 "The production GPUIX renderer does not support this operating system",
             ))
         }
+    }
+
+    /// Read an image from the clipboard, decoded to straight-alpha RGBA.
+    /// Returns null when the clipboard holds no image.
+    #[napi]
+    pub fn read_clipboard_image(&self) -> Result<Option<ClipboardImage>> {
+        #[cfg(target_os = "macos")]
+        {
+            let png = GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                Ok::<_, Error>(app.update(|cx| clipboard_image_bytes(cx)))
+            })?;
+            return decode_clipboard_image(png);
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::ReadClipboardImage { response })?;
+            let png = recv_ui_response(receiver, "the clipboard image query")?;
+            return decode_clipboard_image(png);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
     }
 
     /// Open the platform's save dialog starting in `directory` (defaults to
@@ -6065,6 +6158,53 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
     Ok(destroyed_ids)
 }
 
+/// The bytes of the clipboard's image entry, in whatever format the platform
+/// stored them (PNG on every platform we ship); null when there is none.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn clipboard_image_bytes(cx: &gpui::App) -> Option<Vec<u8>> {
+    cx.read_from_clipboard().and_then(|item| {
+        item.entries
+            .into_iter()
+            .find_map(|entry| match entry {
+                gpui::ClipboardEntry::Image(image) => Some(image.bytes),
+                _ => None,
+            })
+    })
+}
+
+pub(crate) fn encode_rgba_png(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    let expected = width as usize * height as usize * 4;
+    if data.len() != expected {
+        return Err(Error::from_reason(format!(
+            "expected {width}x{height} RGBA pixels ({expected} bytes), got {} bytes",
+            data.len()
+        )));
+    }
+    let image = image::RgbaImage::from_raw(width, height, data.to_vec())
+        .ok_or_else(|| Error::from_reason("image buffer allocation failed"))?;
+    let mut png = Vec::new();
+    image
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+        .map_err(|error| Error::from_reason(format!("PNG encode failed: {error}")))?;
+    Ok(png)
+}
+
+pub(crate) fn decode_clipboard_image(png: Option<Vec<u8>>) -> Result<Option<ClipboardImage>> {
+    let Some(png) = png else {
+        return Ok(None);
+    };
+    let decoded = image::load_from_memory(&png).map_err(|error| {
+        Error::from_reason(format!("clipboard image decode failed: {error}"))
+    })?;
+    let rgba = decoded.to_rgba8();
+    let (width, height) = rgba.dimensions();
+    Ok(Some(ClipboardImage {
+        data: Buffer::from(rgba.into_raw()),
+        width,
+        height,
+    }))
+}
+
 // ── Types ────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
@@ -6072,6 +6212,14 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 pub struct WindowSize {
     pub width: f64,
     pub height: f64,
+}
+
+/// A clipboard image decoded to straight-alpha RGBA.
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct ClipboardImage {
+    pub data: Buffer,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// Options for the platform file-selection dialog (`promptForPaths`).

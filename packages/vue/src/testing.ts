@@ -97,6 +97,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  writeClipboardImage(data: Uint8Array, width: number, height: number): void
+  readClipboardImage(): { data: Uint8Array; width: number; height: number } | null
   promptForPaths(
     options: PathPromptOptions,
     callback: (error: Error | null, outcome: PathPromptOutcome) => void
@@ -665,6 +667,18 @@ export class TestRenderer implements NativeRenderer {
    *  A bridge round-trip, not a GPU readback. */
   readCanvasPixels(elementId: number): Uint8Array | null {
     return this.native.readCanvasPixels?.(elementId) ?? null
+  }
+
+  /** Put a straight-alpha RGBA image on the platform's in-memory test
+   *  clipboard, mirroring the production encoder path. */
+  writeClipboardImage(data: Uint8Array, width: number, height: number): void {
+    this.native.writeClipboardImage?.(data, width, height)
+  }
+
+  /** Read an image from the test clipboard, decoded to RGBA — a real round
+   *  trip through the `ClipboardEntry::Image` the platform stored. */
+  readClipboardImage(): { data: Uint8Array; width: number; height: number } | null {
+    return this.native.readClipboardImage?.() ?? null
   }
 
   /** Bytes built into canvas tile images so far — the upload cost the GPU

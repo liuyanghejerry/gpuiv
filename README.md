@@ -362,6 +362,29 @@ function Toolbar() {
 panels run asynchronously — the dialog answer arrives through a callback on the
 Node event loop, so nothing blocks while the panel is open.
 
+## Clipboard images
+
+`writeClipboardImage(data, width, height)` puts straight-alpha RGBA pixels on
+the system clipboard as PNG; `readClipboardImage()` reads an image back,
+decoded to the same RGBA layout, or `null` when the clipboard holds no image.
+Both are renderer commands — reach the renderer with `useGpuixRequired()`:
+
+```tsx
+import { useGpuixRequired } from '@gpuiv/vue'
+
+function CopyButton() {
+  const renderer = useGpuixRequired()
+  const copy = () => {
+    const rgba = new Uint8Array([255, 0, 0, 255])
+    renderer.writeClipboardImage?.(rgba, 1, 1)
+  }
+  return <div testId="copy" onClick={copy}>Copy pixel</div>
+}
+```
+
+The test platform keeps a real in-memory clipboard, so the round trip is
+testable end-to-end through `TestRenderer`.
+
 ## Debug frame overlay
 
 GPUI paints frame-time stats into the window after layout. The overlay is not
@@ -2618,6 +2641,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
+- [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
