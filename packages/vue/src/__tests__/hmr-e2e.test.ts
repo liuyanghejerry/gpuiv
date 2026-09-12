@@ -4,7 +4,7 @@
  *  reload semantics) while its parent's state survives — the classic
  *  full-remount path would reset both.
  *
- *  The fixture's preload imports the transform and the runtime from src via
+ *  The fixture's preload imports the preload/transform/runtime from src via
  *  absolute paths, so this test needs no built dist (CI runs Vue package
  *  tests before the package build). */
 
@@ -22,28 +22,45 @@ const srcDir = fileURLToPath(new URL("..", import.meta.url))
 function preloadSource(): string {
   return `
 import { plugin } from "bun"
-import { transformHmrSource } from ${JSON.stringify(join(srcDir, "hmr", "transform.ts"))}
+import { createHmrPreload } from ${JSON.stringify(join(srcDir, "hmr", "preload.ts"))}
 
 const RUNTIME = ${JSON.stringify(join(srcDir, "hmr", "index.ts"))}
+const hmr = createHmrPreload({ importSpecifier: RUNTIME })
 
 plugin({
   name: "gpuiv-hmr-e2e",
   setup(build) {
-    build.onLoad({ filter: /tmp-hmr-e2e.*\\.ts$/ }, async (args) => {
-      const source = await Bun.file(args.path).text()
-      const transformed = transformHmrSource(source, args.path, RUNTIME)
-      if (transformed === source) return undefined
-      return { contents: transformed, loader: "ts" }
-    })
+    build.onLoad({ filter: hmr.filter }, (args) => hmr.load(args.path))
   },
 })
 `
 }
 
-function entrySource(label: string): string {
+/** `theme` is a component-less sibling module: the entry imports it, and the
+ *  preload filter matches it, so it exercises the onLoad return contract that
+ *  used to abort the child at startup. `asset` is a JSON sibling — a save
+ *  that changes no component, i.e. the classic-remount trigger (bun --hot
+ *  does not re-evaluate a change in a module the preload loaded). */
+function entrySource(
+  label: string,
+  options: { theme?: boolean; asset?: boolean; clickThrough?: number } = {}
+): string {
+  const imports = [
+    options.theme ? 'import { THEME } from "./theme"' : "",
+    options.asset ? 'import data from "./asset.json"' : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+  const childLabel = [
+    JSON.stringify(`child ${label}`),
+    options.theme ? "THEME" : "",
+    options.asset ? "data.label" : "",
+  ]
+    .filter(Boolean)
+    .join(" + ' ' + ")
   return `
 import { defineComponent, h, ref } from "vue"
-import { TestRenderer } from ${JSON.stringify(join(srcDir, "testing.ts"))}
+${imports}${imports ? "\n" : ""}import { TestRenderer } from ${JSON.stringify(join(srcDir, "testing.ts"))}
 import { createApp } from ${JSON.stringify(join(srcDir, "renderer.ts"))}
 
 const slot = globalThis as Record<string, unknown>
@@ -65,7 +82,7 @@ const Child = defineComponent({
             count.value += 1
           },
         },
-        ${JSON.stringify(`child ${label} `)} + count.value
+        ${childLabel} + " " + count.value
       )
   },
 })
@@ -97,7 +114,7 @@ const App = defineComponent({
 
 createApp(App, { renderer })
 
-if (evals === 1) {
+if (evals <= ${options.clickThrough ?? 1}) {
   const click = (testId: string) => {
     const el = renderer.findByTestId(testId)!
     const bounds = renderer.getElementBounds(el.id)!
@@ -171,4 +188,46 @@ describeNative("vue fast refresh (bun --hot e2e)", () => {
       rmSync(dir, { recursive: true, force: true })
     }
   }, 40_000)
+
+  it("starts with a component-less sibling and keeps reloading after a remount", async () => {
+    const dir = join(srcDir, "tmp-hmr-e2e-remount")
+    rmSync(dir, { recursive: true, force: true })
+    mkdirSync(dir, { recursive: true })
+    const entry = join(dir, "hmr-entry.ts")
+    const theme = join(dir, "theme.ts")
+    const asset = join(dir, "asset.json")
+    const preload = join(dir, "preload.ts")
+    const assetSource = (version: string) => `{ "label": ${JSON.stringify(version)} }\n`
+    writeFileSync(entry, entrySource("v1", { theme: true, asset: true, clickThrough: 2 }), "utf8")
+    writeFileSync(theme, 'export const THEME = "theme1"\n', "utf8")
+    writeFileSync(asset, assetSource("data1"), "utf8")
+    writeFileSync(preload, preloadSource(), "utf8")
+    const child = spawn("bun", ["--preload", preload, "--hot", entry], { cwd: srcDir })
+    const output = collectOutput(child)
+    try {
+      // A component-less .ts import must not abort the child: the preload
+      // matches it, so its onLoad has to resolve (Bun throws on undefined).
+      await output.wait('HMR_STATE 1 ["parent 1","child v1 theme1 data1 1"]', 15_000)
+
+      // An asset save changes no component hash, so the entry re-evaluates
+      // into a new vue copy and createApp remounts the tree.
+      writeFileSync(asset, assetSource("data2"), "utf8")
+      await output.wait('HMR_STATE 2 ["parent 1","child v1 theme1 data2 1"]', 15_000)
+
+      // A component save after that remount must still reload in place: the
+      // child remounts with fresh state, the parent keeps its own.
+      writeFileSync(entry, entrySource("v2", { theme: true, asset: true, clickThrough: 2 }), "utf8")
+      await output.wait('HMR_STATE 3 ["parent 1","child v2 theme1 data2 0"]', 15_000)
+    } finally {
+      child.kill()
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 2_000)
+        child.on("exit", () => {
+          clearTimeout(timer)
+          resolve(null)
+        })
+      })
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
 })

@@ -11,9 +11,10 @@
  *
  * The scanner is a hand-rolled tokenizer that understands strings, template
  * literals (including nested `${ }`), comments, regex literals, and JSX text
- * (where quotes and brackets are literal). Any parse anomaly returns the
- * source untouched — that file then keeps the classic full-remount behaviour
- * under `bun --hot`.
+ * (where quotes and brackets are literal). Any parse anomaly — including a
+ * statement tail the injected registration cannot follow, such as a type
+ * assertion or a comma — returns the source untouched; that file then keeps
+ * the classic full-remount behaviour under `bun --hot`.
  */
 
 /** 32-bit FNV-1a, hex. Hashes only ever compare across saves of the same
@@ -418,6 +419,36 @@ interface StatementSite {
   end: number
 }
 
+/** Characters that continue the expression whose tail the caller just
+ *  consumed: a call, an index, a tagged template, or a binary operator. A
+ *  statement boundary (ASI) can only be where none of these follows. */
+const EXPRESSION_TAIL_CHARS = new Set("([`+-*/%<>=!&|^~?:,.".split(""))
+
+/** Words that are expression operators in JavaScript/TypeScript and so can
+ *  follow a call: `x as T`, `x satisfies T`, `x instanceof T`, `k in o`. */
+const EXPRESSION_TAIL_WORDS = new Set(["as", "satisfies", "instanceof", "in"])
+
+/** Whether the next token can only be the start of a new statement. Anything
+ *  in the expression-tail sets would instead make the injected registration
+ *  land mid-expression — `const A = defineComponent({…}) as T` — which is a
+ *  module that cannot parse, so those decline the file. */
+function startsNextStatement(sanitized: string, from: number): boolean {
+  let i = from
+  const n = sanitized.length
+  while (i < n && WS.test(sanitized[i])) i++
+  if (i >= n) return true
+  const c = sanitized[i]
+  if (EXPRESSION_TAIL_CHARS.has(c)) return false
+  if (IDENT_START.test(c)) {
+    const start = i
+    while (i < n && IDENT_CHAR.test(sanitized[i])) i++
+    return !EXPRESSION_TAIL_WORDS.has(sanitized.slice(start, i))
+  }
+  // A closing brace is a statement boundary; a string or number cannot
+  // continue a call expression.
+  return true
+}
+
 /** Find top-level `(export )?(const|let|var) X = defineComponent(...)`
  *  statements on the sanitized source (only structural code remains). */
 function findComponentStatements(sanitized: string): StatementSite[] | null {
@@ -490,10 +521,12 @@ function findComponentStatements(sanitized: string): StatementSite[] | null {
               if (sanitized[i] === "(") {
                 if (!skipBalanced("(", ")")) return null
                 // Statement tail: optional ".chain()" continuations and ";".
+                let terminated = false
                 for (;;) {
                   skipWs()
                   if (sanitized[i] === ";") {
                     i++
+                    terminated = true
                     break
                   }
                   if (sanitized[i] === ".") {
@@ -507,6 +540,12 @@ function findComponentStatements(sanitized: string): StatementSite[] | null {
                   }
                   break
                 }
+                // An unterminated tail is only safe when what follows can only
+                // start a new statement. `as T`, `satisfies T`, `, B = …`,
+                // `|| …` and friends would push the injected registration into
+                // the middle of the expression — decline the file (it keeps the
+                // classic remount) rather than emit a module that cannot parse.
+                if (!terminated && !startsNextStatement(sanitized, i)) return null
                 sites.push({ name, start: stmtStart, end: i })
                 continue
               }
