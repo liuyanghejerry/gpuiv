@@ -1205,7 +1205,11 @@ export const ModelPicker = defineComponent({
   },
   setup(props) {
     return () => (
-      <Select value={props.value} onValueChange={props.onChange}>
+      <Select
+        items={MODELS.map((model) => ({ value: model.id, label: model.label }))}
+        value={props.value}
+        onValueChange={props.onChange}
+      >
         <div style={{ position: 'relative', display: 'flex' }}>
           <SelectTrigger
             style={(state: SelectTriggerState) => ({
@@ -1236,7 +1240,7 @@ export const ModelPicker = defineComponent({
           >
             <SelectGroup>
               {MODELS.map((model) => (
-                <SelectItem key={model.id} value={model.id} textValue={model.label}>
+                <SelectItem key={model.id} value={model.id}>
                   {(state: SelectItemState) => (
                     <div
                       style={{
@@ -1264,8 +1268,12 @@ export const ModelPicker = defineComponent({
 
 `SelectTrigger` and `SelectItem` take a **style function** of their current
 state (`open`, `selected`, `highlighted`, `disabled`, `placeholder`), and
-`SelectItem`'s default slot is a render function of the same state. Use the
-styled local file with the familiar compound shape:
+`SelectItem`'s default slot is a render function of the same state. Pass
+**`items`** on `Select` (the Root) when `SelectValue` should show a label while
+the menu is closed — it is only a label lookup. Keyboard nav and clicks read
+the mounted `SelectItem` children through a registration registry, so a styled
+wrapper around `SelectItem` is fine. Without `items`, `SelectValue` shows the
+raw value. Use the styled local file with the familiar compound shape:
 
 ```tsx
 <ModelPicker
@@ -1289,7 +1297,11 @@ the virtual list. The list paints after the composer, so you still see the
 markdown through the menu, and clicks hit the text behind it.
 
 ```tsx
-<Select value={model.value} onValueChange={setModel}>
+<Select
+  items={[{ value: 'flash', label: 'DeepSeek V4 Flash' }]}
+  value={model.value}
+  onValueChange={setModel}
+>
   <div style={{ position: 'relative' }}>
     <SelectTrigger>
       <SelectValue />

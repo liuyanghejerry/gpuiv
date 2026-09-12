@@ -110,6 +110,7 @@ export type {
 } from "./components/floating.js"
 export type {
   SelectContentProps,
+  SelectItemData,
   SelectItemProps,
   SelectItemState,
   SelectProps,

@@ -1003,6 +1003,7 @@ const ChipSelect = defineComponent({
   props: {
     value: { type: String, required: true },
     onChange: { type: Function as PropType<(next: string) => void>, required: true },
+    items: { type: Array as PropType<{ value: string; label: string }[]>, required: true },
     icon: { type: String as PropType<IconName>, required: true },
     label: { type: String, required: true },
     caret: { type: Boolean, default: true },
@@ -1012,7 +1013,7 @@ const ChipSelect = defineComponent({
   },
   setup(props, { slots }) {
     return () => (
-      <Select value={props.value} onValueChange={props.onChange} style={{ flexShrink: 0 }}>
+      <Select items={props.items} value={props.value} onValueChange={props.onChange} style={{ flexShrink: 0 }}>
         <div style={{ position: 'relative', display: 'flex' }}>
           <SelectTrigger
             testId={props.testId}
@@ -1064,6 +1065,7 @@ const ModelPicker = defineComponent({
       <ChipSelect
         value={props.value}
         onChange={props.onChange}
+        items={MODELS.map((model) => ({ value: model.id, label: model.label }))}
         icon={selected.value.icon}
         label={selected.value.label}
         testId="model-picker-trigger"
@@ -1085,7 +1087,7 @@ const ModelPicker = defineComponent({
               <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</text>
             </SelectLabel>
             {group.items.map((model) => (
-              <SelectItem key={model.id} value={model.id} textValue={model.label}>
+              <SelectItem key={model.id} value={model.id}>
                 {(state: SelectItemState) => (
                   <MenuRow
                     label={model.label}
@@ -1114,6 +1116,7 @@ const ReasoningPicker = defineComponent({
       <ChipSelect
         value={props.value}
         onChange={props.onChange}
+        items={REASONING.map((option) => ({ value: option.id, label: option.label }))}
         icon={props.value === 'low' ? 'zap' : 'sparkle'}
         label={selected.value.label}
         caret={false}
@@ -1129,7 +1132,7 @@ const ReasoningPicker = defineComponent({
           <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</text>
         </SelectLabel>
         {REASONING.map((option) => (
-          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+          <SelectItem key={option.id} value={option.id}>
             {(state: SelectItemState) => (
               <MenuRow
                 label={option.label}
@@ -1156,13 +1159,14 @@ const AccessPicker = defineComponent({
       <ChipSelect
         value={props.value}
         onChange={props.onChange}
+        items={ACCESS.map((option) => ({ value: option.id, label: option.label }))}
         icon={selected.value.icon}
         label={selected.value.label}
         caret={false}
         menuWidth={288}
       >
         {ACCESS.map((option) => (
-          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+          <SelectItem key={option.id} value={option.id}>
             {(state: SelectItemState) => (
               <MenuRow
                 label={option.label}
@@ -1190,12 +1194,13 @@ const ProjectPicker = defineComponent({
       <ChipSelect
         value={props.value}
         onChange={props.onChange}
+        items={PROJECTS.map((option) => ({ value: option.id, label: option.label }))}
         icon="folder"
         label={selected.value.label}
         caret={false}
       >
         {PROJECTS.map((option) => (
-          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+          <SelectItem key={option.id} value={option.id}>
             {(state: SelectItemState) => (
               <MenuRow
                 label={option.label}
@@ -1222,6 +1227,7 @@ const WorkspacePicker = defineComponent({
       <ChipSelect
         value={props.value}
         onChange={props.onChange}
+        items={WORKSPACES.map((option) => ({ value: option.id, label: option.label }))}
         icon={selected.value.icon}
         label={selected.value.label}
         caret={false}
@@ -1237,7 +1243,7 @@ const WorkspacePicker = defineComponent({
           <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</text>
         </SelectLabel>
         {WORKSPACES.map((option) => (
-          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+          <SelectItem key={option.id} value={option.id}>
             {(state: SelectItemState) => (
               <MenuRow
                 label={option.label}
@@ -1261,9 +1267,15 @@ const BranchPicker = defineComponent({
   setup(props) {
     const selected = computed(() => BRANCHES.find((option) => option.id === props.value) ?? BRANCHES[0])
     return () => (
-      <ChipSelect value={props.value} onChange={props.onChange} icon="gitBranch" label={selected.value.label}>
+      <ChipSelect
+        value={props.value}
+        onChange={props.onChange}
+        items={BRANCHES.map((option) => ({ value: option.id, label: option.label }))}
+        icon="gitBranch"
+        label={selected.value.label}
+      >
         {BRANCHES.map((option) => (
-          <SelectItem key={option.id} value={option.id} textValue={option.label}>
+          <SelectItem key={option.id} value={option.id}>
             {(state: SelectItemState) => (
               <MenuRow
                 label={option.label}

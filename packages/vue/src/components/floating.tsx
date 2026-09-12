@@ -70,6 +70,11 @@ export interface FloatingContentProps {
  * AGENTS.md).
  */
 export const FloatingLayer = defineComponent({
+  // Attrs are spread onto the inner content div by hand. Without this, Vue's
+  // automatic fallthrough would also apply them to the `anchored` root —
+  // duplicating tabIndex/autoFocus onto an element whose supported_events do
+  // not include keyDown, and racing the content div for popup focus.
+  inheritAttrs: false,
   props: {
     side: { type: String, default: "bottom" },
     sideOffset: { type: Number, default: 0 },
