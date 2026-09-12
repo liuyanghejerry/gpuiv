@@ -506,6 +506,13 @@ Constraints:
 - A statement tail the injected registration cannot follow — `as T`,
   `satisfies T`, `, B = …`, a ternary — leaves that file on the classic
   remount instead of emitting a module that cannot parse.
+- Bun 1.3.x does not watch files a plugin served through `onLoad`
+  ([oven-sh/bun#4689](https://github.com/oven-sh/bun/issues/4689), the open
+  `watchFiles`/`watchDirs` gap), and the preload serves every matched
+  `.ts`/`.tsx`. A save only re-evaluates when the edited file is the entry —
+  the one file Bun always watches — or a file the preload does not match (a
+  `.json` import). Saving another component module is a no-op; save the
+  entry to pick the edit up, or restart.
 - Production builds are unaffected: `Bun.build` does not run the preload,
   and the injected calls no-op without Vue's dev HMR runtime.
 

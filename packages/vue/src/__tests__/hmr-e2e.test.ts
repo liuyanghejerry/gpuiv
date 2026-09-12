@@ -39,8 +39,9 @@ plugin({
 /** `theme` is a component-less sibling module: the entry imports it, and the
  *  preload filter matches it, so it exercises the onLoad return contract that
  *  used to abort the child at startup. `asset` is a JSON sibling — a save
- *  that changes no component, i.e. the classic-remount trigger (bun --hot
- *  does not re-evaluate a change in a module the preload loaded). */
+ *  that changes no component, i.e. the classic-remount trigger. Bun does not
+ *  watch a module the preload served (oven-sh/bun#4689), which is also why no
+ *  test edits an imported component module: such a save is a no-op. */
 function entrySource(
   label: string,
   options: { theme?: boolean; asset?: boolean; clickThrough?: number } = {}

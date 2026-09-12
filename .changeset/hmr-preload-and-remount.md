@@ -17,3 +17,9 @@ component save reloads instead of being silently dropped.
 The source transform no longer emits a module that cannot parse when a
 `defineComponent(...)` statement has a tail it cannot follow (`as T`,
 `satisfies T`, a comma, a ternary); that file keeps the classic remount.
+
+One Bun caveat applies to Fast Refresh in multi-file apps: a file the preload
+served is not watched by `bun --hot`, so a save only re-evaluates when the
+edited file is the entry or one the preload does not match (a `.json`
+import). Saving any other module is a no-op until this Bun gap closes
+([oven-sh/bun#4689](https://github.com/oven-sh/bun/issues/4689)).
