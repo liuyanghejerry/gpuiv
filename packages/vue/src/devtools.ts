@@ -11,10 +11,13 @@
  * Two Bun environment mismatches must be shimmed before connecting, and both
  * are load-bearing:
  *
- * - `@vue/devtools-shared` decides "browser" from `typeof navigator`, which
- *   Bun defines. Its electron user-app then calls `window.addEventListener`
- *   and touches `document` — both absent in Bun — so the shims make those
- *   calls harmless no-ops.
+ * - Bun has no `window`, `document` or `location` — `navigator`, `self`,
+ *   `addEventListener` and `removeEventListener` it does define, so those
+ *   shims are for other runtimes. `@vue/devtools-shared` decides "browser"
+ *   from `typeof navigator` (true on Bun), and the user-app (8.2.1) then
+ *   reads `window.location.origin` and builds DOM nodes with
+ *   `document.createElement` / `querySelectorAll` / `createRange` — the
+ *   stubs turn those calls into no-ops instead of TypeErrors.
  *
  * - The same package computes its global `target` as
  *   `typeof window !== "undefined" ? window : globalThis`. If `window` were
@@ -22,7 +25,8 @@
  *   would never see it. `window` therefore must BE globalThis.
  */
 
-interface DevtoolsConnectOptions {
+/** Options for `connectVueDevtools`. */
+export interface DevtoolsConnectOptions {
   /** Devtools middleware server host. Default "http://localhost". */
   host?: string
   /** Devtools middleware server port. Default 8098 (`PORT` env on the
@@ -32,20 +36,35 @@ interface DevtoolsConnectOptions {
 
 const CONNECTED_KEY = "__gpuivDevtoolsConnected"
 
-/** Install the window/document shims exactly once. Exported for tests. */
-export function installDevtoolsShims(): void {
+/**
+ * Install the window/document shims exactly once. Returns the global keys
+ * this call installed (empty on a repeat call) so a connect that fails can
+ * undo exactly those. Exported for tests.
+ */
+export function installDevtoolsShims(): string[] {
   const g = globalThis as Record<string, unknown>
-  g.addEventListener ??= () => {}
-  g.removeEventListener ??= () => {}
-  g.location ??= { origin: "" }
-  g.window ??= g
-  g.document ??= {
+  const installed: string[] = []
+  const shim = (key: string, value: unknown): void => {
+    if (g[key] !== undefined) return
+    g[key] = value
+    installed.push(key)
+  }
+  shim("addEventListener", () => {})
+  shim("removeEventListener", () => {})
+  shim("location", { origin: "" })
+  shim("window", g)
+  shim("document", {
+    // The stub the devtools overlays and `scrollToComponent` build with:
+    // the latter appends a positioned div to document.body and calls
+    // scrollIntoView on it when the component's root has none (always true
+    // for a GPUIV host node).
     createElement: () => ({
       style: {},
       id: "",
       innerHTML: "",
       appendChild() {},
       removeChild() {},
+      scrollIntoView() {},
     }),
     createRange: () => ({
       selectNode() {},
@@ -61,7 +80,14 @@ export function installDevtoolsShims(): void {
     getElementById: () => null,
     querySelectorAll: () => [],
     body: { appendChild() {}, removeChild() {} },
-  }
+  })
+  return installed
+}
+
+/** Undo `installDevtoolsShims`, and only what it installed. */
+function removeDevtoolsShims(installed: string[]): void {
+  const g = globalThis as Record<string, unknown>
+  for (const key of installed) delete g[key]
 }
 
 /**
@@ -69,27 +95,42 @@ export function installDevtoolsShims(): void {
  * (`bun x vue-devtools`). Call BEFORE createApp so the hook is installed in
  * time; the component tree and component state then appear in the devtools
  * UI. Safe to call again after a `bun --hot` reload — the second call is a
- * no-op. Returns false with a warning when `@vue/devtools` is not installed.
+ * no-op. Returns false with a warning when `@vue/devtools` is not installed
+ * or the client cannot start, in which case the shims are rolled back and
+ * the process is left as it was.
  */
 export async function connectVueDevtools(options: DevtoolsConnectOptions = {}): Promise<boolean> {
   const g = globalThis as Record<string, unknown>
   if (g[CONNECTED_KEY]) return true
-  installDevtoolsShims()
+  const shimmed = installDevtoolsShims()
   let devtools: { connect: (host?: string, port?: number) => unknown }
   try {
     ;({ devtools } = (await import("@vue/devtools")) as unknown as {
       devtools: { connect: (host?: string, port?: number) => unknown }
     })
   } catch {
+    removeDevtoolsShims(shimmed)
     console.warn(
       "[gpuiv] connectVueDevtools: @vue/devtools is not installed. " +
         "Add it as a dev dependency and start the server with `bun x vue-devtools`.",
     )
     return false
   }
+  try {
+    // Upstream's connect() is async but its body runs synchronously: it
+    // installs the hook (and needs the shims for that) before starting the
+    // user-app bundle in a floating dynamic import. Awaiting it therefore
+    // keeps the "call before createApp" contract, and turns a connect
+    // failure (a shim gap, a dropped named export) into this warning instead
+    // of an unhandled rejection. The runtime treats null as "no port in the
+    // URL" (proxy setups) even though the published types only admit
+    // number|undefined.
+    await devtools.connect(options.host, options.port as number | undefined)
+  } catch (error) {
+    removeDevtoolsShims(shimmed)
+    console.warn("[gpuiv] connectVueDevtools: could not start the devtools client.", error)
+    return false
+  }
   g[CONNECTED_KEY] = true
-  // The runtime treats null as "no port in the URL" (proxy setups) even
-  // though the published types only admit number|undefined.
-  devtools.connect(options.host, options.port as number | undefined)
   return true
 }

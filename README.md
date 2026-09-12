@@ -2344,12 +2344,14 @@ open-in-editor) stay inert.
    `connectVueDevtools({ host, port })` defaults to `http://localhost:8098`
    (the `PORT` env of the `vue-devtools` CLI). It is safe under `bun --hot` —
    repeated calls after a reload no-op — and returns `false` with a console
-   hint when `@vue/devtools` is not installed. `examples/chat.tsx` wires it
-   behind `GPUIV_DEVTOOLS=1`.
+   hint when `@vue/devtools` is not installed or the client cannot start.
+   `examples/chat.tsx` wires it behind `GPUIV_DEVTOOLS=1`.
 
 Because there is no browser, the integration shims `window`/`document` for
 the devtools client before connecting (`window` **is** globalThis, so the
 devtools hook lands where Vue reads it; the DOM-only calls become no-ops).
+They exist only for that client: a connect that fails removes them again, so
+the rest of the process never sees a browser that is not there.
 
 ## Packaging
 
