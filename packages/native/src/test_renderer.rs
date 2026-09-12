@@ -11,10 +11,12 @@
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 
 use gpui::AppContext as _;
@@ -23,9 +25,18 @@ use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
     parse_debug_frame_overlay_mode, parse_dirty_rect, to_element_id, DebugFrameOverlayStats,
-    EventCallback, GpuixView, decode_clipboard_image, encode_rgba_png,
+    EventCallback, GpuixView, NewPathPromptOutcome, PathPromptOptionsDesc, PathPromptOutcome,
+    decode_clipboard_image, encode_rgba_png,
 };
 use crate::retained_tree::RetainedTree;
+
+/// The request the last test `promptForNewPath` call received.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct NewPathPromptRequest {
+    pub directory: String,
+    pub suggested_name: Option<String>,
+}
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
@@ -183,6 +194,13 @@ pub struct TestGpuixRenderer {
     selection: crate::text::SharedSelection,
     /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
     canvas_surfaces: crate::canvas::CanvasStore,
+    /// Canned answers for `promptForPaths`: each call pops one; an empty
+    /// queue answers "cancelled". The real platform queue behind GPUI's test
+    /// platform is `pub(crate)`, so the bridge keeps its own.
+    path_prompt_answers: RefCell<VecDeque<Option<Vec<String>>>>,
+    last_path_prompt_options: RefCell<Option<crate::renderer::PathPromptOptionsDesc>>,
+    new_path_prompt_answers: RefCell<VecDeque<Option<String>>>,
+    last_new_path_prompt: RefCell<Option<(String, Option<String>)>>,
 }
 
 #[napi]
@@ -264,6 +282,10 @@ impl TestGpuixRenderer {
             events,
             selection,
             canvas_surfaces,
+            path_prompt_answers: RefCell::new(Default::default()),
+            last_path_prompt_options: RefCell::new(None),
+            new_path_prompt_answers: RefCell::new(Default::default()),
+            last_new_path_prompt: RefCell::new(None),
         })
     }
 
@@ -425,6 +447,79 @@ impl TestGpuixRenderer {
             cx.run_until_parked();
             Ok(())
         })
+    }
+
+    // ── File dialogs (canned) ────────────────────────────────────────
+
+    /// Test stand-in for the production `promptForPaths`: records the options
+    /// and answers with the queued response, or "cancelled" when the queue is
+    /// empty. GPUI's test platform keeps its prompt queue `pub(crate)`, so the
+    /// bridge cannot drive the real one.
+    #[napi]
+    pub fn prompt_for_paths(
+        &self,
+        options: PathPromptOptionsDesc,
+        callback: ThreadsafeFunction<PathPromptOutcome>,
+    ) -> Result<()> {
+        *self.last_path_prompt_options.borrow_mut() = Some(options);
+        let paths = self.path_prompt_answers.borrow_mut().pop_front().flatten();
+        callback.call(
+            Ok(PathPromptOutcome { paths }),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+        Ok(())
+    }
+
+    /// Queue the next answer for `promptForPaths`; `null` means cancelled.
+    #[napi]
+    pub fn set_next_path_prompt_response(&self, paths: Option<Vec<String>>) {
+        self.path_prompt_answers.borrow_mut().push_back(paths);
+    }
+
+    /// The options the last `promptForPaths` call received.
+    #[napi]
+    pub fn get_last_path_prompt_options(&self) -> Option<PathPromptOptionsDesc> {
+        self.last_path_prompt_options.borrow().clone()
+    }
+
+    /// Test stand-in for the production `promptForNewPath`.
+    #[napi]
+    pub fn prompt_for_new_path(
+        &self,
+        directory: Option<String>,
+        suggested_name: Option<String>,
+        callback: ThreadsafeFunction<NewPathPromptOutcome>,
+    ) -> Result<()> {
+        let directory = directory.unwrap_or_else(|| ".".into());
+        *self.last_new_path_prompt.borrow_mut() = Some((directory.clone(), suggested_name));
+        let path = self
+            .new_path_prompt_answers
+            .borrow_mut()
+            .pop_front()
+            .flatten();
+        callback.call(
+            Ok(NewPathPromptOutcome { path }),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+        Ok(())
+    }
+
+    /// Queue the next answer for `promptForNewPath`; `null` means cancelled.
+    #[napi]
+    pub fn set_next_new_path_response(&self, path: Option<String>) {
+        self.new_path_prompt_answers.borrow_mut().push_back(path);
+    }
+
+    /// The request the last `promptForNewPath` call received.
+    #[napi]
+    pub fn get_last_new_path_prompt(&self) -> Option<NewPathPromptRequest> {
+        self.last_new_path_prompt
+            .borrow()
+            .clone()
+            .map(|(directory, suggested_name)| NewPathPromptRequest {
+                directory,
+                suggested_name,
+            })
     }
 
     // ── Test-specific methods ────────────────────────────────────────

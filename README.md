@@ -322,6 +322,46 @@ id, and one event map, so mounting a second root on a renderer that already has
 one throws. `createApp()` unmounts the previous tree before remounting, so only
 code that builds its own host with `createGpuivRendererHost()` can hit this.
 
+## File dialogs
+
+`promptForPaths` opens the platform's file-selection panel and
+`promptForNewPath` the save panel. Both resolve with `null` when the user
+cancels — the DOM's `showOpenFilePicker()` shape, not a modal return value.
+
+```tsx
+import { promptForNewPath, promptForPaths, useGpuixRequired } from '@gpuiv/vue'
+
+function Toolbar() {
+  const renderer = useGpuixRequired()
+  const open = async () => {
+    const paths = await promptForPaths(renderer, {
+      files: true,
+      directories: false,
+      multiple: true,
+      prompt: 'Open drawings',
+    })
+    if (paths) console.log(paths)
+  }
+  const saveAs = async () => {
+    const path = await promptForNewPath(renderer, {
+      directory: '/tmp',
+      suggestedName: 'drawing.png',
+    })
+    if (path) console.log(path)
+  }
+  return (
+    <div>
+      <div testId="open" onClick={open}>Open…</div>
+      <div testId="save" onClick={saveAs}>Save as…</div>
+    </div>
+  )
+}
+```
+
+`promptForNewPath` defaults `directory` to the process working directory. The
+panels run asynchronously — the dialog answer arrives through a callback on the
+Node event loop, so nothing blocks while the panel is open.
+
 ## Clipboard images
 
 `writeClipboardImage(data, width, height)` puts straight-alpha RGBA pixels on
@@ -2600,6 +2640,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
+- [x] File dialogs (`promptForPaths`, `promptForNewPath`)
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)

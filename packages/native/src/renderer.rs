@@ -471,6 +471,15 @@ enum UiCommand {
     ReadClipboardImage {
         response: SyncSender<Option<Vec<u8>>>,
     },
+    PromptForPaths {
+        options: PathPromptOptionsDesc,
+        callback: ThreadsafeFunction<PathPromptOutcome>,
+    },
+    PromptForNewPath {
+        directory: String,
+        suggested_name: Option<String>,
+        callback: ThreadsafeFunction<NewPathPromptOutcome>,
+    },
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -482,6 +491,58 @@ fn refresh_ui_window(
         cx.notify();
         window.refresh();
     })
+}
+
+/// File dialogs answer through a oneshot channel only after the user closes
+/// them, so the napi call must not block on the answer. Await it on a
+/// background thread and hand the outcome to the JS callback from there.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn resolve_path_prompt(
+    cx: &gpui::App,
+    receiver: futures::channel::oneshot::Receiver<anyhow::Result<Option<Vec<std::path::PathBuf>>>>,
+    callback: ThreadsafeFunction<PathPromptOutcome>,
+) {
+    cx.background_executor()
+        .spawn(async move {
+            let outcome = match receiver.await {
+                Ok(Ok(paths)) => Ok(PathPromptOutcome {
+                    paths: paths.map(|paths| {
+                        paths
+                            .iter()
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .collect()
+                    }),
+                }),
+                Ok(Err(error)) => Err(Error::from_reason(format!("{error:#}"))),
+                Err(_) => Err(Error::from_reason(
+                    "the file dialog was closed without an answer",
+                )),
+            };
+            callback.call(outcome, ThreadsafeFunctionCallMode::NonBlocking);
+        })
+        .detach();
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn resolve_new_path_prompt(
+    cx: &gpui::App,
+    receiver: futures::channel::oneshot::Receiver<anyhow::Result<Option<std::path::PathBuf>>>,
+    callback: ThreadsafeFunction<NewPathPromptOutcome>,
+) {
+    cx.background_executor()
+        .spawn(async move {
+            let outcome = match receiver.await {
+                Ok(Ok(path)) => Ok(NewPathPromptOutcome {
+                    path: path.map(|path| path.to_string_lossy().into_owned()),
+                }),
+                Ok(Err(error)) => Err(Error::from_reason(format!("{error:#}"))),
+                Err(_) => Err(Error::from_reason(
+                    "the file dialog was closed without an answer",
+                )),
+            };
+            callback.call(outcome, ThreadsafeFunctionCallMode::NonBlocking);
+        })
+        .detach();
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -827,6 +888,19 @@ async fn run_ui_commands(
                     response.send(png);
                 })
             }
+            UiCommand::PromptForPaths { options, callback } => window.update(cx, move |_view, _window, cx| {
+                let receiver = cx.prompt_for_paths(options.to_gpui());
+                resolve_path_prompt(cx, receiver, callback);
+            }),
+            UiCommand::PromptForNewPath {
+                directory,
+                suggested_name,
+                callback,
+            } => window.update(cx, move |_view, _window, cx| {
+                let receiver =
+                    cx.prompt_for_new_path(std::path::Path::new(&directory), suggested_name.as_deref());
+                resolve_new_path_prompt(cx, receiver, callback);
+            }),
         };
         if let Err(error) = result {
             // The last window can close mid-command; logging `window not found`
@@ -1703,6 +1777,45 @@ impl GpuixRenderer {
         }
     }
 
+    /// Open the platform's file-selection dialog. The callback receives
+    /// `(error, outcome)`; `outcome.paths` is `null` when the user cancelled.
+    #[napi]
+    pub fn prompt_for_paths(
+        &self,
+        options: PathPromptOptionsDesc,
+        callback: ThreadsafeFunction<PathPromptOutcome>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                let receiver = cx.prompt_for_paths(options.to_gpui());
+                resolve_path_prompt(cx, receiver, callback);
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::PromptForPaths { options, callback });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = options;
+            let _ = callback;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
     /// Read an image from the clipboard, decoded to straight-alpha RGBA.
     /// Returns null when the clipboard holds no image.
     #[napi]
@@ -1736,6 +1849,54 @@ impl GpuixRenderer {
         Err(Error::from_reason(
             "The production GPUIX renderer does not support this operating system",
         ))
+    }
+
+    /// Open the platform's save dialog starting in `directory` (defaults to
+    /// the process working directory). The callback receives `(error,
+    /// outcome)`; `outcome.path` is `null` when the user cancelled.
+    #[napi]
+    pub fn prompt_for_new_path(
+        &self,
+        directory: Option<String>,
+        suggested_name: Option<String>,
+        callback: ThreadsafeFunction<NewPathPromptOutcome>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                let directory = directory.unwrap_or_else(|| ".".into());
+                let receiver =
+                    cx.prompt_for_new_path(std::path::Path::new(&directory), suggested_name.as_deref());
+                resolve_new_path_prompt(cx, receiver, callback);
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::PromptForNewPath {
+            directory: directory.unwrap_or_else(|| ".".into()),
+            suggested_name,
+            callback,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = directory;
+            let _ = suggested_name;
+            let _ = callback;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
     }
 
     #[napi]
@@ -6059,6 +6220,44 @@ pub struct ClipboardImage {
     pub data: Buffer,
     pub width: u32,
     pub height: u32,
+}
+
+/// Options for the platform file-selection dialog (`promptForPaths`).
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct PathPromptOptionsDesc {
+    pub files: bool,
+    pub directories: bool,
+    pub multiple: bool,
+    pub prompt: Option<String>,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+impl PathPromptOptionsDesc {
+    fn to_gpui(&self) -> gpui::PathPromptOptions {
+        gpui::PathPromptOptions {
+            files: self.files,
+            directories: self.directories,
+            multiple: self.multiple,
+            prompt: self.prompt.as_deref().map(gpui::SharedString::from),
+        }
+    }
+}
+
+/// Outcome of `promptForPaths` — `paths` is `null` when the dialog was
+/// cancelled.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct PathPromptOutcome {
+    pub paths: Option<Vec<String>>,
+}
+
+/// Outcome of `promptForNewPath` — `path` is `null` when the dialog was
+/// cancelled.
+#[derive(Debug, Clone)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct NewPathPromptOutcome {
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
