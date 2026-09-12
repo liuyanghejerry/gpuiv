@@ -11,10 +11,12 @@
 /// VisualTestAppContext is !Send, so it is stored in thread-local state.
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{ThreadsafeFunction, ThreadsafeFunctionCallMode};
 use napi_derive::napi;
 
 use gpui::AppContext as _;
@@ -23,9 +25,18 @@ use crate::element_tree::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
     parse_debug_frame_overlay_mode, parse_dirty_rect, to_element_id, DebugFrameOverlayStats,
-    EventCallback, GpuixView,
+    EventCallback, GpuixView, NewPathPromptOutcome, PathPromptOptionsDesc, PathPromptOutcome,
+    decode_clipboard_image, encode_rgba_png,
 };
 use crate::retained_tree::RetainedTree;
+
+/// The request the last test `promptForNewPath` call received.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct NewPathPromptRequest {
+    pub directory: String,
+    pub suggested_name: Option<String>,
+}
 
 // ── Thread-local storage for !Send GPUI types ────────────────────────
 
@@ -183,6 +194,22 @@ pub struct TestGpuixRenderer {
     selection: crate::text::SharedSelection,
     /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
     canvas_surfaces: crate::canvas::CanvasStore,
+    /// Window-control requests the bridge records instead of driving: the
+    /// offscreen platform window applies fullscreen through async AppKit
+    /// animation and does not implement minimize.
+    fullscreen: RefCell<bool>,
+    minimize_calls: RefCell<usize>,
+    /// The last URL handed to `openUrl`. The test platform records its own
+    /// copy where the bridge cannot read it (`pub(crate)`), so tests assert
+    /// here.
+    last_opened_url: RefCell<Option<String>>,
+    /// Canned answers for `promptForPaths`: each call pops one; an empty
+    /// queue answers "cancelled". The real platform queue behind GPUI's test
+    /// platform is `pub(crate)`, so the bridge keeps its own.
+    path_prompt_answers: RefCell<VecDeque<Option<Vec<String>>>>,
+    last_path_prompt_options: RefCell<Option<crate::renderer::PathPromptOptionsDesc>>,
+    new_path_prompt_answers: RefCell<VecDeque<Option<String>>>,
+    last_new_path_prompt: RefCell<Option<(String, Option<String>)>>,
 }
 
 #[napi]
@@ -264,6 +291,13 @@ impl TestGpuixRenderer {
             events,
             selection,
             canvas_surfaces,
+            fullscreen: RefCell::new(false),
+            minimize_calls: RefCell::new(0),
+            last_opened_url: RefCell::new(None),
+            path_prompt_answers: RefCell::new(Default::default()),
+            last_path_prompt_options: RefCell::new(None),
+            new_path_prompt_answers: RefCell::new(Default::default()),
+            last_new_path_prompt: RefCell::new(None),
         })
     }
 
@@ -440,7 +474,158 @@ impl TestGpuixRenderer {
         })
     }
 
+    // ── File dialogs (canned) ────────────────────────────────────────
+
+    /// Test stand-in for the production `promptForPaths`: records the options
+    /// and answers with the queued response, or "cancelled" when the queue is
+    /// empty. GPUI's test platform keeps its prompt queue `pub(crate)`, so the
+    /// bridge cannot drive the real one.
+    #[napi]
+    pub fn prompt_for_paths(
+        &self,
+        options: PathPromptOptionsDesc,
+        callback: ThreadsafeFunction<PathPromptOutcome>,
+    ) -> Result<()> {
+        *self.last_path_prompt_options.borrow_mut() = Some(options);
+        let paths = self.path_prompt_answers.borrow_mut().pop_front().flatten();
+        callback.call(
+            Ok(PathPromptOutcome { paths }),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+        Ok(())
+    }
+
+    /// Queue the next answer for `promptForPaths`; `null` means cancelled.
+    #[napi]
+    pub fn set_next_path_prompt_response(&self, paths: Option<Vec<String>>) {
+        self.path_prompt_answers.borrow_mut().push_back(paths);
+    }
+
+    /// The options the last `promptForPaths` call received.
+    #[napi]
+    pub fn get_last_path_prompt_options(&self) -> Option<PathPromptOptionsDesc> {
+        self.last_path_prompt_options.borrow().clone()
+    }
+
+    /// Test stand-in for the production `promptForNewPath`.
+    #[napi]
+    pub fn prompt_for_new_path(
+        &self,
+        directory: Option<String>,
+        suggested_name: Option<String>,
+        callback: ThreadsafeFunction<NewPathPromptOutcome>,
+    ) -> Result<()> {
+        let directory = directory.unwrap_or_else(|| ".".into());
+        *self.last_new_path_prompt.borrow_mut() = Some((directory.clone(), suggested_name));
+        let path = self
+            .new_path_prompt_answers
+            .borrow_mut()
+            .pop_front()
+            .flatten();
+        callback.call(
+            Ok(NewPathPromptOutcome { path }),
+            ThreadsafeFunctionCallMode::NonBlocking,
+        );
+        Ok(())
+    }
+
+    /// Queue the next answer for `promptForNewPath`; `null` means cancelled.
+    #[napi]
+    pub fn set_next_new_path_response(&self, path: Option<String>) {
+        self.new_path_prompt_answers.borrow_mut().push_back(path);
+    }
+
+    /// The request the last `promptForNewPath` call received.
+    #[napi]
+    pub fn get_last_new_path_prompt(&self) -> Option<NewPathPromptRequest> {
+        self.last_new_path_prompt
+            .borrow()
+            .clone()
+            .map(|(directory, suggested_name)| NewPathPromptRequest {
+                directory,
+                suggested_name,
+            })
+    }
+
     // ── Test-specific methods ────────────────────────────────────────
+
+    /// Toggle the window's fullscreen state. The test window is a real
+    /// offscreen platform window whose fullscreen transition runs through
+    /// async AppKit animation, so the bridge tracks the requested parity
+    /// instead of reading it back.
+    #[napi]
+    pub fn toggle_fullscreen(&self) -> Result<()> {
+        let mut fullscreen = self.fullscreen.borrow_mut();
+        *fullscreen = !*fullscreen;
+        drop(fullscreen);
+        Ok(())
+    }
+
+    /// The fullscreen parity `toggleFullscreen` has requested so far.
+    #[napi]
+    pub fn is_fullscreen(&self) -> Result<bool> {
+        Ok(*self.fullscreen.borrow())
+    }
+
+    /// Record a minimize request — the real TestWindow path would run the
+    /// platform `minimize`, which the test window does not implement.
+    #[napi]
+    pub fn minimize_window(&self) -> Result<()> {
+        *self.minimize_calls.borrow_mut() += 1;
+        Ok(())
+    }
+
+    /// How many times `minimizeWindow` was called.
+    #[napi]
+    pub fn get_minimize_calls(&self) -> u32 {
+        *self.minimize_calls.borrow() as u32
+    }
+
+    /// Record the URL; the platform's own recorder is not reachable from
+    /// the bridge, so `getLastOpenedUrl` reads this instead.
+    #[napi]
+    pub fn open_url(&self, url: String) -> Result<()> {
+        *self.last_opened_url.borrow_mut() = Some(url);
+        Ok(())
+    }
+
+    /// The last URL handed to `openUrl`.
+    #[napi]
+    pub fn get_last_opened_url(&self) -> Option<String> {
+        self.last_opened_url.borrow().clone()
+    }
+
+    /// Put a straight-alpha RGBA image on the platform's in-memory test
+    /// clipboard, mirroring the production encoder path.
+    #[napi]
+    pub fn write_clipboard_image(&self, data: Buffer, width: u32, height: u32) -> Result<()> {
+        let png = encode_rgba_png(&data, width, height)?;
+        with_test_state(|cx, _window, _view| {
+            cx.update(|cx| {
+                let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, png);
+                cx.write_to_clipboard(gpui::ClipboardItem::new_image(&image));
+            });
+            Ok(())
+        })
+    }
+
+    /// Read an image from the test clipboard, decoded to RGBA. The round
+    /// trip through the real `ClipboardItem::Image` entry is the point:
+    /// production reads whatever bytes the platform stored.
+    #[napi]
+    pub fn read_clipboard_image(&self) -> Result<Option<crate::renderer::ClipboardImage>> {
+        let png = with_test_state(|cx, _window, _view| {
+            Ok(cx.update(|cx| {
+                cx.read_from_clipboard().and_then(|item| {
+                    item.entries.into_iter().find_map(|entry| match entry {
+                        gpui::ClipboardEntry::Image(image) => Some(image.bytes),
+                        _ => None,
+                    })
+                })
+            }))
+        })?;
+        decode_clipboard_image(png)
+    }
 
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.

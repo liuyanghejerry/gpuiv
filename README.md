@@ -322,6 +322,95 @@ id, and one event map, so mounting a second root on a renderer that already has
 one throws. `createApp()` unmounts the previous tree before remounting, so only
 code that builds its own host with `createGpuivRendererHost()` can hit this.
 
+## Window controls
+
+`toggleFullscreen()`, `isFullscreen()`, and `minimizeWindow()` drive the
+window at runtime — the same commands the traffic-light and taskbar chrome
+use. They are renderer commands (`useGpuixRequired()` reaches them):
+
+```tsx
+const renderer = useGpuixRequired()
+<div onClick={() => renderer.toggleFullscreen?.()}>Fullscreen</div>
+```
+
+`minimizeWindow()` complements the built-in `⌘M` menu item for custom
+chrome. Resizing by edge drag and window zoom are not exposed yet.
+
+## Opening URLs
+
+`openUrl(url)` hands a URL to the user's default handler — the system browser
+for `https://`, the registered app for custom schemes. It is a renderer
+command (`useGpuixRequired()` reaches it), for links that must leave the app
+such as OAuth callbacks or payment pages.
+
+```tsx
+const renderer = useGpuixRequired()
+<div onClick={() => renderer.openUrl?.('https://gpuiv.dev/docs')}>Docs</div>
+```
+
+## File dialogs
+
+`promptForPaths` opens the platform's file-selection panel and
+`promptForNewPath` the save panel. Both resolve with `null` when the user
+cancels — the DOM's `showOpenFilePicker()` shape, not a modal return value.
+
+```tsx
+import { promptForNewPath, promptForPaths, useGpuixRequired } from '@gpuiv/vue'
+
+function Toolbar() {
+  const renderer = useGpuixRequired()
+  const open = async () => {
+    const paths = await promptForPaths(renderer, {
+      files: true,
+      directories: false,
+      multiple: true,
+      prompt: 'Open drawings',
+    })
+    if (paths) console.log(paths)
+  }
+  const saveAs = async () => {
+    const path = await promptForNewPath(renderer, {
+      directory: '/tmp',
+      suggestedName: 'drawing.png',
+    })
+    if (path) console.log(path)
+  }
+  return (
+    <div>
+      <div testId="open" onClick={open}>Open…</div>
+      <div testId="save" onClick={saveAs}>Save as…</div>
+    </div>
+  )
+}
+```
+
+`promptForNewPath` defaults `directory` to the process working directory. The
+panels run asynchronously — the dialog answer arrives through a callback on the
+Node event loop, so nothing blocks while the panel is open.
+
+## Clipboard images
+
+`writeClipboardImage(data, width, height)` puts straight-alpha RGBA pixels on
+the system clipboard as PNG; `readClipboardImage()` reads an image back,
+decoded to the same RGBA layout, or `null` when the clipboard holds no image.
+Both are renderer commands — reach the renderer with `useGpuixRequired()`:
+
+```tsx
+import { useGpuixRequired } from '@gpuiv/vue'
+
+function CopyButton() {
+  const renderer = useGpuixRequired()
+  const copy = () => {
+    const rgba = new Uint8Array([255, 0, 0, 255])
+    renderer.writeClipboardImage?.(rgba, 1, 1)
+  }
+  return <div testId="copy" onClick={copy}>Copy pixel</div>
+}
+```
+
+The test platform keeps a real in-memory clipboard, so the round trip is
+testable end-to-end through `TestRenderer`.
+
 ## Debug frame overlay
 
 GPUI paints frame-time stats into the window after layout. The overlay is not
@@ -2594,6 +2683,10 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
+- [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`)
+- [x] File dialogs (`promptForPaths`, `promptForNewPath`)
+- [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
+- [x] Opening external URLs (`openUrl`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
