@@ -671,6 +671,12 @@ export class TestRenderer implements NativeRenderer {
     return this.native.readCanvasPixels?.(elementId) ?? null
   }
 
+  /** The last uploaded buffer as PNG bytes, or null before the first
+   *  upload — same store the production renderer reads. */
+  canvasToPng(elementId: number): Uint8Array | null {
+    return this.native.canvasToPng?.(elementId) ?? null
+  }
+
   toggleFullscreen(): void {
     this.native.toggleFullscreen?.()
   }

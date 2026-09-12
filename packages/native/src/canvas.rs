@@ -309,6 +309,25 @@ impl CanvasStore {
         Some(rgba)
     }
 
+    /// The stored buffer encoded as a PNG byte stream (None before the
+    /// first upload, like `read`). Encoding runs on the caller's thread —
+    /// the mirror is plain memory, no GPU state is touched.
+    pub fn to_png(&self, id: u64) -> Option<image::ImageResult<Vec<u8>>> {
+        let surfaces = self.surfaces.lock().unwrap();
+        let surface = surfaces.get(&id)?;
+        let mut rgba = surface.mirror.clone();
+        swap_red_blue(&mut rgba);
+        // The mirror is always width * height * 4 by construction; a None
+        // here would mean a corrupted surface, which reads as absent.
+        let image = image::RgbaImage::from_raw(surface.width, surface.height, rgba)?;
+        let mut png = Vec::new();
+        Some(
+            image
+                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+                .map(|()| png),
+        )
+    }
+
     /// The tile grid for `build_canvas`.
     pub(crate) fn snapshot(&self, id: u64) -> Option<CanvasSnapshot> {
         let surfaces = self.surfaces.lock().unwrap();
@@ -618,6 +637,18 @@ mod tests {
         store.upload_region(7, 2, 2, &RGBA, None).unwrap();
 
         assert_eq!(store.read(7).as_deref(), Some(RGBA.as_slice()));
+    }
+
+    #[test]
+    fn to_png_encodes_the_stored_surface() {
+        let store = CanvasStore::default();
+        assert!(store.to_png(7).is_none());
+        store.upload_region(7, 2, 2, &RGBA, None).unwrap();
+
+        let png = store.to_png(7).unwrap().unwrap();
+        let decoded = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(decoded.dimensions(), (2, 2));
+        assert_eq!(decoded.into_raw().as_slice(), RGBA.as_slice());
     }
 
     #[test]

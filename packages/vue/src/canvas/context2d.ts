@@ -20,9 +20,10 @@
  * (`fillText`/`strokeText`/`measureText` — they throw, glyph rasterization
  * is a separate project), the non-separable blend modes
  * (`hue`/`saturation`/`color`/`luminosity` as `globalCompositeOperation` —
- * assigning one throws), `toDataURL`/`toBlob`, shadows, `filter`,
+ * assigning one throws), shadows, `filter`,
  * `createPattern`, conic gradients, WebGL, and `HTMLImageElement` as a
- * `drawImage` source (JS never sees decoded `<img>` pixels).
+ * `drawImage` source (JS never sees decoded `<img>` pixels). PNG export
+ * lives on the canvas instance (`toDataURL`/`toBlob`), not the context.
  */
 
 import { GpuixCanvas2DCore } from "@gpuiv/native"

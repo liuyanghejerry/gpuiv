@@ -30,6 +30,15 @@ export interface GpuixCanvasInstance {
   /** The last uploaded buffer as RGBA, or null before the first upload.
    *  A store round-trip, not a GPU readback. */
   readPixels(): Uint8Array | null
+  /** The canvas as a `data:image/png;base64,…` URL, like the DOM method.
+   *  Only PNG is produced: any other `type` falls back to PNG, the DOM's
+   *  unsupported-type behavior. Returns null before the first upload —
+   *  unlike the DOM, which would encode a transparent bitmap. */
+  toDataURL(type?: string, quality?: unknown): string | null
+  /** The canvas as a PNG `Blob`, like the DOM method (called
+   *  synchronously rather than on a task). Any `type` other than PNG
+   *  still yields PNG. Calls back with null before the first upload. */
+  toBlob(callback: (blob: Blob | null) => void, type?: string, quality?: unknown): void
 }
 
 export const GpuixCanvas = defineComponent({
@@ -98,6 +107,44 @@ export const GpuixCanvas = defineComponent({
       return renderer.readCanvasPixels(requireId())
     }
 
+    function canvasToPng(): Uint8Array | null {
+      const renderer = gpuix.renderer
+      if (!renderer?.canvasToPng) {
+        throw new Error(
+          "GpuixCanvas.toDataURL()/toBlob() requires a renderer with canvasToPng support",
+        )
+      }
+      return renderer.canvasToPng(requireId())
+    }
+
+    function toDataURL(_type?: string, _quality?: unknown): string | null {
+      const png = canvasToPng()
+      if (png == null) return null
+      let binary = ""
+      // String.fromCharCode spreads cap out around 64k args; chunk so a
+      // multi-megabyte canvas cannot blow the stack.
+      const chunk = 0x8000
+      for (let offset = 0; offset < png.length; offset += chunk) {
+        binary += String.fromCharCode(...png.subarray(offset, offset + chunk))
+      }
+      return `data:image/png;base64,${btoa(binary)}`
+    }
+
+    function toBlob(
+      callback: (blob: Blob | null) => void,
+      _type?: string,
+      _quality?: unknown,
+    ): void {
+      const png = canvasToPng()
+      if (png == null) {
+        callback(null)
+        return
+      }
+      // The napi Buffer types as Uint8Array<ArrayBufferLike>, which is not a
+      // BlobPart; copy into a plain ArrayBuffer-backed view.
+      callback(new Blob([new Uint8Array(png)], { type: "image/png" }))
+    }
+
     // A DOM canvas resets its bitmap and state when its width or height is
     // set, even to the same value; we reset only on an actual change so a
     // reactive no-op does not wipe the drawing.
@@ -123,6 +170,8 @@ export const GpuixCanvas = defineComponent({
       getContext,
       uploadPixels,
       readPixels,
+      toDataURL,
+      toBlob,
     })
 
     return () =>

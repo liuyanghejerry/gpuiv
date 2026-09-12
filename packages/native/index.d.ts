@@ -125,6 +125,12 @@ export declare class GpuixRenderer {
   /** Read back the last uploaded buffer, converted back to RGBA. */
   readCanvasPixels(elementId: number): Buffer | null
   /**
+   * The last uploaded canvas buffer encoded as a PNG byte stream, or
+   * null before the first upload. This is the `toDataURL`/`toBlob`
+   * export path; encoding runs here, on the JS thread.
+   */
+  canvasToPng(elementId: number): Buffer | null
+  /**
    * Arm gpui pointer capture on the element from its next press on, like
    * `setPointerCapture` requested before the press: move and up keep
    * targeting the element after the pointer leaves its bounds. Capture
@@ -323,6 +329,11 @@ export declare class TestGpuixRenderer {
   canvasUploadedBytes(): number
   /** Read back the last uploaded buffer, converted to RGBA. */
   readCanvasPixels(elementId: number): Buffer | null
+  /**
+   * The last uploaded canvas buffer as PNG bytes, or null before the
+   * first upload — same store the production renderer reads.
+   */
+  canvasToPng(elementId: number): Buffer | null
   /** Arm gpui pointer capture on the element for its next press. */
   setPointerCapture(elementId: number): void
   /** Release any active pointer capture now. */

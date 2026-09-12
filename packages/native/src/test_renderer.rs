@@ -383,6 +383,19 @@ impl TestGpuixRenderer {
             .map(|rgba| Buffer::from(rgba)))
     }
 
+    /// The last uploaded canvas buffer as PNG bytes, or null before the
+    /// first upload — same store the production renderer reads.
+    #[napi]
+    pub fn canvas_to_png(&self, element_id: f64) -> Result<Option<Buffer>> {
+        let id = to_element_id(element_id)?;
+        match self.canvas_surfaces.to_png(id) {
+            Some(png) => Ok(Some(Buffer::from(
+                png.map_err(|error| Error::from_reason(format!("PNG encode failed: {error}")))?,
+            ))),
+            None => Ok(None),
+        }
+    }
+
     /// Arm gpui pointer capture on the element for its next press.
     #[napi]
     pub fn set_pointer_capture(&self, element_id: f64) -> Result<()> {
