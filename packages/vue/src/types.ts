@@ -617,6 +617,68 @@ export interface NativeRenderer {
 
   /** Hand a URL to the user's default browser / handler. */
   openUrl?(url: string): void
+
+  // ── Clipboard ──────────────────────────────────────────────────
+  /** Put a straight-alpha RGBA image on the clipboard as PNG. */
+  writeClipboardImage?(data: Uint8Array, width: number, height: number): void
+  /** Read an image from the clipboard as straight-alpha RGBA. Returns null
+   *  when the clipboard holds no image. */
+  readClipboardImage?(): ClipboardImage | null
+
+  // ── File dialogs ───────────────────────────────────────────────
+  /** Open the platform file-selection dialog. The callback receives
+   *  `(error, outcome)`; `outcome.paths` is null when the user cancelled. */
+  promptForPaths?(
+    options: PathPromptOptions,
+    callback: (error: Error | null, outcome: PathPromptOutcome) => void
+  ): void
+  /** Open the platform save dialog starting in `directory` (defaults to the
+   *  working directory). The callback receives `(error, outcome)`;
+   *  `outcome.path` is undefined when the user cancelled. */
+  promptForNewPath?(
+    directory: string | undefined | null,
+    suggestedName: string | undefined | null,
+    callback: (error: Error | null, outcome: NewPathPromptOutcome) => void
+  ): void
+}
+
+/** A clipboard image decoded to straight-alpha RGBA. */
+export interface ClipboardImage {
+  data: Uint8Array
+  width: number
+  height: number
+}
+
+/** Options for the platform file-selection dialog. */
+export interface PathPromptOptions {
+  /** Allow selecting files. */
+  files: boolean
+  /** Allow selecting directories. */
+  directories: boolean
+  /** Allow selecting more than one entry. */
+  multiple: boolean
+  /** Label for the confirm button, where the platform supports one. */
+  prompt?: string | undefined
+}
+
+/** Outcome of a file-selection dialog. */
+export interface PathPromptOutcome {
+  /** Selected paths, or absent when the dialog was cancelled. */
+  paths?: string[] | undefined
+}
+
+/** Options for the platform save dialog. */
+export interface NewPathPromptOptions {
+  /** Directory the dialog opens in. Defaults to the working directory. */
+  directory?: string | undefined
+  /** Name pre-filled in the save field. */
+  suggestedName?: string | undefined
+}
+
+/** Outcome of a save dialog. */
+export interface NewPathPromptOutcome {
+  /** The chosen path, or absent when the dialog was cancelled. */
+  path?: string | undefined
 }
 
 /** Commit-phase facade used only by the Vue host config. */

@@ -23,6 +23,9 @@ import type {
   ElementBounds,
   HostNode,
   NativeRenderer,
+  NewPathPromptOutcome,
+  PathPromptOptions,
+  PathPromptOutcome,
   WindowKeyEventHandlers,
 } from "./types.js"
 export type { ElementBounds }
@@ -96,6 +99,21 @@ interface NativeTestRendererApi extends NativeRenderer {
   captureScreenshot(path: string): void
   openUrl(url: string): void
   getLastOpenedUrl(): string | null
+  writeClipboardImage(data: Uint8Array, width: number, height: number): void
+  readClipboardImage(): { data: Uint8Array; width: number; height: number } | null
+  promptForPaths(
+    options: PathPromptOptions,
+    callback: (error: Error | null, outcome: PathPromptOutcome) => void
+  ): void
+  promptForNewPath(
+    directory: string | null,
+    suggestedName: string | undefined,
+    callback: (error: Error | null, outcome: NewPathPromptOutcome) => void
+  ): void
+  setNextPathPromptResponse(paths: string[] | null): void
+  getLastPathPromptOptions(): PathPromptOptions | null
+  setNextNewPathResponse(path: string | null): void
+  getLastNewPathPrompt(): { directory: string; suggestedName: string | undefined } | null
 }
 
 interface NativeTestRendererConstructor {
@@ -237,6 +255,43 @@ export class TestRenderer implements NativeRenderer {
     this.focusNextWithin = this.native.focusNextWithin.bind(this.native)
     this.focusPreviousWithin = this.native.focusPreviousWithin.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
+  }
+
+  // ── File dialogs (canned by the native test renderer) ───────────
+
+  promptForPaths(
+    options: PathPromptOptions,
+    callback: (error: Error | null, outcome: PathPromptOutcome) => void
+  ): void {
+    this.native.promptForPaths(options, callback)
+  }
+
+  promptForNewPath(
+    directory: string | null,
+    suggestedName: string | undefined,
+    callback: (error: Error | null, outcome: NewPathPromptOutcome) => void
+  ): void {
+    this.native.promptForNewPath(directory, suggestedName, callback)
+  }
+
+  /** Queue the next `promptForPaths` answer; `null` means cancelled. */
+  setNextPathPromptResponse(paths: string[] | null): void {
+    this.native.setNextPathPromptResponse(paths)
+  }
+
+  /** The options the last `promptForPaths` call received. */
+  getLastPathPromptOptions(): PathPromptOptions | null {
+    return this.native.getLastPathPromptOptions()
+  }
+
+  /** Queue the next `promptForNewPath` answer; `null` means cancelled. */
+  setNextNewPathResponse(path: string | null): void {
+    this.native.setNextNewPathResponse(path)
+  }
+
+  /** The request the last `promptForNewPath` call received. */
+  getLastNewPathPrompt(): { directory: string; suggestedName: string | undefined } | null {
+    return this.native.getLastNewPathPrompt()
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
@@ -624,6 +679,18 @@ export class TestRenderer implements NativeRenderer {
 
   getLastOpenedUrl(): string | null {
     return this.native.getLastOpenedUrl?.() ?? null
+  }
+
+  /** Put a straight-alpha RGBA image on the platform's in-memory test
+   *  clipboard, mirroring the production encoder path. */
+  writeClipboardImage(data: Uint8Array, width: number, height: number): void {
+    this.native.writeClipboardImage?.(data, width, height)
+  }
+
+  /** Read an image from the test clipboard, decoded to RGBA — a real round
+   *  trip through the `ClipboardEntry::Image` the platform stored. */
+  readClipboardImage(): { data: Uint8Array; width: number; height: number } | null {
+    return this.native.readClipboardImage?.() ?? null
   }
 
   /** Bytes built into canvas tile images so far — the upload cost the GPU
