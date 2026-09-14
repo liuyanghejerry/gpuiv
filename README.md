@@ -227,9 +227,39 @@ terminal.
 | `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. Waku uses `(16, 17)` |
 | `appName` | string | Name inside the macOS application menu, in `Hide X` and `Quit X`. Defaults to `title` |
+| `appId` | string | Wayland `app_id` / X11 `WM_CLASS`, used by desktop environments for grouping and window rules |
+| `layerShell` | object | Open as a Wayland `wlr-layer-shell` surface instead of a normal window (see below). Linux/Wayland only; ignored elsewhere |
 | `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
 | `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
 | `debugFrameOverlay` | `"hidden"` \| `"minimal"` \| `"full"` | Frame-time overlay (see below) |
+
+#### Layer-shell surfaces
+
+On Linux/Wayland, `layerShell` turns the window into a compositor-anchored
+surface — a panel, dock, notification shade or wallpaper. The surface has no
+native titlebar and is placed by the compositor from its `anchor`, not by the
+window origin; `width` / `height` only constrain the axis the surface is not
+stretched along.
+
+```tsx
+render(<Bar />, {
+  appId: 'my-panel',
+  height: 34,
+  focus: false,
+  layerShell: {
+    namespace: 'my-panel',
+    layer: 'top',                              // background | bottom | top | overlay
+    anchor: ['top', 'left', 'right'],          // opposite edges stretch that axis
+    exclusiveZone: 34,                         // keep tiled windows clear of the bar
+    keyboardInteractivity: 'none',             // none | on-demand | exclusive
+  },
+})
+```
+
+`exclusiveEdge` picks where the exclusive zone applies when the anchor does not
+make it obvious; `margin` is the gap to each anchor edge in CSS order
+`[top, right, bottom, left]`. Defaults: `layer: 'top'`, a top-bar anchor, no
+keyboard interactivity.
 
 ### The macOS menu bar
 
@@ -2682,6 +2712,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
+- [x] Wayland layer-shell surfaces (`layerShell` window option: panels, docks, wallpapers; Linux/Wayland only)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
