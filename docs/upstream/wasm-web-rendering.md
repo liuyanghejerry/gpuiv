@@ -127,4 +127,5 @@ Sync this topic when any of these becomes true:
 `75a1fe6` (Oniguruma/fancy split), `92082a3` (docs site), `7d6e1f9` (Bun dev
 server + Fast Refresh), `711945f` (wasm build fix), `7f6732a` (ignore browser
 bundle), `bbcea1f` (web resize cursors), `291b92d` (deploy WebGPU chat
-example), `a906cf9` (website backout), `f52fa54` (changelog nav).
+example), `a906cf9` (website backout), `f52fa54` (changelog nav), `5388016`
+(homepage hero: Arizona Flare font, Holocron `hero-bg.mp4` shader backdrop).

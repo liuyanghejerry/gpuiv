@@ -1293,11 +1293,17 @@ impl GpuixRenderer {
                         .run(move |cx| {
                             crate::custom_elements::input::init(cx);
                             crate::custom_elements::img::init(cx);
-                            let bounds = gpui::Bounds::centered(
-                                None,
-                                gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
-                                cx,
-                            );
+                            let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
+                            // A layer-shell surface is positioned by the compositor from its
+                            // anchor, so it opens at the origin; a normal window is centered.
+                            let bounds = if window_options.layer_shell.is_some() {
+                                gpui::Bounds {
+                                    origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                                    size,
+                                }
+                            } else {
+                                gpui::Bounds::centered(None, size, cx)
+                            };
                             let window = match cx.open_window(
                                 to_gpui_window_options(&window_options, bounds),
                                 |_window, cx| {
@@ -6515,6 +6521,40 @@ pub struct DebugFrameOverlayStats {
     pub samples: f64,
 }
 
+/// Wayland `wlr-layer-shell` surface options. Linux/Wayland only; ignored on
+/// every other platform. When present on `WindowOptions`, the window is opened
+/// as a compositor-anchored surface (a bar, dock, notification overlay or
+/// wallpaper) with no native titlebar instead of a normal floating window.
+/// `width` / `height` then only constrain the axis the surface is not
+/// stretched along by its `anchor`.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
+pub struct LayerShellOptions {
+    /// Compositor surface namespace, used for window rules. Cannot be changed
+    /// after the surface is created. Defaults to the empty string.
+    pub namespace: Option<String>,
+    /// `"background"` | `"bottom"` | `"top"` | `"overlay"`. Defaults to `"top"`.
+    pub layer: Option<String>,
+    /// Screen edges to anchor to: any combination of `"top"`, `"bottom"`,
+    /// `"left"`, `"right"`. Anchoring two opposite edges stretches the surface
+    /// across that axis. Defaults to `["top", "left", "right"]` (a top bar).
+    pub anchor: Option<Vec<String>>,
+    /// Logical pixels to reserve along the anchored edge so other windows do
+    /// not overlap the surface. `0` lets the compositor decide, a negative
+    /// value asks it not to reserve any space.
+    pub exclusive_zone: Option<f64>,
+    /// Which edge the exclusive zone applies to when it cannot be inferred from
+    /// a single-edge `anchor`. Same values as one `anchor` entry.
+    pub exclusive_edge: Option<String>,
+    /// Gap between the surface and its anchor edge(s), in CSS order:
+    /// `[top, right, bottom, left]`. Must have exactly four entries or it is
+    /// ignored.
+    pub margin: Option<Vec<f64>>,
+    /// `"none"` | `"on-demand"` | `"exclusive"`. Defaults to `"none"`: a bar or
+    /// overlay that never takes keyboard focus.
+    pub keyboard_interactivity: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 #[cfg_attr(not(all(target_arch = "wasm32", target_os = "unknown")), napi(object))]
 pub struct WindowOptions {
@@ -6543,6 +6583,13 @@ pub struct WindowOptions {
     /// The name macOS shows in the application menu, and in its "Hide" and
     /// "Quit" items. Defaults to `title`.
     pub app_name: Option<String>,
+    /// Application id: Wayland `app_id` / X11 `WM_CLASS`. Desktop environments
+    /// use it to group windows and match window rules. Required in practice for
+    /// a `layerShell` surface a compositor is meant to target by rule.
+    pub app_id: Option<String>,
+    /// Open the window as a Wayland `wlr-layer-shell` surface instead of a
+    /// normal window. Linux/Wayland only; ignored elsewhere.
+    pub layer_shell: Option<LayerShellOptions>,
 }
 
 impl Default for WindowOptions {
@@ -6563,7 +6610,66 @@ impl Default for WindowOptions {
             focus: Some(true),
             show: Some(true),
             app_name: None,
+            app_id: None,
+            layer_shell: None,
         }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn layer_shell_anchor_bit(name: &str) -> gpui::layer_shell::Anchor {
+    use gpui::layer_shell::Anchor;
+    match name.trim().to_ascii_lowercase().as_str() {
+        "top" => Anchor::TOP,
+        "bottom" => Anchor::BOTTOM,
+        "left" => Anchor::LEFT,
+        "right" => Anchor::RIGHT,
+        _ => Anchor::empty(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn to_layer_shell_options(options: &LayerShellOptions) -> gpui::layer_shell::LayerShellOptions {
+    use gpui::layer_shell::{Anchor, KeyboardInteractivity, Layer};
+
+    let layer = match options.layer.as_deref() {
+        Some("background") => Layer::Background,
+        Some("bottom") => Layer::Bottom,
+        Some("overlay") => Layer::Overlay,
+        _ => Layer::Top,
+    };
+    let anchor = match options.anchor.as_deref() {
+        Some(names) if !names.is_empty() => names
+            .iter()
+            .fold(Anchor::empty(), |acc, name| acc | layer_shell_anchor_bit(name)),
+        _ => Anchor::TOP | Anchor::LEFT | Anchor::RIGHT,
+    };
+    let keyboard_interactivity = match options.keyboard_interactivity.as_deref() {
+        Some("on-demand") => KeyboardInteractivity::OnDemand,
+        Some("exclusive") => KeyboardInteractivity::Exclusive,
+        _ => KeyboardInteractivity::None,
+    };
+    let margin = options.margin.as_ref().and_then(|m| match m.as_slice() {
+        [top, right, bottom, left] => Some((
+            gpui::px(*top as f32),
+            gpui::px(*right as f32),
+            gpui::px(*bottom as f32),
+            gpui::px(*left as f32),
+        )),
+        _ => None,
+    });
+
+    gpui::layer_shell::LayerShellOptions {
+        namespace: options.namespace.clone().unwrap_or_default(),
+        layer,
+        anchor,
+        exclusive_zone: options.exclusive_zone.map(|z| gpui::px(z as f32)),
+        exclusive_edge: options
+            .exclusive_edge
+            .as_deref()
+            .map(layer_shell_anchor_bit),
+        margin,
+        keyboard_interactivity,
     }
 }
 
@@ -6595,7 +6701,8 @@ fn to_gpui_window_options(
     } else {
         gpui::WindowBounds::Windowed(bounds)
     };
-    gpui::WindowOptions {
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut gpui_options = gpui::WindowOptions {
         window_bounds: Some(window_bounds),
         titlebar: Some(gpui::TitlebarOptions {
             title: Some(title.into()),
@@ -6607,8 +6714,20 @@ fn to_gpui_window_options(
         window_min_size,
         focus: options.focus.unwrap_or(true),
         show: options.show.unwrap_or(true),
+        app_id: options.app_id.clone(),
         ..Default::default()
+    };
+
+    // A layer-shell surface has no titlebar and is placed by the compositor
+    // from its anchor, not by `window_bounds.origin`. The `WindowKind` variant
+    // only exists on a Wayland-enabled Linux gpui build.
+    #[cfg(target_os = "linux")]
+    if let Some(layer_shell) = &options.layer_shell {
+        gpui_options.titlebar = None;
+        gpui_options.kind = gpui::WindowKind::LayerShell(to_layer_shell_options(layer_shell));
     }
+
+    gpui_options
 }
 
 #[cfg(test)]
@@ -6683,6 +6802,83 @@ mod window_options_tests {
             gpui_options.window_min_size,
             Some(gpui::size(gpui::px(320.0), gpui::px(240.0)))
         );
+    }
+
+    #[test]
+    fn app_id_is_forwarded() {
+        let gpui_options = mapped(WindowOptions {
+            app_id: Some("kite-panel".to_string()),
+            ..WindowOptions::default()
+        });
+        assert_eq!(gpui_options.app_id.as_deref(), Some("kite-panel"));
+    }
+
+    #[test]
+    fn without_layer_shell_the_window_is_normal_with_a_titlebar() {
+        let gpui_options = mapped(WindowOptions::default());
+        assert_eq!(gpui_options.kind, gpui::WindowKind::Normal);
+        assert!(gpui_options.titlebar.is_some());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn layer_shell_options_map_to_a_layer_shell_window_kind() {
+        use gpui::layer_shell::{Anchor, KeyboardInteractivity, Layer};
+
+        let gpui_options = mapped(WindowOptions {
+            app_id: Some("kite-panel".to_string()),
+            layer_shell: Some(LayerShellOptions {
+                namespace: Some("kite-panel".to_string()),
+                layer: Some("top".to_string()),
+                anchor: Some(vec![
+                    "top".to_string(),
+                    "left".to_string(),
+                    "right".to_string(),
+                ]),
+                exclusive_zone: Some(34.0),
+                exclusive_edge: Some("top".to_string()),
+                margin: Some(vec![0.0, 0.0, 0.0, 0.0]),
+                keyboard_interactivity: Some("none".to_string()),
+            }),
+            ..WindowOptions::default()
+        });
+
+        assert!(gpui_options.titlebar.is_none());
+        match gpui_options.kind {
+            gpui::WindowKind::LayerShell(opts) => {
+                assert_eq!(opts.namespace, "kite-panel");
+                assert_eq!(opts.layer, Layer::Top);
+                assert_eq!(opts.anchor, Anchor::TOP | Anchor::LEFT | Anchor::RIGHT);
+                assert_eq!(opts.exclusive_zone, Some(gpui::px(34.0)));
+                assert_eq!(opts.exclusive_edge, Some(Anchor::TOP));
+                assert_eq!(
+                    opts.margin,
+                    Some((gpui::px(0.0), gpui::px(0.0), gpui::px(0.0), gpui::px(0.0)))
+                );
+                assert_eq!(
+                    opts.keyboard_interactivity,
+                    KeyboardInteractivity::None
+                );
+            }
+            other => panic!("expected a layer-shell window kind, got {other:?}"),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn layer_shell_anchor_defaults_to_a_top_bar() {
+        use gpui::layer_shell::Anchor;
+
+        let gpui_options = mapped(WindowOptions {
+            layer_shell: Some(LayerShellOptions::default()),
+            ..WindowOptions::default()
+        });
+        match gpui_options.kind {
+            gpui::WindowKind::LayerShell(opts) => {
+                assert_eq!(opts.anchor, Anchor::TOP | Anchor::LEFT | Anchor::RIGHT);
+            }
+            other => panic!("expected a layer-shell window kind, got {other:?}"),
+        }
     }
 }
 
