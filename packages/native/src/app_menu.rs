@@ -83,6 +83,7 @@ fn js_menu_handler() -> &'static Mutex<Option<ThreadsafeFunction<String>>> {
 
 /// A menu for the application menu bar, as described from JS.
 #[napi(object)]
+#[derive(Clone)]
 pub struct JsMenuDesc {
     /// Displayed menu title. The first menu is the macOS application menu.
     pub name: String,
@@ -95,6 +96,7 @@ pub struct JsMenuDesc {
 /// One item of a [`JsMenuDesc`]. Exactly one of `separator`, `submenu`, or
 /// (`id` | `system`) applies; `label` is the displayed title.
 #[napi(object)]
+#[derive(Clone)]
 pub struct JsMenuItemDesc {
     pub label: Option<String>,
     /// Delivered to the `setMenus` callback when the item fires.
@@ -268,22 +270,11 @@ pub(crate) fn record_menus(menus: Vec<JsMenuDesc>) -> napi::Result<Vec<RecordedM
 }
 
 fn record_item(desc: JsMenuItemDesc) -> napi::Result<RecordedMenuItem> {
-    // Validate through the production conversion first, so the recorded shape
-    // cannot drift from what set_js_menus would have installed.
+    // Validate through the production conversion first — submenu included, so
+    // a submenu root validates as one — so the recorded shape cannot drift
+    // from what set_js_menus would have installed.
     let mut bindings = Vec::new();
-    to_gpui_item(
-        JsMenuItemDesc {
-            label: desc.label.clone(),
-            id: desc.id.clone(),
-            system: desc.system.clone(),
-            keystroke: desc.keystroke.clone(),
-            checked: desc.checked,
-            disabled: desc.disabled,
-            separator: desc.separator,
-            submenu: None,
-        },
-        &mut bindings,
-    )?;
+    to_gpui_item(desc.clone(), &mut bindings)?;
     Ok(RecordedMenuItem {
         label: desc
             .label
