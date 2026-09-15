@@ -550,7 +550,7 @@ function mountTree(
   if (!host) {
     throw new Error("GPUIX renderer is not initialized")
   }
-  const { onEvent, onKeyDown, onKeyUp } = options
+  const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen } = options
   const previous = slot.handle
   slot.handle = undefined
   if (previous) {
@@ -566,7 +566,7 @@ function mountTree(
   const gpuivHost = createGpuivRendererHost(
     host,
     idAllocatorFor(host),
-    { onKeyDown, onKeyUp },
+    { onKeyDown, onKeyUp, onWindowShouldClose, onReopen },
     windowKeyEventId
   )
   // Bind the render-level observer to this root. A remount replaces it, and
@@ -576,6 +576,7 @@ function mountTree(
   if (registryContainer) registryContainer.onEvent = onEvent
   try {
     host.setWindowKeyEvents?.(Boolean(onKeyDown), Boolean(onKeyUp), windowKeyEventId)
+    host.setWindowObservers?.(Boolean(onWindowShouldClose), Boolean(onReopen), windowKeyEventId)
   } catch (error) {
     gpuivHost.detach()
     throw error
@@ -604,10 +605,11 @@ function mountTree(
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
-      // Only the live root may turn its window key listeners off; a stale
+      // Only the live root may turn its window listeners off; a stale
       // unmount must not disable the replacement's.
       if (gpuivHost.detach()) {
         host.setWindowKeyEvents?.(false, false, windowKeyEventId)
+        host.setWindowObservers?.(false, false, windowKeyEventId)
       }
     },
   }

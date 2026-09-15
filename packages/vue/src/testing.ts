@@ -82,6 +82,11 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusNextWithin(elementId: number): void
   focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
+  setWindowObservers(shouldClose: boolean, reopen: boolean, eventId: number): void
+  attemptWindowClose(): boolean
+  simulateAppReopen(): void
+  closeWindow(): void
+  getWindowCloseCount(): number
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
@@ -246,6 +251,11 @@ export class TestRenderer implements NativeRenderer {
     keyUp: boolean,
     eventId: number
   ) => void
+  readonly setWindowObservers: (
+    shouldClose: boolean,
+    reopen: boolean,
+    eventId: number
+  ) => void
 
   constructor(options: TestWindowOptions = {}) {
     if (!NativeTestRenderer) {
@@ -261,6 +271,29 @@ export class TestRenderer implements NativeRenderer {
     this.focusNextWithin = this.native.focusNextWithin.bind(this.native)
     this.focusPreviousWithin = this.native.focusPreviousWithin.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
+    this.setWindowObservers = this.native.setWindowObservers.bind(this.native)
+  }
+
+  // ── Window close / reopen (veto bridge) ──────────────────────────
+
+  /** Simulate an OS close attempt. False means the attempt was vetoed and
+   *  `onWindowShouldClose` fired; true means the window would have closed. */
+  attemptWindowClose(): boolean {
+    return this.native.attemptWindowClose()
+  }
+
+  /** Simulate a Dock-icon relaunch; fires `onReopen` while armed. */
+  simulateAppReopen(): void {
+    this.native.simulateAppReopen()
+  }
+
+  /** The confirmed close — assert with `getWindowCloseCount`. */
+  closeWindow(): void {
+    this.native.closeWindow()
+  }
+
+  getWindowCloseCount(): number {
+    return this.native.getWindowCloseCount()
   }
 
   // ── File dialogs (canned by the native test renderer) ───────────
@@ -882,12 +915,22 @@ export function createTestApp(
   const gpuivHost = createGpuivRendererHost(
     renderer,
     idAllocatorFor(renderer),
-    { onKeyDown: options.onKeyDown, onKeyUp: options.onKeyUp },
+    {
+      onKeyDown: options.onKeyDown,
+      onKeyUp: options.onKeyUp,
+      onWindowShouldClose: options.onWindowShouldClose,
+      onReopen: options.onReopen,
+    },
     windowKeyEventId
   )
   renderer.setWindowKeyEvents(
     Boolean(options.onKeyDown),
     Boolean(options.onKeyUp),
+    windowKeyEventId
+  )
+  renderer.setWindowObservers(
+    Boolean(options.onWindowShouldClose),
+    Boolean(options.onReopen),
     windowKeyEventId
   )
   const app = gpuivHost.vue.createApp(rootComponent)
@@ -915,9 +958,10 @@ export function createTestApp(
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
-      // Only the live root may turn its window key listeners off.
+      // Only the live root may turn its window listeners off.
       if (gpuivHost.detach()) {
         renderer.setWindowKeyEvents(false, false, windowKeyEventId)
+        renderer.setWindowObservers(false, false, windowKeyEventId)
       }
       renderer.flush()
     },

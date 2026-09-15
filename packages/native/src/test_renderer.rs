@@ -210,6 +210,7 @@ pub struct TestGpuixRenderer {
     last_path_prompt_options: RefCell<Option<crate::renderer::PathPromptOptionsDesc>>,
     last_menus: RefCell<Option<Vec<crate::app_menu::RecordedMenu>>>,
     menu_action_handler: RefCell<Option<ThreadsafeFunction<String>>>,
+    window_close_count: RefCell<u32>,
     new_path_prompt_answers: RefCell<VecDeque<Option<String>>>,
     last_new_path_prompt: RefCell<Option<(String, Option<String>)>>,
 }
@@ -300,6 +301,7 @@ impl TestGpuixRenderer {
             last_path_prompt_options: RefCell::new(None),
             last_menus: RefCell::new(None),
             menu_action_handler: RefCell::new(None),
+            window_close_count: RefCell::new(0),
             new_path_prompt_answers: RefCell::new(Default::default()),
             last_new_path_prompt: RefCell::new(None),
         })
@@ -455,6 +457,96 @@ impl TestGpuixRenderer {
             cx.run_until_parked();
             Ok(())
         })
+    }
+
+    /// Arm or disarm the window close/reopen observers, mirroring the
+    /// production `setWindowObservers`.
+    #[napi]
+    pub fn set_window_observers(
+        &self,
+        should_close: bool,
+        reopen: bool,
+        event_id: f64,
+    ) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.window_should_close = should_close;
+                    view.app_reopen = reopen;
+                    view.window_key_event_id = event_id;
+                    cx.notify();
+                });
+                window.refresh();
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Simulate an OS close attempt through the veto path: while
+    /// `windowShouldClose` is observed the attempt is vetoed and the event
+    /// fires; otherwise the window would close. Returns whether the window
+    /// would have closed.
+    #[napi]
+    pub fn attempt_window_close(&self) -> Result<bool> {
+        let would_close = with_test_state(|cx, _window, view| {
+            let view = view.clone();
+            Ok(cx.update(|cx| {
+                view.update(cx, |view, _cx| {
+                    if view.window_should_close {
+                        crate::renderer::emit_event_full(
+                            &view.event_callback,
+                            view.window_key_event_id,
+                            "windowShouldClose",
+                            |_| {},
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                })
+            }))
+        })?;
+        Ok(would_close)
+    }
+
+    /// Simulate a Dock-icon relaunch: fires `appReopen` while observed.
+    #[napi]
+    pub fn simulate_app_reopen(&self) -> Result<()> {
+        with_test_state(|cx, _window, view| {
+            let view = view.clone();
+            cx.update(|cx| {
+                view.update(cx, |view, _cx| {
+                    if view.app_reopen {
+                        crate::renderer::emit_event_full(
+                            &view.event_callback,
+                            view.window_key_event_id,
+                            "appReopen",
+                            |_| {},
+                        );
+                    }
+                })
+            });
+            Ok(())
+        })
+    }
+
+    /// Test stand-in for the production `closeWindow`: counts the confirmed
+    /// closes instead of destroying the shared test window. Assert with
+    /// `getWindowCloseCount`.
+    #[napi]
+    pub fn close_window(&self) -> Result<()> {
+        *self.window_close_count.borrow_mut() += 1;
+        Ok(())
+    }
+
+    /// How many times `closeWindow` was called.
+    #[napi]
+    pub fn get_window_close_count(&self) -> u32 {
+        *self.window_close_count.borrow()
     }
 
     /// Enable the window key events requested by the JS renderer.

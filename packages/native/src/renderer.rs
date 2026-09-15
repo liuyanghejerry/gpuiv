@@ -410,6 +410,12 @@ enum UiCommand {
         key_up: bool,
         event_id: u64,
     },
+    SetWindowObservers {
+        should_close: bool,
+        reopen: bool,
+        event_id: u64,
+    },
+    CloseWindow,
     GetWindowSize {
         response: SyncSender<WindowSize>,
     },
@@ -882,6 +888,20 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::SetWindowObservers {
+                should_close,
+                reopen,
+                event_id,
+            } => window.update(cx, move |view, window, cx| {
+                view.window_should_close = should_close;
+                view.app_reopen = reopen;
+                view.window_key_event_id = event_id;
+                cx.notify();
+                window.refresh();
+            }),
+            UiCommand::CloseWindow => {
+                window.update(cx, |_view, window, _cx| window.remove_window())
+            }
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
             UiCommand::ToggleFullscreen => {
                 window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
@@ -1168,6 +1188,26 @@ impl GpuixRenderer {
         // Last window close quits AppKit; tick() returns false and JS exits.
         let app = gpui::Application::with_platform(platform.clone())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
+        // A Dock-icon relaunch of a running process lands here (macOS
+        // applicationShouldHandleReopen). Without a handler nothing happens;
+        // with `appReopen` observed, JS decides (focus the window, open a
+        // document, …).
+        app.on_reopen(|cx: &mut gpui::App| {
+            GPUI_WINDOW.with(|stored| {
+                if let Some(handle) = stored.borrow().as_ref() {
+                    let _ = handle.update(cx, |view, _window, _cx| {
+                        if view.app_reopen {
+                            emit_event_full(
+                                &view.event_callback,
+                                view.window_key_event_id,
+                                "appReopen",
+                                |_| {},
+                            );
+                        }
+                    });
+                }
+            });
+        });
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
@@ -1197,6 +1237,28 @@ impl GpuixRenderer {
             ) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
+                    // The close veto reads live view state at close time, so
+                    // arming later (setWindowObservers) needs no re-register.
+                    if let Err(error) = window_handle.update(cx, |view, window, cx| {
+                        let entity = cx.entity();
+                        window.on_window_should_close(cx, move |_window, cx| {
+                            let mut allow = true;
+                            let _ = entity.update(cx, |view, _cx| {
+                                if view.window_should_close {
+                                    emit_event_full(
+                                        &view.event_callback,
+                                        view.window_key_event_id,
+                                        "windowShouldClose",
+                                        |_| {},
+                                    );
+                                    allow = false;
+                                }
+                            });
+                            allow
+                        });
+                    }) {
+                        log::error!("Failed to install the close interceptor: {error:#}");
+                    }
                     if activate {
                         cx.activate(true);
                     }
@@ -2092,6 +2154,69 @@ impl GpuixRenderer {
                 "setMenus is macOS-only: the application menu bar is a macOS concept in GPUI",
             ))
         }
+    }
+
+    /// Arm or disarm the window-level close and reopen observers. Both emit
+    /// on the same event id as the window key events.
+    #[napi]
+    pub fn set_window_observers(
+        &self,
+        should_close: bool,
+        reopen: bool,
+        event_id: f64,
+    ) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.window_should_close = should_close;
+            view.app_reopen = reopen;
+            view.window_key_event_id = event_id;
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetWindowObservers {
+            should_close,
+            reopen,
+            event_id,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (should_close, reopen, event_id);
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Close the window for real. When a `windowShouldClose` observer is
+    /// armed, an OS close attempt is vetoed and delivered to JS instead; this
+    /// is the confirmed close that follows. Closing the last window quits
+    /// (QuitMode::LastWindowClosed).
+    #[napi]
+    pub fn close_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.remove_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::CloseWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
     }
 
     /// Open the platform's save dialog starting in `directory` (defaults to
@@ -3696,6 +3821,12 @@ pub(crate) struct GpuixView {
     pub(crate) window_key_down: bool,
     pub(crate) window_key_up: bool,
     pub(crate) window_key_event_id: u64,
+    /// While `windowShouldClose` is observed, an OS close attempt is vetoed
+    /// and emitted instead; JS closes for real through `closeWindow()`.
+    pub(crate) window_should_close: bool,
+    /// While `appReopen` is observed, a Dock-icon relaunch emits instead of
+    /// doing nothing (a running bun process has no second instance to spawn).
+    pub(crate) app_reopen: bool,
 }
 
 impl GpuixView {
@@ -3727,6 +3858,8 @@ impl GpuixView {
             window_key_down: false,
             window_key_up: false,
             window_key_event_id: 0,
+            window_should_close: false,
+            app_reopen: false,
         }
     }
 

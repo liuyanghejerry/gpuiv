@@ -547,7 +547,15 @@ export interface NativeRenderer {
   /** Enable window-level key events for the owning root. The event id is a
    *  generation: queued events from an old root carry a stale id and are
    *  rejected before reaching handlers. */
+  /** Arm window-level key events belonging to `eventId`; disarm with
+   *  `false, false`. */
   setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
+  /** Arm or disarm the window close and reopen observers. Both emit on the
+   *  same event id as the window key events. */
+  setWindowObservers?(shouldClose: boolean, reopen: boolean, eventId: number): void
+  /** Close the window for real, past an armed `onWindowShouldClose` veto.
+   *  Closing the last window quits the app. */
+  closeWindow?(): void
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
@@ -789,6 +797,12 @@ export interface ElementIdAllocator {
 export interface WindowKeyEventHandlers {
   onKeyDown?: (event: EventPayload) => void
   onKeyUp?: (event: EventPayload) => void
+  /** Veto-and-observe window closing: while set, an OS close attempt (red
+   *  button, ⌘W path) is cancelled and delivered here; call
+   *  `renderer.closeWindow()` to close for real. */
+  onWindowShouldClose?: () => void
+  /** A Dock-icon relaunch of the running process (macOS). */
+  onReopen?: () => void
 }
 
 // One renderer root. Event handlers stay on this object so two live roots
