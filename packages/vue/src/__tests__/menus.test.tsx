@@ -54,7 +54,26 @@ describeNative("dynamic menus", () => {
     )
 
     renderer.fireMenuAction("settings")
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    for (let i = 0; i < 100 && fired.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    expect(fired).toEqual(["settings"])
+  })
+
+  it("the promise-free helper reaches the bridge", async () => {
+    const { setMenus } = await import("../index.js")
+    const renderer = new TestRenderer()
+    const fired = []
+    setMenus(
+      renderer as never,
+      [{ name: "Chat", items: [{ label: "Settings", id: "settings" }] }],
+      (id) => fired.push(id)
+    )
+    expect(renderer.getLastMenus()[0].name).toBe("Chat")
+    renderer.fireMenuAction("settings")
+    for (let i = 0; i < 100 && fired.length === 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
     expect(fired).toEqual(["settings"])
   })
 
