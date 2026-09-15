@@ -16,6 +16,7 @@
 //! any highlighting has run.
 
 pub mod cache;
+pub mod stream;
 
 use std::collections::BTreeSet;
 use std::ops::Range;
@@ -308,6 +309,36 @@ pub fn highlight_with_limits(
     request: HighlightRequest<'_>,
     limits: HighlightLimits,
 ) -> Result<HighlightedDocument, HighlightError> {
+    highlight_with_resume(request, limits, None).map(|(document, _)| document)
+}
+
+/// A parsing checkpoint: everything needed to continue highlighting a
+/// longer document that starts with the one just highlighted.
+#[derive(Clone)]
+pub(crate) struct ResumeState {
+    /// Byte offset this state resumes at (a line start).
+    pub(crate) offset: usize,
+    /// Absolute spans for everything before `offset`.
+    pub(crate) spans: Vec<HighlightSpan>,
+    pub(crate) parse_state: ParseState,
+    pub(crate) stack: ScopeStack,
+}
+
+/// Byte offset of the last line's start: the checkpoint a streamed document
+/// resumes from, so the (possibly still-partial) final line is always
+/// re-parsed.
+fn last_line_start(source: &str) -> usize {
+    source.rfind('\n').map_or(0, |at| at + 1)
+}
+
+/// Highlight, optionally resuming from a [`ResumeState`] whose document is a
+/// byte-prefix of `request.source`. Returns the document plus the checkpoint
+/// for the next append.
+pub(crate) fn highlight_with_resume(
+    request: HighlightRequest<'_>,
+    limits: HighlightLimits,
+    resume: Option<ResumeState>,
+) -> Result<(HighlightedDocument, ResumeState), HighlightError> {
     if request.source.len() > limits.max_source_bytes {
         return Err(HighlightError::SourceTooLarge);
     }
@@ -320,13 +351,31 @@ pub fn highlight_with_limits(
 
     let syntax = syntax_for_language(language)?;
     let set = syntax_set();
-    let mut parse_state = ParseState::new(syntax);
-    let mut stack = ScopeStack::new();
-    let mut spans = Vec::new();
-    let mut offset = 0;
+    let (mut parse_state, mut stack, mut spans, mut offset) = match resume {
+        Some(state) if state.offset <= request.source.len() => {
+            (state.parse_state, state.stack, state.spans, state.offset)
+        }
+        _ => (
+            ParseState::new(syntax),
+            ScopeStack::new(),
+            Vec::new(),
+            0,
+        ),
+    };
 
-    if !request.source.is_empty() {
-        for line in request.source.split_inclusive('\n') {
+    let resume_at = last_line_start(request.source);
+    let mut checkpoint: Option<ResumeState> = None;
+
+    if !request.source.is_empty() && offset < request.source.len() {
+        for line in request.source[offset..].split_inclusive('\n') {
+            if offset == resume_at {
+                checkpoint = Some(ResumeState {
+                    offset,
+                    spans: spans.clone(),
+                    parse_state: parse_state.clone(),
+                    stack: stack.clone(),
+                });
+            }
             let ops = parse_state
                 .parse_line(line, set)
                 .map_err(|error| HighlightError::Parser(error.to_string()))?;
@@ -351,8 +400,19 @@ pub fn highlight_with_limits(
             offset += line.len();
         }
     }
+    if checkpoint.is_none() {
+        // Empty source, or a resume from the very end: checkpoint now.
+        checkpoint = Some(ResumeState {
+            offset,
+            spans: spans.clone(),
+            parse_state: parse_state.clone(),
+            stack: stack.clone(),
+        });
+    }
 
-    HighlightedDocument::from_absolute_spans(language, request.source, spans)
+    let document =
+        HighlightedDocument::from_absolute_spans(language, request.source, spans)?;
+    Ok((document, checkpoint.expect("just built")))
 }
 
 fn syntax_set() -> &'static SyntaxSet {

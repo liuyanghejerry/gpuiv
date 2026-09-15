@@ -70,6 +70,8 @@ pub struct CacheStats {
     pub misses: u64,
     pub documents: usize,
     pub retained_bytes: usize,
+    /// Appends that resumed from a stable-prefix checkpoint.
+    pub stream_hits: u64,
 }
 
 impl SyntaxCache {
@@ -117,11 +119,13 @@ impl SyntaxCache {
     }
 
     pub fn stats(&self) -> CacheStats {
+        let (stream_hits, _) = super::stream::stats();
         CacheStats {
             hits: self.hits,
             misses: self.misses,
             documents: self.documents.len(),
             retained_bytes: self.retained_bytes,
+            stream_hits,
         }
     }
 }
@@ -154,16 +158,35 @@ pub fn highlight_cached(
     if let Some(cached) = global().lock().ok()?.get(&key) {
         return Some(cached);
     }
-    let document = highlight(HighlightRequest {
-        source,
-        path,
-        fence_tag,
-    })
+    // A streamed source grows by appends, so the full-content key above
+    // always misses. Resume from the stable-prefix checkpoint when one
+    // matches; otherwise parse in full and record a checkpoint for the next
+    // append.
+    if let Some((document, state)) =
+        super::stream::try_resume(language, source, path, fence_tag)
+    {
+        let document = Arc::new(document);
+        if let Ok(mut cache) = global().lock() {
+            cache.insert(key, document.clone());
+        }
+        super::stream::store(language, source, state);
+        return Some(document);
+    }
+    let (document, state) = super::highlight_with_resume(
+        HighlightRequest {
+            source,
+            path,
+            fence_tag,
+        },
+        super::HighlightLimits::default(),
+        None,
+    )
     .ok()?;
     let document = Arc::new(document);
     if let Ok(mut cache) = global().lock() {
         cache.insert(key, document.clone());
     }
+    super::stream::store(language, source, state);
     Some(document)
 }
 
@@ -176,6 +199,7 @@ pub fn stats() -> CacheStats {
             misses: 0,
             documents: 0,
             retained_bytes: 0,
+            stream_hits: 0,
         })
 }
 
@@ -203,6 +227,25 @@ mod tests {
     #[test]
     fn unknown_language_returns_none() {
         assert!(highlight_cached("x", Some("notes.txt"), None).is_none());
+    }
+
+    #[test]
+    fn streamed_appends_resume_and_match_a_full_parse() {
+        let full = "fn streamed(left: u32) -> u32 {\n    let doubled = left * 2;\n    doubled + 1\n}\n\nfn tail() -> &'static str {\n    \"done\"\n}\n";
+        let mut seen = String::new();
+        for chunk in full.split_inclusive(' ') {
+            seen.push_str(chunk);
+            let streamed = highlight_cached(&seen, Some("streamed.rs"), None).unwrap();
+            let fresh = highlight(HighlightRequest {
+                source: &seen,
+                path: Some("streamed.rs"),
+                fence_tag: None,
+            })
+            .unwrap();
+            assert_eq!(streamed.lines, fresh.lines, "diverged at {seen:?}");
+        }
+        // The appends after the first must have gone through the resume path.
+        assert!(stats().stream_hits > 0);
     }
 
     #[test]

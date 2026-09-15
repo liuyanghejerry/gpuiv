@@ -1146,6 +1146,7 @@ impl TestGpuixRenderer {
             stats.hits as f64,
             stats.misses as f64,
             stats.documents as f64,
+            stats.stream_hits as f64,
         ]
     }
 
