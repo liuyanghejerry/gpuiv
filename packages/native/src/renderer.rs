@@ -2067,6 +2067,33 @@ impl GpuixRenderer {
         ))
     }
 
+    /// Replace the application menu bar at runtime (macOS only). `onAction`
+    /// receives the `id` of the fired item. A menu named "Window" receives
+    /// the window list, exactly like the default bar.
+    #[napi]
+    pub fn set_menus(
+        &self,
+        menus: Vec<crate::app_menu::JsMenuDesc>,
+        on_action: ThreadsafeFunction<String>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| crate::app_menu::set_js_menus(menus, on_action, cx))
+        });
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (menus, on_action);
+            Err(Error::from_reason(
+                "setMenus is macOS-only: the application menu bar is a macOS concept in GPUI",
+            ))
+        }
+    }
+
     /// Open the platform's save dialog starting in `directory` (defaults to
     /// the process working directory). The callback receives `(error,
     /// outcome)`; `outcome.path` is `null` when the user cancelled.

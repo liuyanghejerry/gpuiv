@@ -628,6 +628,11 @@ export interface NativeRenderer {
   /** Hand a URL to the user's default browser / handler. */
   openUrl?(url: string): void
 
+  /** Replace the application menu bar at runtime (macOS only). `onAction`
+   *  receives the `id` of the fired item. A menu named "Window" receives the
+   *  window list, exactly like the default bar. */
+  setMenus?(menus: MenuBarMenu[], onAction: (id: string) => void): void
+
   // ── Clipboard ──────────────────────────────────────────────────
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */
   writeClipboardImage?(data: Uint8Array, width: number, height: number): void
@@ -655,6 +660,43 @@ export interface NativeRenderer {
     suggestedName: string | undefined | null,
     callback: (error: Error | null, outcome: NewPathPromptOutcome) => void
   ): void
+}
+
+/** One entry of a [`MenuBarMenu`]. Exactly one of `separator`, `submenu`, or
+ *  (`id` | `system`) applies; `label` is the displayed title. */
+export interface MenuItemSpec {
+  label?: string
+  /** Stable id delivered to the `setMenus` callback when the item fires. */
+  id?: string
+  /** A built-in behavior instead of a JS callback, so a replaced menu bar can
+   *  keep Quit and friends. */
+  system?:
+    | "quit"
+    | "hide"
+    | "hideOthers"
+    | "showAll"
+    | "minimizeWindow"
+    | "zoomWindow"
+    | "closeWindow"
+  /** Key equivalent, e.g. `"cmd-,"`; displayed in the menu. */
+  keystroke?: string
+  /** Show a checkmark beside the item. */
+  checked?: boolean
+  /** Gray the item out. */
+  disabled?: boolean
+  /** A horizontal rule instead of an entry. */
+  separator?: boolean
+  /** Nested menu; the item becomes a submenu root. */
+  submenu?: MenuItemSpec[]
+}
+
+/** A top-level menu of the application menu bar, as described from JS. */
+export interface MenuBarMenu {
+  /** Displayed menu title. The first menu is the macOS application menu. */
+  name: string
+  items?: MenuItemSpec[]
+  /** Gray the whole menu out. */
+  disabled?: boolean
 }
 
 /** A clipboard image decoded to straight-alpha RGBA. */

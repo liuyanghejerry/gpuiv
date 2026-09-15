@@ -157,7 +157,7 @@ pub(crate) fn img_notice_box(message: &str) -> gpui::AnyElement {
         .border_color(gpui::rgba(0x5d6481ff))
         .text_color(gpui::rgba(0xa4accdff))
         .child(crate::text::chrome_text(
-            SharedString::from(message.to_string()),
+            gpui::SharedString::from(message.to_string()),
             None,
         ))
         .into_any_element()

@@ -22,6 +22,7 @@ import type {
   DebugFrameOverlayStats,
   ElementBounds,
   HostNode,
+  MenuBarMenu,
   NativeRenderer,
   NewPathPromptOutcome,
   PathPromptOptions,
@@ -99,6 +100,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   captureScreenshot(path: string): void
   openUrl(url: string): void
   getLastOpenedUrl(): string | null
+  setMenus(menus: MenuBarMenu[], onAction: (id: string) => void): void
+  getLastMenus(): { name: string; items: unknown[] }[] | null
+  fireMenuAction(id: string): void
   writeClipboardImage(data: Uint8Array, width: number, height: number): void
   readClipboardImage(): { data: Uint8Array; width: number; height: number } | null
   writeClipboardText(text: string): void
@@ -703,6 +707,22 @@ export class TestRenderer implements NativeRenderer {
 
   getLastOpenedUrl(): string | null {
     return this.native.getLastOpenedUrl?.() ?? null
+  }
+
+  /** Install the menu bar. The test bridge records it; assert with
+   *  `getLastMenus` and drive clicks with `fireMenuAction`. */
+  setMenus(menus: MenuBarMenu[], onAction: (id: string) => void): void {
+    this.native.setMenus?.(menus, onAction)
+  }
+
+  getLastMenus(): { name: string; items: unknown[] }[] | null {
+    const native = this.native as { getLastMenus?(): { name: string; items: unknown[] }[] | null }
+    return native.getLastMenus?.() ?? null
+  }
+
+  fireMenuAction(id: string): void {
+    const native = this.native as { fireMenuAction?(id: string): void }
+    native.fireMenuAction?.(id)
   }
 
   /** Put a straight-alpha RGBA image on the platform's in-memory test

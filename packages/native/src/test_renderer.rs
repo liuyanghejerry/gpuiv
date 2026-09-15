@@ -208,6 +208,8 @@ pub struct TestGpuixRenderer {
     /// platform is `pub(crate)`, so the bridge keeps its own.
     path_prompt_answers: RefCell<VecDeque<Option<Vec<String>>>>,
     last_path_prompt_options: RefCell<Option<crate::renderer::PathPromptOptionsDesc>>,
+    last_menus: RefCell<Option<Vec<crate::app_menu::RecordedMenu>>>,
+    menu_action_handler: RefCell<Option<ThreadsafeFunction<String>>>,
     new_path_prompt_answers: RefCell<VecDeque<Option<String>>>,
     last_new_path_prompt: RefCell<Option<(String, Option<String>)>>,
 }
@@ -296,6 +298,8 @@ impl TestGpuixRenderer {
             last_opened_url: RefCell::new(None),
             path_prompt_answers: RefCell::new(Default::default()),
             last_path_prompt_options: RefCell::new(None),
+            last_menus: RefCell::new(None),
+            menu_action_handler: RefCell::new(None),
             new_path_prompt_answers: RefCell::new(Default::default()),
             last_new_path_prompt: RefCell::new(None),
         })
@@ -505,6 +509,39 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_last_path_prompt_options(&self) -> Option<PathPromptOptionsDesc> {
         self.last_path_prompt_options.borrow().clone()
+    }
+
+    // ── Menus (recorded) ────────────────────────────────────────────
+
+    /// Test stand-in for the production `setMenus`: records the converted
+    /// menus (validating them through the production path) and arms the
+    /// callback. The test platform's menu bar is a no-op, so assert with
+    /// `getLastMenus` and drive clicks with `fireMenuAction`.
+    #[napi]
+    pub fn set_menus(
+        &self,
+        menus: Vec<crate::app_menu::JsMenuDesc>,
+        on_action: ThreadsafeFunction<String>,
+    ) -> Result<()> {
+        let recorded = crate::app_menu::record_menus(menus)?;
+        *self.last_menus.borrow_mut() = Some(recorded);
+        *self.menu_action_handler.borrow_mut() = Some(on_action);
+        Ok(())
+    }
+
+    /// The menus the last `setMenus` call installed.
+    #[napi]
+    pub fn get_last_menus(&self) -> Option<Vec<crate::app_menu::RecordedMenu>> {
+        self.last_menus.borrow().clone()
+    }
+
+    /// Deliver a menu item click to the armed `setMenus` callback, the way
+    /// the macOS menu bar would.
+    #[napi]
+    pub fn fire_menu_action(&self, id: String) {
+        if let Some(handler) = self.menu_action_handler.borrow().as_ref() {
+            handler.clone().call(Ok(id), ThreadsafeFunctionCallMode::NonBlocking);
+        }
     }
 
     /// Test stand-in for the production `promptForNewPath`.
