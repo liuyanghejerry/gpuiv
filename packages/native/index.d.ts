@@ -190,6 +190,31 @@ export declare class GpuixRenderer {
    * Returns null when the clipboard holds no image.
    */
   readClipboardImage(): ClipboardImage | null
+  /** Put text on the clipboard. */
+  writeClipboardText(text: string): void
+  /**
+   * Read text from the clipboard. Returns null when the clipboard holds
+   * no text entry.
+   */
+  readClipboardText(): string | null
+  /**
+   * Replace the application menu bar at runtime (macOS only). `onAction`
+   * receives the `id` of the fired item. A menu named "Window" receives
+   * the window list, exactly like the default bar.
+   */
+  setMenus(menus: Array<JsMenuDesc>, onAction: ((err: Error | null, arg: string) => any)): void
+  /**
+   * Arm or disarm the window-level close and reopen observers. Both emit
+   * on the same event id as the window key events.
+   */
+  setWindowObservers(shouldClose: boolean, reopen: boolean, eventId: number): void
+  /**
+   * Close the window for real. When a `windowShouldClose` observer is
+   * armed, an OS close attempt is vetoed and delivered to JS instead; this
+   * is the confirmed close that follows. Closing the last window quits
+   * (QuitMode::LastWindowClosed).
+   */
+  closeWindow(): void
   /**
    * Open the platform's save dialog starting in `directory` (defaults to
    * the process working directory). The callback receives `(error,
@@ -342,6 +367,45 @@ export declare class TestGpuixRenderer {
   focusNext(): void
   /** Move focus to the previous GPUI tab stop. */
   focusPrevious(): void
+  /**
+   * Arm or disarm the window close/reopen observers, mirroring the
+   * production `setWindowObservers`.
+   */
+  setWindowObservers(shouldClose: boolean, reopen: boolean, eventId: number): void
+  /**
+   * Simulate an OS close attempt through the veto path: while
+   * `windowShouldClose` is observed the attempt is vetoed and the event
+   * fires; otherwise the window would close. Returns whether the window
+   * would have closed.
+   */
+  attemptWindowClose(): boolean
+  /** Simulate a Dock-icon relaunch: fires `appReopen` while observed. */
+  simulateAppReopen(): void
+  /**
+   * Test stand-in for the production `closeWindow`: counts the confirmed
+   * closes instead of destroying the shared test window. Assert with
+   * `getWindowCloseCount`.
+   */
+  closeWindow(): void
+  /** How many times `closeWindow` was called. */
+  getWindowCloseCount(): number
+  /**
+   * Drive `setMarkedText` on the element's editor: the platform call
+   * behind a pinyin candidate update. `selectedStart`/`selectedEnd` are
+   * UTF-16 offsets inside the marked text.
+   */
+  simulateMarkedText(elementId: number, text: string, selectedStart?: number | undefined | null, selectedEnd?: number | undefined | null): void
+  /**
+   * Drive a composition commit (`insertText`): fires compositionEnd and
+   * the change event, like confirming a candidate.
+   */
+  simulateImeCommit(elementId: number, text: string): void
+  /**
+   * Drive a composition cancel (Esc while composing). The real platforms
+   * cancel by setting empty marked text, which also reverts the composed
+   * string; compositionEnd fires.
+   */
+  simulateImeCancel(elementId: number): void
   /** Enable the window key events requested by the JS renderer. */
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   /**
@@ -355,6 +419,20 @@ export declare class TestGpuixRenderer {
   setNextPathPromptResponse(paths?: Array<string> | undefined | null): void
   /** The options the last `promptForPaths` call received. */
   getLastPathPromptOptions(): PathPromptOptionsDesc | null
+  /**
+   * Test stand-in for the production `setMenus`: records the converted
+   * menus (validating them through the production path) and arms the
+   * callback. The test platform's menu bar is a no-op, so assert with
+   * `getLastMenus` and drive clicks with `fireMenuAction`.
+   */
+  setMenus(menus: Array<JsMenuDesc>, onAction: ((err: Error | null, arg: string) => any)): void
+  /** The menus the last `setMenus` call installed. */
+  getLastMenus(): Array<RecordedMenu> | null
+  /**
+   * Deliver a menu item click to the armed `setMenus` callback, the way
+   * the macOS menu bar would.
+   */
+  fireMenuAction(id: string): void
   /** Test stand-in for the production `promptForNewPath`. */
   promptForNewPath(directory: string | undefined | null, suggestedName: string | undefined | null, callback: ((err: Error | null, arg: NewPathPromptOutcome) => any)): void
   /** Queue the next answer for `promptForNewPath`; `null` means cancelled. */
@@ -395,6 +473,13 @@ export declare class TestGpuixRenderer {
    * production reads whatever bytes the platform stored.
    */
   readClipboardImage(): ClipboardImage | null
+  /**
+   * Put text on the in-memory test clipboard, mirroring the production
+   * `ClipboardItem::String` entry.
+   */
+  writeClipboardText(text: string): void
+  /** Read text from the test clipboard, or null when it holds no text. */
+  readClipboardText(): string | null
   /**
    * Notify the view entity and run GPUI until parked.
    * This triggers GpuixView::render() → build_element() → GPUI layout.
@@ -786,6 +871,45 @@ export interface HighlightRect {
   height: number
 }
 
+/** A menu for the application menu bar, as described from JS. */
+export interface JsMenuDesc {
+  /** Displayed menu title. The first menu is the macOS application menu. */
+  name: string
+  /** Item list; a menu without items renders empty. */
+  items?: Array<JsMenuItemDesc>
+  /** Gray the whole menu out. */
+  disabled?: boolean
+}
+
+/**
+ * One item of a [`JsMenuDesc`]. Exactly one of `separator`, `submenu`, or
+ * (`id` | `system`) applies; `label` is the displayed title.
+ */
+export interface JsMenuItemDesc {
+  label?: string
+  /** Delivered to the `setMenus` callback when the item fires. */
+  id?: string
+  /**
+   * A built-in behavior instead of a JS callback, so a replaced menu bar
+   * can keep Quit and friends.
+   */
+  system?: string
+  /**
+   * Key equivalent, e.g. `"cmd-,"`. Bound into the keymap so the menu can
+   * display it; re-binding the same id with a different keystroke keeps
+   * the FIRST binding visible (the macOS menu reads earlier bindings).
+   */
+  keystroke?: string
+  /** Show a checkmark beside the item. */
+  checked?: boolean
+  /** Gray the item out. */
+  disabled?: boolean
+  /** A horizontal rule instead of an entry. */
+  separator?: boolean
+  /** Nested menu; the item becomes a submenu root. */
+  submenu?: Array<JsMenuItemDesc>
+}
+
 /**
  * Wayland `wlr-layer-shell` surface options. Linux/Wayland only; ignored on
  * every other platform. When present on `WindowOptions`, the window is opened
@@ -860,6 +984,28 @@ export interface PathPromptOptionsDesc {
  */
 export interface PathPromptOutcome {
   paths?: Array<string>
+}
+
+/**
+ * The menus recorded by the test renderer's `setMenus` — labels and
+ * keystrokes as JS sent them, so tests can assert the conversion without a
+ * real menu bar.
+ */
+export interface RecordedMenu {
+  name: string
+  items: Array<RecordedMenuItem>
+}
+
+export interface RecordedMenuItem {
+  label: string
+  /** `Some` for a JS-callback item, `None` for separators and system items. */
+  id?: string
+  system?: string
+  keystroke?: string
+  checked: boolean
+  disabled: boolean
+  separator: boolean
+  submenu: Array<RecordedMenuItem>
 }
 
 export interface WindowInsets {
