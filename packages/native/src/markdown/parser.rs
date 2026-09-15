@@ -13,7 +13,7 @@
 
 use std::ops::Range;
 
-use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag};
+use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
 /// Inline styling flags, threaded through nested emphasis and links.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -42,6 +42,13 @@ pub enum Block {
     Heading {
         level: u8,
         runs: Vec<InlineRun>,
+    },
+    /// A paragraph holding nothing but `![alt](url)` images. Images that sit
+    /// among other inline content are not blocks — they degrade to link-styled
+    /// runs, because `InlineRun` is text-only.
+    Image {
+        url: String,
+        alt: String,
     },
     CodeBlock {
         language: Option<String>,
@@ -160,9 +167,14 @@ fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
         return Vec::new();
     };
     match tag {
-        Tag::Paragraph => vec![Block::Paragraph {
-            runs: parse_inline_container(cur, &InlineStyle::default()),
-        }],
+        Tag::Paragraph => {
+            if let Some(images) = take_standalone_images(cur) {
+                return images;
+            }
+            vec![Block::Paragraph {
+                runs: parse_inline_container(cur, &InlineStyle::default()),
+            }]
+        }
         Tag::Heading { level, .. } => vec![Block::Heading {
             level: heading_level(level),
             runs: parse_inline_container(cur, &InlineStyle::default()),
@@ -310,6 +322,75 @@ fn parse_table(cur: &mut Cursor, align: Vec<TableAlign>) -> Block {
         header,
         rows,
         align,
+    }
+}
+
+/// Consume a paragraph that holds nothing but images — and optional
+/// whitespace between them — as one `Block::Image` per image, through the
+/// paragraph's `End`. Returns `None` (consuming nothing) the moment any other
+/// inline content appears, so mixed paragraphs take the normal path where an
+/// image degrades to a link-styled run of its alt text.
+fn take_standalone_images(cur: &mut Cursor) -> Option<Vec<Block>> {
+    let events = cur.events;
+    let mut ix = cur.ix;
+    let mut blocks = Vec::new();
+    loop {
+        while matches!(
+            events.get(ix).map(|(event, _)| event),
+            Some(Event::Text(text)) if text.trim().is_empty()
+        ) {
+            ix += 1;
+        }
+        match events.get(ix).map(|(event, _)| event) {
+            Some(Event::Start(Tag::Image { dest_url, .. })) => {
+                let url = dest_url.to_string();
+                ix += 1;
+                let alt = collect_image_alt(events, &mut ix)?;
+                blocks.push(Block::Image { url, alt });
+            }
+            Some(Event::End(TagEnd::Paragraph)) if !blocks.is_empty() => {
+                cur.ix = ix + 1;
+                return Some(blocks);
+            }
+            _ => return None,
+        }
+    }
+}
+
+/// Collect the alt text of one image, stopping at the image's own `End`.
+/// Nested inline formatting contributes its text but not its styling; any
+/// event that cannot be alt text fails the standalone match.
+fn collect_image_alt(events: &[(Event, Range<usize>)], ix: &mut usize) -> Option<String> {
+    let mut alt = String::new();
+    let mut depth = 0usize;
+    loop {
+        match events.get(*ix).map(|(event, _)| event) {
+            Some(Event::Text(text)) => {
+                alt.push_str(text);
+                *ix += 1;
+            }
+            Some(Event::Code(text)) => {
+                alt.push_str(text);
+                *ix += 1;
+            }
+            Some(Event::SoftBreak) | Some(Event::HardBreak) => {
+                alt.push(' ');
+                *ix += 1;
+            }
+            Some(Event::Start(_)) => {
+                depth += 1;
+                *ix += 1;
+            }
+            Some(Event::End(TagEnd::Image)) if depth == 0 => {
+                *ix += 1;
+                return Some(alt);
+            }
+            Some(Event::End(_)) => {
+                depth -= 1;
+                *ix += 1;
+            }
+            _ => return None,
+        }
     }
 }
 
@@ -561,6 +642,71 @@ mod tests {
         assert_eq!(link.text, "docs");
         assert_eq!(link.style.link.as_deref(), Some("https://example.com/x"));
         assert_eq!(flat(runs), "see docs now");
+    }
+
+    #[test]
+    fn a_lone_image_becomes_an_image_block() {
+        let tree = parse("![a chart](https://example.com/chart.png)");
+        assert_eq!(
+            tree.blocks,
+            vec![Block::Image {
+                url: "https://example.com/chart.png".into(),
+                alt: "a chart".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn several_images_in_one_paragraph_become_sequential_blocks() {
+        let tree = parse("![one](1.png) ![two](2.png)");
+        assert_eq!(
+            tree.blocks,
+            vec![
+                Block::Image {
+                    url: "1.png".into(),
+                    alt: "one".into(),
+                },
+                Block::Image {
+                    url: "2.png".into(),
+                    alt: "two".into(),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn an_image_among_text_stays_a_link_run() {
+        let tree = parse("before ![alt](img.png) after");
+        let Block::Paragraph { runs } = &tree.blocks[0] else {
+            panic!("expected a paragraph");
+        };
+        let link = runs.iter().find(|r| r.style.link.is_some()).unwrap();
+        assert_eq!(link.text, "alt");
+        assert_eq!(link.style.link.as_deref(), Some("img.png"));
+    }
+
+    #[test]
+    fn image_alt_flattens_nested_formatting_and_breaks() {
+        let tree = parse("![plain *bold* `code`\nmore](img.png)");
+        assert_eq!(
+            tree.blocks,
+            vec![Block::Image {
+                url: "img.png".into(),
+                alt: "plain bold code more".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn an_image_with_an_empty_alt_is_still_a_block() {
+        let tree = parse("![](img.png)");
+        assert_eq!(
+            tree.blocks,
+            vec![Block::Image {
+                url: "img.png".into(),
+                alt: String::new(),
+            }]
+        );
     }
 
     #[test]

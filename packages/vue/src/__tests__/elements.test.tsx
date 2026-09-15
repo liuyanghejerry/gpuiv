@@ -43,6 +43,64 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("renders standalone markdown images as blocks", () => {
+    // A 1x1 transparent PNG data URL: a real image element, not text.
+    const png =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown source={`before\n\n![a tiny picture](${png})\n\nafter`} />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    expect(painted).toContain("before")
+    expect(painted).toContain("after")
+    // A rendered image paints no text: the alt is accessibility metadata.
+    expect(painted).not.toContain("a tiny picture")
+    app.unmount()
+  })
+
+  it("falls back to the alt text when a markdown image cannot load", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown
+              source={"![alt fallback](data:image/png;base64,not-base64)"}
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    expect(painted).toContain("alt fallback")
+    app.unmount()
+  })
+
+  it("keeps an image among text as a link run", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown source={"see ![inline alt](img.png) there"} />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    expect(painted).toContain("see")
+    expect(painted).toContain("inline alt")
+    expect(painted).toContain("there")
+    app.unmount()
+  })
+
   it("renders code line numbers and tokens", () => {
     const App = defineComponent({
       setup() {
