@@ -75,6 +75,9 @@ const EVENT_TYPES = new Set([
   "lineClick",
   "linkClick",
   "visibleRange",
+  "compositionStart",
+  "compositionUpdate",
+  "compositionEnd",
 ])
 
 /// Props that reach Rust on EVERY element type, including div and text.

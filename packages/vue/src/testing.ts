@@ -87,6 +87,14 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateAppReopen(): void
   closeWindow(): void
   getWindowCloseCount(): number
+  simulateMarkedText(
+    elementId: number,
+    text: string,
+    selectedStart?: number,
+    selectedEnd?: number
+  ): void
+  simulateImeCommit(elementId: number, text: string): void
+  simulateImeCancel(elementId: number): void
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
@@ -294,6 +302,30 @@ export class TestRenderer implements NativeRenderer {
 
   getWindowCloseCount(): number {
     return this.native.getWindowCloseCount()
+  }
+
+  // ── IME composition (direct editor drive) ────────────────────────
+
+  /** Drive `setMarkedText`: the platform call behind a candidate update.
+   *  Emits compositionStart (first) then compositionUpdate. */
+  simulateMarkedText(
+    elementId: number,
+    text: string,
+    selectedStart?: number,
+    selectedEnd?: number
+  ): void {
+    this.native.simulateMarkedText(elementId, text, selectedStart, selectedEnd)
+  }
+
+  /** Drive a composition commit: compositionEnd + change. */
+  simulateImeCommit(elementId: number, text: string): void {
+    this.native.simulateImeCommit(elementId, text)
+  }
+
+  /** Drive a composition cancel: the marked text is reverted and
+   *  compositionEnd fires. */
+  simulateImeCancel(elementId: number): void {
+    this.native.simulateImeCancel(elementId)
   }
 
   // ── File dialogs (canned by the native test renderer) ───────────

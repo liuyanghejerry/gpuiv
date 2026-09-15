@@ -507,7 +507,12 @@ impl CustomElement for TextEditorElement {
     fn supported_events(&self) -> &'static [&'static str] {
         &[
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
+            "compositionStart", "compositionUpdate", "compositionEnd",
         ]
+    }
+
+    fn editor_entity(&mut self) -> Option<Entity<TextEditorState>> {
+        self.state.clone()
     }
 
     fn destroy(&mut self) {
@@ -595,7 +600,7 @@ fn push_undo_snapshot(history: &mut VecDeque<EditSnapshot>, snapshot: EditSnapsh
     history.push_back(snapshot);
 }
 
-struct TextEditorState {
+pub(crate) struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
     emits_change: bool,
@@ -1482,7 +1487,14 @@ impl EntityInputHandler for TextEditorState {
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
-        self.marked_range = None;
+        if let Some(marked) = self.marked_range.take() {
+            // A cancelled composition still ends, exactly like a committed
+            // one; the data is the composed text being dropped.
+            let data = self.content.get(marked).map(str::to_string).unwrap_or_default();
+            emit_event_full(&self.callback, self.element_id, "compositionEnd", |payload| {
+                payload.value = Some(data);
+            });
+        }
         cx.notify();
     }
 
@@ -1508,6 +1520,18 @@ impl EntityInputHandler for TextEditorState {
         };
         if self.marked_range.is_none() {
             self.record_edit(&range, &replacement, cx.background_executor().now());
+        }
+        if self.marked_range.is_none() {
+            // A committed composition ends with the inserted text as its
+            // data, mirroring the DOM's compositionend-after-insert order.
+            emit_event_full(
+                &self.callback,
+                self.element_id,
+                "compositionEnd",
+                |payload| {
+                    payload.value = Some(replacement.clone());
+                },
+            );
         }
         self.content =
             self.content[..range.start].to_owned() + &replacement + &self.content[range.end..];
@@ -1537,7 +1561,8 @@ impl EntityInputHandler for TextEditorState {
             .map(|range| self.range_from_utf16(range))
             .or(self.marked_range.clone())
             .unwrap_or(self.selected_range.clone());
-        if self.marked_range.is_none() {
+        let was_marked = self.marked_range.is_some();
+        if !was_marked {
             let snapshot = self.snapshot();
             push_undo_snapshot(&mut self.undo_stack, snapshot);
             self.redo_stack.clear();
@@ -1550,6 +1575,40 @@ impl EntityInputHandler for TextEditorState {
         };
         self.content =
             self.content[..range.start].to_owned() + &replacement + &self.content[range.end..];
+        // DOM shape: compositionstart once, compositionupdate per new marked
+        // text, compositionend when the platform clears the marking (macOS
+        // sends an empty setMarkedText to finish) or commits.
+        if replacement.is_empty() {
+            if was_marked {
+                emit_event_full(
+                    &self.callback,
+                    self.element_id,
+                    "compositionEnd",
+                    |payload| {
+                        payload.value = Some(String::new());
+                    },
+                );
+            }
+        } else {
+            if !was_marked {
+                emit_event_full(
+                    &self.callback,
+                    self.element_id,
+                    "compositionStart",
+                    |payload| {
+                        payload.value = Some(String::new());
+                    },
+                );
+            }
+            emit_event_full(
+                &self.callback,
+                self.element_id,
+                "compositionUpdate",
+                |payload| {
+                    payload.value = Some(replacement.clone());
+                },
+            );
+        }
         self.marked_range =
             (!replacement.is_empty()).then_some(range.start..range.start + replacement.len());
         self.selected_range = new_selected_range_utf16

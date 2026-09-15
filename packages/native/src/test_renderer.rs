@@ -549,6 +549,80 @@ impl TestGpuixRenderer {
         *self.window_close_count.borrow()
     }
 
+    // ── IME composition (direct editor drive) ───────────────────────
+
+    /// Drive `setMarkedText` on the element's editor: the platform call
+    /// behind a pinyin candidate update. `selectedStart`/`selectedEnd` are
+    /// UTF-16 offsets inside the marked text.
+    #[napi]
+    pub fn simulate_marked_text(
+        &self,
+        element_id: f64,
+        text: String,
+        selected_start: Option<f64>,
+        selected_end: Option<f64>,
+    ) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        let id = to_element_id(element_id)?;
+        let selection = match (selected_start, selected_end) {
+            (Some(start), Some(end)) => Some(start as usize..end as usize),
+            _ => None,
+        };
+        self.drive_ime(id, move |state, window, cx| {
+            state.replace_and_mark_text_in_range(None, &text, selection, window, cx);
+        })
+    }
+
+    /// Drive a composition commit (`insertText`): fires compositionEnd and
+    /// the change event, like confirming a candidate.
+    #[napi]
+    pub fn simulate_ime_commit(&self, element_id: f64, text: String) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        let id = to_element_id(element_id)?;
+        self.drive_ime(id, move |state, window, cx| {
+            state.replace_text_in_range(None, &text, window, cx);
+        })
+    }
+
+    /// Drive a composition cancel (Esc while composing). The real platforms
+    /// cancel by setting empty marked text, which also reverts the composed
+    /// string; compositionEnd fires.
+    #[napi]
+    pub fn simulate_ime_cancel(&self, element_id: f64) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        let id = to_element_id(element_id)?;
+        self.drive_ime(id, |state, window, cx| {
+            let range = state.marked_text_range(window, cx);
+            state.replace_and_mark_text_in_range(range, "", None, window, cx);
+            state.unmark_text(window, cx);
+        })
+    }
+
+    fn drive_ime(
+        &self,
+        element_id: u64,
+        drive: impl FnOnce(
+            &mut crate::custom_elements::input::TextEditorState,
+            &mut gpui::Window,
+            &mut gpui::Context<crate::custom_elements::input::TextEditorState>,
+        ),
+    ) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        with_test_state(|cx, window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(element_id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {element_id} is not a text editor"))
+                })?;
+            cx.update_window(window, move |_, window, app| {
+                entity.update(app, |state, cx| drive(state, window, cx));
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     /// Enable the window key events requested by the JS renderer.
     #[napi]
     pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {

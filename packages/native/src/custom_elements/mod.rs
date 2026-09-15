@@ -228,6 +228,15 @@ pub trait CustomElement: 'static {
     /// Immutable event capability declaration for this adapter.
     fn supported_events(&self) -> &'static [&'static str];
 
+    /// The text-editor entity backing this element, when it is one. The
+    /// automation bridge drives IME composition through it; production
+    /// rendering never calls this.
+    fn editor_entity(
+        &mut self,
+    ) -> Option<gpui::Entity<crate::custom_elements::input::TextEditorState>> {
+        None
+    }
+
     /// Clean up resources (GPUI entities, subscriptions, etc.)
     fn destroy(&mut self);
 }
@@ -377,6 +386,17 @@ impl CustomElementRegistry {
         if let Some(mut entry) = self.instances.remove(&id) {
             entry.element.destroy();
         }
+    }
+
+    /// The text-editor entity of a live input/textarea element, for the
+    /// automation bridge's IME simulation.
+    pub fn editor_entity(
+        &mut self,
+        id: u64,
+    ) -> Option<gpui::Entity<crate::custom_elements::input::TextEditorState>> {
+        self.instances
+            .get_mut(&id)
+            .and_then(|entry| entry.element.editor_entity())
     }
 
     /// Destroy every live instance. Only for app teardown.
