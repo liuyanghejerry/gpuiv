@@ -22,6 +22,7 @@ import type {
   DebugFrameOverlayStats,
   ElementBounds,
   HostNode,
+  MenuBarMenu,
   NativeRenderer,
   NewPathPromptOutcome,
   PathPromptOptions,
@@ -81,6 +82,19 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusNextWithin(elementId: number): void
   focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
+  setWindowObservers(shouldClose: boolean, reopen: boolean, eventId: number): void
+  attemptWindowClose(): boolean
+  simulateAppReopen(): void
+  closeWindow(): void
+  getWindowCloseCount(): number
+  simulateMarkedText(
+    elementId: number,
+    text: string,
+    selectedStart?: number,
+    selectedEnd?: number
+  ): void
+  simulateImeCommit(elementId: number, text: string): void
+  simulateImeCancel(elementId: number): void
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
@@ -99,8 +113,16 @@ interface NativeTestRendererApi extends NativeRenderer {
   captureScreenshot(path: string): void
   openUrl(url: string): void
   getLastOpenedUrl(): string | null
+  setMenus(
+    menus: MenuBarMenu[],
+    onAction: (error: Error | null, id: string) => void
+  ): void
+  getLastMenus(): { name: string; items: unknown[] }[] | null
+  fireMenuAction(id: string): void
   writeClipboardImage(data: Uint8Array, width: number, height: number): void
   readClipboardImage(): { data: Uint8Array; width: number; height: number } | null
+  writeClipboardText(text: string): void
+  readClipboardText(): string | null
   promptForPaths(
     options: PathPromptOptions,
     callback: (error: Error | null, outcome: PathPromptOutcome) => void
@@ -240,6 +262,11 @@ export class TestRenderer implements NativeRenderer {
     keyUp: boolean,
     eventId: number
   ) => void
+  readonly setWindowObservers: (
+    shouldClose: boolean,
+    reopen: boolean,
+    eventId: number
+  ) => void
 
   constructor(options: TestWindowOptions = {}) {
     if (!NativeTestRenderer) {
@@ -255,6 +282,53 @@ export class TestRenderer implements NativeRenderer {
     this.focusNextWithin = this.native.focusNextWithin.bind(this.native)
     this.focusPreviousWithin = this.native.focusPreviousWithin.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
+    this.setWindowObservers = this.native.setWindowObservers.bind(this.native)
+  }
+
+  // ── Window close / reopen (veto bridge) ──────────────────────────
+
+  /** Simulate an OS close attempt. False means the attempt was vetoed and
+   *  `onWindowShouldClose` fired; true means the window would have closed. */
+  attemptWindowClose(): boolean {
+    return this.native.attemptWindowClose()
+  }
+
+  /** Simulate a Dock-icon relaunch; fires `onReopen` while armed. */
+  simulateAppReopen(): void {
+    this.native.simulateAppReopen()
+  }
+
+  /** The confirmed close — assert with `getWindowCloseCount`. */
+  closeWindow(): void {
+    this.native.closeWindow()
+  }
+
+  getWindowCloseCount(): number {
+    return this.native.getWindowCloseCount()
+  }
+
+  // ── IME composition (direct editor drive) ────────────────────────
+
+  /** Drive `setMarkedText`: the platform call behind a candidate update.
+   *  Emits compositionStart (first) then compositionUpdate. */
+  simulateMarkedText(
+    elementId: number,
+    text: string,
+    selectedStart?: number,
+    selectedEnd?: number
+  ): void {
+    this.native.simulateMarkedText(elementId, text, selectedStart, selectedEnd)
+  }
+
+  /** Drive a composition commit: compositionEnd + change. */
+  simulateImeCommit(elementId: number, text: string): void {
+    this.native.simulateImeCommit(elementId, text)
+  }
+
+  /** Drive a composition cancel: the marked text is reverted and
+   *  compositionEnd fires. */
+  simulateImeCancel(elementId: number): void {
+    this.native.simulateImeCancel(elementId)
   }
 
   // ── File dialogs (canned by the native test renderer) ───────────
@@ -703,6 +777,22 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getLastOpenedUrl?.() ?? null
   }
 
+  /** Install the menu bar. The test bridge records it; assert with
+   *  `getLastMenus` and drive clicks with `fireMenuAction`. */
+  setMenus(menus: MenuBarMenu[], onAction: (error: Error | null, id: string) => void): void {
+    this.native.setMenus?.(menus, onAction)
+  }
+
+  getLastMenus(): { name: string; items: unknown[] }[] | null {
+    const native = this.native as { getLastMenus?(): { name: string; items: unknown[] }[] | null }
+    return native.getLastMenus?.() ?? null
+  }
+
+  fireMenuAction(id: string): void {
+    const native = this.native as { fireMenuAction?(id: string): void }
+    native.fireMenuAction?.(id)
+  }
+
   /** Put a straight-alpha RGBA image on the platform's in-memory test
    *  clipboard, mirroring the production encoder path. */
   writeClipboardImage(data: Uint8Array, width: number, height: number): void {
@@ -713,6 +803,17 @@ export class TestRenderer implements NativeRenderer {
    *  trip through the `ClipboardEntry::Image` the platform stored. */
   readClipboardImage(): { data: Uint8Array; width: number; height: number } | null {
     return this.native.readClipboardImage?.() ?? null
+  }
+
+  /** Put text on the in-memory test clipboard. */
+  writeClipboardText(text: string): void {
+    this.native.writeClipboardText?.(text)
+  }
+
+  /** Read text from the test clipboard — a real round trip through the
+   *  `ClipboardEntry::String` the platform stored. */
+  readClipboardText(): string | null {
+    return this.native.readClipboardText?.() ?? null
   }
 
   /** Bytes built into canvas tile images so far — the upload cost the GPU
@@ -849,12 +950,22 @@ export function createTestApp(
   const gpuivHost = createGpuivRendererHost(
     renderer,
     idAllocatorFor(renderer),
-    { onKeyDown: options.onKeyDown, onKeyUp: options.onKeyUp },
+    {
+      onKeyDown: options.onKeyDown,
+      onKeyUp: options.onKeyUp,
+      onWindowShouldClose: options.onWindowShouldClose,
+      onReopen: options.onReopen,
+    },
     windowKeyEventId
   )
   renderer.setWindowKeyEvents(
     Boolean(options.onKeyDown),
     Boolean(options.onKeyUp),
+    windowKeyEventId
+  )
+  renderer.setWindowObservers(
+    Boolean(options.onWindowShouldClose),
+    Boolean(options.onReopen),
     windowKeyEventId
   )
   const app = gpuivHost.vue.createApp(rootComponent)
@@ -882,9 +993,10 @@ export function createTestApp(
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
-      // Only the live root may turn its window key listeners off.
+      // Only the live root may turn its window listeners off.
       if (gpuivHost.detach()) {
         renderer.setWindowKeyEvents(false, false, windowKeyEventId)
+        renderer.setWindowObservers(false, false, windowKeyEventId)
       }
       renderer.flush()
     },

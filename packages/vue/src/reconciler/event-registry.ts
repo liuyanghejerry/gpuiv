@@ -82,17 +82,32 @@ export function handleGpuixEvent(payload: EventPayload, renderer: NativeRenderer
   const container = containerForRenderer(renderer)
   if (!container) return false
   const onEvent = container.onEvent
-  if (payload.eventType === "windowKeyDown" || payload.eventType === "windowKeyUp") {
+  if (
+    payload.eventType === "windowKeyDown" ||
+    payload.eventType === "windowKeyUp" ||
+    payload.eventType === "windowShouldClose" ||
+    payload.eventType === "appReopen"
+  ) {
     if (payload.elementId !== container.windowKeyEventId) return false
-    const handler =
-      payload.eventType === "windowKeyDown"
-        ? container.windowKeyEventHandlers.onKeyDown
-        : container.windowKeyEventHandlers.onKeyUp
+    const observers = container.windowKeyEventHandlers
+    let handler: ((event: EventPayload) => void) | undefined
+    let normalizedType = payload.eventType
+    if (payload.eventType === "windowKeyDown") {
+      handler = observers.onKeyDown
+      normalizedType = "keyDown"
+    } else if (payload.eventType === "windowKeyUp") {
+      handler = observers.onKeyUp
+      normalizedType = "keyUp"
+    } else if (payload.eventType === "windowShouldClose") {
+      handler = observers.onWindowShouldClose
+    } else {
+      handler = observers.onReopen
+    }
     if (!handler) return false
     handler({
       ...payload,
       elementId: 0,
-      eventType: payload.eventType === "windowKeyDown" ? "keyDown" : "keyUp",
+      eventType: normalizedType,
     })
     onEvent?.(payload)
     return true

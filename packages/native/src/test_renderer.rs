@@ -208,6 +208,9 @@ pub struct TestGpuixRenderer {
     /// platform is `pub(crate)`, so the bridge keeps its own.
     path_prompt_answers: RefCell<VecDeque<Option<Vec<String>>>>,
     last_path_prompt_options: RefCell<Option<crate::renderer::PathPromptOptionsDesc>>,
+    last_menus: RefCell<Option<Vec<crate::app_menu::RecordedMenu>>>,
+    menu_action_handler: RefCell<Option<ThreadsafeFunction<String>>>,
+    window_close_count: RefCell<u32>,
     new_path_prompt_answers: RefCell<VecDeque<Option<String>>>,
     last_new_path_prompt: RefCell<Option<(String, Option<String>)>>,
 }
@@ -296,6 +299,9 @@ impl TestGpuixRenderer {
             last_opened_url: RefCell::new(None),
             path_prompt_answers: RefCell::new(Default::default()),
             last_path_prompt_options: RefCell::new(None),
+            last_menus: RefCell::new(None),
+            menu_action_handler: RefCell::new(None),
+            window_close_count: RefCell::new(0),
             new_path_prompt_answers: RefCell::new(Default::default()),
             last_new_path_prompt: RefCell::new(None),
         })
@@ -453,6 +459,170 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Arm or disarm the window close/reopen observers, mirroring the
+    /// production `setWindowObservers`.
+    #[napi]
+    pub fn set_window_observers(
+        &self,
+        should_close: bool,
+        reopen: bool,
+        event_id: f64,
+    ) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.window_should_close = should_close;
+                    view.app_reopen = reopen;
+                    view.window_key_event_id = event_id;
+                    cx.notify();
+                });
+                window.refresh();
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    /// Simulate an OS close attempt through the veto path: while
+    /// `windowShouldClose` is observed the attempt is vetoed and the event
+    /// fires; otherwise the window would close. Returns whether the window
+    /// would have closed.
+    #[napi]
+    pub fn attempt_window_close(&self) -> Result<bool> {
+        let would_close = with_test_state(|cx, _window, view| {
+            let view = view.clone();
+            Ok(cx.update(|cx| {
+                view.update(cx, |view, _cx| {
+                    if view.window_should_close {
+                        crate::renderer::emit_event_full(
+                            &view.event_callback,
+                            view.window_key_event_id,
+                            "windowShouldClose",
+                            |_| {},
+                        );
+                        false
+                    } else {
+                        true
+                    }
+                })
+            }))
+        })?;
+        Ok(would_close)
+    }
+
+    /// Simulate a Dock-icon relaunch: fires `appReopen` while observed.
+    #[napi]
+    pub fn simulate_app_reopen(&self) -> Result<()> {
+        with_test_state(|cx, _window, view| {
+            let view = view.clone();
+            cx.update(|cx| {
+                view.update(cx, |view, _cx| {
+                    if view.app_reopen {
+                        crate::renderer::emit_event_full(
+                            &view.event_callback,
+                            view.window_key_event_id,
+                            "appReopen",
+                            |_| {},
+                        );
+                    }
+                })
+            });
+            Ok(())
+        })
+    }
+
+    /// Test stand-in for the production `closeWindow`: counts the confirmed
+    /// closes instead of destroying the shared test window. Assert with
+    /// `getWindowCloseCount`.
+    #[napi]
+    pub fn close_window(&self) -> Result<()> {
+        *self.window_close_count.borrow_mut() += 1;
+        Ok(())
+    }
+
+    /// How many times `closeWindow` was called.
+    #[napi]
+    pub fn get_window_close_count(&self) -> u32 {
+        *self.window_close_count.borrow()
+    }
+
+    // ── IME composition (direct editor drive) ───────────────────────
+
+    /// Drive `setMarkedText` on the element's editor: the platform call
+    /// behind a pinyin candidate update. `selectedStart`/`selectedEnd` are
+    /// UTF-16 offsets inside the marked text.
+    #[napi]
+    pub fn simulate_marked_text(
+        &self,
+        element_id: f64,
+        text: String,
+        selected_start: Option<f64>,
+        selected_end: Option<f64>,
+    ) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        let id = to_element_id(element_id)?;
+        let selection = match (selected_start, selected_end) {
+            (Some(start), Some(end)) => Some(start as usize..end as usize),
+            _ => None,
+        };
+        self.drive_ime(id, move |state, window, cx| {
+            state.replace_and_mark_text_in_range(None, &text, selection, window, cx);
+        })
+    }
+
+    /// Drive a composition commit (`insertText`): fires compositionEnd and
+    /// the change event, like confirming a candidate.
+    #[napi]
+    pub fn simulate_ime_commit(&self, element_id: f64, text: String) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        let id = to_element_id(element_id)?;
+        self.drive_ime(id, move |state, window, cx| {
+            state.replace_text_in_range(None, &text, window, cx);
+        })
+    }
+
+    /// Drive a composition cancel (Esc while composing). The real platforms
+    /// cancel by setting empty marked text, which also reverts the composed
+    /// string; compositionEnd fires.
+    #[napi]
+    pub fn simulate_ime_cancel(&self, element_id: f64) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        let id = to_element_id(element_id)?;
+        self.drive_ime(id, |state, window, cx| {
+            let range = state.marked_text_range(window, cx);
+            state.replace_and_mark_text_in_range(range, "", None, window, cx);
+            state.unmark_text(window, cx);
+        })
+    }
+
+    fn drive_ime(
+        &self,
+        element_id: u64,
+        drive: impl FnOnce(
+            &mut crate::custom_elements::input::TextEditorState,
+            &mut gpui::Window,
+            &mut gpui::Context<crate::custom_elements::input::TextEditorState>,
+        ),
+    ) -> Result<()> {
+        use gpui::EntityInputHandler as _;
+        with_test_state(|cx, window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(element_id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {element_id} is not a text editor"))
+                })?;
+            cx.update_window(window, move |_, window, app| {
+                entity.update(app, |state, cx| drive(state, window, cx));
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     /// Enable the window key events requested by the JS renderer.
     #[napi]
     pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
@@ -505,6 +675,39 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_last_path_prompt_options(&self) -> Option<PathPromptOptionsDesc> {
         self.last_path_prompt_options.borrow().clone()
+    }
+
+    // ── Menus (recorded) ────────────────────────────────────────────
+
+    /// Test stand-in for the production `setMenus`: records the converted
+    /// menus (validating them through the production path) and arms the
+    /// callback. The test platform's menu bar is a no-op, so assert with
+    /// `getLastMenus` and drive clicks with `fireMenuAction`.
+    #[napi]
+    pub fn set_menus(
+        &self,
+        menus: Vec<crate::app_menu::JsMenuDesc>,
+        on_action: ThreadsafeFunction<String>,
+    ) -> Result<()> {
+        let recorded = crate::app_menu::record_menus(menus)?;
+        *self.last_menus.borrow_mut() = Some(recorded);
+        *self.menu_action_handler.borrow_mut() = Some(on_action);
+        Ok(())
+    }
+
+    /// The menus the last `setMenus` call installed.
+    #[napi]
+    pub fn get_last_menus(&self) -> Option<Vec<crate::app_menu::RecordedMenu>> {
+        self.last_menus.borrow().clone()
+    }
+
+    /// Deliver a menu item click to the armed `setMenus` callback, the way
+    /// the macOS menu bar would.
+    #[napi]
+    pub fn fire_menu_action(&self, id: String) {
+        if let Some(handler) = self.menu_action_handler.borrow().as_ref() {
+            handler.clone().call(Ok(id), ThreadsafeFunctionCallMode::NonBlocking);
+        }
     }
 
     /// Test stand-in for the production `promptForNewPath`.
@@ -625,6 +828,26 @@ impl TestGpuixRenderer {
             }))
         })?;
         decode_clipboard_image(png)
+    }
+
+    /// Put text on the in-memory test clipboard, mirroring the production
+    /// `ClipboardItem::String` entry.
+    #[napi]
+    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
+        with_test_state(|cx, _window, _view| {
+            cx.update(|cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+            });
+            Ok(())
+        })
+    }
+
+    /// Read text from the test clipboard, or null when it holds no text.
+    #[napi]
+    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+        with_test_state(|cx, _window, _view| {
+            Ok(cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())))
+        })
     }
 
     /// Notify the view entity and run GPUI until parked.
@@ -923,6 +1146,7 @@ impl TestGpuixRenderer {
             stats.hits as f64,
             stats.misses as f64,
             stats.documents as f64,
+            stats.stream_hits as f64,
         ]
     }
 

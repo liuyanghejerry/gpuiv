@@ -1,6 +1,7 @@
 // GPUIX Vue components and native motion wrappers.
 
 export { motion } from "./motion.js"
+export { Spinner } from "./spinner.js"
 export type { VirtualListInstance, WindowedVirtualListProps } from "./virtual-list.js"
 export type { VirtualListScrollTop } from "./virtual-list.js"
 export { VirtualList } from "./virtual-list.js"

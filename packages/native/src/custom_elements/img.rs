@@ -116,6 +116,53 @@ fn http_image_uri(src: &str) -> Option<gpui::SharedUri> {
     (src.len() > scheme_end + 3).then(|| gpui::SharedUri::from(src.to_string()))
 }
 
+/// An `<img>`-shaped element for a raw `src` string outside the
+/// custom-element pipeline (markdown image blocks). Classifies the source the
+/// same way `ImgElement::load_src` does. `None` when the src is empty or a
+/// malformed data URL — callers render their own placeholder.
+pub(crate) fn standalone_img(src: &str, id: gpui::SharedString) -> Option<gpui::Stateful<gpui::Img>> {
+    use gpui::{InteractiveElement as _, StyledImage as _};
+
+    let src = src.trim();
+    if src.is_empty() {
+        return None;
+    }
+    let source = if src.starts_with("data:") {
+        let (format, bytes) = decode_image_data_url(src)?;
+        gpui::ImageSource::Image(std::sync::Arc::new(gpui::Image::from_bytes(format, bytes)))
+    } else if let Some(uri) = http_image_uri(src) {
+        gpui::ImageSource::from(uri)
+    } else {
+        gpui::ImageSource::from(std::path::PathBuf::from(src))
+    };
+    Some(
+        gpui::img(source)
+            .with_fallback(|| img_notice_box("img: load failed"))
+            .id(id),
+    )
+}
+
+/// The bordered muted box shown where an image element cannot paint content.
+/// The message goes through `chrome_text` so a fallback is visible to
+/// `getPaintedText()`.
+pub(crate) fn img_notice_box(message: &str) -> gpui::AnyElement {
+    use gpui::prelude::*;
+
+    gpui::div()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(gpui::rgba(0x1f2230ff))
+        .border(gpui::px(1.0))
+        .border_color(gpui::rgba(0x5d6481ff))
+        .text_color(gpui::rgba(0xa4accdff))
+        .child(crate::text::chrome_text(
+            gpui::SharedString::from(message.to_string()),
+            None,
+        ))
+        .into_any_element()
+}
+
 /// Install the GPUI HTTP client so `<img src="https://…">` can fetch.
 ///
 /// Desktop Application defaults to `NullHttpClient`, which fails every URI
@@ -196,18 +243,7 @@ impl CustomElement for ImgElement {
         // never advances past frame zero.
         let mut el = el
             .object_fit(self.object_fit.as_gpui())
-            .with_fallback(|| {
-                gpui::div()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .bg(gpui::rgba(0x1f2230ff))
-                    .border(gpui::px(1.0))
-                    .border_color(gpui::rgba(0x5d6481ff))
-                    .text_color(gpui::rgba(0xa4accdff))
-                    .child("img: load failed")
-                    .into_any_element()
-            })
+            .with_fallback(|| img_notice_box("img: load failed"))
             .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
 
         if let Some(style) = ctx.style {

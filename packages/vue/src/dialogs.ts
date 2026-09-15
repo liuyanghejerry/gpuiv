@@ -6,6 +6,7 @@
  * the shape the DOM's `showOpenFilePicker()` made canonical for JS. */
 
 import type {
+  MenuBarMenu,
   NativeRenderer,
   NewPathPromptOptions,
   NewPathPromptOutcome,
@@ -52,5 +53,21 @@ export function promptForNewPath(
         resolve(outcome?.path ?? null)
       }
     )
+  })
+}
+
+/** Install a runtime application menu bar (macOS).
+ *
+ * `onAction` receives the `id` of a fired JS item. The install is one call,
+ * not a promise — the menu bar belongs to the app and swaps atomically. */
+export function setMenus(
+  renderer: NativeRenderer,
+  menus: MenuBarMenu[],
+  onAction: (id: string) => void
+): void {
+  if (!renderer.setMenus) throw missing("setMenus")
+  renderer.setMenus(menus, (error, id) => {
+    if (error) throw error
+    onAction(id)
   })
 }

@@ -241,6 +241,12 @@ pub struct Metrics {
     /// column keeps a readable width.
     pub md_table_min_column_content: f32,
     pub md_inline_code_radius: f32,
+    /// Markdown image blocks clamp their painted height to this, so one huge
+    /// screenshot cannot swallow the message column. Width follows the
+    /// container up to `max_w_full`.
+    pub md_image_max_height: f32,
+    /// Corner radius of a markdown image block.
+    pub md_image_radius: f32,
     // The fenced-block card. `<code>` paints no card of its own, so these are
     // markdown-only: a document renderer owns its layout, a primitive does not.
     pub md_code_padding_x: f32,
@@ -315,6 +321,8 @@ impl Metrics {
             o.md_table_min_column_content,
         );
         set(&mut self.md_inline_code_radius, o.md_inline_code_radius);
+        set(&mut self.md_image_max_height, o.md_image_max_height);
+        set(&mut self.md_image_radius, o.md_image_radius);
         if let Some(sizes) = &o.md_heading_sizes {
             for (slot, value) in self.md_heading_sizes.iter_mut().zip(sizes) {
                 *slot = *value as f32;
@@ -378,6 +386,8 @@ impl Metrics {
             self.md_table_min_column_width,
             self.md_table_min_column_content,
             self.md_inline_code_radius,
+            self.md_image_max_height,
+            self.md_image_radius,
         ] {
             feed(value);
         }
@@ -421,6 +431,8 @@ impl Default for Metrics {
             md_table_min_column_width: 96.0,
             md_table_min_column_content: 48.0,
             md_inline_code_radius: 4.5,
+            md_image_max_height: 320.0,
+            md_image_radius: 8.0,
             md_code_padding_x: 12.0,
             md_code_padding_y: 10.0,
             md_code_radius: 10.0,
@@ -694,6 +706,8 @@ pub struct MetricsOverride {
     pub md_table_min_column_width: Option<f64>,
     pub md_table_min_column_content: Option<f64>,
     pub md_inline_code_radius: Option<f64>,
+    pub md_image_max_height: Option<f64>,
+    pub md_image_radius: Option<f64>,
     pub md_code_padding_x: Option<f64>,
     pub md_code_padding_y: Option<f64>,
     pub md_code_radius: Option<f64>,

@@ -547,7 +547,15 @@ export interface NativeRenderer {
   /** Enable window-level key events for the owning root. The event id is a
    *  generation: queued events from an old root carry a stale id and are
    *  rejected before reaching handlers. */
+  /** Arm window-level key events belonging to `eventId`; disarm with
+   *  `false, false`. */
   setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
+  /** Arm or disarm the window close and reopen observers. Both emit on the
+   *  same event id as the window key events. */
+  setWindowObservers?(shouldClose: boolean, reopen: boolean, eventId: number): void
+  /** Close the window for real, past an armed `onWindowShouldClose` veto.
+   *  Closing the last window quits the app. */
+  closeWindow?(): void
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
@@ -628,12 +636,25 @@ export interface NativeRenderer {
   /** Hand a URL to the user's default browser / handler. */
   openUrl?(url: string): void
 
+  /** Replace the application menu bar at runtime (macOS only). `onAction`
+   *  receives `(null, id)` when a JS item fires. A menu named "Window"
+   *  receives the window list, exactly like the default bar. */
+  setMenus?(
+    menus: MenuBarMenu[],
+    onAction: (error: Error | null, id: string) => void
+  ): void
+
   // ── Clipboard ──────────────────────────────────────────────────
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */
   writeClipboardImage?(data: Uint8Array, width: number, height: number): void
   /** Read an image from the clipboard as straight-alpha RGBA. Returns null
    *  when the clipboard holds no image. */
   readClipboardImage?(): ClipboardImage | null
+  /** Put text on the clipboard. */
+  writeClipboardText?(text: string): void
+  /** Read text from the clipboard. Returns null when the clipboard holds
+   *  no text. */
+  readClipboardText?(): string | null
 
   // ── File dialogs ───────────────────────────────────────────────
   /** Open the platform file-selection dialog. The callback receives
@@ -650,6 +671,43 @@ export interface NativeRenderer {
     suggestedName: string | undefined | null,
     callback: (error: Error | null, outcome: NewPathPromptOutcome) => void
   ): void
+}
+
+/** One entry of a [`MenuBarMenu`]. Exactly one of `separator`, `submenu`, or
+ *  (`id` | `system`) applies; `label` is the displayed title. */
+export interface MenuItemSpec {
+  label?: string
+  /** Stable id delivered to the `setMenus` callback when the item fires. */
+  id?: string
+  /** A built-in behavior instead of a JS callback, so a replaced menu bar can
+   *  keep Quit and friends. */
+  system?:
+    | "quit"
+    | "hide"
+    | "hideOthers"
+    | "showAll"
+    | "minimizeWindow"
+    | "zoomWindow"
+    | "closeWindow"
+  /** Key equivalent, e.g. `"cmd-,"`; displayed in the menu. */
+  keystroke?: string
+  /** Show a checkmark beside the item. */
+  checked?: boolean
+  /** Gray the item out. */
+  disabled?: boolean
+  /** A horizontal rule instead of an entry. */
+  separator?: boolean
+  /** Nested menu; the item becomes a submenu root. */
+  submenu?: MenuItemSpec[]
+}
+
+/** A top-level menu of the application menu bar, as described from JS. */
+export interface MenuBarMenu {
+  /** Displayed menu title. The first menu is the macOS application menu. */
+  name: string
+  items?: MenuItemSpec[]
+  /** Gray the whole menu out. */
+  disabled?: boolean
 }
 
 /** A clipboard image decoded to straight-alpha RGBA. */
@@ -742,6 +800,12 @@ export interface ElementIdAllocator {
 export interface WindowKeyEventHandlers {
   onKeyDown?: (event: EventPayload) => void
   onKeyUp?: (event: EventPayload) => void
+  /** Veto-and-observe window closing: while set, an OS close attempt (red
+   *  button, ⌘W path) is cancelled and delivered here; call
+   *  `renderer.closeWindow()` to close for real. */
+  onWindowShouldClose?: () => void
+  /** A Dock-icon relaunch of the running process (macOS). */
+  onReopen?: () => void
 }
 
 // One renderer root. Event handlers stay on this object so two live roots

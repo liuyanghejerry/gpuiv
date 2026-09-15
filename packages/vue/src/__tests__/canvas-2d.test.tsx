@@ -444,18 +444,23 @@ describe("canvas 2d context (pure rasterizer)", () => {
     expectPixelClose(px(image, 3, 3), [0, 0, 0, 255], 0)
   })
 
-  it("throws on non-separable blend modes instead of degrading", () => {
+  it("rasterizes non-separable blend modes", () => {
     const { ctx } = makeContext(8, 8)
-    for (const mode of ["hue", "saturation", "color", "luminosity"]) {
-      expect(() => {
-        ctx.globalCompositeOperation = mode as never
-      }).toThrow(/non-separable/)
+    for (const [mode, want] of [
+      ["hue", [94, 0, 0, 255]],
+      ["saturation", [0, 0, 255, 255]],
+      ["color", [94, 0, 0, 255]],
+      ["luminosity", [54, 54, 255, 255]],
+    ] as [string, number[]][]) {
+      ctx.fillStyle = "#0000ff"
+      ctx.fillRect(0, 0, 8, 8)
+      ctx.fillStyle = "#ff0000"
+      ctx.globalCompositeOperation = mode as never
+      ctx.fillRect(0, 0, 8, 8)
+      expectPixelClose(px(ctx, 3, 3), want as never, 0)
+      expect(ctx.globalCompositeOperation).toBe(mode)
+      ctx.globalCompositeOperation = "source-over"
     }
-    // A rejected assignment leaves the state untouched.
-    expect(ctx.globalCompositeOperation).toBe("source-over")
-    // Separable modes still round-trip through the getter.
-    ctx.globalCompositeOperation = "color-dodge"
-    expect(ctx.globalCompositeOperation).toBe("color-dodge")
   })
 
   it("clears rectangles through the clip mask", () => {

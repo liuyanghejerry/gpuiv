@@ -287,6 +287,46 @@ There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
 AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
 would take the keystroke away from text selection and from `<input>`.
 
+#### Runtime menus
+
+`setMenus(menus, onAction)` replaces the whole bar at runtime — the settings
+menu with `⌘,`, a model switcher, anything the app owns. Items fire their
+`id` back to `onAction`; `system` items keep built-in behaviors so a replaced
+bar can still quit; `keystroke` items display their key equivalent. macOS
+only — the menu bar is a macOS concept in GPUI.
+
+```tsx
+import { setMenus, useGpuixRequired } from '@gpuiv/vue'
+
+function installMenus() {
+  const renderer = useGpuixRequired()
+  setMenus(
+    renderer,
+    [
+      {
+        name: 'Chat',
+        items: [
+          { label: 'About Chat', id: 'about' },
+          { separator: true },
+          { label: 'Settings…', id: 'settings', keystroke: 'cmd-,' },
+          { separator: true },
+          { label: 'Quit Chat', system: 'quit', keystroke: 'cmd-q' },
+        ],
+      },
+      { name: 'Window', items: [{ label: 'Minimize', system: 'minimizeWindow' }] },
+    ],
+    (error, id) => {
+      if (id === 'settings') openSettings()
+    }
+  )
+}
+```
+
+The menu named exactly `Window` receives the open-window list, like the
+default bar. Submenus nest through `items` on an item. Re-binding the same
+`id` with a different `keystroke` keeps the first binding displayed — set
+the final keystrokes in one `setMenus` call.
+
 ### Background launch
 
 `focus: false` opens the window **without taking focus**. The app you were
@@ -366,6 +406,28 @@ const renderer = useGpuixRequired()
 `minimizeWindow()` complements the built-in `⌘M` menu item for custom
 chrome. Resizing by edge drag and window zoom are not exposed yet.
 
+### Close interception
+
+`createApp(App, { onWindowShouldClose })` switches closing into an
+Electron-style veto: the red button and `⌘W` path are cancelled and reported
+to JS instead, and the app decides what happens next. `closeWindow()` is the
+confirmed close — it bypasses the veto, and closing the last window still
+quits the process.
+
+```tsx
+createApp(App, {
+  onWindowShouldClose: () => {
+    if (hasUnsavedWork()) showConfirmDialog()  // calls closeWindow() on Yes
+    else renderer.closeWindow?.()
+  },
+})
+```
+
+`onReopen` observes a Dock-icon relaunch of the running process (macOS
+`applicationShouldHandleReopen`) — focus the window, open a new document,
+whatever the app wants. Both observers ride the same render-level wiring as
+`onKeyDown`/`onKeyUp` and disarm on unmount.
+
 ## Opening URLs
 
 `openUrl(url)` hands a URL to the user's default handler — the system browser
@@ -418,12 +480,13 @@ function Toolbar() {
 panels run asynchronously — the dialog answer arrives through a callback on the
 Node event loop, so nothing blocks while the panel is open.
 
-## Clipboard images
+## Clipboard
 
+`writeClipboardText(text)` / `readClipboardText()` move plain text;
 `writeClipboardImage(data, width, height)` puts straight-alpha RGBA pixels on
-the system clipboard as PNG; `readClipboardImage()` reads an image back,
+the system clipboard as PNG, and `readClipboardImage()` reads an image back,
 decoded to the same RGBA layout, or `null` when the clipboard holds no image.
-Both are renderer commands — reach the renderer with `useGpuixRequired()`:
+All are renderer commands — reach the renderer with `useGpuixRequired()`:
 
 ```tsx
 import { useGpuixRequired } from '@gpuiv/vue'
@@ -438,7 +501,7 @@ function CopyButton() {
 }
 ```
 
-The test platform keeps a real in-memory clipboard, so the round trip is
+The test platform keeps a real in-memory clipboard, so both round trips are
 testable end-to-end through `TestRenderer`.
 
 ## Debug frame overlay
@@ -669,6 +732,24 @@ Use **`motion.div`** to animate from an initial style to a target style. Vue
 sends the target once. Rust calculates intermediate values and requests GPUI
 frames until the transition finishes, without a Vue render or N-API call for
 each frame.
+
+For loading states, **`Spinner`** is the ready-made primitive: three pulsing
+dots by default, an indeterminate sliding bar with `variant="pulse"`. It
+animates plain opacity/position styles over the mutation protocol, exposes
+`size`, `color`, and `width`, announces itself through the `status` a11y
+role, and accepts a `phase` prop that pins the animation for deterministic
+screenshots.
+
+```tsx
+import { Spinner } from '@gpuiv/vue'
+
+const Thinking = () => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12 }}>
+    <Spinner label="Thinking" />
+    <text style={{ color: '#8b8fa3' }}>Thinking…</text>
+  </div>
+)
+```
 
 ### Animate a target
 
@@ -1117,6 +1198,11 @@ time**. `8.3 MS` is about 120 Hz.
 `<input>` and `<textarea>` use GPUI's platform input handler. They support a
 native caret, text selection, IME composition, clipboard actions, undo/redo,
 grapheme-safe deletion and mouse positioning.
+
+IME composition is observable: `onCompositionStart` fires once when marking
+begins, `onCompositionUpdate` on every candidate change, and
+`onCompositionEnd` when the composition commits or cancels — the DOM's
+lifecycle, so an app can suppress shortcuts while a pinyin candidate is open.
 
 ```tsx
 const Composer = defineComponent({
@@ -1683,6 +1769,17 @@ strikethrough, task lists, and autolinked bare URLs.
 <markdown source={readme} onLinkClick={(e) => open(e.value)} />
 ```
 
+A paragraph holding nothing but `![alt](url)` images renders them as image
+blocks — data URLs decode inline, `http(s)` sources load through the same
+pipeline as `<img>`, and local paths read from disk. Painted height is capped
+by the `mdImageMaxHeight` metric (default 320) so one screenshot cannot
+swallow the column; an unloadable image falls back to its alt text. An image
+among other inline content stays text: its alt renders with link styling.
+
+Fenced code streams well: when the `source` grows by appends — token-by-token
+LLM output — highlighting resumes from a stable-prefix checkpoint and only
+re-parses the new tail, so long streams stay proportional to the chunk size.
+
 ![Markdown with headings, lists, a table and a code fence](docs/images/markdown.png)
 
 ### Theming
@@ -1911,9 +2008,6 @@ Deliberately not implemented:
 
 - `fillText` / `strokeText` / `measureText` — they **throw**. Glyph
   rasterization needs a font pipeline that does not exist JS-side yet.
-- The non-separable blend modes (`hue`, `saturation`, `color`, `luminosity`
-  as `globalCompositeOperation`) — assigning one **throws**. They mix colour
-  channels, which the separable blend pipeline does not rasterize.
 - Shadows, `filter`, `createPattern`, `Path2D`,
   conic gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
   never sees decoded `<img>` pixels).
@@ -2706,7 +2800,10 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Native text input and multiline textarea
 - [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`)
 - [x] Virtual lists (`<virtual-list>`)
-- [x] Native text components (`<code>`, `<diff>`, `<markdown>`)
+- [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images)
+- [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
+- [x] IME composition events (`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd`)
+- [x] Spinner loading primitive (`Spinner`, dots and pulse variants)
 - [x] Cross-element text selection
 - [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
 - [x] Native `hover` and `active` styles
@@ -2714,14 +2811,18 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Wayland layer-shell surfaces (`layerShell` window option: panels, docks, wallpapers; Linux/Wayland only)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
-- [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`)
+- [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`, `closeWindow`)
+- [x] Window close interception (`onWindowShouldClose` vetoes and observes; `closeWindow()` confirms)
+- [x] Dock relaunch observer (`onReopen`, macOS)
+- [x] Runtime menu bars (`setMenus`; macOS)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
+- [x] Clipboard text (`writeClipboardText`, `readClipboardText`)
 - [x] Opening external URLs (`openUrl`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
-- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. separable blend modes, image data — text APIs and non-separable blend modes throw `NotSupported`)
+- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. all W3C blend modes, image data — text APIs throw `NotSupported`)
 - [x] Canvas PNG export (`toDataURL`, `toBlob`, renderer `canvasToPng`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)

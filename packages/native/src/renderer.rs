@@ -410,6 +410,12 @@ enum UiCommand {
         key_up: bool,
         event_id: u64,
     },
+    SetWindowObservers {
+        should_close: bool,
+        reopen: bool,
+        event_id: u64,
+    },
+    CloseWindow,
     GetWindowSize {
         response: SyncSender<WindowSize>,
     },
@@ -476,6 +482,12 @@ enum UiCommand {
     },
     ReadClipboardImage {
         response: SyncSender<Option<Vec<u8>>>,
+    },
+    WriteClipboardText {
+        text: String,
+    },
+    ReadClipboardText {
+        response: SyncSender<Option<String>>,
     },
     PromptForPaths {
         options: PathPromptOptionsDesc,
@@ -876,6 +888,20 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::SetWindowObservers {
+                should_close,
+                reopen,
+                event_id,
+            } => window.update(cx, move |view, window, cx| {
+                view.window_should_close = should_close;
+                view.app_reopen = reopen;
+                view.window_key_event_id = event_id;
+                cx.notify();
+                window.refresh();
+            }),
+            UiCommand::CloseWindow => {
+                window.update(cx, |_view, window, _cx| window.remove_window())
+            }
             UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
             UiCommand::ToggleFullscreen => {
                 window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
@@ -904,6 +930,19 @@ async fn run_ui_commands(
                         })
                     });
                     response.send(png);
+                })
+            }
+            UiCommand::WriteClipboardText { text } => {
+                window.update(cx, move |_view, _window, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                })
+            }
+            UiCommand::ReadClipboardText { response } => {
+                window.update(cx, move |_view, _window, cx| {
+                    let text = cx
+                        .read_from_clipboard()
+                        .and_then(|item| item.text());
+                    response.send(text);
                 })
             }
             UiCommand::PromptForPaths { options, callback } => window.update(cx, move |_view, _window, cx| {
@@ -1149,6 +1188,26 @@ impl GpuixRenderer {
         // Last window close quits AppKit; tick() returns false and JS exits.
         let app = gpui::Application::with_platform(platform.clone())
             .with_quit_mode(gpui::QuitMode::LastWindowClosed);
+        // A Dock-icon relaunch of a running process lands here (macOS
+        // applicationShouldHandleReopen). Without a handler nothing happens;
+        // with `appReopen` observed, JS decides (focus the window, open a
+        // document, …).
+        app.on_reopen(|cx: &mut gpui::App| {
+            GPUI_WINDOW.with(|stored| {
+                if let Some(handle) = stored.borrow().as_ref() {
+                    let _ = handle.update(cx, |view, _window, _cx| {
+                        if view.app_reopen {
+                            emit_event_full(
+                                &view.event_callback,
+                                view.window_key_event_id,
+                                "appReopen",
+                                |_| {},
+                            );
+                        }
+                    });
+                }
+            });
+        });
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
@@ -1178,6 +1237,33 @@ impl GpuixRenderer {
             ) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
+                    // The close veto reads live view state at close time, so
+                    // arming later (setWindowObservers) needs no re-register.
+                    // A weak handle: a strong one would leak the view entity
+                    // at process exit (GPUI asserts on leaked handles).
+                    if let Err(error) = window_handle.update(cx, |_view, window, cx| {
+                        let entity = cx.entity().downgrade();
+                        window.on_window_should_close(cx, move |_window, cx| {
+                            let Some(entity) = entity.upgrade() else {
+                                return true;
+                            };
+                            let mut allow = true;
+                            let _ = entity.update(cx, |view, _cx| {
+                                if view.window_should_close {
+                                    emit_event_full(
+                                        &view.event_callback,
+                                        view.window_key_event_id,
+                                        "windowShouldClose",
+                                        |_| {},
+                                    );
+                                    allow = false;
+                                }
+                            });
+                            allow
+                        });
+                    }) {
+                        log::error!("Failed to install the close interceptor: {error:#}");
+                    }
                     if activate {
                         cx.activate(true);
                     }
@@ -1971,6 +2057,161 @@ impl GpuixRenderer {
             let png = recv_ui_response(receiver, "the clipboard image query")?;
             return decode_clipboard_image(png);
         }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Put text on the clipboard.
+    #[napi]
+    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::WriteClipboardText { text });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = text;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Read text from the clipboard. Returns null when the clipboard holds
+    /// no text entry.
+    #[napi]
+    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+        #[cfg(target_os = "macos")]
+        {
+            return GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                Ok(app.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())))
+            });
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::ReadClipboardText { response })?;
+            recv_ui_response(receiver, "the clipboard text query")
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Replace the application menu bar at runtime (macOS only). `onAction`
+    /// receives the `id` of the fired item. A menu named "Window" receives
+    /// the window list, exactly like the default bar.
+    #[napi]
+    pub fn set_menus(
+        &self,
+        menus: Vec<crate::app_menu::JsMenuDesc>,
+        on_action: ThreadsafeFunction<String>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| crate::app_menu::set_js_menus(menus, on_action, cx))
+        });
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (menus, on_action);
+            Err(Error::from_reason(
+                "setMenus is macOS-only: the application menu bar is a macOS concept in GPUI",
+            ))
+        }
+    }
+
+    /// Arm or disarm the window-level close and reopen observers. Both emit
+    /// on the same event id as the window key events.
+    #[napi]
+    pub fn set_window_observers(
+        &self,
+        should_close: bool,
+        reopen: bool,
+        event_id: f64,
+    ) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.window_should_close = should_close;
+            view.app_reopen = reopen;
+            view.window_key_event_id = event_id;
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetWindowObservers {
+            should_close,
+            reopen,
+            event_id,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (should_close, reopen, event_id);
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Close the window for real. When a `windowShouldClose` observer is
+    /// armed, an OS close attempt is vetoed and delivered to JS instead; this
+    /// is the confirmed close that follows. Closing the last window quits
+    /// (QuitMode::LastWindowClosed).
+    #[napi]
+    pub fn close_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.remove_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::CloseWindow);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3585,6 +3826,12 @@ pub(crate) struct GpuixView {
     pub(crate) window_key_down: bool,
     pub(crate) window_key_up: bool,
     pub(crate) window_key_event_id: u64,
+    /// While `windowShouldClose` is observed, an OS close attempt is vetoed
+    /// and emitted instead; JS closes for real through `closeWindow()`.
+    pub(crate) window_should_close: bool,
+    /// While `appReopen` is observed, a Dock-icon relaunch emits instead of
+    /// doing nothing (a running bun process has no second instance to spawn).
+    pub(crate) app_reopen: bool,
 }
 
 impl GpuixView {
@@ -3616,6 +3863,8 @@ impl GpuixView {
             window_key_down: false,
             window_key_up: false,
             window_key_event_id: 0,
+            window_should_close: false,
+            app_reopen: false,
         }
     }
 

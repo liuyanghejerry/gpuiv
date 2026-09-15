@@ -245,6 +245,7 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
             text_element(runs, size, line, FontWeight::SEMIBOLD, ctx)
         }
         Block::CodeBlock { language, code } => render_code_block(language.as_deref(), code, ctx),
+        Block::Image { url, alt } => render_image(url, alt, ctx),
         Block::BlockQuote { children } => div()
             // Accent-tinted quote: an indigo rail with a whisper of the same
             // hue behind it.
@@ -352,6 +353,50 @@ fn text_element(
         .text_size(px(size))
         .line_height(px(line_height))
         .child(inner)
+        .into_any_element()
+}
+
+/// A standalone image block. `gpui::img` sizes itself from the bitmap once
+/// loaded (and fills `aspect_ratio`), so the box tracks the natural size
+/// until the max-height metric clamps it. An unparseable or empty src falls
+/// back to the alt text in a muted card, never to nothing.
+fn render_image(url: &str, alt: &str, ctx: &mut MdContext) -> AnyElement {
+    use gpui::prelude::*;
+
+    let theme = ctx.theme.clone();
+    let m = &theme.metrics;
+    let sub = ctx.take_sub();
+    let id = SharedString::from(format!("__gpuix_md_img_{}_{}", ctx.element_id, sub));
+    let image = match crate::custom_elements::img::standalone_img(url, id) {
+        Some(image) => image
+            .max_w_full()
+            .max_h(px(m.md_image_max_height))
+            .rounded(px(m.md_image_radius))
+            .into_any_element(),
+        None => {
+            let label = if alt.is_empty() { "image" } else { alt };
+            div()
+                .flex()
+                .items_center()
+                .max_w_full()
+                .px(px(10.0))
+                .py(px(8.0))
+                .rounded(px(m.md_image_radius))
+                .bg(opacity(theme.text, 0.06))
+                .text_color(theme.text_muted)
+                .child(crate::text::chrome_text(
+                    SharedString::from(label.to_string()),
+                    None,
+                ))
+                .into_any_element()
+        }
+    };
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .child(image)
         .into_any_element()
 }
 
