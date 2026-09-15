@@ -1911,9 +1911,6 @@ Deliberately not implemented:
 
 - `fillText` / `strokeText` / `measureText` — they **throw**. Glyph
   rasterization needs a font pipeline that does not exist JS-side yet.
-- The non-separable blend modes (`hue`, `saturation`, `color`, `luminosity`
-  as `globalCompositeOperation`) — assigning one **throws**. They mix colour
-  channels, which the separable blend pipeline does not rasterize.
 - Shadows, `filter`, `createPattern`, `Path2D`,
   conic gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
   never sees decoded `<img>` pixels).
@@ -2721,7 +2718,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
-- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. separable blend modes, image data — text APIs and non-separable blend modes throw `NotSupported`)
+- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. all W3C blend modes, image data — text APIs throw `NotSupported`)
 - [x] Canvas PNG export (`toDataURL`, `toBlob`, renderer `canvasToPng`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)

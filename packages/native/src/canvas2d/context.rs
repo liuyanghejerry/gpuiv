@@ -42,8 +42,7 @@ use super::geom::stroke::{build_stroke_geometry, StrokeCap, StrokeJoin, StrokePa
 
 /// The separable blend modes of W3C *Compositing and Blending Level 1*
 /// §5.1, rasterized channel-by-channel (each output channel depends only
-/// on the same input channel). Non-separable modes (hue, saturation, color,
-/// luminosity) mix channels and are rejected at parse time.
+/// on the same input channel).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SeparableBlend {
     Multiply,
@@ -119,10 +118,97 @@ impl SeparableBlend {
     }
 }
 
-/// Every composite mode that rasterizes: the Porter-Duff operators plus the
-/// separable blend modes. Parsed from the validated JS string; a name this
-/// enum does not cover (including the non-separable blend modes) is an
-/// error, never a silent fallback to `source-over`.
+/// The non-separable blend modes of W3C *Compositing and Blending Level 1*
+/// §5.2: the blend step mixes channels through the spec's luminance and
+/// saturation operators, so it operates on whole colours.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NonSeparableBlend {
+    Hue,
+    Saturation,
+    Color,
+    Luminosity,
+}
+
+impl NonSeparableBlend {
+    /// The blend step `B(Cb, Cs)` on whole straight colours normalized to
+    /// 0–1, transcribed from §5.2. `sat`/`lum`/`set_sat`/`set_lum` are the
+    /// spec's helper operators.
+    fn blend(self, cb: [f64; 3], cs: [f64; 3]) -> [f64; 3] {
+        fn lum(c: [f64; 3]) -> f64 {
+            0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
+        }
+        fn sat(c: [f64; 3]) -> f64 {
+            c[0].max(c[1]).max(c[2]) - c[0].min(c[1]).min(c[2])
+        }
+        fn clip_color(mut c: [f64; 3]) -> [f64; 3] {
+            let l = lum(c);
+            let min = c[0].min(c[1]).min(c[2]);
+            if min < 0.0 {
+                let scale = l / (l - min);
+                for channel in &mut c {
+                    *channel = l + (*channel - l) * scale;
+                }
+            }
+            let max = c[0].max(c[1]).max(c[2]);
+            if max > 1.0 {
+                let scale = (1.0 - l) / (max - l);
+                for channel in &mut c {
+                    *channel = l + (*channel - l) * scale;
+                }
+            }
+            c
+        }
+        fn set_lum(c: [f64; 3], l: f64) -> [f64; 3] {
+            let d = l - lum(c);
+            clip_color([c[0] + d, c[1] + d, c[2] + d])
+        }
+        fn set_sat(c: [f64; 3], s: f64) -> [f64; 3] {
+            // The spec re-assigns by rank (min/mid/max), so find the ranks
+            // first and write back into the original channel positions.
+            let mut ranks = [0usize, 1, 2];
+            ranks.sort_by(|&a, &b| c[a].total_cmp(&c[b]));
+            let (imin, imid, imax) = (ranks[0], ranks[1], ranks[2]);
+            let mut out = [0.0; 3];
+            if c[imax] > c[imin] {
+                out[imid] = (c[imid] - c[imin]) * s / (c[imax] - c[imin]);
+                out[imax] = s;
+            }
+            out[imin] = 0.0;
+            out
+        }
+        match self {
+            NonSeparableBlend::Hue => set_lum(set_sat(cs, sat(cb)), lum(cb)),
+            NonSeparableBlend::Saturation => set_lum(set_sat(cb, sat(cs)), lum(cb)),
+            NonSeparableBlend::Color => set_lum(cs, lum(cb)),
+            NonSeparableBlend::Luminosity => set_lum(cb, lum(cs)),
+        }
+    }
+}
+
+/// Every blend mode the rasterizer carries: separable modes blend per
+/// channel, non-separable modes on whole colours.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum BlendMode {
+    Separable(SeparableBlend),
+    NonSeparable(NonSeparableBlend),
+}
+
+impl BlendMode {
+    fn blend(self, cb: [f64; 3], cs: [f64; 3]) -> [f64; 3] {
+        match self {
+            BlendMode::Separable(mode) => [
+                mode.channel(cb[0], cs[0]),
+                mode.channel(cb[1], cs[1]),
+                mode.channel(cb[2], cs[2]),
+            ],
+            BlendMode::NonSeparable(mode) => mode.blend(cb, cs),
+        }
+    }
+}
+
+/// Every composite mode that rasterizes: the Porter-Duff operators plus all
+/// W3C blend modes. Parsed from the validated JS string; a name this enum
+/// does not cover is an error, never a silent fallback to `source-over`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Composite {
     SourceOver,
@@ -137,7 +223,7 @@ enum Composite {
     Copy,
     Xor,
     Clear,
-    Blend(SeparableBlend),
+    Blend(BlendMode),
 }
 
 impl Composite {
@@ -155,17 +241,25 @@ impl Composite {
             "copy" => Some(Composite::Copy),
             "xor" => Some(Composite::Xor),
             "clear" => Some(Composite::Clear),
-            "multiply" => Some(Composite::Blend(SeparableBlend::Multiply)),
-            "screen" => Some(Composite::Blend(SeparableBlend::Screen)),
-            "overlay" => Some(Composite::Blend(SeparableBlend::Overlay)),
-            "darken" => Some(Composite::Blend(SeparableBlend::Darken)),
-            "lighten" => Some(Composite::Blend(SeparableBlend::Lighten)),
-            "color-dodge" => Some(Composite::Blend(SeparableBlend::ColorDodge)),
-            "color-burn" => Some(Composite::Blend(SeparableBlend::ColorBurn)),
-            "hard-light" => Some(Composite::Blend(SeparableBlend::HardLight)),
-            "soft-light" => Some(Composite::Blend(SeparableBlend::SoftLight)),
-            "difference" => Some(Composite::Blend(SeparableBlend::Difference)),
-            "exclusion" => Some(Composite::Blend(SeparableBlend::Exclusion)),
+            "multiply" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::Multiply))),
+            "screen" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::Screen))),
+            "overlay" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::Overlay))),
+            "darken" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::Darken))),
+            "lighten" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::Lighten))),
+            "color-dodge" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::ColorDodge))),
+            "color-burn" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::ColorBurn))),
+            "hard-light" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::HardLight))),
+            "soft-light" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::SoftLight))),
+            "difference" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::Difference))),
+            "exclusion" => Some(Composite::Blend(BlendMode::Separable(SeparableBlend::Exclusion))),
+            "hue" => Some(Composite::Blend(BlendMode::NonSeparable(NonSeparableBlend::Hue))),
+            "saturation" => Some(Composite::Blend(BlendMode::NonSeparable(
+                NonSeparableBlend::Saturation,
+            ))),
+            "color" => Some(Composite::Blend(BlendMode::NonSeparable(NonSeparableBlend::Color))),
+            "luminosity" => Some(Composite::Blend(BlendMode::NonSeparable(
+                NonSeparableBlend::Luminosity,
+            ))),
             // Unknown and non-separable names (hue/saturation/color/
             // luminosity): `set_composite` turns this into a napi error —
             // the facade throws before the call for the names the DOM
@@ -1230,14 +1324,15 @@ fn composite_pixel(premul: &mut [u8], p: usize, rgb: [f64; 3], e: f64, composite
             premul[p + 2] = to_u8_clamp(rgb[2] * e + premul[p + 2] as f64 * ia);
             premul[p + 3] = to_u8_clamp(255.0 * e + premul[p + 3] as f64 * ia);
         }
-        // Separable blend modes: W3C Compositing and Blending Level 1 §5
-        // composites a blended source over the backdrop,
+        // Blend modes: W3C Compositing and Blending Level 1 §5 composites a
+        // blended source over the backdrop,
         //
         //   Co = αs·(1−αb)·Cs + αs·αb·B(Cb, Cs) + (1−αs)·αb·Cb
         //   αo = αs + αb·(1−αs)
         //
         // with Cs/Cb straight (un-premultiplied) colours, B the per-mode
-        // blend step, and Co the premultiplied result this buffer stores.
+        // blend step (per-channel for separable modes, whole-colour for
+        // non-separable), and Co the premultiplied result this buffer stores.
         // The formula degenerates to plain source-over when B = Cs. `e`
         // already carries coverage × style × globalAlpha, so αs = e; a
         // transparent backdrop has no colour to blend with, and the αb
@@ -1249,11 +1344,15 @@ fn composite_pixel(premul: &mut [u8], p: usize, rgb: [f64; 3], e: f64, composite
                 if dst_a > 0.0 { premul[p + 1] as f64 / dst_a } else { 0.0 },
                 if dst_a > 0.0 { premul[p + 2] as f64 / dst_a } else { 0.0 },
             ];
+            let cs = [rgb[0], rgb[1], rgb[2]];
+            let blended = mode.blend(
+                [cb[0] / 255.0, cb[1] / 255.0, cb[2] / 255.0],
+                [cs[0] / 255.0, cs[1] / 255.0, cs[2] / 255.0],
+            );
             let back = src_a * dst_a;
             let dst_only = (1.0 - src_a) * dst_a;
             for ch in 0..3 {
-                let blended = mode.channel(cb[ch] / 255.0, rgb[ch] / 255.0) * 255.0;
-                let out = src_a * (1.0 - dst_a) * rgb[ch] + back * blended + dst_only * cb[ch];
+                let out = src_a * (1.0 - dst_a) * cs[ch] + back * blended[ch] * 255.0 + dst_only * cb[ch];
                 premul[p + ch] = to_u8_clamp(out);
             }
             premul[p + 3] = to_u8_clamp(255.0 * (src_a + dst_a * (1.0 - src_a)));
@@ -2042,7 +2141,7 @@ mod tests {
     }
 
     /// An opaque blue backdrop, then the mode blending opaque red over it.
-    fn blend_red_over_blue(mode: SeparableBlend) -> ContextCore {
+    fn blend_red_over_blue(mode: BlendMode) -> ContextCore {
         let mut core = core_8x8();
         core.state.fill = Paint::Solid { r: 0.0, g: 0.0, b: 255.0, a: 1.0 };
         fill_all(&mut core);
@@ -2101,19 +2200,20 @@ mod tests {
     /// and stored through `Uint8ClampedArray` rounding.
     #[test]
     fn blend_modes_rasterize_over_opaque_backdrop() {
+        use BlendMode::Separable as S;
         use SeparableBlend::*;
-        let expected: &[(SeparableBlend, [u8; 4])] = &[
-            (Multiply, [0, 0, 0, 255]),
-            (Screen, [255, 0, 255, 255]),
-            (Overlay, [0, 0, 255, 255]),
-            (Darken, [0, 0, 0, 255]),
-            (Lighten, [255, 0, 255, 255]),
-            (ColorDodge, [0, 0, 255, 255]),
-            (ColorBurn, [0, 0, 255, 255]),
-            (HardLight, [255, 0, 0, 255]),
-            (SoftLight, [0, 0, 255, 255]),
-            (Difference, [255, 0, 255, 255]),
-            (Exclusion, [255, 0, 255, 255]),
+        let expected: &[(BlendMode, [u8; 4])] = &[
+            (S(Multiply), [0, 0, 0, 255]),
+            (S(Screen), [255, 0, 255, 255]),
+            (S(Overlay), [0, 0, 255, 255]),
+            (S(Darken), [0, 0, 0, 255]),
+            (S(Lighten), [255, 0, 255, 255]),
+            (S(ColorDodge), [0, 0, 255, 255]),
+            (S(ColorBurn), [0, 0, 255, 255]),
+            (S(HardLight), [255, 0, 0, 255]),
+            (S(SoftLight), [0, 0, 255, 255]),
+            (S(Difference), [255, 0, 255, 255]),
+            (S(Exclusion), [255, 0, 255, 255]),
         ];
         for &(mode, want) in expected {
             let core = blend_red_over_blue(mode);
@@ -2121,16 +2221,16 @@ mod tests {
         }
         // Mid-grey pairs pin the piecewise branches away from the extremes.
         for &(mode, dst, src, want) in &[
-            (Overlay, 60.0, 200.0, [94, 94, 94, 255]),
-            (Overlay, 200.0, 60.0, [171, 171, 171, 255]),
-            (HardLight, 60.0, 200.0, [171, 171, 171, 255]),
-            (HardLight, 200.0, 60.0, [94, 94, 94, 255]),
-            (SoftLight, 60.0, 200.0, [96, 96, 96, 255]),
-            (SoftLight, 200.0, 60.0, [177, 177, 177, 255]),
-            (ColorBurn, 60.0, 200.0, [6, 6, 6, 255]),
-            (ColorBurn, 200.0, 60.0, [21, 21, 21, 255]),
-            (ColorDodge, 60.0, 200.0, [255, 255, 255, 255]),
-            (ColorDodge, 200.0, 60.0, [255, 255, 255, 255]),
+            (S(Overlay), 60.0, 200.0, [94, 94, 94, 255]),
+            (S(Overlay), 200.0, 60.0, [171, 171, 171, 255]),
+            (S(HardLight), 60.0, 200.0, [171, 171, 171, 255]),
+            (S(HardLight), 200.0, 60.0, [94, 94, 94, 255]),
+            (S(SoftLight), 60.0, 200.0, [96, 96, 96, 255]),
+            (S(SoftLight), 200.0, 60.0, [177, 177, 177, 255]),
+            (S(ColorBurn), 60.0, 200.0, [6, 6, 6, 255]),
+            (S(ColorBurn), 200.0, 60.0, [21, 21, 21, 255]),
+            (S(ColorDodge), 60.0, 200.0, [255, 255, 255, 255]),
+            (S(ColorDodge), 200.0, 60.0, [255, 255, 255, 255]),
         ] {
             let mut core = core_8x8();
             core.state.fill = Paint::Solid { r: dst, g: dst, b: dst, a: 1.0 };
@@ -2147,16 +2247,56 @@ mod tests {
     #[test]
     fn blend_over_transparent_backdrop_paints_the_source() {
         for mode in [
-            SeparableBlend::Multiply,
-            SeparableBlend::Screen,
-            SeparableBlend::Overlay,
-            SeparableBlend::SoftLight,
+            BlendMode::Separable(SeparableBlend::Multiply),
+            BlendMode::Separable(SeparableBlend::Screen),
+            BlendMode::Separable(SeparableBlend::Overlay),
+            BlendMode::Separable(SeparableBlend::SoftLight),
+            BlendMode::NonSeparable(NonSeparableBlend::Hue),
+            BlendMode::NonSeparable(NonSeparableBlend::Color),
         ] {
             let mut core = core_8x8();
             core.state.fill = Paint::Solid { r: 255.0, g: 64.0, b: 32.0, a: 1.0 };
             core.state.composite = Composite::Blend(mode);
             fill_all(&mut core);
             assert_eq!(pixel(&core, 3, 3), [255, 64, 32, 255], "mode {mode:?}");
+        }
+    }
+
+    /// Opaque red over opaque blue through the non-separable operators of
+    /// §5.2 — expected bytes from the spec formulas in exact f64 (lum(blue) =
+    /// 0.11, lum(red) = 0.3), rounded half-to-even into bytes. `hue` equals
+    /// `color` on this pair because both colours are fully saturated.
+    #[test]
+    fn non_separable_blend_modes_rasterize_over_opaque_backdrop() {
+        use BlendMode::NonSeparable as N;
+        use NonSeparableBlend::*;
+        let expected: &[(BlendMode, [u8; 4])] = &[
+            (N(Hue), [94, 0, 0, 255]),
+            (N(Saturation), [0, 0, 255, 255]),
+            (N(Color), [94, 0, 0, 255]),
+            (N(Luminosity), [54, 54, 255, 255]),
+        ];
+        for &(mode, want) in expected {
+            let core = blend_red_over_blue(mode);
+            assert_eq!(pixel(&core, 3, 3), want, "mode {mode:?}");
+        }
+        // Equal grey pairs: grey sources have no saturation and keep the
+        // backdrop's luminance, so hue/saturation rebuild the backdrop grey,
+        // color keeps the backdrop luminance, and luminosity takes the
+        // source's.
+        for &(mode, want) in &[
+            (N(Hue), [200, 200, 200, 255]),
+            (N(Saturation), [200, 200, 200, 255]),
+            (N(Color), [200, 200, 200, 255]),
+            (N(Luminosity), [60, 60, 60, 255]),
+        ] {
+            let mut core = core_8x8();
+            core.state.fill = Paint::Solid { r: 200.0, g: 200.0, b: 200.0, a: 1.0 };
+            fill_all(&mut core);
+            core.state.fill = Paint::Solid { r: 60.0, g: 60.0, b: 60.0, a: 1.0 };
+            core.state.composite = Composite::Blend(mode);
+            fill_all(&mut core);
+            assert_eq!(pixel(&core, 3, 3), want, "mode {mode:?}");
         }
     }
 
@@ -2169,7 +2309,7 @@ mod tests {
         let mut core = core_8x8();
         core.apply_put_image(&[255, 0, 0, 128], 1, 1, 2, 3, 0, 0, 1, 1);
         core.state.fill = Paint::Solid { r: 0.0, g: 0.0, b: 255.0, a: 1.0 };
-        core.state.composite = Composite::Blend(SeparableBlend::Multiply);
+        core.state.composite = Composite::Blend(BlendMode::Separable(SeparableBlend::Multiply));
         fill_all(&mut core);
         // out = αs·(1−αb)·Cs + αs·αb·(Cb·Cs) : red dies (Cb·Cs = 0), blue
         // keeps (1−128/255)·255 = 127 of the source.
@@ -2182,7 +2322,7 @@ mod tests {
         fill_all(&mut core);
         core.state.fill = Paint::Solid { r: 255.0, g: 0.0, b: 0.0, a: 1.0 };
         core.state.global_alpha = 0.5;
-        core.state.composite = Composite::Blend(SeparableBlend::Multiply);
+        core.state.composite = Composite::Blend(BlendMode::Separable(SeparableBlend::Multiply));
         fill_all(&mut core);
         assert_eq!(pixel(&core, 3, 3), [255, 128, 128, 255]);
     }
@@ -2207,7 +2347,15 @@ mod tests {
         ] {
             assert!(Composite::parse(name).is_some(), "{name} should parse");
         }
-        for name in ["hue", "saturation", "color", "luminosity", "Multiply", "multiply\0", "nope"] {
+        for name in [
+            "hue",
+            "saturation",
+            "color",
+            "luminosity",
+        ] {
+            assert!(Composite::parse(name).is_some(), "{name} should parse");
+        }
+        for name in ["Multiply", "multiply\0", "nope"] {
             assert!(Composite::parse(name).is_none(), "{name:?} must not parse");
         }
     }

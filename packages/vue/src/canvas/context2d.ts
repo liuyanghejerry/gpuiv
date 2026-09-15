@@ -67,6 +67,10 @@ export type GpuixCompositeOperation =
   | "soft-light"
   | "difference"
   | "exclusion"
+  | "hue"
+  | "saturation"
+  | "color"
+  | "luminosity"
 
 const COMPOSITE_OPERATIONS: ReadonlySet<string> = new Set([
   "source-over",
@@ -92,11 +96,6 @@ const COMPOSITE_OPERATIONS: ReadonlySet<string> = new Set([
   "soft-light",
   "difference",
   "exclusion",
-])
-
-/** DOM-valid values with no rasterizer — assigning one throws instead of
- *  silently degrading to source-over. */
-const NON_SEPARABLE_BLEND_MODES: ReadonlySet<string> = new Set([
   "hue",
   "saturation",
   "color",
@@ -155,11 +154,6 @@ interface ShadowState {
 const NOT_SUPPORTED_TEXT =
   "GpuixCanvas: text rendering (fillText/strokeText/measureText) is not implemented. " +
   "Glyph rasterization is tracked as follow-up work; see the README Canvas section."
-
-const NOT_SUPPORTED_BLEND_MODE =
-  "GpuixCanvas: non-separable blend modes (hue/saturation/color/luminosity) are not " +
-  "implemented. They mix colour channels, which the separable blend pipeline does not " +
-  "rasterize; see the README Canvas section."
 
 function finite(...values: number[]): boolean {
   return values.every((v) => Number.isFinite(v))
@@ -496,9 +490,6 @@ export class GpuixCanvasRenderingContext2D {
   }
 
   set globalCompositeOperation(value: GpuixCompositeOperation) {
-    if (typeof value === "string" && NON_SEPARABLE_BLEND_MODES.has(value)) {
-      throw new Error(NOT_SUPPORTED_BLEND_MODE)
-    }
     if (typeof value === "string" && COMPOSITE_OPERATIONS.has(value)) {
       this.state.composite = value
       this.native.setComposite(value)
