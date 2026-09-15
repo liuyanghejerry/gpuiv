@@ -18,12 +18,13 @@ function styledDivs(app, predicate) {
       for (const child of node.children ?? []) walk(child)
     }
   }
-  for (const node of JSON.parse(app.renderer.getTreeJson()).children ?? []) walk(node)
+  const tree = app.renderer.toJSON()
+  for (const node of tree.children ?? []) walk(node)
   return out
 }
 
 describeNative("spinner (vue)", () => {
-  it("announces itself through the status role", () => {
+  it("announces itself through the status role", async () => {
     const App = defineComponent({
       setup() {
         return () => (
@@ -34,7 +35,11 @@ describeNative("spinner (vue)", () => {
       },
     })
     const app = createTestApp(App)
-    expect(app.renderer.getA11yTree()).toContain("Thinking")
+    await app.settle()
+    const nodes = Object.values(app.renderer.getA11yTree().nodes ?? {})
+    expect(
+      nodes.some((node) => node.aria?.role === "Status" && node.aria?.label === "Thinking")
+    ).toBe(true)
     app.unmount()
   })
 

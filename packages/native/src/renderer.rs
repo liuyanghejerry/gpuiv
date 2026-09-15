@@ -1239,9 +1239,14 @@ impl GpuixRenderer {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
                     // The close veto reads live view state at close time, so
                     // arming later (setWindowObservers) needs no re-register.
-                    if let Err(error) = window_handle.update(cx, |view, window, cx| {
-                        let entity = cx.entity();
+                    // A weak handle: a strong one would leak the view entity
+                    // at process exit (GPUI asserts on leaked handles).
+                    if let Err(error) = window_handle.update(cx, |_view, window, cx| {
+                        let entity = cx.entity().downgrade();
                         window.on_window_should_close(cx, move |_window, cx| {
+                            let Some(entity) = entity.upgrade() else {
+                                return true;
+                            };
                             let mut allow = true;
                             let _ = entity.update(cx, |view, _cx| {
                                 if view.window_should_close {

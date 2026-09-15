@@ -32,15 +32,19 @@ describeNative("IME composition events", () => {
       },
     })
     const app = createTestApp(App)
-    return { app, events, value }
+    // Marked-text edits also fire change events (like the DOM's input during
+    // composition); the composition assertions care only about the
+    // composition lifecycle.
+    const compositionEvents = () => events.filter(([kind]) => kind !== "change")
+    return { app, events, value, compositionEvents }
   }
 
   it("fires start and update while marking", async () => {
-    const { app, events } = compositionApp()
+    const { app, compositionEvents } = compositionApp()
     const input = app.renderer.findByTestId("composer")
     app.renderer.simulateMarkedText(input.id, "ni")
     await app.settle()
-    expect(events).toEqual([
+    expect(compositionEvents()).toEqual([
       ["start", ""],
       ["update", "ni"],
     ])
@@ -48,13 +52,13 @@ describeNative("IME composition events", () => {
   })
 
   it("updates again without restarting", async () => {
-    const { app, events } = compositionApp()
+    const { app, compositionEvents } = compositionApp()
     const input = app.renderer.findByTestId("composer")
     app.renderer.simulateMarkedText(input.id, "ni")
     await app.settle()
     app.renderer.simulateMarkedText(input.id, "nihao", 0, 5)
     await app.settle()
-    expect(events).toEqual([
+    expect(compositionEvents()).toEqual([
       ["start", ""],
       ["update", "ni"],
       ["update", "nihao"],
@@ -63,30 +67,27 @@ describeNative("IME composition events", () => {
   })
 
   it("commit ends the composition and changes the value", async () => {
-    const { app, events, value } = compositionApp()
+    const { app, events, compositionEvents, value } = compositionApp()
     const input = app.renderer.findByTestId("composer")
     app.renderer.simulateMarkedText(input.id, "nihao")
     await app.settle()
     events.length = 0
     app.renderer.simulateImeCommit(input.id, "你好")
     await app.settle()
-    expect(events).toEqual([
-      ["end", "你好"],
-      ["change", "你好"],
-    ])
+    expect(compositionEvents()).toEqual([["end", "你好"]])
     expect(value.value).toBe("你好")
     app.unmount()
   })
 
   it("cancel reverts the marked text and ends", async () => {
-    const { app, events, value } = compositionApp()
+    const { app, events, compositionEvents, value } = compositionApp()
     const input = app.renderer.findByTestId("composer")
     app.renderer.simulateMarkedText(input.id, "nihao")
     await app.settle()
     events.length = 0
     app.renderer.simulateImeCancel(input.id)
     await app.settle()
-    expect(events).toEqual([["end", ""]])
+    expect(compositionEvents()).toEqual([["end", ""]])
     expect(value.value).toBe("")
     // The composed string was reverted, not committed.
     expect(app.renderer.getAllText().join("")).not.toContain("nihao")

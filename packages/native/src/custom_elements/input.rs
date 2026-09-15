@@ -1521,7 +1521,7 @@ impl EntityInputHandler for TextEditorState {
         if self.marked_range.is_none() {
             self.record_edit(&range, &replacement, cx.background_executor().now());
         }
-        if self.marked_range.is_none() {
+        if self.marked_range.is_some() {
             // A committed composition ends with the inserted text as its
             // data, mirroring the DOM's compositionend-after-insert order.
             emit_event_full(

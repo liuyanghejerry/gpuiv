@@ -113,7 +113,10 @@ interface NativeTestRendererApi extends NativeRenderer {
   captureScreenshot(path: string): void
   openUrl(url: string): void
   getLastOpenedUrl(): string | null
-  setMenus(menus: MenuBarMenu[], onAction: (id: string) => void): void
+  setMenus(
+    menus: MenuBarMenu[],
+    onAction: (error: Error | null, id: string) => void
+  ): void
   getLastMenus(): { name: string; items: unknown[] }[] | null
   fireMenuAction(id: string): void
   writeClipboardImage(data: Uint8Array, width: number, height: number): void
@@ -776,7 +779,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** Install the menu bar. The test bridge records it; assert with
    *  `getLastMenus` and drive clicks with `fireMenuAction`. */
-  setMenus(menus: MenuBarMenu[], onAction: (id: string) => void): void {
+  setMenus(menus: MenuBarMenu[], onAction: (error: Error | null, id: string) => void): void {
     this.native.setMenus?.(menus, onAction)
   }
 

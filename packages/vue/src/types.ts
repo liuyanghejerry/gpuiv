@@ -637,9 +637,12 @@ export interface NativeRenderer {
   openUrl?(url: string): void
 
   /** Replace the application menu bar at runtime (macOS only). `onAction`
-   *  receives the `id` of the fired item. A menu named "Window" receives the
-   *  window list, exactly like the default bar. */
-  setMenus?(menus: MenuBarMenu[], onAction: (id: string) => void): void
+   *  receives `(null, id)` when a JS item fires. A menu named "Window"
+   *  receives the window list, exactly like the default bar. */
+  setMenus?(
+    menus: MenuBarMenu[],
+    onAction: (error: Error | null, id: string) => void
+  ): void
 
   // ── Clipboard ──────────────────────────────────────────────────
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */

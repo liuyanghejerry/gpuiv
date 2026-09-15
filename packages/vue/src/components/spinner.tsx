@@ -6,7 +6,7 @@
  *  (milliseconds into the 1200ms cycle) to pin the visuals, e.g. in tests
  *  or when driving it from an app-owned timeline. */
 
-import { defineComponent, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
+import { defineComponent, h, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
 
 const PERIOD = 1200
 const TICK_MS = 40
@@ -68,62 +68,62 @@ export const Spinner = defineComponent({
       if (props.variant === "pulse") {
         const height = props.size ?? 4
         const trackWidth = props.width ?? 96
-        const t = ((((phase % PERIOD) + PERIOD) % PERIOD) / PERIOD)
+        const t = (phase % PERIOD + PERIOD) % PERIOD / PERIOD
         // 0 → 1 → 0: the segment sweeps one way and back, like a shimmer.
         const slide = 0.5 - 0.5 * Math.cos(2 * Math.PI * t)
         const segmentWidth = Math.max(12, trackWidth * 0.35)
         const left = (trackWidth - segmentWidth) * slide
-        return (
-          <div
-            role="status"
-            aria-label={props.label}
-            style={{
+        return h(
+          "div",
+          {
+            role: "status",
+            "aria-label": props.label,
+            style: {
               position: "relative",
               width: trackWidth,
               height,
               borderRadius: height / 2,
               backgroundColor: withAlpha(props.color, 0.25),
-            }}
-          >
-            <div
-              style={{
-                position: "absolute",
-                left,
-                top: 0,
-                width: segmentWidth,
-                height,
-                borderRadius: height / 2,
-                backgroundColor: props.color,
-              }}
-            />
-          </div>
+            },
+          },
+          h("div", {
+            style: {
+              position: "absolute",
+              left,
+              top: 0,
+              width: segmentWidth,
+              height,
+              borderRadius: height / 2,
+              backgroundColor: props.color,
+            },
+          })
         )
       }
       const dot = props.size ?? 8
-      return (
-        <div
-          role="status"
-          aria-label={props.label}
-          style={{
+      return h(
+        "div",
+        {
+          role: "status",
+          "aria-label": props.label,
+          style: {
             display: "flex",
             flexDirection: "row",
             alignItems: "center",
             gap: Math.max(3, Math.round(dot * 0.6)),
-          }}
-        >
-          {[0, 1, 2].map((ix) => (
-            <div
-              key={ix}
-              style={{
-                width: dot,
-                height: dot,
-                borderRadius: dot / 2,
-                backgroundColor: props.color,
-                opacity: cycleTone(phase, ix * DOT_STAGGER),
-              }}
-            />
-          ))}
-        </div>
+          },
+        },
+        [0, 1, 2].map((ix) =>
+          h("div", {
+            key: ix,
+            style: {
+              width: dot,
+              height: dot,
+              borderRadius: dot / 2,
+              backgroundColor: props.color,
+              opacity: cycleTone(phase, ix * DOT_STAGGER),
+            },
+          })
+        )
       )
     }
   },

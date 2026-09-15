@@ -47,7 +47,10 @@ describeNative("dynamic menus", () => {
     const fired = []
     renderer.setMenus(
       [{ name: "Chat", items: [{ label: "Settings", id: "settings" }] }],
-      (id) => fired.push(id)
+      (error, id) => {
+        expect(error).toBeNull()
+        fired.push(id)
+      }
     )
 
     renderer.fireMenuAction("settings")
