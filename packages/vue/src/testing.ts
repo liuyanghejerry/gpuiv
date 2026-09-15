@@ -101,6 +101,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getLastOpenedUrl(): string | null
   writeClipboardImage(data: Uint8Array, width: number, height: number): void
   readClipboardImage(): { data: Uint8Array; width: number; height: number } | null
+  writeClipboardText(text: string): void
+  readClipboardText(): string | null
   promptForPaths(
     options: PathPromptOptions,
     callback: (error: Error | null, outcome: PathPromptOutcome) => void
@@ -713,6 +715,17 @@ export class TestRenderer implements NativeRenderer {
    *  trip through the `ClipboardEntry::Image` the platform stored. */
   readClipboardImage(): { data: Uint8Array; width: number; height: number } | null {
     return this.native.readClipboardImage?.() ?? null
+  }
+
+  /** Put text on the in-memory test clipboard. */
+  writeClipboardText(text: string): void {
+    this.native.writeClipboardText?.(text)
+  }
+
+  /** Read text from the test clipboard — a real round trip through the
+   *  `ClipboardEntry::String` the platform stored. */
+  readClipboardText(): string | null {
+    return this.native.readClipboardText?.() ?? null
   }
 
   /** Bytes built into canvas tile images so far — the upload cost the GPU

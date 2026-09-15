@@ -477,6 +477,12 @@ enum UiCommand {
     ReadClipboardImage {
         response: SyncSender<Option<Vec<u8>>>,
     },
+    WriteClipboardText {
+        text: String,
+    },
+    ReadClipboardText {
+        response: SyncSender<Option<String>>,
+    },
     PromptForPaths {
         options: PathPromptOptionsDesc,
         callback: ThreadsafeFunction<PathPromptOutcome>,
@@ -904,6 +910,19 @@ async fn run_ui_commands(
                         })
                     });
                     response.send(png);
+                })
+            }
+            UiCommand::WriteClipboardText { text } => {
+                window.update(cx, move |_view, _window, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+                })
+            }
+            UiCommand::ReadClipboardText { response } => {
+                window.update(cx, move |_view, _window, cx| {
+                    let text = cx
+                        .read_from_clipboard()
+                        .and_then(|item| item.text());
+                    response.send(text);
                 })
             }
             UiCommand::PromptForPaths { options, callback } => window.update(cx, move |_view, _window, cx| {
@@ -1970,6 +1989,71 @@ impl GpuixRenderer {
             self.send_ui_command(UiCommand::ReadClipboardImage { response })?;
             let png = recv_ui_response(receiver, "the clipboard image query")?;
             return decode_clipboard_image(png);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Put text on the clipboard.
+    #[napi]
+    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::WriteClipboardText { text });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = text;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Read text from the clipboard. Returns null when the clipboard holds
+    /// no text entry.
+    #[napi]
+    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+        #[cfg(target_os = "macos")]
+        {
+            return GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                Ok(app.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())))
+            });
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::ReadClipboardText { response })?;
+            recv_ui_response(receiver, "the clipboard text query")
         }
 
         #[cfg(not(any(

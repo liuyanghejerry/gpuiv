@@ -627,6 +627,26 @@ impl TestGpuixRenderer {
         decode_clipboard_image(png)
     }
 
+    /// Put text on the in-memory test clipboard, mirroring the production
+    /// `ClipboardItem::String` entry.
+    #[napi]
+    pub fn write_clipboard_text(&self, text: String) -> Result<()> {
+        with_test_state(|cx, _window, _view| {
+            cx.update(|cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+            });
+            Ok(())
+        })
+    }
+
+    /// Read text from the test clipboard, or null when it holds no text.
+    #[napi]
+    pub fn read_clipboard_text(&self) -> Result<Option<String>> {
+        with_test_state(|cx, _window, _view| {
+            Ok(cx.update(|cx| cx.read_from_clipboard().and_then(|item| item.text())))
+        })
+    }
+
     /// Notify the view entity and run GPUI until parked.
     /// This triggers GpuixView::render() → build_element() → GPUI layout.
     /// Must be called after mutations and before simulating events (GPUI's

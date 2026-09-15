@@ -634,6 +634,11 @@ export interface NativeRenderer {
   /** Read an image from the clipboard as straight-alpha RGBA. Returns null
    *  when the clipboard holds no image. */
   readClipboardImage?(): ClipboardImage | null
+  /** Put text on the clipboard. */
+  writeClipboardText?(text: string): void
+  /** Read text from the clipboard. Returns null when the clipboard holds
+   *  no text. */
+  readClipboardText?(): string | null
 
   // ── File dialogs ───────────────────────────────────────────────
   /** Open the platform file-selection dialog. The callback receives
