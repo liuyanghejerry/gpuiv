@@ -1530,6 +1530,15 @@ paints a flat hit list and does not bubble clicks: a filled child paints its
 own hitbox on top of the item and the pick never runs. Custom row content
 inside the item should be pointer-transparent (`pointerEvents: 'none'`).
 
+When a custom row should own its own root element, use **`asChild`** instead:
+the item then renders no wrapper — its handlers, state style, and remaining
+props merge onto the single child element via `cloneVNode`, so the row
+itself is the item and its fill is the item's own hit target. A component
+child receives those props through Vue's fallthrough attrs and must render a
+single root element. Filled descendants inside the row — an `<svg>` icon,
+say — still need `pointerEvents: 'none'`, because their hitboxes would cover
+the row's.
+
 ```tsx
 <ModelPicker
   value={model.value}

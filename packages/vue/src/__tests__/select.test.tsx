@@ -206,6 +206,112 @@ describeNative("select (vue)", () => {
     app.unmount()
   })
 
+  it("selects an asChild row whose root carries the item's fill", async () => {
+    // asChild: the item does not render its own wrapper — its handlers and
+    // state style merge onto the single child element, so a filled row root
+    // IS the hit target (the component-layer answer to the flat hit list).
+    const value = ref("one")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select value={value.value} onValueChange={(next) => (value.value = next)}>
+              <SelectTrigger style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent sideOffset={4} style={contentStyle}>
+                <SelectItem value="one" style={itemStyle} asChild>
+                  <div style={{ width: "100%", padding: 6 }}>
+                    <text>One</text>
+                  </div>
+                </SelectItem>
+                <SelectItem value="two" style={itemStyle} testId="two" asChild>
+                  <div style={{ width: "100%", padding: 6 }}>
+                    <text>Two</text>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+
+    // One element carries both the row's own padding and the item's state fill.
+    const two = app.renderer.findByTestId("two")
+    expect(two).toBeDefined()
+    expect(two!.style.backgroundColor).toBe("#111827")
+    expect(two!.style.padding).toBe(6)
+
+    const bounds = app.renderer.getElementBounds(two!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(bounds!.x + 8, bounds!.y + 8)
+    await app.settle()
+    const texts = app.renderer.getAllText()
+    expect(texts).toContain("Value: two")
+    expect(texts).not.toContain("One")
+    app.unmount()
+  })
+
+  it("forwards item props through an asChild component child", async () => {
+    // The forwarding contract: a component child receives the item's props as
+    // fallthrough attrs on its single root. This row root is filled and has
+    // no pointerEvents: "none" — under the wrapper pattern it would swallow
+    // the click; asChild makes the fill the item's own hitbox.
+    const FilledRow = defineComponent({
+      props: { label: { type: String, required: true } },
+      setup(props) {
+        return () => (
+          <div style={{ width: "100%", height: 32, padding: 6, backgroundColor: "#1e3a5f" }}>
+            <text>{props.label}</text>
+          </div>
+        )
+      },
+    })
+    const value = ref("one")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select value={value.value} onValueChange={(next) => (value.value = next)}>
+              <SelectTrigger style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent sideOffset={4} style={contentStyle}>
+                <SelectItem value="one" asChild>
+                  <FilledRow label="One" />
+                </SelectItem>
+                <SelectItem value="two" testId="two" asChild>
+                  <FilledRow label="Two" />
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+    const two = app.renderer.findByTestId("two")
+    expect(two).toBeDefined()
+    const bounds = app.renderer.getElementBounds(two!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(bounds!.x + 8, bounds!.y + 8)
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain("Value: two")
+    app.unmount()
+  })
+
   it("selects from children when Root has no items", async () => {
     const value = ref("one")
     const App = defineComponent({

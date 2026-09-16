@@ -67,6 +67,58 @@ describeNative("combobox and tooltip (vue)", () => {
     app.unmount()
   })
 
+  it("selects a filled ComboboxItem asChild row", async () => {
+    const value = ref<string | null>(null)
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 24 }}>
+            <Combobox
+              items={["DeepSeek V4", "Claude Opus"]}
+              value={value.value}
+              onValueChange={(next) => (value.value = next as string | null)}
+              itemToStringValue={(item) => item}
+            >
+              <div style={{ position: "relative", display: "flex" }}>
+                <ComboboxInput style={{ width: 300 }} placeholder="Pick a model" />
+                <ComboboxContent side="bottom" sideOffset={4} style={{ backgroundColor: "#222" }}>
+                  <ComboboxList
+                    renderItem={(item: string) => (
+                      <ComboboxItem key={item} value={item} testId={item} asChild>
+                        <div
+                          style={{ width: "100%", padding: 6, backgroundColor: "#1e3a5f" }}
+                        >
+                          <text>{item}</text>
+                        </div>
+                      </ComboboxItem>
+                    )}
+                  />
+                </ComboboxContent>
+              </div>
+            </Combobox>
+            <text>{`Selected: ${value.value ?? ""}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const input = app.renderer.findByType("input")[0]
+    expect(input).toBeDefined()
+
+    // Focus opens the popup; the filled row is the item's only hit target.
+    app.renderer.nativeSimulateKeystrokes(input.id, "c")
+    await app.settle()
+    const row = app.renderer.findByTestId("Claude Opus")
+    expect(row).toBeDefined()
+    const bounds = app.renderer.getElementBounds(row!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(bounds!.x + 8, bounds!.y + 8)
+    await app.settle()
+    expect(app.renderer.getPaintedText().join("\n")).toContain("Selected: Claude Opus")
+
+    app.unmount()
+  })
+
   it("opens a tooltip on hover and closes on leave", async () => {
     const App = defineComponent({
       setup() {

@@ -1185,10 +1185,11 @@ const MENU = {
   borderRadius: 12,
 } satisfies StyleDesc
 
-// The fill lives on the SelectItem: GPUI paints a flat hit list and does not
-// bubble clicks, so a filled row painted inside the item covers the item's
-// hitbox and the pick never runs. The item owns the one filled hit target;
-// everything inside the row is pointer-transparent.
+// The fill lives on the SelectItem's style and the row renders through
+// asChild: GPUI paints a flat hit list and does not hover-gate clicks through
+// a filled child, so the item's props merge onto the row's single root —
+// one element, one hit target. Only the inner svg icons stay
+// pointer-transparent (their hitboxes would cover the row's).
 function menuItemStyle(state: SelectItemState): StyleDesc {
   return {
     display: 'flex',
@@ -1223,7 +1224,6 @@ const MenuRow = defineComponent({
           paddingBottom: props.description ? 6 : 5,
           paddingLeft: 8,
           paddingRight: 8,
-          pointerEvents: 'none',
         }}
       >
         {props.icon && <Icon name={props.icon} size={14} color={C.tertiary} />}
@@ -1341,6 +1341,7 @@ const ModelPicker = defineComponent({
             </SelectLabel>
             {group.items.map((model) => (
               <SelectItem
+                asChild
                 key={model.id}
                 value={model.id}
                 testId={`model-${model.id}`}
@@ -1386,6 +1387,7 @@ const ReasoningPicker = defineComponent({
         </SelectLabel>
         {REASONING.map((option) => (
           <SelectItem
+            asChild
             key={option.id}
             value={option.id}
             testId={`reasoning-${option.id}`}
@@ -1420,6 +1422,7 @@ const AccessPicker = defineComponent({
       >
         {ACCESS.map((option) => (
           <SelectItem
+            asChild
             key={option.id}
             value={option.id}
             testId={`access-${option.id}`}
@@ -1458,6 +1461,7 @@ const ProjectPicker = defineComponent({
       >
         {PROJECTS.map((option) => (
           <SelectItem
+            asChild
             key={option.id}
             value={option.id}
             testId={`project-${option.id}`}
@@ -1501,6 +1505,7 @@ const WorkspacePicker = defineComponent({
         </SelectLabel>
         {WORKSPACES.map((option) => (
           <SelectItem
+            asChild
             key={option.id}
             value={option.id}
             testId={`workspace-${option.id}`}
@@ -1533,6 +1538,7 @@ const BranchPicker = defineComponent({
       >
         {BRANCHES.map((option) => (
           <SelectItem
+            asChild
             key={option.id}
             value={option.id}
             testId={`branch-${option.id}`}

@@ -1,6 +1,8 @@
 /** Shared state and positioning helpers for headless floating controls. */
 
 import { computed, defineComponent, h, ref, type Ref } from "vue"
+import { cloneVNode, isVNode, Comment, Text } from "vue"
+import type { VNode, VNodeChild } from "vue"
 import type { StyleDesc } from "../types.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
@@ -21,6 +23,32 @@ export function mergeStyles(
   if (!base) return override
   if (!override) return base
   return { ...base, ...override }
+}
+
+/**
+ * The asChild render path: instead of the primitive rendering its own host
+ * div, the item's props are merged onto the user's single child element, so
+ * the custom row itself becomes the item — one element, one hit target.
+ *
+ * `cloneVNode` merging does the work: styles become an array that
+ * `toGpuixStyle` flattens (item style wins on conflicts), event handlers
+ * compose into arrays that both fire (child first), and every other prop
+ * falls through to the child's root element. A component child must forward
+ * its fallthrough attrs to a single root, the standard Vue contract.
+ */
+export function cloneAsChild(
+  owner: string,
+  rendered: VNodeChild,
+  itemProps: Record<string, unknown>
+): VNode {
+  const list = (Array.isArray(rendered) ? rendered : [rendered]).filter(
+    (child): child is VNode =>
+      isVNode(child) && child.type !== Text && child.type !== Comment
+  )
+  if (list.length !== 1) {
+    throw new Error(`${owner} asChild requires exactly one child element`)
+  }
+  return cloneVNode(list[0], itemProps, true)
 }
 
 export function floatingRootStyle(style?: StyleDesc): StyleDesc {
