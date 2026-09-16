@@ -1004,11 +1004,7 @@ impl TestGpuixRenderer {
 
             cx.update_window(window, |_, window, app| {
                 view.update(app, |view, cx| {
-                    view.reveal_virtual_list_ancestor(id);
-                    if let Some(handle) = view.focus_handles.get(&id) {
-                        handle.focus(window, cx);
-                    }
-                    cx.notify();
+                    view.request_focus(id, window, cx);
                 });
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
