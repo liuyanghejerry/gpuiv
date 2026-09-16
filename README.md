@@ -1489,21 +1489,22 @@ export const ModelPicker = defineComponent({
           >
             <SelectGroup>
               {MODELS.map((model) => (
-                <SelectItem key={model.id} value={model.id}>
-                  {(state: SelectItemState) => (
-                    <div
-                      style={{
-                        padding: 8,
-                        backgroundColor: state.highlighted
-                          ? '#334155'
-                          : state.selected
-                            ? '#1e3a5f'
-                            : '#0f172a',
-                      }}
-                    >
-                      <text style={{ fontSize: 13, color: '#cdd6f4' }}>{model.label}</text>
-                    </div>
-                  )}
+                <SelectItem
+                  key={model.id}
+                  value={model.id}
+                  style={(state: SelectItemState) => ({
+                    borderRadius: 6,
+                    backgroundColor: state.highlighted
+                      ? '#334155'
+                      : state.selected
+                        ? '#1e3a5f'
+                        : '#0f172a',
+                    cursor: 'pointer',
+                  })}
+                >
+                  <div style={{ padding: 8, pointerEvents: 'none' }}>
+                    <text style={{ fontSize: 13, color: '#cdd6f4' }}>{model.label}</text>
+                  </div>
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -1523,6 +1524,11 @@ the menu is closed — it is only a label lookup. Keyboard nav and clicks read
 the mounted `SelectItem` children through a registration registry, so a styled
 wrapper around `SelectItem` is fine. Without `items`, `SelectValue` shows the
 raw value. Use the styled local file with the familiar compound shape:
+
+Put the row's fill **on the item's style**, not on a `div` inside it. GPUI
+paints a flat hit list and does not bubble clicks: a filled child paints its
+own hitbox on top of the item and the pick never runs. Custom row content
+inside the item should be pointer-transparent (`pointerEvents: 'none'`).
 
 ```tsx
 <ModelPicker

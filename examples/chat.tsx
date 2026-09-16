@@ -153,7 +153,13 @@ const Icon = defineComponent({
     return () => (
       <svg
         src={ICONS[props.name]}
-        style={{ width: props.size, height: props.size, flexShrink: 0, color: props.color }}
+        style={{
+          width: props.size,
+          height: props.size,
+          flexShrink: 0,
+          color: props.color,
+          pointerEvents: 'none',
+        }}
       />
     )
   },
@@ -947,13 +953,29 @@ const MENU = {
   borderRadius: 12,
 } satisfies StyleDesc
 
+// The fill lives on the SelectItem: GPUI paints a flat hit list and does not
+// bubble clicks, so a filled row painted inside the item covers the item's
+// hitbox and the pick never runs. The item owns the one filled hit target;
+// everything inside the row is pointer-transparent.
+function menuItemStyle(state: SelectItemState): StyleDesc {
+  return {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    borderRadius: 7,
+    backgroundColor: state.highlighted ? '#404040' : state.selected ? '#2C2C2C' : C.raised,
+    hover: { backgroundColor: '#404040' },
+    cursor: 'pointer',
+  }
+}
+
 const MenuRow = defineComponent({
   props: {
     label: { type: String, required: true },
     description: { type: String, default: undefined },
     icon: { type: String as PropType<IconName>, default: undefined },
     selected: { type: Boolean, required: true },
-    highlighted: { type: Boolean, required: true },
     hint: { type: String, default: undefined },
   },
   setup(props) {
@@ -969,9 +991,7 @@ const MenuRow = defineComponent({
           paddingBottom: props.description ? 6 : 5,
           paddingLeft: 8,
           paddingRight: 8,
-          borderRadius: 7,
-          backgroundColor: props.highlighted ? '#404040' : props.selected ? '#2C2C2C' : C.raised,
-          hover: { backgroundColor: '#404040' },
+          pointerEvents: 'none',
         }}
       >
         {props.icon && <Icon name={props.icon} size={14} color={C.tertiary} />}
@@ -1088,14 +1108,14 @@ const ModelPicker = defineComponent({
               <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>{group.name}</text>
             </SelectLabel>
             {group.items.map((model) => (
-              <SelectItem key={model.id} value={model.id}>
+              <SelectItem
+                key={model.id}
+                value={model.id}
+                testId={`model-${model.id}`}
+                style={(state: SelectItemState) => menuItemStyle(state)}
+              >
                 {(state: SelectItemState) => (
-                  <MenuRow
-                    label={model.label}
-                    icon={model.icon}
-                    selected={state.selected}
-                    highlighted={state.highlighted}
-                  />
+                  <MenuRow label={model.label} icon={model.icon} selected={state.selected} />
                 )}
               </SelectItem>
             ))}
@@ -1133,14 +1153,14 @@ const ReasoningPicker = defineComponent({
           <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Reasoning</text>
         </SelectLabel>
         {REASONING.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
+          <SelectItem
+            key={option.id}
+            value={option.id}
+            testId={`reasoning-${option.id}`}
+            style={(state: SelectItemState) => menuItemStyle(state)}
+          >
             {(state: SelectItemState) => (
-              <MenuRow
-                label={option.label}
-                hint={option.hint}
-                selected={state.selected}
-                highlighted={state.highlighted}
-              />
+              <MenuRow label={option.label} hint={option.hint} selected={state.selected} />
             )}
           </SelectItem>
         ))}
@@ -1167,14 +1187,18 @@ const AccessPicker = defineComponent({
         menuWidth={288}
       >
         {ACCESS.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
+          <SelectItem
+            key={option.id}
+            value={option.id}
+            testId={`access-${option.id}`}
+            style={(state: SelectItemState) => menuItemStyle(state)}
+          >
             {(state: SelectItemState) => (
               <MenuRow
                 label={option.label}
                 description={option.description}
                 icon={option.icon}
                 selected={state.selected}
-                highlighted={state.highlighted}
               />
             )}
           </SelectItem>
@@ -1201,14 +1225,14 @@ const ProjectPicker = defineComponent({
         caret={false}
       >
         {PROJECTS.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
+          <SelectItem
+            key={option.id}
+            value={option.id}
+            testId={`project-${option.id}`}
+            style={(state: SelectItemState) => menuItemStyle(state)}
+          >
             {(state: SelectItemState) => (
-              <MenuRow
-                label={option.label}
-                icon="folder"
-                selected={state.selected}
-                highlighted={state.highlighted}
-              />
+              <MenuRow label={option.label} icon="folder" selected={state.selected} />
             )}
           </SelectItem>
         ))}
@@ -1244,14 +1268,14 @@ const WorkspacePicker = defineComponent({
           <text style={{ fontSize: 11.5, fontWeight: 500, color: C.ghost }}>Work in</text>
         </SelectLabel>
         {WORKSPACES.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
+          <SelectItem
+            key={option.id}
+            value={option.id}
+            testId={`workspace-${option.id}`}
+            style={(state: SelectItemState) => menuItemStyle(state)}
+          >
             {(state: SelectItemState) => (
-              <MenuRow
-                label={option.label}
-                icon={option.icon}
-                selected={state.selected}
-                highlighted={state.highlighted}
-              />
+              <MenuRow label={option.label} icon={option.icon} selected={state.selected} />
             )}
           </SelectItem>
         ))}
@@ -1276,14 +1300,14 @@ const BranchPicker = defineComponent({
         label={selected.value.label}
       >
         {BRANCHES.map((option) => (
-          <SelectItem key={option.id} value={option.id}>
+          <SelectItem
+            key={option.id}
+            value={option.id}
+            testId={`branch-${option.id}`}
+            style={(state: SelectItemState) => menuItemStyle(state)}
+          >
             {(state: SelectItemState) => (
-              <MenuRow
-                label={option.label}
-                icon="gitBranch"
-                selected={state.selected}
-                highlighted={state.highlighted}
-              />
+              <MenuRow label={option.label} icon="gitBranch" selected={state.selected} />
             )}
           </SelectItem>
         ))}
