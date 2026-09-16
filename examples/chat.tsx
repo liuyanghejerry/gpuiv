@@ -34,8 +34,10 @@ import {
   SelectItem,
   SelectLabel,
   SelectTrigger,
+  useGpuix,
   VirtualList,
   type EventPayload,
+  type HostNode,
   type SelectItemState,
   type SelectTriggerState,
   type StyleDesc,
@@ -256,6 +258,7 @@ interface Conversation {
   group: string
   project: string
   time: string
+  turns: Turn[]
 }
 
 const MODELS = [
@@ -317,31 +320,6 @@ const BRANCHES = [
   { id: 'waku-clone', label: 'waku-clone' },
 ]
 
-const CONVERSATIONS: Conversation[] = [
-  { id: 'c1', title: 'give me a quick overview', group: 'Yesterday', project: 'waku', time: '16m' },
-  {
-    id: 'c2',
-    title: 'Native SDK vs GPUI comparison',
-    group: 'Yesterday',
-    project: 'No project',
-    time: '14h',
-  },
-  {
-    id: 'c3',
-    title: 'Vercel Labs scriptc implementat...',
-    group: 'Yesterday',
-    project: 'No project',
-    time: '15h',
-  },
-  {
-    id: 'c4',
-    title: 'check if any memory optimizatio...',
-    group: 'This Month',
-    project: 'waku',
-    time: '2d',
-  },
-]
-
 function groupByGroup<T extends { group: string }>(items: T[]): { name: string; items: T[] }[] {
   const out: { name: string; items: T[] }[] = []
   for (const item of items) {
@@ -352,7 +330,6 @@ function groupByGroup<T extends { group: string }>(items: T[]): { name: string; 
   return out
 }
 
-const CONVERSATION_GROUPS = groupByGroup(CONVERSATIONS)
 const MODEL_GROUPS = groupByGroup(MODELS)
 
 const OVERVIEW = `**Waku** is a native control plane for local coding agents. Rust plus GPUI. One window, no Electron.`
@@ -499,10 +476,13 @@ const SidebarAction = defineComponent({
   props: {
     icon: { type: String as PropType<IconName>, required: true },
     label: { type: String, required: true },
+    onClick: { type: Function as PropType<() => void>, default: undefined },
+    testId: { type: String, default: undefined },
   },
   setup(props) {
     return () => (
       <div
+        testId={props.testId}
         style={{
           display: 'flex',
           flexDirection: 'row',
@@ -516,6 +496,7 @@ const SidebarAction = defineComponent({
           hover: { backgroundColor: C.item },
           active: { backgroundColor: C.overlayStrong },
         }}
+        onClick={props.onClick}
       >
         <div
           style={{
@@ -540,10 +521,12 @@ const ConversationRow = defineComponent({
     conversation: { type: Object as PropType<Conversation>, required: true },
     active: { type: Boolean, default: false },
     onSelect: { type: Function as PropType<(id: string) => void>, required: true },
+    testId: { type: String, default: undefined },
   },
   setup(props) {
     return () => (
       <div
+        testId={props.testId}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -594,9 +577,19 @@ const ConversationRow = defineComponent({
 
 const Sidebar = defineComponent({
   props: {
+    groups: { type: Array as PropType<{ name: string; items: Conversation[] }[]>, required: true },
     activeId: { type: String, required: true },
     onSelect: { type: Function as PropType<(id: string) => void>, required: true },
     onCollapse: { type: Function as PropType<() => void>, required: true },
+    onNewTask: { type: Function as PropType<() => void>, required: true },
+    onSearch: { type: Function as PropType<() => void>, required: true },
+    canGoBack: { type: Boolean, required: true },
+    canGoForward: { type: Boolean, required: true },
+    onBack: { type: Function as PropType<() => void>, required: true },
+    onForward: { type: Function as PropType<() => void>, required: true },
+    onSettings: { type: Function as PropType<() => void>, required: true },
+    onFilter: { type: Function as PropType<() => void>, required: true },
+    filterActive: { type: Boolean, default: false },
   },
   setup(props) {
     return () => (
@@ -636,13 +629,23 @@ const Sidebar = defineComponent({
               marginLeft: 6,
             }}
           >
-            <IconButton icon="arrowLeft" dimmed />
-            <IconButton icon="arrowRight" dimmed />
+            <IconButton
+              icon="arrowLeft"
+              dimmed={!props.canGoBack}
+              testId="history-back"
+              onClick={props.onBack}
+            />
+            <IconButton
+              icon="arrowRight"
+              dimmed={!props.canGoForward}
+              testId="history-forward"
+              onClick={props.onForward}
+            />
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', paddingLeft: 10, paddingRight: 10 }}>
-          <SidebarAction icon="compose" label="New Task" />
+          <SidebarAction icon="compose" label="New Task" testId="new-task" onClick={props.onNewTask} />
         </div>
 
         <div
@@ -657,9 +660,9 @@ const Sidebar = defineComponent({
           }}
         >
           <div style={{ paddingBottom: 6 }}>
-            <SidebarAction icon="search" label="Search" />
+            <SidebarAction icon="search" label="Search" testId="search-action" onClick={props.onSearch} />
           </div>
-          {CONVERSATION_GROUPS.map((group, groupIndex) => (
+          {props.groups.map((group, groupIndex) => (
             <div
               key={group.name}
               style={{ display: 'flex', flexDirection: 'column', paddingBottom: 10 }}
@@ -685,7 +688,14 @@ const Sidebar = defineComponent({
                 >
                   {group.name}
                 </text>
-                {groupIndex === 0 && <Icon name="listFilter" size={14} color={C.secondary} />}
+                {groupIndex === 0 && (
+                  <IconButton
+                    icon="listFilter"
+                    testId="filter"
+                    dimmed={!props.filterActive}
+                    onClick={props.onFilter}
+                  />
+                )}
               </div>
               {group.items.map((conversation) => (
                 <ConversationRow
@@ -693,6 +703,7 @@ const Sidebar = defineComponent({
                   conversation={conversation}
                   active={conversation.id === props.activeId}
                   onSelect={props.onSelect}
+                  testId={`thread-${conversation.id}`}
                 />
               ))}
             </div>
@@ -710,7 +721,7 @@ const Sidebar = defineComponent({
             paddingRight: 10,
           }}
         >
-          <IconButton icon="settings" />
+          <IconButton icon="settings" testId="settings" onClick={props.onSettings} />
         </div>
       </div>
     )
@@ -830,6 +841,90 @@ function expandTurns(count: number): Turn[] {
   return out
 }
 
+const SDK_VS_GPUI = `GPUI is the renderer. A native SDK would still talk to it. GPUIV is the Vue layer on that same GPUI tree, so you keep your components and skip a second UI stack.`
+const SCRIPT_C = `scriptc is a Vercel Labs experiment. This demo has no live runtime for it. The chat still shows how a coding agent would walk that kind of patch in GPUIV.`
+const MEMORY = `The chat example keeps one retained Vue child per turn. Pass \`itemCount\` and a window when the list grows. Native paint stays on visible rows only.`
+
+const CONVERSATIONS: Conversation[] = [
+  {
+    id: 'c1',
+    title: 'give me a quick overview',
+    group: 'Yesterday',
+    project: 'waku',
+    time: '16m',
+    turns: TURNS,
+  },
+  {
+    id: 'c2',
+    title: 'Native SDK vs GPUI comparison',
+    group: 'Yesterday',
+    project: 'No project',
+    time: '14h',
+    turns: [
+      { kind: 'user', text: 'Native SDK vs GPUI comparison' },
+      { kind: 'fold', duration: 'Worked for 9 seconds' },
+      { kind: 'markdown', source: SDK_VS_GPUI },
+    ],
+  },
+  {
+    id: 'c3',
+    title: 'Vercel Labs scriptc implementat...',
+    group: 'Yesterday',
+    project: 'No project',
+    time: '15h',
+    turns: [
+      { kind: 'user', text: 'Vercel Labs scriptc implementation' },
+      { kind: 'fold', duration: 'Worked for 12 seconds' },
+      { kind: 'markdown', source: SCRIPT_C },
+    ],
+  },
+  {
+    id: 'c4',
+    title: 'check if any memory optimizatio...',
+    group: 'This Month',
+    project: 'waku',
+    time: '2d',
+    turns: [
+      { kind: 'user', text: 'check if any memory optimizations land' },
+      { kind: 'fold', duration: 'Worked for 7 seconds' },
+      { kind: 'markdown', source: MEMORY },
+    ],
+  },
+]
+
+function seedTurnsFor(id: string, turnCount: number): Turn[] {
+  if (id === 'c1') return expandTurns(turnCount)
+  return CONVERSATIONS.find((conversation) => conversation.id === id)?.turns.slice() ?? []
+}
+
+function demoReply({
+  text,
+  modelLabel,
+  mode,
+}: {
+  text: string
+  modelLabel: string
+  mode: 'build' | 'plan'
+}): Turn[] {
+  const quoted = text.length > 80 ? `${text.slice(0, 77)}...` : text
+  const modeLine =
+    mode === 'plan'
+      ? 'Plan mode is on, so this is a sketch, not a patch.'
+      : 'Build mode is on. This still stays in the demo.'
+  return [
+    { kind: 'fold', duration: 'Worked for 2 seconds' },
+    {
+      kind: 'markdown',
+      source: `This is the GPUIV chat demo. No model ran. You wrote "${quoted}". ${modelLabel} would answer here. ${modeLine}`,
+    },
+  ]
+}
+
+function titleFromDraft(text: string) {
+  const first = text.trim().split(/\s+/).slice(0, 6).join(' ')
+  return first.length > 42 ? `${first.slice(0, 39)}...` : first
+}
+
 // `memo(Transcript)` — Vue's prop comparison skips the update when `turns`
 // keeps the same reference, which is exactly what the memo did in React.
 const Transcript = defineComponent({
@@ -837,6 +932,7 @@ const Transcript = defineComponent({
     turns: { type: Array as () => Turn[], required: true },
     includeSafeMdx: { type: Boolean, default: false },
     listRef: { type: Object as PropType<Ref<VirtualListInstance | null>>, default: null },
+    onRetry: { type: Function as PropType<() => void>, default: undefined },
   },
   setup(props) {
     return () => {
@@ -873,6 +969,9 @@ const Transcript = defineComponent({
                   <CodeBlock code={turn.source} language={turn.language} showLineNumbers />
                 )}
                 {turn.kind === 'diff' && <diff patch={turn.patch} wordDiff theme={CHAT_THEME} />}
+                {turnIndex === props.turns.length - 1 && turn.kind !== 'user' && (
+                  <ActionBar onRetry={props.onRetry} />
+                )}
               </TranscriptRow>
             )
           }}
@@ -888,6 +987,11 @@ const Header = defineComponent({
     onExpand: { type: Function as PropType<() => void>, required: true },
     title: { type: String, required: true },
     turnCount: { type: Number, required: true },
+    canGoBack: { type: Boolean, required: true },
+    canGoForward: { type: Boolean, required: true },
+    onBack: { type: Function as PropType<() => void>, required: true },
+    onForward: { type: Function as PropType<() => void>, required: true },
+    onToggleInspector: { type: Function as PropType<() => void>, required: true },
   },
   setup(props) {
     return () => (
@@ -910,8 +1014,8 @@ const Header = defineComponent({
             <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <IconButton icon="sidebar" testId="sidebar-expand" onClick={props.onExpand} />
               <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-                <IconButton icon="arrowLeft" dimmed />
-                <IconButton icon="arrowRight" dimmed />
+                <IconButton icon="arrowLeft" dimmed={!props.canGoBack} onClick={props.onBack} />
+                <IconButton icon="arrowRight" dimmed={!props.canGoForward} onClick={props.onForward} />
               </div>
             </div>
           </>
@@ -935,7 +1039,135 @@ const Header = defineComponent({
           </text>
         )}
         <div style={{ flexGrow: 1 }} />
-        <IconButton icon="panelRight" />
+        <IconButton icon="panelRight" testId="inspector-toggle" onClick={props.onToggleInspector} />
+      </div>
+    )
+  },
+})
+
+const Inspector = defineComponent({
+  props: {
+    conversation: { type: Object as PropType<Conversation>, default: undefined },
+    model: { type: String, required: true },
+    reasoning: { type: String, required: true },
+    access: { type: String, required: true },
+    mode: { type: String as PropType<'build' | 'plan'>, required: true },
+    project: { type: String, required: true },
+  },
+  setup(props) {
+    return () => {
+      const modelLabel = MODELS.find((item) => item.id === props.model)?.label ?? props.model
+      const reasoningLabel =
+        REASONING.find((item) => item.id === props.reasoning)?.label ?? props.reasoning
+      const accessLabel = ACCESS.find((item) => item.id === props.access)?.label ?? props.access
+      const projectLabel = PROJECTS.find((item) => item.id === props.project)?.label ?? props.project
+      const rows: [string, string][] = [
+        ['Thread', props.conversation?.title ?? 'New task'],
+        ['Project', projectLabel],
+        ['Model', modelLabel],
+        ['Reasoning', reasoningLabel],
+        ['Access', accessLabel],
+        ['Mode', props.mode === 'plan' ? 'Plan' : 'Build'],
+        ['Turns', String(props.conversation?.turns.length ?? 0)],
+      ]
+      return (
+        <div
+          testId="inspector"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            width: 260,
+            flexShrink: 0,
+            height: '100%',
+            backgroundColor: C.sidebar,
+            borderLeftWidth: 1,
+            borderColor: C.sidebarBorder,
+            paddingTop: 14,
+            paddingLeft: 14,
+            paddingRight: 14,
+            gap: 10,
+          }}
+        >
+          <text style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Inspector</text>
+          {rows.map(([label, value]) => (
+            <div key={label} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <text style={{ fontSize: 11.5, color: C.ghost }}>{label}</text>
+              <text style={{ fontSize: 13, color: C.secondary }}>{value}</text>
+            </div>
+          ))}
+        </div>
+      )
+    }
+  },
+})
+
+// Modal card centered over the whole window. The dim layer is
+// pointer-transparent and the card is the only filled surface with
+// onMouseDownOutside on it: a dim layer that took the hit would swallow the
+// outside press and the close would never fire (upstream c98b414).
+const OverlayCard = defineComponent({
+  props: {
+    title: { type: String, required: true },
+    onClose: { type: Function as PropType<() => void>, required: true },
+    height: { type: Number, default: undefined },
+  },
+  setup(props, { slots }) {
+    return () => (
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#00000066',
+          pointerEvents: 'none',
+        }}
+      >
+        <div
+          onMouseDownOutside={props.onClose}
+          style={{
+            width: 420,
+            height: props.height,
+            maxWidth: '90%',
+            backgroundColor: C.raised,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderColor: C.borderStrong,
+            padding: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            pointerEvents: 'auto',
+          }}
+        >
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+            <text style={{ fontSize: 14, fontWeight: 600, color: C.text, flexGrow: 1 }}>
+              {props.title}
+            </text>
+            <div
+              testId="overlay-close"
+              onClick={props.onClose}
+              style={{
+                height: 24,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 6,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                hover: { backgroundColor: C.overlay },
+              }}
+            >
+              <text style={{ fontSize: 12, color: C.secondary }}>Close</text>
+            </div>
+          </div>
+          {slots.default?.()}
+        </div>
       </div>
     )
   },
@@ -1363,8 +1595,20 @@ const Composer = defineComponent({
     onAccessChange: { type: Function as PropType<(next: string) => void>, required: true },
     mode: { type: String as PropType<'build' | 'plan'>, required: true },
     onModeChange: { type: Function as PropType<(next: 'build' | 'plan') => void>, required: true },
+    focusTick: { type: Number, default: 0 },
   },
   setup(props) {
+    const composerRef = ref<HostNode | null>(null)
+    const { renderer } = useGpuix()
+    // The composer stays mounted across threads, so autoFocus only runs once.
+    // The app bumps focusTick whenever focus should return to the draft.
+    watch(
+      () => props.focusTick,
+      () => {
+        const id = composerRef.value?.id
+        if (id != null) renderer?.focusElement?.(id)
+      },
+    )
     const send = (text: string) => {
       const next = text.trim()
       if (!next) return
@@ -1401,6 +1645,7 @@ const Composer = defineComponent({
             }}
           >
             <textarea
+              ref={composerRef}
               testId="composer"
               value={props.value}
               placeholder="Do anything..."
@@ -1525,12 +1770,14 @@ const GhostButton = defineComponent({
     label: { type: String, default: undefined },
     active: { type: Boolean, default: false },
     onClick: { type: Function as PropType<() => void>, default: undefined },
+    testId: { type: String, default: undefined },
   },
   setup(props) {
     return () => {
       const color = props.active ? C.text : C.ghost
       return (
         <div
+          testId={props.testId}
           style={{
             display: 'flex',
             flexDirection: 'row',
@@ -1557,7 +1804,10 @@ const GhostButton = defineComponent({
 })
 
 const ActionBar = defineComponent({
-  setup() {
+  props: {
+    onRetry: { type: Function as PropType<() => void>, default: undefined },
+  },
+  setup(props) {
     const copied = ref(false)
     const feedback = ref<'up' | 'down' | null>(null)
 
@@ -1588,7 +1838,7 @@ const ActionBar = defineComponent({
           active={feedback.value === 'down'}
           onClick={() => (feedback.value = feedback.value === 'down' ? null : 'down')}
         />
-        <GhostButton icon="retry" />
+        <GhostButton icon="retry" testId="retry" onClick={props.onRetry} />
         <GhostButton icon="share" />
         <GhostButton icon="more" />
       </div>
@@ -1936,8 +2186,19 @@ export const ChatApp = defineComponent({
     includeSafeMdx: { type: Boolean, default: false },
   },
   setup(props) {
+    const conversations = ref<Conversation[]>(
+      CONVERSATIONS.map((conversation) => ({
+        ...conversation,
+        turns: seedTurnsFor(conversation.id, props.turnCount),
+      })),
+    )
     const activeId = ref('c1')
+    const nav = ref({ stack: ['c1'], index: 0 })
     const collapsed = ref(false)
+    const inspectorOpen = ref(false)
+    const overlay = ref<'search' | 'settings' | null>(null)
+    const query = ref('')
+    const projectOnly = ref(false)
     const draft = ref('')
     const model = ref('deepseek-v4-flash')
     const reasoning = ref('high')
@@ -1946,111 +2207,298 @@ export const ChatApp = defineComponent({
     const project = ref('waku')
     const workspace = ref('local')
     const branch = ref('main')
+    const focusTick = ref(0)
 
-    const turns = ref(expandTurns(props.turnCount))
     const listRef = ref<VirtualListInstance | null>(null)
-    const rowCount = computed(() => turns.value.length + (props.includeSafeMdx ? 1 : 0))
+    const nextTask = ref(1)
+    const { renderer } = useGpuix()
 
-    // React ran this in an effect that skipped the first run and scrolled on
-    // rowCount changes. A `flush: 'post'` watcher fires only on changes, and
-    // the microtask defers the scroll until the mutation batch reached Rust.
-    watch(
-      rowCount,
-      (count) => {
-        queueMicrotask(() => {
-          listRef.value?.scrollToItem(count - 1)
-        })
-      },
-      { flush: 'post' },
+    const active = computed(() =>
+      conversations.value.find((conversation) => conversation.id === activeId.value),
     )
+    const turns = computed(() => active.value?.turns ?? [])
+    const showSafeMdx = computed(() => props.includeSafeMdx && activeId.value === 'c1')
+    const rowCount = computed(() => turns.value.length + (showSafeMdx.value ? 1 : 0))
+    const canGoBack = computed(() => nav.value.index > 0)
+    const canGoForward = computed(() => nav.value.index < nav.value.stack.length - 1)
+    const projectLabel = computed(
+      () => PROJECTS.find((item) => item.id === project.value)?.label ?? project.value,
+    )
+    const visibleConversations = computed(() =>
+      projectOnly.value
+        ? conversations.value.filter((conversation) => conversation.project === projectLabel.value)
+        : conversations.value,
+    )
+    const conversationGroups = computed(() => groupByGroup(visibleConversations.value))
+    const searchHits = computed(() => {
+      const needle = query.value.trim().toLowerCase()
+      if (!needle) return conversations.value
+      return conversations.value.filter((conversation) =>
+        conversation.title.toLowerCase().includes(needle),
+      )
+    })
 
-    const onSend = (text: string) => {
-      turns.value = [...turns.value, { kind: 'user', text }]
-      draft.value = ''
+    const goTo = (id: string) => {
+      overlay.value = null
+      if (id !== activeId.value) {
+        activeId.value = id
+        nav.value = {
+          stack: nav.value.stack.slice(0, nav.value.index + 1).concat(id),
+          index: nav.value.index + 1,
+        }
+      }
+      focusTick.value += 1
+    }
+    const goBack = () => {
+      if (nav.value.index === 0) return
+      const index = nav.value.index - 1
+      activeId.value = nav.value.stack[index]!
+      nav.value = { ...nav.value, index }
+      focusTick.value += 1
+    }
+    const goForward = () => {
+      if (nav.value.index >= nav.value.stack.length - 1) return
+      const index = nav.value.index + 1
+      activeId.value = nav.value.stack[index]!
+      nav.value = { ...nav.value, index }
+      focusTick.value += 1
     }
 
-    return () => {
-      const title =
-        CONVERSATIONS.find((conversation) => conversation.id === activeId.value)?.title ?? ''
-      return (
-        <div
+    // A `flush: 'post'` watcher fires only on changes, and the microtask
+    // defers the scroll until the mutation batch reached Rust. Appending a
+    // turn or switching threads lands the list on the latest row.
+    const scrollToTail = () => {
+      queueMicrotask(() => {
+        if (rowCount.value > 0) listRef.value?.scrollToItem(rowCount.value - 1)
+      })
+    }
+    watch(rowCount, scrollToTail, { flush: 'post' })
+    watch(activeId, scrollToTail, { flush: 'post' })
+
+    const updateActive = (update: (conversation: Conversation) => Conversation) => {
+      conversations.value = conversations.value.map((conversation) =>
+        conversation.id === activeId.value ? update(conversation) : conversation,
+      )
+    }
+    const onSend = (text: string) => {
+      const modelLabel = MODELS.find((item) => item.id === model.value)?.label ?? model.value
+      const reply = demoReply({ text, modelLabel, mode: mode.value })
+      updateActive((conversation) => ({
+        ...conversation,
+        title: conversation.turns.length === 0 ? titleFromDraft(text) : conversation.title,
+        turns: [...conversation.turns, { kind: 'user' as const, text }, ...reply],
+      }))
+      draft.value = ''
+    }
+    const onRetry = () => {
+      const current = turns.value
+      let cut = -1
+      for (let i = current.length - 1; i >= 0; i--) {
+        if (current[i]?.kind === 'user') {
+          cut = i
+          break
+        }
+      }
+      const lastUser = cut >= 0 ? current[cut] : undefined
+      if (!lastUser || lastUser.kind !== 'user') return
+      const modelLabel = MODELS.find((item) => item.id === model.value)?.label ?? model.value
+      const reply = demoReply({ text: lastUser.text, modelLabel, mode: mode.value })
+      updateActive((conversation) => ({
+        ...conversation,
+        turns: [...conversation.turns.slice(0, cut + 1), ...reply],
+      }))
+    }
+    const onNewTask = () => {
+      const id = `task-${nextTask.value++}`
+      const created: Conversation = {
+        id,
+        title: 'New task',
+        group: 'Today',
+        project: projectLabel.value,
+        time: 'now',
+        turns: [],
+      }
+      conversations.value = [created, ...conversations.value]
+      draft.value = ''
+      goTo(id)
+    }
+
+    return () => (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          width: '100%',
+          height: '100%',
+          fontFamily: '.SystemUIFont',
+          color: C.text,
+          position: 'relative',
+        }}
+        // The packager's smoke test waits for this testId in the packaged
+        // binary (gpuiv.package.ts smokeTestId).
+        testId="app-root"
+      >
+        <motion.div
+          initial={false}
+          animate={{ width: collapsed.value ? 0 : SIDEBAR_WIDTH + 1 }}
+          transition={{ duration: 0.2, ease: 'easeOut' }}
           style={{
             display: 'flex',
             flexDirection: 'row',
-            width: '100%',
             height: '100%',
-            fontFamily: '.SystemUIFont',
-            color: C.text,
+            flexShrink: 0,
+            overflow: 'hidden',
           }}
-          // The packager's smoke test waits for this testId in the packaged
-          // binary (gpuiv.package.ts smokeTestId).
-          testId="app-root"
         >
-          <motion.div
-            initial={false}
-            animate={{ width: collapsed.value ? 0 : SIDEBAR_WIDTH + 1 }}
-            transition={{ duration: 0.2, ease: 'easeOut' }}
-            style={{
-              display: 'flex',
-              flexDirection: 'row',
-              height: '100%',
-              flexShrink: 0,
-              overflow: 'hidden',
+          <Sidebar
+            groups={conversationGroups.value}
+            activeId={activeId.value}
+            onSelect={goTo}
+            onCollapse={() => (collapsed.value = true)}
+            onNewTask={onNewTask}
+            onSearch={() => {
+              query.value = ''
+              overlay.value = 'search'
             }}
-          >
-            <Sidebar
-              activeId={activeId.value}
-              onSelect={(id) => (activeId.value = id)}
-              onCollapse={() => (collapsed.value = true)}
-            />
-            <div style={{ width: 1, height: '100%', flexShrink: 0, backgroundColor: C.sidebarBorder }} />
-          </motion.div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              flexGrow: 1,
-              minWidth: 0,
-              height: '100%',
-              backgroundColor: C.canvas,
-            }}
-          >
-            <Header
-              collapsed={collapsed.value}
-              onExpand={() => (collapsed.value = false)}
-              title={title}
-              turnCount={turns.value.length}
-            />
-            <Transcript
-              turns={turns.value}
-              includeSafeMdx={props.includeSafeMdx}
-              listRef={listRef}
-            />
-            <Composer
-              value={draft.value}
-              onChange={(next) => (draft.value = next)}
-              onSend={onSend}
-              model={model.value}
-              onModelChange={(next) => (model.value = next)}
-              reasoning={reasoning.value}
-              onReasoningChange={(next) => (reasoning.value = next)}
-              access={access.value}
-              onAccessChange={(next) => (access.value = next)}
-              mode={mode.value}
-              onModeChange={(next) => (mode.value = next)}
-            />
-            <WorkspaceFooter
-              project={project.value}
-              onProjectChange={(next) => (project.value = next)}
-              workspace={workspace.value}
-              onWorkspaceChange={(next) => (workspace.value = next)}
-              branch={branch.value}
-              onBranchChange={(next) => (branch.value = next)}
-            />
-          </div>
+            canGoBack={canGoBack.value}
+            canGoForward={canGoForward.value}
+            onBack={goBack}
+            onForward={goForward}
+            onSettings={() => (overlay.value = 'settings')}
+            onFilter={() => (projectOnly.value = !projectOnly.value)}
+            filterActive={projectOnly.value}
+          />
+          <div style={{ width: 1, height: '100%', flexShrink: 0, backgroundColor: C.sidebarBorder }} />
+        </motion.div>
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            flexGrow: 1,
+            minWidth: 0,
+            height: '100%',
+            backgroundColor: C.canvas,
+          }}
+        >
+          <Header
+            collapsed={collapsed.value}
+            onExpand={() => (collapsed.value = false)}
+            title={active.value?.title ?? 'New task'}
+            turnCount={turns.value.length}
+            canGoBack={canGoBack.value}
+            canGoForward={canGoForward.value}
+            onBack={goBack}
+            onForward={goForward}
+            onToggleInspector={() => (inspectorOpen.value = !inspectorOpen.value)}
+          />
+          <Transcript
+            key={activeId.value}
+            turns={turns.value}
+            includeSafeMdx={showSafeMdx.value}
+            listRef={listRef}
+            onRetry={onRetry}
+          />
+          <Composer
+            value={draft.value}
+            onChange={(next) => (draft.value = next)}
+            onSend={onSend}
+            model={model.value}
+            onModelChange={(next) => (model.value = next)}
+            reasoning={reasoning.value}
+            onReasoningChange={(next) => (reasoning.value = next)}
+            access={access.value}
+            onAccessChange={(next) => (access.value = next)}
+            mode={mode.value}
+            onModeChange={(next) => (mode.value = next)}
+            focusTick={focusTick.value}
+          />
+          <WorkspaceFooter
+            project={project.value}
+            onProjectChange={(next) => (project.value = next)}
+            workspace={workspace.value}
+            onWorkspaceChange={(next) => (workspace.value = next)}
+            branch={branch.value}
+            onBranchChange={(next) => (branch.value = next)}
+          />
         </div>
-      )
-    }
+        {inspectorOpen.value && (
+          <Inspector
+            conversation={active.value}
+            model={model.value}
+            reasoning={reasoning.value}
+            access={access.value}
+            mode={mode.value}
+            project={project.value}
+          />
+        )}
+        {overlay.value === 'search' && (
+          <OverlayCard title="Search threads" height={420} onClose={() => (overlay.value = null)}>
+            <input
+              testId="search-input"
+              value={query.value}
+              placeholder="Filter by title"
+              autoFocus
+              theme={CHAT_THEME}
+              style={{
+                width: '100%',
+                height: 32,
+                flexShrink: 0,
+                fontSize: 13,
+                color: C.text,
+                backgroundColor: C.composer,
+                borderRadius: 8,
+                paddingLeft: 10,
+                paddingRight: 10,
+              }}
+              onChange={(event: EventPayload) => (query.value = event.value ?? '')}
+            />
+            <div style={{ flexGrow: 1, minHeight: 0, overflowY: 'scroll' }}>
+              {searchHits.value.map((conversation) => (
+                <div
+                  key={conversation.id}
+                  testId={`search-${conversation.id}`}
+                  onClick={() => goTo(conversation.id)}
+                  style={{
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    paddingLeft: 8,
+                    paddingRight: 8,
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    hover: { backgroundColor: C.overlay },
+                  }}
+                >
+                  <text style={{ fontSize: 13, color: C.text }}>{conversation.title}</text>
+                </div>
+              ))}
+            </div>
+          </OverlayCard>
+        )}
+        {overlay.value === 'settings' && (
+          <OverlayCard title="Settings" onClose={() => (overlay.value = null)}>
+            <text style={{ fontSize: 13, lineHeight: 18, color: C.secondary }}>
+              This is the GPUIV chat demo. Threads, drafts, and replies stay in this window.
+            </text>
+            <div
+              testId="cycle-overlay"
+              onClick={() => renderer?.cycleDebugFrameOverlay?.()}
+              style={{
+                height: 32,
+                borderRadius: 8,
+                display: 'flex',
+                alignItems: 'center',
+                paddingLeft: 10,
+                cursor: 'pointer',
+                backgroundColor: C.overlay,
+                hover: { backgroundColor: C.overlayStrong },
+              }}
+            >
+              <text style={{ fontSize: 13, color: C.text }}>Cycle frame overlay</text>
+            </div>
+          </OverlayCard>
+        )}
+      </div>
+    )
   },
 })
 

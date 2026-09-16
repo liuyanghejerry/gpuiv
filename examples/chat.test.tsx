@@ -169,6 +169,14 @@ describeNative('chat example (vue)', () => {
     await app.settle()
     expect(app.renderer.getPaintedText()).toContain('Do anything...')
 
+    // The send appends the user turn and a demo reply, and the list scrolls
+    // to the tail. The new visible range dispatches at flush end, so the
+    // freshly scrolled rows paint on the next settle.
+    await app.settle()
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('This is the GPUIV chat demo'))
+    ).toBe(true)
+
     const transcript = app.renderer.findByType('virtual-list')[0]
     app.renderer.scrollToItem(transcript.id, 24)
     await app.settle()
@@ -247,7 +255,17 @@ describeNative('chat example (vue)', () => {
     expect(rowOf('give me a quick overview')!.style.backgroundColor).not.toBe(activeFill)
     expect(headerTitle()).toBeDefined()
 
-    // Clicking back to c1 restores the original state.
+    // The transcript itself follows: c2's reply paints, c1's corpus is gone.
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('GPUI is the renderer'))
+    ).toBe(true)
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('control plane for local coding agents'))
+    ).toBe(false)
+
+    // Clicking back to c1 restores the original state, and c2's thread is
+    // gone from the paint. c1 opens at its tail, so the last corpus rows
+    // show after the scrolled window repaints on the second settle.
     const c1Title = titledText('give me a quick overview', 13.5)
     const c1Bounds = app.renderer.getElementBounds(c1Title!.id)
     app.renderer.nativeSimulateClick(
@@ -255,8 +273,159 @@ describeNative('chat example (vue)', () => {
       c1Bounds!.y! + c1Bounds!.height! / 2,
     )
     await app.settle()
+    await app.settle()
     expect(rowOf('give me a quick overview')!.style.backgroundColor).toBe(activeFill)
     expect(rowOf('Native SDK vs GPUI comparison')!.style.backgroundColor).not.toBe(activeFill)
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('GPUI is the renderer'))
+    ).toBe(false)
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('GPT-5.4'))
+    ).toBe(true)
+    app.unmount()
+  })
+
+  /** Click a painted element's center by testId, then settle. */
+  async function clickTestId(app: ReturnType<typeof createTestApp>, testId: string) {
+    const el = app.renderer.findByTestId(testId)
+    expect(el, `missing testId: ${testId}`).toBeDefined()
+    const bounds = app.renderer.getElementBounds(el!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(
+      bounds!.x! + bounds!.width! / 2,
+      bounds!.y! + bounds!.height! / 2,
+    )
+    await app.settle()
+  }
+
+  it('starts a blank task from the sidebar compose action', async () => {
+    const app = createTestApp(ChatApp)
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('control plane for local coding agents'))
+    ).toBe(true)
+
+    await clickTestId(app, 'new-task')
+    // A blank thread: c1's corpus is gone, the placeholder title shows.
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('control plane for local coding agents'))
+    ).toBe(false)
+    expect(app.renderer.getPaintedText()).toContain('New task')
+
+    // The first send names the thread from the draft and paints a demo reply.
+    const textarea = app.renderer.findByType('textarea')[0]
+    app.renderer.nativeSimulateKeystrokes(textarea.id, 'f i x space t h e space g u t t e r')
+    await app.settle()
+    app.renderer.nativeSimulateKeystrokes(textarea.id, 'enter')
+    await app.settle()
+    // The tail scroll's visible range dispatches at flush end; the new rows
+    // paint on the next settle.
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain('fix the gutter')
+    expect(
+      app.renderer.getPaintedText().some((line) => line.includes('This is the GPUIV chat demo'))
+    ).toBe(true)
+    app.unmount()
+  })
+
+  it('rebuilds the last demo reply from retry', async () => {
+    const app = createTestApp(ChatApp)
+    const textarea = app.renderer.findByType('textarea')[0]
+    app.renderer.nativeSimulateKeystrokes(textarea.id, 'h e l l o')
+    await app.settle()
+    app.renderer.nativeSimulateKeystrokes(textarea.id, 'enter')
+    await app.settle()
+    // Tail scroll: the new rows paint on the second settle.
+    await app.settle()
+    const replies = () =>
+      app.renderer.getPaintedText().filter((line) => line.includes('This is the GPUIV chat demo'))
+    expect(replies().length).toBe(1)
+
+    await clickTestId(app, 'retry')
+    // Rebuilt in place: still exactly one reply, no duplicated user turn.
+    expect(replies().length).toBe(1)
+    expect(app.renderer.getPaintedText().filter((line) => line === 'hello').length).toBe(1)
+    app.unmount()
+  })
+
+  it('toggles the inspector from the header', async () => {
+    const app = createTestApp(ChatApp)
+    expect(app.renderer.findByTestId('inspector')).toBeUndefined()
+
+    await clickTestId(app, 'inspector-toggle')
+    expect(app.renderer.findByTestId('inspector')).toBeDefined()
+    const painted = app.renderer.getPaintedText()
+    expect(painted).toContain('Inspector')
+    expect(painted).toContain('DeepSeek V4 Flash')
+    expect(painted).toContain('Full access')
+
+    await clickTestId(app, 'inspector-toggle')
+    expect(app.renderer.findByTestId('inspector')).toBeUndefined()
+    app.unmount()
+  })
+
+  it('walks thread history with the sidebar arrows', async () => {
+    const app = createTestApp(ChatApp)
+    const paints = (needle: string) =>
+      app.renderer.getPaintedText().some((line) => line.includes(needle))
+
+    await clickTestId(app, 'thread-c2')
+    await clickTestId(app, 'thread-c3')
+    expect(paints('scriptc is a Vercel Labs experiment')).toBe(true)
+
+    await clickTestId(app, 'history-back')
+    expect(paints('GPUI is the renderer')).toBe(true)
+    expect(paints('scriptc is a Vercel Labs experiment')).toBe(false)
+
+    await clickTestId(app, 'history-forward')
+    expect(paints('scriptc is a Vercel Labs experiment')).toBe(true)
+
+    // A fresh navigation truncates the forward branch.
+    await clickTestId(app, 'thread-c1')
+    await clickTestId(app, 'history-back')
+    expect(paints('scriptc is a Vercel Labs experiment')).toBe(true)
+    await clickTestId(app, 'history-back')
+    expect(paints('GPUI is the renderer')).toBe(true)
+    app.unmount()
+  })
+
+  it('closes search on an outside press and focuses the search field', async () => {
+    const app = createTestApp(ChatApp)
+    await clickTestId(app, 'search-action')
+
+    const input = app.renderer.findByTestId('search-input')
+    expect(input).toBeDefined()
+    expect(app.renderer.getFocusedElementId()).toBe(input!.id)
+
+    app.renderer.nativeSimulateKeystrokes(input!.id, 's d k')
+    await app.settle()
+    expect(app.renderer.findByTestId('search-c2')).toBeDefined()
+    expect(app.renderer.findByTestId('search-c1')).toBeUndefined()
+
+    // A press outside the card closes the overlay (the dim layer is
+    // pointer-transparent, so the press lands on the transcript beneath).
+    app.renderer.nativeSimulateClick(1100, 700)
+    await app.settle()
+    expect(app.renderer.findByTestId('search-input')).toBeUndefined()
+    app.unmount()
+  })
+
+  it('refocuses the composer on New Task and thread switches', async () => {
+    const app = createTestApp(ChatApp)
+    const composer = app.renderer.findByTestId('composer')
+    expect(composer).toBeDefined()
+    const trigger = app.renderer.findByTestId('model-picker-trigger')
+    expect(trigger).toBeDefined()
+
+    // Steal focus, then New Task: focusTick returns it to the draft.
+    app.renderer.focusElement(trigger!.id)
+    expect(app.renderer.getFocusedElementId()).toBe(trigger!.id)
+    await clickTestId(app, 'new-task')
+    expect(app.renderer.getFocusedElementId()).toBe(composer!.id)
+
+    // Steal again, then switch threads: same rule.
+    app.renderer.focusElement(trigger!.id)
+    await clickTestId(app, 'thread-c1')
+    expect(app.renderer.getFocusedElementId()).toBe(composer!.id)
     app.unmount()
   })
 
