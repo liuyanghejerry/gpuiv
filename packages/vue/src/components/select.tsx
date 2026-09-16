@@ -20,6 +20,7 @@ import type { StyleDesc } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
   FloatingLayer,
+  cloneAsChild,
   floatingRootStyle,
   resolveStyle,
   useControllableState,
@@ -418,6 +419,7 @@ export const SelectItem = defineComponent({
   props: {
     value: { type: String, required: true },
     disabled: { type: Boolean, default: false },
+    asChild: { type: Boolean, default: false },
   },
   setup(props, { attrs, slots }) {
     const context = useSelectContext("SelectItem")
@@ -457,6 +459,9 @@ export const SelectItem = defineComponent({
           ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
           if (!props.disabled && !context.disabled) context.selectValue(props.value)
         },
+      }
+      if (props.asChild) {
+        return cloneAsChild("SelectItem", slots.default?.(state), itemProps)
       }
       return h("div", itemProps, slots.default?.(state))
     }

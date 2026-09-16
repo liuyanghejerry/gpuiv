@@ -14,6 +14,7 @@ import type { StyleDesc } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
   FloatingLayer,
+  cloneAsChild,
   floatingRootStyle,
   resolveStyle,
   useControllableState,
@@ -449,6 +450,7 @@ export const ComboboxItem = defineComponent({
   props: {
     value: { type: String, required: true },
     disabled: { type: Boolean, default: false },
+    asChild: { type: Boolean, default: false },
   },
   setup(props, { attrs, slots }) {
     const context = useComboboxContext("ComboboxItem")
@@ -480,6 +482,9 @@ export const ComboboxItem = defineComponent({
           ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
           if (!props.disabled) context.selectItem(props.value)
         },
+      }
+      if (props.asChild) {
+        return cloneAsChild("ComboboxItem", slots.default?.(state), itemProps)
       }
       return h("div", itemProps, slots.default?.(state))
     }
