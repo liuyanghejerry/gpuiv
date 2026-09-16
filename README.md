@@ -1397,6 +1397,12 @@ Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
 handle. Add `tabIndex` as well when the element must be reachable with Tab.
 Removing `tabIndex` removes the element from the tab order.
 
+A `focusElement()` call that arrives before its element has a native focus
+handle — say from a mount effect ahead of the first frame — is queued and
+applied by the first render that creates the handle. If several requests
+arrive before that render, the latest request wins, and an explicit request
+beats `autoFocus`.
+
 ## Headless controls
 
 The built-in controls are **unstyled primitives**, not a fixed component

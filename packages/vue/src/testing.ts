@@ -928,6 +928,11 @@ export interface TestApp {
    * Call after simulating input (Vue updates are microtask-based).
    */
   settle: () => Promise<void>
+  /** Apply queued host-config mutations to the Rust tree WITHOUT repainting.
+   *  settle() paints immediately; this split exists for tests that must act
+   *  between the tree update and the next frame — e.g. a focus request that
+   *  must land before the element's focus handle is painted into existence. */
+  flushMutations: () => void
   unmount: () => void
 }
 
@@ -990,6 +995,7 @@ export function createTestApp(
       // asserts. Idempotent when the queue is empty.
       renderer.dispatchNativeEvents()
     },
+    flushMutations: gpuivHost.flushMutations,
     unmount: () => {
       app.unmount()
       gpuivHost.flushMutations()
