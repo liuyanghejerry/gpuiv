@@ -91,6 +91,121 @@ describeNative("select (vue)", () => {
     app.unmount()
   })
 
+  it("lets the pick through when a filled row child is pointer-transparent", async () => {
+    // The menu-row pattern GPUI requires: a flat painted hit list, no click
+    // bubbling. The item owns the only filled hit target; the custom row
+    // inside it sets pointerEvents: "none" so it inserts no hitbox.
+    const value = ref("one")
+    const filledRow = (label: string) => (
+      <div
+        style={{
+          width: "100%",
+          padding: 6,
+          backgroundColor: "#334155",
+          pointerEvents: "none",
+        }}
+      >
+        <text>{label}</text>
+      </div>
+    )
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select value={value.value} onValueChange={(next) => (value.value = next)}>
+              <SelectTrigger style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent sideOffset={4} style={contentStyle}>
+                <SelectItem value="one" style={itemStyle} testId="item-one">
+                  {filledRow("One")}
+                </SelectItem>
+                <SelectItem value="two" style={itemStyle} testId="item-two">
+                  {filledRow("Two")}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain("Two")
+
+    const item = app.renderer.findByTestId("item-two")
+    expect(item).toBeDefined()
+    const bounds = app.renderer.getElementBounds(item!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(
+      bounds!.x + bounds!.width / 2,
+      bounds!.y + bounds!.height / 2,
+    )
+    await app.settle()
+    const texts = app.renderer.getAllText()
+    expect(texts).toContain("Value: two")
+    // Popup closed: the option rows are gone from the paint.
+    expect(texts).not.toContain("One")
+    expect(texts).not.toContain("Two")
+    app.unmount()
+  })
+
+  it("a filled row child without pointer transparency covers the item's hit", async () => {
+    // Platform truth the pattern above defends against: GPUI does not bubble
+    // clicks, so a filled child inserts its own hitbox on top of the item and
+    // the pick never runs. If GPUI ever grows click bubbling, this test
+    // flipping is the signal.
+    const value = ref("one")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ width: 400, height: 300, padding: 12 }}>
+            <Select value={value.value} onValueChange={(next) => (value.value = next)}>
+              <SelectTrigger style={triggerStyle}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent sideOffset={4} style={contentStyle}>
+                <SelectItem value="one" style={itemStyle} testId="item-one">
+                  <div style={{ width: "100%", padding: 6, backgroundColor: "#334155" }}>
+                    <text>One</text>
+                  </div>
+                </SelectItem>
+                <SelectItem value="two" style={itemStyle} testId="item-two">
+                  <div style={{ width: "100%", padding: 6, backgroundColor: "#334155" }}>
+                    <text>Two</text>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <text>{`Value: ${value.value}`}</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+
+    app.renderer.nativeSimulateClick(30, 25)
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain("Two")
+
+    const item = app.renderer.findByTestId("item-two")
+    expect(item).toBeDefined()
+    const bounds = app.renderer.getElementBounds(item!.id)
+    expect(bounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(
+      bounds!.x + bounds!.width / 2,
+      bounds!.y + bounds!.height / 2,
+    )
+    await app.settle()
+    expect(app.renderer.getAllText()).toContain("Value: one")
+    app.unmount()
+  })
+
   it("selects from children when Root has no items", async () => {
     const value = ref("one")
     const App = defineComponent({

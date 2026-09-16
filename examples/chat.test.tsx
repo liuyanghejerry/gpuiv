@@ -123,6 +123,39 @@ describeNative('chat example (vue)', () => {
     app.unmount()
   })
 
+  it('selects a model by clicking its row', async () => {
+    const app = createTestApp(ChatApp)
+
+    const trigger = app.renderer.findByTestId('model-picker-trigger')
+    expect(trigger).toBeDefined()
+    const triggerBounds = app.renderer.getElementBounds(trigger!.id)
+    app.renderer.nativeSimulateClick(
+      triggerBounds!.x! + triggerBounds!.width! / 2,
+      triggerBounds!.y! + triggerBounds!.height! / 2
+    )
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain('Claude Opus 4.6')
+
+    // GPUI paints a flat hit list and does not bubble clicks: a filled row
+    // inside SelectItem used to cover the item's hitbox and swallow the pick.
+    // The fill now lives on the item and the row is pointer-transparent.
+    const row = app.renderer.findByTestId('model-opus-4.6')
+    expect(row).toBeDefined()
+    const rowBounds = app.renderer.getElementBounds(row!.id)
+    expect(rowBounds).not.toBeNull()
+    app.renderer.nativeSimulateClick(
+      rowBounds!.x! + rowBounds!.width! / 2,
+      rowBounds!.y! + rowBounds!.height! / 2
+    )
+    await app.settle()
+
+    // The pick ran: popup closed, the trigger now shows the picked model.
+    const painted = app.renderer.getPaintedText()
+    expect(painted).not.toContain('DeepSeek V4 Flash')
+    expect(painted).toContain('Claude Opus 4.6')
+    app.unmount()
+  })
+
   it('types into the composer and clears on enter', async () => {
     const app = createTestApp(ChatApp)
 
