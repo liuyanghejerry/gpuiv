@@ -76,8 +76,12 @@ export function useControllableState<Value>(
     controlled.value ? (options.value as Value) : internal.value
   )
   const setValue = (nextValue: Value): void => {
+    // Compare before assigning: in uncontrolled mode `current` reads the
+    // internal ref, so comparing after the assignment always reports
+    // "unchanged" and onChange never fires.
+    const previous = current.value
     if (!controlled.value) internal.value = nextValue
-    if (!Object.is(current.value, nextValue)) options.onChange?.(nextValue)
+    if (!Object.is(previous, nextValue)) options.onChange?.(nextValue)
   }
   return [current, setValue]
 }

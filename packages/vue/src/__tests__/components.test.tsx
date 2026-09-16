@@ -119,6 +119,49 @@ describeNative("combobox and tooltip (vue)", () => {
     app.unmount()
   })
 
+  it("fires onValueChange in uncontrolled mode", async () => {
+    // useControllableState used to compare `current` against the next value
+    // AFTER mutating the internal ref, so uncontrolled onChange never fired.
+    const seen: (string | null)[] = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 24 }}>
+            <Combobox
+              items={["DeepSeek V4", "Claude Opus"]}
+              onValueChange={(next) => seen.push(next as string | null)}
+              itemToStringValue={(item) => item}
+            >
+              <div style={{ position: "relative", display: "flex" }}>
+                <ComboboxInput style={{ width: 300 }} placeholder="Pick a model" />
+                <ComboboxContent side="bottom" sideOffset={4} style={{ backgroundColor: "#222" }}>
+                  <ComboboxList
+                    renderItem={(item: string) => (
+                      <ComboboxItem key={item} value={item} testId={item} style={{ padding: 6 }}>
+                        <text>{item}</text>
+                      </ComboboxItem>
+                    )}
+                  />
+                </ComboboxContent>
+              </div>
+            </Combobox>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const input = app.renderer.findByType("input")[0]
+    app.renderer.nativeSimulateKeystrokes(input.id, "c")
+    await app.settle()
+    const row = app.renderer.findByTestId("Claude Opus")
+    const bounds = app.renderer.getElementBounds(row!.id)
+    app.renderer.nativeSimulateClick(bounds!.x + 8, bounds!.y + 8)
+    await app.settle()
+    expect(seen).toEqual(["Claude Opus"])
+
+    app.unmount()
+  })
+
   it("opens a tooltip on hover and closes on leave", async () => {
     const App = defineComponent({
       setup() {
