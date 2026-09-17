@@ -483,6 +483,12 @@ pub struct Theme {
     pub font_sans: String,
     /// Monospace family for code, diffs and terminals.
     pub font_mono: String,
+    /// Fallback families tried after `font_sans` for glyphs it lacks.
+    /// Empty keeps the platform's own cascade (CoreText on macOS); set it to
+    /// pin CJK/emoji coverage on Windows and Linux.
+    pub font_sans_fallbacks: Vec<String>,
+    /// Fallback families tried after `font_mono`.
+    pub font_mono_fallbacks: Vec<String>,
     /// Every layout number. Overridable from JS, so a design tweak needs no
     /// native rebuild.
     pub metrics: Metrics,
@@ -508,6 +514,8 @@ impl Theme {
             syntax: SyntaxPalette::dark(neutral(0.922), neutral(0.60), oklch(0.704, 0.191, 22.216)),
             font_sans: system_sans().to_string(),
             font_mono: system_mono().to_string(),
+            font_sans_fallbacks: Vec::new(),
+            font_mono_fallbacks: Vec::new(),
             metrics: Metrics::default(),
         }
     }
@@ -531,8 +539,38 @@ impl Theme {
             syntax: SyntaxPalette::dark(neutral(0.25), neutral(0.48), oklch(0.505, 0.213, 27.518)),
             font_sans: system_sans().to_string(),
             font_mono: system_mono().to_string(),
+            font_sans_fallbacks: Vec::new(),
+            font_mono_fallbacks: Vec::new(),
             metrics: Metrics::default(),
         }
+    }
+
+    /// The sans family as a shaped [`gpui::Font`], with any configured
+    /// fallbacks attached.
+    pub fn sans_font(&self) -> gpui::Font {
+        let mut font = gpui::font(self.font_sans.clone());
+        font.fallbacks = self.sans_fallbacks();
+        font
+    }
+
+    /// The mono family as a shaped [`gpui::Font`], with any configured
+    /// fallbacks attached.
+    pub fn mono_font(&self) -> gpui::Font {
+        let mut font = gpui::font(self.font_mono.clone());
+        font.fallbacks = self.mono_fallbacks();
+        font
+    }
+
+    /// The configured sans fallbacks, or `None` to keep the platform's own
+    /// cascade.
+    pub fn sans_fallbacks(&self) -> Option<gpui::FontFallbacks> {
+        fallbacks(&self.font_sans_fallbacks)
+    }
+
+    /// The configured mono fallbacks, or `None` to keep the platform's own
+    /// cascade.
+    pub fn mono_fallbacks(&self) -> Option<gpui::FontFallbacks> {
+        fallbacks(&self.font_mono_fallbacks)
     }
 
     /// Apply a JS-supplied override on top of this theme.
@@ -558,6 +596,12 @@ impl Theme {
         }
         if let Some(font) = &o.font_sans {
             self.font_sans = font.clone();
+        }
+        if let Some(fallbacks) = &o.font_mono_fallbacks {
+            self.font_mono_fallbacks = fallbacks.clone();
+        }
+        if let Some(fallbacks) = &o.font_sans_fallbacks {
+            self.font_sans_fallbacks = fallbacks.clone();
         }
         if let Some(metrics) = &o.metrics {
             self.metrics.apply(metrics);
@@ -648,6 +692,37 @@ fn system_mono() -> &'static str {
     }
 }
 
+fn fallbacks(families: &[String]) -> Option<gpui::FontFallbacks> {
+    (!families.is_empty()).then(|| gpui::FontFallbacks::from_fonts(families.to_vec()))
+}
+
+/// Theme-aware family styling for gpui elements. `Styled::font` would also
+/// reset weight and style to the Font's defaults, so these set only the
+/// family and the fallbacks on the ambient text style.
+pub(crate) trait ThemeFonts: gpui::Styled {
+    /// Style with the theme's sans family and fallbacks.
+    fn theme_sans(self, theme: &Theme) -> Self
+    where
+        Self: Sized,
+    {
+        let mut this = self.font_family(theme.font_sans.clone());
+        this.text_style().font_fallbacks = theme.sans_fallbacks();
+        this
+    }
+
+    /// Style with the theme's mono family and fallbacks.
+    fn theme_mono(self, theme: &Theme) -> Self
+    where
+        Self: Sized,
+    {
+        let mut this = self.font_family(theme.font_mono.clone());
+        this.text_style().font_fallbacks = theme.mono_fallbacks();
+        this
+    }
+}
+
+impl<T: gpui::Styled> ThemeFonts for T {}
+
 // ── JS-facing override ───────────────────────────────────────────────
 
 /// A `theme` prop from JS. Every field is a CSS colour string and optional.
@@ -671,6 +746,8 @@ pub struct ThemeOverride {
     pub diff_hunk_bg: Option<String>,
     pub font_sans: Option<String>,
     pub font_mono: Option<String>,
+    pub font_sans_fallbacks: Option<Vec<String>>,
+    pub font_mono_fallbacks: Option<Vec<String>>,
     pub syntax: Option<SyntaxOverride>,
     pub metrics: Option<MetricsOverride>,
 }
@@ -777,6 +854,30 @@ mod tests {
         assert_ne!(t.diff_add, t.diff_del);
         assert_ne!(t.syntax.keyword, t.syntax.string);
         assert_eq!(t.syntax.variable, t.text);
+    }
+
+    #[test]
+    fn font_fallbacks_from_the_override_reach_the_fonts() {
+        let o: ThemeOverride = serde_json::from_str(
+            r##"{ "fontSansFallbacks": ["PingFang SC", "Segoe UI Emoji"],
+                 "fontMonoFallbacks": ["Noto Sans Mono CJK SC"] }"##,
+        )
+        .unwrap();
+        let t = Theme::dark().with_override(&o);
+        assert_eq!(t.font_sans_fallbacks, ["PingFang SC", "Segoe UI Emoji"]);
+        assert_eq!(
+            t.mono_font().fallbacks.unwrap().fallback_list(),
+            ["Noto Sans Mono CJK SC"]
+        );
+        assert_eq!(t.sans_font().fallbacks.unwrap().fallback_list()[0], "PingFang SC");
+    }
+
+    #[test]
+    fn no_fallbacks_keeps_the_platform_cascade() {
+        let t = Theme::dark();
+        assert!(t.mono_font().fallbacks.is_none());
+        assert!(t.sans_font().fallbacks.is_none());
+        assert!(t.mono_fallbacks().is_none());
     }
 
     #[test]

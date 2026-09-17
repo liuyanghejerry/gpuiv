@@ -33,7 +33,7 @@ use crate::syntax::cache::highlight_cached;
 use crate::syntax::HighlightSpan;
 use crate::text::runs::runs_for_spans;
 use crate::text::{range_rects, SharedSelection};
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeFonts};
 
 /// How far past the viewport the list pre-builds rows.
 const OVERDRAW: f32 = 1024.0;
@@ -541,7 +541,7 @@ fn render_row(data: &DiffData, ix: usize, ctx: RowContext) -> gpui::AnyElement {
                 .items_center()
                 .px(px(m.diff_row_padding_x))
                 .bg(theme.diff_hunk_bg)
-                .font_family(theme.font_mono.clone())
+                .theme_mono(&theme)
                 .text_size(px(11.0))
                 .text_color(theme.text_faint)
                 .child(crate::text::chrome_text(SharedString::from(header), None))
@@ -666,7 +666,7 @@ fn file_header_row(
                 .flex_1()
                 .min_w_0()
                 .overflow_hidden()
-                .font_family(theme.font_mono.clone())
+                .theme_mono(&theme)
                 .text_size(px(12.0))
                 .text_color(theme.text_dim)
                 .child(crate::text::chrome_text(
@@ -677,7 +677,7 @@ fn file_header_row(
         .child(
             gpui::div()
                 .flex_none()
-                .font_family(theme.font_mono.clone())
+                .theme_mono(&theme)
                 .text_size(px(11.0))
                 .text_color(theme.diff_add)
                 .child(crate::text::chrome_text(
@@ -688,7 +688,7 @@ fn file_header_row(
         .child(
             gpui::div()
                 .flex_none()
-                .font_family(theme.font_mono.clone())
+                .theme_mono(&theme)
                 .text_size(px(11.0))
                 .text_color(theme.diff_del)
                 // U+2212 MINUS SIGN, not a hyphen: it matches the plus sign's
@@ -769,7 +769,7 @@ fn diff_line_row(
         gpui::div()
             .w(px(gutter_px))
             .flex_none()
-            .font_family(theme.font_mono.clone())
+            .theme_mono(&theme)
             .text_size(px(11.0))
             .text_color(color)
             .flex()
@@ -781,7 +781,7 @@ fn diff_line_row(
             ))
     };
 
-    let mono: Font = gpui::font(theme.font_mono.clone());
+    let mono: Font = theme.mono_font();
     let spans: Vec<(std::ops::Range<usize>, Hsla)> = highlight_spans
         .iter()
         .map(|span| (span.range.clone(), theme.syntax.color(span.kind)))
@@ -881,7 +881,7 @@ fn diff_line_row(
                 .justify_center()
                 .text_size(px(m.diff_text_size))
                 .text_color(marker_color)
-                .font_family(theme.font_mono.clone())
+                .theme_mono(&theme)
                 .child(crate::text::chrome_text(SharedString::from(marker), None)),
         )
         .child(
@@ -890,7 +890,7 @@ fn diff_line_row(
                 .min_w_0()
                 .overflow_hidden()
                 .pl(px(12.0))
-                .font_family(theme.font_mono.clone())
+                .theme_mono(&theme)
                 .text_size(px(m.diff_text_size))
                 .whitespace_nowrap()
                 .child(ctx.text(ix, line.text.clone(), Some(runs), word_wash)),

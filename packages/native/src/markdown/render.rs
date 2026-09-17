@@ -12,14 +12,14 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use gpui::{
-    div, font, px, AnyElement, BorderStyle, FontStyle, FontWeight, Hsla, SharedString, TextRun,
+    div, px, AnyElement, BorderStyle, FontStyle, FontWeight, Hsla, SharedString, TextRun,
     UnderlineStyle, Window,
 };
 
 use super::parser::{Block, BlockTree, InlineRun, TableAlign};
 use crate::syntax::cache::highlight_cached;
 use crate::text::{range_rects, runs::runs_for_spans, SharedSelection};
-use crate::theme::{Metrics, Theme};
+use crate::theme::{Metrics, Theme, ThemeFonts};
 
 // ── Metrics ──────────────────────────────────────────────────────────
 //
@@ -92,9 +92,9 @@ pub fn flatten_runs(runs: &[InlineRun], theme: &Theme, base_weight: FontWeight) 
         text.push_str(&run.text);
 
         let mut f = if run.style.code {
-            font(theme.font_mono.clone())
+            theme.mono_font()
         } else {
-            font(theme.font_sans.clone())
+            theme.sans_font()
         };
         f.weight = if run.style.bold && base_weight.0 < FontWeight::SEMIBOLD.0 {
             FontWeight::SEMIBOLD
@@ -454,7 +454,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
 
     let theme = ctx.theme.clone();
     let m = &theme.metrics;
-    let mono = font(theme.font_mono.clone());
+    let mono = theme.mono_font();
     let highlight = highlight_cached(code, None, language);
 
     // overflow-x only works as a flex *row* viewport. A flex_col scroller
@@ -467,7 +467,7 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
         .flex_col()
         .px(px(m.md_code_padding_x))
         .py(px(m.md_code_padding_y))
-        .font_family(theme.font_mono.clone())
+        .theme_mono(&theme)
         .text_size(px(m.code_text_size))
         .line_height(px(m.code_line_height))
         .whitespace_nowrap();
