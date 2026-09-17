@@ -26,7 +26,7 @@ use gpui::{px, BorderStyle, Font, Hsla, SharedString};
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::diff::{
     annotate_word_diffs, file_notices, flatten_rows, gutter_width, parse_patch, DiffLine, DiffRow,
-    FileDiff, LineKind,
+    DiffStream, FileDiff, LineKind,
 };
 use crate::renderer::emit_event_full;
 use crate::syntax::cache::highlight_cached;
@@ -111,6 +111,13 @@ pub struct DiffElement {
     max_lines: Option<usize>,
     collapsed: HashSet<String>,
     theme: Theme,
+    /// Streaming parse state: appending to `patch` reparses only the tail
+    /// (the last file's last hunk, or its header while hunk-less); completed
+    /// files are never re-parsed or re-word-diffed.
+    parse_stream: DiffStream,
+    /// The `show_word_diff` the stream's retained files were annotated under;
+    /// a flip forces a full reparse so retained word ranges cannot go stale.
+    stream_word_diff: Option<bool>,
     /// Parsed data for the current patch. Rebuilt only when the props change.
     data: Option<Rc<DiffData>>,
     fingerprint: Option<u64>,
@@ -133,9 +140,23 @@ impl DiffElement {
             }
         }
 
-        let mut files = parse_patch(&self.patch);
+        let can_append = self.parse_stream.source() != self.patch
+            && self.patch.starts_with(self.parse_stream.source())
+            && self.stream_word_diff == Some(self.show_word_diff);
+        self.parse_stream.set_patch(&self.patch);
+        self.stream_word_diff = Some(self.show_word_diff);
+
+        let mut files: Vec<FileDiff> = self.parse_stream.files().to_vec();
         if self.show_word_diff {
-            annotate_word_diffs(&mut files);
+            if can_append {
+                // Retained files keep their word ranges from the last
+                // rebuild; only the tail file's last hunk was re-parsed.
+                if let Some(tail) = files.last_mut() {
+                    annotate_word_diffs(std::slice::from_mut(tail));
+                }
+            } else {
+                annotate_word_diffs(&mut files);
+            }
         }
         let highlights = files.iter().map(file_highlight).collect();
         let collapsed = self.collapsed.clone();

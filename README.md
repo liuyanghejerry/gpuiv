@@ -2825,6 +2825,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
 - [x] Streaming markdown parsing (appends re-parse from the last stable block boundary; full parity with a full parse)
+- [x] Streaming diff parsing (hunk-level checkpoints; completed files are never re-parsed)
 - [x] IME composition events (`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd`)
 - [x] Spinner loading primitive (`Spinner`, dots and pulse variants)
 - [x] Cross-element text selection
