@@ -624,9 +624,10 @@ export interface NativeRenderer {
   getWindowSize?(): { width: number; height: number }
   /** The window's frame on screen: logical points, origin at the main
    *  display's top-left, including the native titlebar where present
-   *  (`getWindowSize` reports the content viewport). Save it and pass it
-   *  back as the `x`/`y` window options to restore the position on the
-   *  next launch. */
+   *  (`getWindowSize` reports the content viewport). Note: the Windows
+   *  platform window currently reports physical pixels — a GPUI platform
+   *  divergence. Save it and pass it back as the `x`/`y` window options to
+   *  restore the position on the next launch. */
   getWindowBounds?(): { x: number; y: number; width: number; height: number }
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void

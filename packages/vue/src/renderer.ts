@@ -534,12 +534,12 @@ export function createApp(
     // Reload button; the mount itself stays.
     //
     // The reload counter says a turn changed something hot-applied; the
-    // duplicate counter says a watcher reported the same save twice and the
-    // re-run changed nothing (bun's Windows watcher does this) — remounting
-    // then would discard the state the reload just preserved. A turn with
-    // neither advance still takes the remount below: an edited asset
-    // re-evaluates the entry with unchanged component hashes, and that
-    // remount is the only thing that applies the new data.
+    // duplicate counter says a watcher re-reported a save whose re-run
+    // changed nothing — remounting then would discard the state the reload
+    // just preserved. A turn with neither advance still remounts below: an
+    // edited asset re-evaluates the entry with unchanged component hashes,
+    // and that remount — synchronously, before the entry's own side effects
+    // run — is the only thing that applies the new data.
     return slot.handle
   }
   return mountTree(slot, rootComponent, options)
