@@ -47,12 +47,21 @@ interface FileRecord {
   nextBody?: string
   /** hmrId → statement hash, one entry per registered component. */
   components: Map<string, string>
+  /** When this file last started evaluating, in ms. */
+  lastEvalAt: number
+  /** Whether the previous evaluation of this file changed its body — the
+   *  precondition for recognizing a duplicate watch event. */
+  justChanged: boolean
 }
 
 interface HmrState {
   files: Map<string, FileRecord>
   /** Monotonic count of reloads issued since process start. */
   reloadCount: number
+  /** Monotonic count of duplicate re-evaluations suppressed since process
+   *  start. createApp watermarks this alongside `reloadCount` to keep the
+   *  live tree when a save was reported twice. */
+  settledDuplicates: number
   /** The __VUE_HMR_RUNTIME__ of the vue copy that mounted the live tree:
    *  Vue records mounted instances in the copy that mounted them, so a reload
    *  through any other copy finds no instances. Re-pinned by noteHmrMount()
@@ -72,6 +81,7 @@ function hmrState(): HmrState {
   const created: HmrState = {
     files: new Map(),
     reloadCount: 0,
+    settledDuplicates: 0,
   }
   Reflect.set(globalThis, STATE_KEY, created)
   return created
@@ -106,20 +116,51 @@ export function noteHmrMount(): void {
   hmrState().runtime = runtime
 }
 
+/** How soon after a changed evaluation an identical one counts as a
+ * duplicate watch event rather than its own turn. Bun's Windows watcher can
+ * report one save twice; the second evaluation is byte-identical and lands
+ * within the same event-loop drain (milliseconds), while real saves are
+ * separated by at least a user's save cadence. */
+const DUPLICATE_WINDOW_MS = 50
+
 /** Injected at the top of a transformed module body. The first evaluation
- *  only registers the file's body hash; a re-evaluation commits the previous
- *  generation's hash and stashes the new one for __gpuivHmrComponent's
- *  change detection. */
+ * only registers the file's body hash; a re-evaluation commits the previous
+ * generation's hash and stashes the new one for __gpuivHmrComponent's
+ * change detection. */
 export function __gpuivHmrFile(url: string, bodyHash: string): void {
   if (!vueHmrRuntime()) return
   const state = hmrState()
   const record = state.files.get(url)
   if (!record) {
-    state.files.set(url, { body: bodyHash, components: new Map() })
+    state.files.set(url, {
+      body: bodyHash,
+      components: new Map(),
+      lastEvalAt: Date.now(),
+      justChanged: false,
+    })
     return
   }
+  const now = Date.now()
+  const previousEvalHash = record.nextBody
+  const duplicate =
+    previousEvalHash !== undefined &&
+    previousEvalHash === bodyHash &&
+    record.justChanged &&
+    now - record.lastEvalAt <= DUPLICATE_WINDOW_MS
+  record.lastEvalAt = now
   if (record.nextBody !== undefined) record.body = record.nextBody
   record.nextBody = bodyHash
+  if (duplicate) {
+    // A watcher double-report of the save that just hot-applied: nothing in
+    // this generation differs, so remounting would only throw away the state
+    // the reload preserved. Count it for createApp's watermark and keep
+    // `justChanged` armed so a third report is suppressed too.
+    state.settledDuplicates += 1
+    return
+  }
+  // Against the committed body, so the first re-evaluation of a changed file
+  // counts as changed even though its predecessor stashed nothing.
+  record.justChanged = bodyHash !== record.body
 }
 
 /** Injected after each top-level `const X = defineComponent(...)` statement,
@@ -137,7 +178,12 @@ export function __gpuivHmrComponent(
   const state = hmrState()
   let record = state.files.get(url)
   if (!record) {
-    record = { body: "", components: new Map() }
+    record = {
+      body: "",
+      components: new Map(),
+      lastEvalAt: 0,
+      justChanged: false,
+    }
     state.files.set(url, record)
   }
   const previousHash = record.components.get(id)
@@ -156,4 +202,12 @@ export function __gpuivHmrComponent(
  *  sees no advance takes the classic remount path. */
 export function hmrReloadCount(): number {
   return peekState()?.reloadCount ?? 0
+}
+
+/** The monotonic duplicate-suppression counter createApp watermarks
+ *  alongside the reload count: a watcher double-report of a save re-runs the
+ *  entry with unchanged hashes, and without this signal that identical turn
+ *  would take the remount path and discard the state the reload kept. */
+export function hmrSettledDuplicates(): number {
+  return peekState()?.settledDuplicates ?? 0
 }
