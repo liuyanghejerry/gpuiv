@@ -160,6 +160,19 @@ thread_local! {
 }
 
 const SELECTION_SCROLL_TICK_MS: u64 = 24;
+
+/// The JS handler for URLs the platform asks the app to open. gpui only
+/// takes URL-open observers on `Application` (pre-run), so init registers a
+/// Rust observer on every platform and this process-wide slot is what it
+/// fires; `onOpenUrls` arms it from JS at any time. URLs opened before the
+/// first arming are dropped, same as an unarmed `onReopen`.
+static OPEN_URLS_CALLBACK: Mutex<Option<ThreadsafeFunction<Vec<String>>>> = Mutex::new(None);
+
+fn emit_open_urls(urls: Vec<String>) {
+    if let Some(callback) = OPEN_URLS_CALLBACK.lock().unwrap().as_ref() {
+        callback.call(Ok(urls), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+}
 const SELECTION_SCROLL_EDGE_PX: f32 = 36.0;
 const SELECTION_SCROLL_MAX_STEP_PX: f32 = 24.0;
 
@@ -508,6 +521,10 @@ enum UiCommand {
     DismissSystemNotification(String),
     SetSystemNotificationResponseCallback {
         callback: ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>,
+    },
+    RegisterUrlScheme {
+        scheme: String,
+        callback: ThreadsafeFunction<()>,
     },
 }
 
@@ -992,6 +1009,18 @@ async fn run_ui_commands(
                     });
                 })
             }
+            UiCommand::RegisterUrlScheme { scheme, callback } => {
+                window.update(cx, move |_view, _window, cx| {
+                    let registration = cx.register_url_scheme(&scheme);
+                    cx.spawn(async move |_cx| {
+                        let result = registration
+                            .await
+                            .map_err(|error| Error::from_reason(format!("{error:#}")));
+                        callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+                    })
+                    .detach();
+                })
+            }
         };
         if let Err(error) = result {
             // The last window can close mid-command; logging `window not found`
@@ -1242,6 +1271,9 @@ impl GpuixRenderer {
                 }
             });
         });
+        // Deep links and friends. Registered before run for the same reason
+        // as on_reopen above; the JS handler is armed later via `onOpenUrls`.
+        app.on_open_urls(emit_open_urls);
         let app_handle = app.run_embedded(move |cx: &mut gpui::App| {
             crate::custom_elements::input::init(cx);
             crate::custom_elements::img::init(cx);
@@ -1408,9 +1440,12 @@ impl GpuixRenderer {
                     // Default is already LastWindowClosed on Windows/Linux.
                     // Set it anyway so a GPUI default change cannot leave bun
                     // running after the last window closes, as on macOS.
-                    gpui_platform::application()
-                        .with_quit_mode(gpui::QuitMode::LastWindowClosed)
-                        .run(move |cx| {
+                    let application = gpui_platform::application()
+                        .with_quit_mode(gpui::QuitMode::LastWindowClosed);
+                    // Deep links and friends: registered before run, armed
+                    // from JS later via `onOpenUrls` (same slot as macOS).
+                    application.on_open_urls(emit_open_urls);
+                    application.run(move |cx| {
                             crate::custom_elements::input::init(cx);
                             crate::custom_elements::img::init(cx);
                             let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
@@ -2140,6 +2175,63 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
+            let _ = callback;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Register the handler invoked when the platform asks the app to open
+    /// one or more URLs — deep links, files dropped on the Dock icon, and
+    /// friends. Replaces any earlier handler. URLs opened before the first
+    /// registration are dropped.
+    #[napi]
+    pub fn on_open_urls(&self, callback: ThreadsafeFunction<Vec<String>>) -> Result<()> {
+        *OPEN_URLS_CALLBACK.lock().unwrap() = Some(callback);
+        Ok(())
+    }
+
+    /// Register the app as the handler for a URL scheme (e.g. `myapp` for
+    /// `myapp://` URLs). The callback receives `(null)` on success or the
+    /// failure reason: macOS requires 12+, a bundle id, and an installed
+    /// app; Windows and Linux report unsupported.
+    #[napi]
+    pub fn register_url_scheme(
+        &self,
+        scheme: String,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                let registration = cx.register_url_scheme(&scheme);
+                cx.spawn(async move |_cx| {
+                    let result = registration
+                        .await
+                        .map_err(|error| Error::from_reason(format!("{error:#}")));
+                    callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+                })
+                .detach();
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::RegisterUrlScheme { scheme, callback });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = scheme;
             let _ = callback;
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",

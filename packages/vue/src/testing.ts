@@ -863,6 +863,37 @@ export class TestRenderer implements NativeRenderer {
     return native.getDismissedSystemNotifications?.() ?? []
   }
 
+  /** Arm the deep link handler. The test bridge records it; drive URLs with
+   *  `fireOpenUrls`. */
+  onOpenUrls(handler: (error: Error | null, urls: string[]) => void): void {
+    this.native.onOpenUrls?.(handler)
+  }
+
+  /** Register a URL scheme. The test bridge records the scheme and answers
+   *  from the canned queue; an empty queue answers success. */
+  registerUrlScheme(scheme: string, callback: (error: Error | null) => void): void {
+    this.native.registerUrlScheme?.(scheme, callback)
+  }
+
+  /** Deliver opened URLs to the armed `onOpenUrls` handler, the way the OS
+   *  would on a deep link. */
+  fireOpenUrls(urls: string[]): void {
+    const native = this.native as { fireOpenUrls?(urls: string[]): void }
+    native.fireOpenUrls?.(urls)
+  }
+
+  getLastUrlScheme(): string | null {
+    const native = this.native as { getLastUrlScheme?(): string | null }
+    return native.getLastUrlScheme?.() ?? null
+  }
+
+  /** Queue the next answer for `registerUrlScheme`: the error message, or
+   *  null for success. */
+  setNextUrlSchemeError(error: string | null): void {
+    const native = this.native as { setNextUrlSchemeError?(error: string | null): void }
+    native.setNextUrlSchemeError?.(error)
+  }
+
   /** Put a straight-alpha RGBA image on the platform's in-memory test
    *  clipboard, mirroring the production encoder path. */
   writeClipboardImage(data: Uint8Array, width: number, height: number): void {

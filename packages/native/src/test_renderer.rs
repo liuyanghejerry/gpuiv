@@ -222,6 +222,9 @@ pub struct TestGpuixRenderer {
     dismissed_notifications: RefCell<Vec<String>>,
     notification_response_handler:
         RefCell<Option<ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>>>,
+    open_urls_handler: RefCell<Option<ThreadsafeFunction<Vec<String>>>>,
+    last_url_scheme: RefCell<Option<String>>,
+    url_scheme_errors: RefCell<VecDeque<Option<String>>>,
 }
 
 #[napi]
@@ -318,6 +321,9 @@ impl TestGpuixRenderer {
             delivered_notifications: RefCell::new(Default::default()),
             dismissed_notifications: RefCell::new(Default::default()),
             notification_response_handler: RefCell::new(None),
+            open_urls_handler: RefCell::new(None),
+            last_url_scheme: RefCell::new(None),
+            url_scheme_errors: RefCell::new(Default::default()),
         })
     }
 
@@ -827,6 +833,55 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_dismissed_system_notifications(&self) -> Vec<String> {
         self.dismissed_notifications.borrow().clone()
+    }
+
+    // ── Deep links (recorded) ──────────────────────────────────────
+
+    /// Test stand-in for the production `onOpenUrls`.
+    #[napi]
+    pub fn on_open_urls(&self, callback: ThreadsafeFunction<Vec<String>>) -> Result<()> {
+        *self.open_urls_handler.borrow_mut() = Some(callback);
+        Ok(())
+    }
+
+    /// Deliver opened URLs to the armed `onOpenUrls` callback, the way the
+    /// OS would on a deep link.
+    #[napi]
+    pub fn fire_open_urls(&self, urls: Vec<String>) {
+        if let Some(handler) = self.open_urls_handler.borrow().as_ref() {
+            handler.call(Ok(urls), ThreadsafeFunctionCallMode::NonBlocking);
+        }
+    }
+
+    /// Test stand-in for the production `registerUrlScheme`: records the
+    /// scheme and answers from the canned queue — an empty queue answers
+    /// success, matching the platforms where registration succeeds.
+    #[napi]
+    pub fn register_url_scheme(
+        &self,
+        scheme: String,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        *self.last_url_scheme.borrow_mut() = Some(scheme);
+        let outcome = match self.url_scheme_errors.borrow_mut().pop_front().flatten() {
+            Some(message) => Err(Error::from_reason(message)),
+            None => Ok(()),
+        };
+        callback.call(outcome, ThreadsafeFunctionCallMode::NonBlocking);
+        Ok(())
+    }
+
+    /// The scheme the last `registerUrlScheme` call named.
+    #[napi]
+    pub fn get_last_url_scheme(&self) -> Option<String> {
+        self.last_url_scheme.borrow().clone()
+    }
+
+    /// Queue the next answer for `registerUrlScheme`: the error message, or
+    /// null for success.
+    #[napi]
+    pub fn set_next_url_scheme_error(&self, error: Option<String>) {
+        self.url_scheme_errors.borrow_mut().push_back(error);
     }
 
     /// Test stand-in for the production `promptForNewPath`.
