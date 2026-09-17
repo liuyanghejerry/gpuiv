@@ -147,42 +147,77 @@ fn parse_hunk_header(line: &str) -> Option<(u32, u32)> {
 /// keeps whatever parsed. A diff viewer that refuses to render a slightly
 /// malformed patch is useless, and patches are often truncated at a byte cap.
 pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
-    let mut files: Vec<FileDiff> = Vec::new();
-    let mut in_hunk = false;
-    let mut old_no: u32 = 0;
-    let mut new_no: u32 = 0;
+    DiffStream::full_parse(patch).files().to_vec()
+}
 
-    for raw in patch.lines() {
+/// Line-driven core of [`parse_patch`], with the byte offsets an incremental
+/// resume needs. Feeding the same lines from the same state is a pure
+/// function, which is what lets [`DiffStream`] replay a tail onto a retained
+/// prefix and stay parity-exact with a full parse.
+struct FeedState {
+    files: Vec<FileDiff>,
+    in_hunk: bool,
+    old_no: u32,
+    new_no: u32,
+    /// Byte offset of the currently-last file's first line. Everything
+    /// before it is immutable under an append.
+    last_file_start: usize,
+    /// Byte offset of the last file's last hunk header, when it has one.
+    last_hunk_start: Option<usize>,
+    /// `(additions, deletions, max_line)` of the last file as they were
+    /// before its last hunk began — the counters a rollback restores.
+    pre_hunk_counts: (u32, u32, u32),
+}
+
+impl FeedState {
+    fn new() -> Self {
+        Self {
+            files: Vec::new(),
+            in_hunk: false,
+            old_no: 0,
+            new_no: 0,
+            last_file_start: 0,
+            last_hunk_start: None,
+            pre_hunk_counts: (0, 0, 0),
+        }
+    }
+
+    fn feed_line(&mut self, raw: &str, offset: usize) {
         if let Some(rest) = raw.strip_prefix("diff --git ") {
             let (old, new) = parse_git_paths(rest);
             let old_path = (old != new).then_some(old);
-            files.push(FileDiff::new(new, old_path));
-            in_hunk = false;
-            continue;
+            self.files.push(FileDiff::new(new, old_path));
+            self.in_hunk = false;
+            self.last_file_start = offset;
+            self.last_hunk_start = None;
+            return;
         }
         // A patch without a `diff --git` preamble (plain `diff -u` output, or
         // a bare hunk) still gets a file so the rows have somewhere to live.
-        if files.is_empty() && (raw.starts_with("@@") || raw.starts_with("--- ")) {
-            files.push(FileDiff::new(String::new(), None));
+        if self.files.is_empty() && (raw.starts_with("@@") || raw.starts_with("--- ")) {
+            self.files.push(FileDiff::new(String::new(), None));
+            self.last_file_start = offset;
         }
-        let Some(file) = files.last_mut() else {
-            continue;
+        let Some(file) = self.files.last_mut() else {
+            return;
         };
 
         if raw.starts_with("@@") {
             if let Some((o, n)) = parse_hunk_header(raw) {
-                old_no = o;
-                new_no = n;
+                self.old_no = o;
+                self.new_no = n;
+                self.pre_hunk_counts = (file.additions, file.deletions, file.max_line);
+                self.last_hunk_start = Some(offset);
                 file.hunks.push(Hunk {
                     header: raw.to_string(),
                     lines: Vec::new(),
                 });
-                in_hunk = true;
+                self.in_hunk = true;
             }
-            continue;
+            return;
         }
 
-        if in_hunk {
+        if self.in_hunk {
             let mut chars = raw.chars();
             let marker = chars.next();
             let body: String = chars.collect();
@@ -192,35 +227,35 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
                     let l = DiffLine {
                         kind: LineKind::Add,
                         old_no: None,
-                        new_no: Some(new_no),
+                        new_no: Some(self.new_no),
                         text: body,
                         word_ranges: Vec::new(),
                     };
-                    new_no += 1;
+                    self.new_no += 1;
                     Some(l)
                 }
                 Some('-') => {
                     file.deletions += 1;
                     let l = DiffLine {
                         kind: LineKind::Del,
-                        old_no: Some(old_no),
+                        old_no: Some(self.old_no),
                         new_no: None,
                         text: body,
                         word_ranges: Vec::new(),
                     };
-                    old_no += 1;
+                    self.old_no += 1;
                     Some(l)
                 }
                 Some(' ') | None => {
                     let l = DiffLine {
                         kind: LineKind::Context,
-                        old_no: Some(old_no),
-                        new_no: Some(new_no),
+                        old_no: Some(self.old_no),
+                        new_no: Some(self.new_no),
                         text: body,
                         word_ranges: Vec::new(),
                     };
-                    old_no += 1;
-                    new_no += 1;
+                    self.old_no += 1;
+                    self.new_no += 1;
                     Some(l)
                 }
                 Some('\\') => Some(DiffLine {
@@ -232,7 +267,7 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
                 }),
                 _ => {
                     // A non-hunk line ends the hunk; reprocess it as a header.
-                    in_hunk = false;
+                    self.in_hunk = false;
                     None
                 }
             };
@@ -243,11 +278,11 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
                         .max(line.old_no.unwrap_or(0))
                         .max(line.new_no.unwrap_or(0));
                     hunk.lines.push(line);
-                    continue;
+                    return;
                 }
             }
-            if in_hunk {
-                continue;
+            if self.in_hunk {
+                return;
             }
         }
 
@@ -281,7 +316,117 @@ pub fn parse_patch(patch: &str) -> Vec<FileDiff> {
         }
         // "index …", "similarity index …", "old mode …": skipped.
     }
-    files
+}
+
+/// Streaming parse state for an appending patch: an append reparses only
+/// from the last stable boundary — the start of the last file's last hunk
+/// (or of the last file itself while it has none) — so feeding a patch
+/// token by token costs O(tail + last hunk), not O(patch).
+///
+/// The last hunk — not just the appended bytes — is rolled back, because a
+/// source truncated mid-line committed a partial line, and a trailing body
+/// line can also complete into something the tolerant parser reclassifies
+/// on its own (e.g. `\ No newline…`). Header lines precede hunks, so
+/// dropping to the file start covers a partial header the same way.
+pub(crate) struct DiffStream {
+    source: String,
+    state: FeedState,
+    /// Bytes fed through the parser by the most recent `set_patch` — O(tail)
+    /// instrumentation, mirroring the markdown stream.
+    last_parse_bytes: usize,
+}
+
+impl Default for DiffStream {
+    fn default() -> Self {
+        Self {
+            source: String::new(),
+            state: FeedState::new(),
+            last_parse_bytes: 0,
+        }
+    }
+}
+
+impl DiffStream {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Parse a whole patch from scratch.
+    pub fn full_parse(patch: &str) -> Self {
+        let mut stream = DiffStream::default();
+        stream.set_patch(patch);
+        stream
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn files(&self) -> &[FileDiff] {
+        &self.state.files
+    }
+
+    pub fn last_parse_bytes(&self) -> usize {
+        self.last_parse_bytes
+    }
+
+    /// Set the patch: appends take the incremental path, anything else
+    /// reparses from scratch.
+    pub fn set_patch(&mut self, patch: &str) {
+        if patch.len() >= self.source.len() && patch.starts_with(self.source.as_str()) {
+            let delta = &patch[self.source.len()..];
+            if delta.is_empty() {
+                self.last_parse_bytes = 0;
+                return;
+            }
+            self.source.push_str(delta);
+            let boundary = match self.state.files.last_mut() {
+                Some(file) => match self.state.last_hunk_start {
+                    Some(hunk_start) => {
+                        file.hunks.pop();
+                        let (additions, deletions, max_line) = self.state.pre_hunk_counts;
+                        file.additions = additions;
+                        file.deletions = deletions;
+                        file.max_line = max_line;
+                        // The re-feed starts at the hunk header itself; the
+                        // header re-arms the line counters.
+                        self.state.in_hunk = false;
+                        hunk_start
+                    }
+                    None => {
+                        // Still in the file's header region: drop the whole
+                        // file and replay it.
+                        self.state.files.pop();
+                        self.last_file_start()
+                    }
+                },
+                None => 0,
+            };
+            self.feed_from(boundary);
+        } else {
+            self.source = patch.to_string();
+            self.state = FeedState::new();
+            self.feed_from(0);
+        }
+    }
+
+    fn last_file_start(&self) -> usize {
+        if self.state.files.is_empty() {
+            0
+        } else {
+            self.state.last_file_start
+        }
+    }
+
+    fn feed_from(&mut self, boundary: usize) {
+        self.last_parse_bytes = self.source.len() - boundary;
+        let tail = &self.source[boundary..];
+        let mut offset = boundary;
+        for raw in tail.lines() {
+            self.state.feed_line(raw, offset);
+            offset += raw.len() + 1;
+        }
+    }
 }
 
 /// Derived notice rows: new / deleted / renamed / binary plus parser notices.
@@ -907,5 +1052,137 @@ mod tests {
             1
         );
         assert_eq!(rows.last(), Some(&DiffRow::ShowMore { remaining: 2 }));
+    }
+
+    // ── Streaming parity (DiffStream) ──────────────────────────────────
+
+    const STREAM_CORPORA: &[&str] = &[
+        SIMPLE,
+        concat!(
+            "diff --git a/src/one.ts b/src/one.ts\n",
+            "index 111..222 100644\n",
+            "--- a/src/one.ts\n",
+            "+++ b/src/one.ts\n",
+            "@@ -1,3 +1,3 @@\n",
+            " keep\n",
+            "-drop\n",
+            "+add\n",
+            "diff --git a/src/two.ts b/src/two.ts\n",
+            "new file mode 100644\n",
+            "index 000..333\n",
+            "--- /dev/null\n",
+            "+++ b/src/two.ts\n",
+            "@@ -0,0 +1,2 @@\n",
+            "+fresh one\n",
+            "+fresh two\n",
+        ),
+        concat!(
+            "diff --git a/old.rs b/new.rs\n",
+            "similarity index 90%\n",
+            "rename from old.rs\n",
+            "rename to new.rs\n",
+            "@@ -1,2 +1,2 @@\n",
+            " context\n",
+            "-gone\n",
+            "+here\n",
+        ),
+        // A bare hunk with no `diff --git` preamble.
+        "@@ -1,2 +1,2 @@\n line one\n-line two\n+line 2\n",
+        // Truncated mid-hunk, no trailing newline.
+        "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n ctx\n-del",
+        // Truncated mid-header.
+        "diff --git a/x b/x\nnew file mode 100644\nindex 000..111",
+    ];
+
+    fn stream(chunks: usize, patch: &str) -> DiffStream {
+        let mut s = DiffStream::new();
+        s.set_patch("");
+        let bytes = patch.as_bytes();
+        let mut start = 0;
+        while start < bytes.len() {
+            let mut end = (start + chunks).min(bytes.len());
+            while end < bytes.len() && !patch.is_char_boundary(end) {
+                end += 1;
+            }
+            s.set_patch(&patch[..end]);
+            start = end;
+        }
+        s
+    }
+
+    #[test]
+    fn streamed_patch_matches_full_parse() {
+        for (ci, corpus) in STREAM_CORPORA.iter().enumerate() {
+            let full = parse_patch(corpus);
+            for chunk in [1usize, 2, 3, 7, 16, 64] {
+                assert_eq!(
+                    stream(chunk, corpus).files().to_vec(),
+                    full,
+                    "corpus {ci} diverged at chunk size {chunk}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn set_patch_appends_or_resets() {
+        let mut s = DiffStream::new();
+        s.set_patch(SIMPLE);
+        let extended = SIMPLE.to_string() + " const d = 5\n";
+        s.set_patch(&extended);
+        assert_eq!(s.files().to_vec(), parse_patch(&extended));
+        s.set_patch("not a prefix");
+        assert_eq!(s.files().to_vec(), parse_patch("not a prefix"));
+    }
+
+    #[test]
+    fn a_partial_tail_line_is_completed_by_the_append() {
+        // The source ends mid-body-line; the append must complete `+added`
+        // rather than keep a stale `+ad` row and start a new `ded` row.
+        let full = "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n- old\n+ added\n";
+        let mut s = DiffStream::new();
+        s.set_patch("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n- old\n+ ad");
+        s.set_patch(full);
+        assert_eq!(s.files().to_vec(), parse_patch(full));
+    }
+
+    #[test]
+    fn appends_keep_completed_files_identical() {
+        let multi = STREAM_CORPORA[1];
+        let mut s = DiffStream::new();
+        s.set_patch(multi);
+        let before: Vec<FileDiff> = s.files().to_vec();
+        // Append another file section.
+        let extra = concat!(
+            "diff --git a/three.ts b/three.ts\n",
+            "--- a/three.ts\n",
+            "+++ b/three.ts\n",
+            "@@ -1,1 +1,1 @@\n",
+            "-old\n",
+            "+new\n",
+        );
+        s.set_patch(&(multi.to_string() + extra));
+        let after = s.files().to_vec();
+        assert_eq!(after.len(), before.len() + 1);
+        for (kept, was) in after[..before.len()].iter().zip(before.iter()) {
+            assert_eq!(kept, was);
+        }
+    }
+
+    #[test]
+    fn appends_reparse_the_tail_not_the_document() {
+        let mut s = DiffStream::new();
+        let mut patch = String::new();
+        for i in 0..8 {
+            patch.push_str(&format!(
+                "diff --git a/f{i}.ts b/f{i}.ts\n--- a/f{i}.ts\n+++ b/f{i}.ts\n@@ -1,3 +1,3 @@\n ctx\n-d{i}\n+a{i}\n"
+            ));
+        }
+        s.set_patch(&patch);
+        let bytes = s.last_parse_bytes();
+        assert_eq!(bytes, patch.len());
+        s.set_patch(&(patch.clone() + " ctx2\n"));
+        assert!(s.last_parse_bytes() < patch.len() / 2);
+        assert_eq!(s.files().to_vec(), parse_patch(&(patch.clone() + " ctx2\n")));
     }
 }
