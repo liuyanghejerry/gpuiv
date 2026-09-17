@@ -16,7 +16,7 @@ import {
   nextWindowKeyEventId,
 } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
-import { hmrReloadCount, noteHmrMount } from "./hmr/runtime.js"
+import { hmrReloadCount, hmrSettledDuplicates, noteHmrMount } from "./hmr/runtime.js"
 import {
   InProcessBackend,
   liveRendererAsTest,
@@ -191,6 +191,7 @@ type RenderSlot = {
   overlayShown?: boolean
   /** Watermark of the HMR reload counter at the last createApp call. */
   hmrReloadsSeen?: number
+  hmrDuplicatesSeen?: number
   /** Bumped on every mount. A pending overlay microtask keys on it, so an
    *  error scheduled against an older tree cannot paint over a newer one. */
   mountSerial?: number
@@ -517,21 +518,28 @@ export function createApp(
   const overlayWasShown = slot.overlayShown
   slot.overlayShown = false
   const reloadCount = hmrReloadCount()
+  const duplicates = hmrSettledDuplicates()
   const reloadedSinceLastMount = reloadCount > (slot.hmrReloadsSeen ?? 0)
+  const duplicateSinceLastMount = duplicates > (slot.hmrDuplicatesSeen ?? 0)
   slot.hmrReloadsSeen = reloadCount
-  if (slot.handle && !overlayWasShown && reloadedSinceLastMount) {
+  slot.hmrDuplicatesSeen = duplicates
+  if (
+    slot.handle &&
+    !overlayWasShown &&
+    (reloadedSinceLastMount || duplicateSinceLastMount)
+  ) {
     // A `bun --hot` save already reloaded the edited components through
     // Vue's HMR runtime, so the live tree keeps its state. The entry still
     // re-ran above, refreshing rootComponent/lastOptions for the overlay's
     // Reload button; the mount itself stays.
     //
-    // The reload counter is the only signal a turn changed anything: a save
-    // whose component hashes come out identical (bun --hot evaluating one
-    // save twice, or a module edit that touches no reloadable component)
-    // looks exactly like a turn with no reloads and takes the remount below,
-    // resetting state. Deciding on module identity instead would be worse —
-    // an edited asset re-evaluates the entry with unchanged component hashes,
-    // and that remount is the only thing that applies the new data.
+    // The reload counter says a turn changed something hot-applied; the
+    // duplicate counter says a watcher re-reported a save whose re-run
+    // changed nothing — remounting then would discard the state the reload
+    // just preserved. A turn with neither advance still remounts below: an
+    // edited asset re-evaluates the entry with unchanged component hashes,
+    // and that remount — synchronously, before the entry's own side effects
+    // run — is the only thing that applies the new data.
     return slot.handle
   }
   return mountTree(slot, rootComponent, options)

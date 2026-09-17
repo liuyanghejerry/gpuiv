@@ -1048,7 +1048,9 @@ async fn run_ui_commands(
             UiCommand::RegisterUrlScheme { scheme, callback } => {
                 window.update(cx, move |_view, _window, cx| {
                     let registration = cx.register_url_scheme(&scheme);
-                    cx.spawn(async move |_cx| {
+                    // `Context::spawn` hands the owning view's weak entity
+                    // alongside the async app; the registration needs neither.
+                    cx.spawn(async move |_view, _cx| {
                         let result = registration
                             .await
                             .map_err(|error| Error::from_reason(format!("{error:#}")));

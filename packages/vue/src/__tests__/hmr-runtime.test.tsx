@@ -303,4 +303,101 @@ describeNative("vue hmr runtime", () => {
     expect(renderer.getAllText()).toEqual(["child v3 0"])
     resetApp()
   })
+
+  it("keeps the live tree when a watcher reports one save twice", async () => {
+    // bun's Windows watcher can fire twice per write. The second evaluation
+    // is byte-identical to the just-applied save; remounting on it would
+    // discard the state the Fast Refresh reload preserved.
+    const url = "/virtual/hmr-runtime/entry-duplicate.tsx"
+    const childId = "test_EntryChild"
+    const ChildV1 = makeCounter("child", "v1")
+    const ChildV2 = makeCounter("child", "v2")
+    ;(ChildV1 as { __hmrId?: string }).__hmrId = childId
+    ;(ChildV2 as { __hmrId?: string }).__hmrId = childId
+    let rootMounts = 0
+    const makeEntry = (child: Component): Component => ({
+      setup: () => {
+        rootMounts += 1
+        return () => h("div", { style: { width: 300, height: 200 } }, [h(child)])
+      },
+    })
+
+    __gpuivHmrFile(url, "body-1")
+    __gpuivHmrComponent(url, childId, ChildV1, "stmt-1")
+    const renderer = new TestRenderer()
+    const settle = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      renderer.flush()
+    }
+    const first = createApp(makeEntry(ChildV1), { renderer })
+    renderer.flush()
+    expect(rootMounts).toBe(1)
+
+    const child = renderer.findByTestId("child")!
+    const bounds = renderer.getElementBounds(child.id)!
+    renderer.nativeSimulateClick(bounds.x + 4, bounds.y + 4)
+    await settle()
+    expect(renderer.getAllText()).toEqual(["child v1 1"])
+
+    // The save, then the duplicate report of the same save — identical
+    // hashes, back to back, the way one write surfaces twice.
+    __gpuivHmrFile(url, "body-2")
+    __gpuivHmrComponent(url, childId, ChildV2, "stmt-2")
+    const second: GpuivAppHandle = createApp(makeEntry(ChildV2), { renderer })
+    expect(second).toBe(first)
+
+    __gpuivHmrFile(url, "body-2")
+    __gpuivHmrComponent(url, childId, ChildV2, "stmt-2")
+    const duplicate: GpuivAppHandle = createApp(makeEntry(ChildV2), { renderer })
+    // The duplicate must not remount: same handle, root mounted once, and
+    // the child keeps the state its reload reset to (count 0), not v1's 1.
+    expect(duplicate).toBe(first)
+    expect(rootMounts).toBe(1)
+    await settle()
+    expect(renderer.getAllText()).toEqual(["child v2 0"])
+
+    // Control A: an identical re-evaluation that is NOT a duplicate report —
+    // long after the change, the asset-save signature — still remounts.
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    __gpuivHmrFile(url, "body-2")
+    __gpuivHmrComponent(url, childId, ChildV2, "stmt-2")
+    const assetTurn = createApp(makeEntry(ChildV2), { renderer })
+    renderer.flush()
+    expect(assetTurn).not.toBe(first)
+    expect(rootMounts).toBe(2)
+    resetApp()
+  })
+
+  it("an identical evaluation with no preceding change is not a duplicate", async () => {
+    // First evaluations have nothing just-changed behind them, so a repeated
+    // hash there is the classic asset-save shape, never a suppressed report.
+    const url = "/virtual/hmr-runtime/entry-asset.tsx"
+    const childId = "test_EntryChild"
+    const ChildV1 = makeCounter("child", "v1")
+    ;(ChildV1 as { __hmrId?: string }).__hmrId = childId
+    let rootMounts = 0
+    const makeEntry = (child: Component): Component => ({
+      setup: () => {
+        rootMounts += 1
+        return () => h("div", { style: { width: 300, height: 200 } }, [h(child)])
+      },
+    })
+
+    __gpuivHmrFile(url, "body-1")
+    __gpuivHmrComponent(url, childId, ChildV1, "stmt-1")
+    const renderer = new TestRenderer()
+    const first = createApp(makeEntry(ChildV1), { renderer })
+    renderer.flush()
+    expect(rootMounts).toBe(1)
+
+    // Same hashes immediately after a mount-only generation: no reload, no
+    // duplicate suppression — the remount path, as an asset save needs.
+    __gpuivHmrFile(url, "body-1")
+    __gpuivHmrComponent(url, childId, ChildV1, "stmt-1")
+    const second = createApp(makeEntry(ChildV1), { renderer })
+    renderer.flush()
+    expect(second).not.toBe(first)
+    expect(rootMounts).toBe(2)
+    resetApp()
+  })
 })
