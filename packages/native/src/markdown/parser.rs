@@ -7,11 +7,22 @@
 //! with pre-flattened inline runs, because the renderer needs one string plus a
 //! run list per paragraph to hand to `gpui::StyledText`, not a nested AST.
 //!
-//! No incremental parsing here. Comet needs it because it streams LLM output
-//! token by token; GPUIX renders whatever React hands it, and a full reparse of
-//! a document is cheap next to laying it out.
+//! The streaming path ([`IncrementalParser`]) reparses only from the last
+//! stable top-level block boundary: text before the start of the last top-level
+//! block cannot be affected by an append, so each streamed delta costs roughly
+//! O(delta + last block) instead of O(document).
+//!
+//! Soundness guard: link-reference definitions (`[label]: url`) have non-local
+//! effects (a definition anywhere resolves references anywhere), so a source
+//! containing one drops to full reparses. The parity unit tests stream corpora
+//! through both paths and assert equality.
+//!
+//! Comet also mends hanging inline markers for its display tree
+//! (`super::mend`); GPUIV renders the canonical tree as-is, so that half is
+//! not ported.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use pulldown_cmark::{Alignment, CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 
@@ -78,15 +89,29 @@ pub enum TableAlign {
     Right,
 }
 
+/// A top-level block plus its byte range in the source. The range start is
+/// the stable-boundary anchor for incremental reparses.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TopBlock {
+    pub range: Range<usize>,
+    pub block: Block,
+}
+
 /// The parse result: top-level blocks in document order.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BlockTree {
-    pub blocks: Vec<Block>,
+    // Completed blocks are immutable; streamed tail updates share their
+    // contents with earlier trees.
+    pub blocks: Vec<Arc<TopBlock>>,
 }
 
 impl BlockTree {
     pub fn is_empty(&self) -> bool {
         self.blocks.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.blocks.len()
     }
 }
 
@@ -95,22 +120,38 @@ fn options() -> Options {
 }
 
 /// Parse a whole source into a [`BlockTree`].
-pub fn parse(source: &str) -> BlockTree {
+pub fn parse_full(source: &str) -> BlockTree {
+    parse_at(source, 0)
+}
+
+fn parse_at(source: &str, offset: usize) -> BlockTree {
     let events: Vec<(Event, Range<usize>)> = Parser::new_ext(source, options())
         .into_offset_iter()
+        .map(|(event, range)| (event, range.start + offset..range.end + offset))
         .collect();
     let mut cur = Cursor {
         events: &events,
         ix: 0,
     };
     let mut blocks = Vec::new();
-    while let Some((event, _)) = cur.peek() {
+    while let Some((event, range)) = cur.peek() {
+        let range = range.clone();
         match event {
             Event::Rule => {
                 cur.bump();
-                blocks.push(Block::Rule);
+                blocks.push(Arc::new(TopBlock {
+                    range,
+                    block: Block::Rule,
+                }));
             }
-            Event::Start(_) => blocks.extend(parse_started_block(&mut cur)),
+            Event::Start(_) => {
+                for block in parse_started_block(&mut cur) {
+                    blocks.push(Arc::new(TopBlock {
+                        range: range.clone(),
+                        block,
+                    }));
+                }
+            }
             // Stray inline events at the top level should not happen; skip.
             _ => cur.bump(),
         }
@@ -589,9 +630,138 @@ fn heading_level(level: HeadingLevel) -> u8 {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Incremental parse
+// ---------------------------------------------------------------------------
+
+/// Streaming parser: appends reparse only from the last stable top-level block
+/// boundary (snapped back to a line start so indentation context survives).
+#[derive(Debug, Default)]
+pub struct IncrementalParser {
+    source: String,
+    tree: BlockTree,
+    /// Link-reference definitions act at a distance — full reparses only.
+    full_only: bool,
+    /// Bytes fed through `parse_full` by the most recent `set_text`/`append`/
+    /// `reset` — instrumentation proving per-append work is O(tail), not
+    /// O(total). 0 for a no-op set_text.
+    last_parse_bytes: usize,
+    /// Number of leading top-level blocks guaranteed untouched by the most
+    /// recent update (render caches for these blocks stay valid).
+    stable_prefix_blocks: usize,
+}
+
+impl IncrementalParser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub fn tree(&self) -> &BlockTree {
+        &self.tree
+    }
+
+    /// Bytes actually reparsed by the last update (see field docs).
+    pub fn last_parse_bytes(&self) -> usize {
+        self.last_parse_bytes
+    }
+
+    /// Leading top-level blocks left untouched by the last update.
+    pub fn stable_prefix_blocks(&self) -> usize {
+        self.stable_prefix_blocks
+    }
+
+    /// Set the source: appends take the incremental path, anything else resets.
+    pub fn set_text(&mut self, text: &str) {
+        if text.len() >= self.source.len() && text.starts_with(self.source.as_str()) {
+            let delta = &text[self.source.len()..];
+            if delta.is_empty() {
+                self.last_parse_bytes = 0;
+                self.stable_prefix_blocks = self.tree.blocks.len();
+                return;
+            }
+            self.append(delta);
+        } else {
+            self.reset(text);
+        }
+    }
+
+    pub fn reset(&mut self, text: &str) {
+        self.source = text.to_string();
+        self.full_only = has_link_defs(text);
+        self.tree = parse_full(text);
+        self.last_parse_bytes = text.len();
+        self.stable_prefix_blocks = 0;
+    }
+
+    /// Append streamed text, reparsing from the last stable boundary.
+    pub fn append(&mut self, delta: &str) {
+        if delta.is_empty() {
+            self.last_parse_bytes = 0;
+            self.stable_prefix_blocks = self.tree.blocks.len();
+            return;
+        }
+        // The delta may complete a line begun earlier — rescan from that line's
+        // start when checking for definitions.
+        let scan_from = self.source.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        self.source.push_str(delta);
+        if !self.full_only && has_link_defs(&self.source[scan_from..]) {
+            self.full_only = true;
+        }
+        if self.full_only {
+            self.tree = parse_full(&self.source);
+            self.last_parse_bytes = self.source.len();
+            self.stable_prefix_blocks = 0;
+            return;
+        }
+
+        // Stable boundary: start of the SECOND-to-last top-level block, snapped
+        // back to its line start (keeps indented-code / fenced-indent context
+        // intact). Reparsing the last two blocks — not just the last — covers
+        // continuation merges: a trailing paragraph like `3` can become `3.`
+        // and fuse into the preceding loose list. Merges cannot cascade
+        // further back (a block's separation from its predecessor is decided
+        // by its own already-streamed leading bytes), so two blocks suffice;
+        // the parity tests stream corpora to hold this invariant.
+        let boundary = match self.tree.blocks.len() {
+            0 | 1 => 0,
+            n => self.tree.blocks[n - 2].range.start,
+        };
+        let boundary = self.source[..boundary]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+
+        let tail = parse_at(&self.source[boundary..], boundary);
+        self.last_parse_bytes = self.source.len() - boundary;
+        self.tree.blocks.retain(|b| b.range.start < boundary);
+        self.stable_prefix_blocks = self.tree.blocks.len();
+        for top in tail.blocks {
+            self.tree.blocks.push(top);
+        }
+    }
+}
+
+/// Conservative detector for link-reference-definition lines
+/// (`[label]: destination`, up to 3 leading spaces).
+fn has_link_defs(text: &str) -> bool {
+    text.lines().any(|line| {
+        let trimmed = line.trim_start();
+        line.len() - trimmed.len() <= 3 && trimmed.starts_with('[') && trimmed.contains("]:")
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Index into the tree at the Block level; tests don't care about ranges.
+    fn b(tree: &BlockTree, index: usize) -> &Block {
+        &tree.blocks[index].block
+    }
 
     fn plain(text: &str) -> InlineRun {
         InlineRun {
@@ -606,22 +776,22 @@ mod tests {
 
     #[test]
     fn parses_headings_at_every_level() {
-        let tree = parse("# One\n\n## Two\n\n###### Six");
+        let tree = parse_full("# One\n\n## Two\n\n###### Six");
         assert_eq!(tree.blocks.len(), 3);
-        match &tree.blocks[0] {
+        match b(&tree, 0) {
             Block::Heading { level, runs } => {
                 assert_eq!(*level, 1);
                 assert_eq!(runs, &vec![plain("One")]);
             }
             other => panic!("{other:?}"),
         }
-        assert!(matches!(tree.blocks[2], Block::Heading { level: 6, .. }));
+        assert!(matches!(b(&tree, 2), Block::Heading { level: 6, .. }));
     }
 
     #[test]
     fn parses_inline_emphasis_and_code() {
-        let tree = parse("**bold** *em* `code` ~~gone~~");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("**bold** *em* `code` ~~gone~~");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         assert!(runs.iter().any(|r| r.style.bold && r.text == "bold"));
@@ -634,8 +804,8 @@ mod tests {
 
     #[test]
     fn parses_links_and_keeps_their_text() {
-        let tree = parse("see [docs](https://example.com/x) now");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("see [docs](https://example.com/x) now");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         let link = runs.iter().find(|r| r.style.link.is_some()).unwrap();
@@ -646,38 +816,29 @@ mod tests {
 
     #[test]
     fn a_lone_image_becomes_an_image_block() {
-        let tree = parse("![a chart](https://example.com/chart.png)");
+        let tree = parse_full("![a chart](https://example.com/chart.png)");
+        assert_eq!(tree.len(), 1);
         assert_eq!(
-            tree.blocks,
-            vec![Block::Image {
+            b(&tree, 0),
+            &Block::Image {
                 url: "https://example.com/chart.png".into(),
                 alt: "a chart".into(),
-            }]
+            }
         );
     }
 
     #[test]
     fn several_images_in_one_paragraph_become_sequential_blocks() {
-        let tree = parse("![one](1.png) ![two](2.png)");
-        assert_eq!(
-            tree.blocks,
-            vec![
-                Block::Image {
-                    url: "1.png".into(),
-                    alt: "one".into(),
-                },
-                Block::Image {
-                    url: "2.png".into(),
-                    alt: "two".into(),
-                },
-            ]
-        );
+        let tree = parse_full("![one](1.png) ![two](2.png)");
+        assert_eq!(tree.len(), 2);
+        assert_eq!(b(&tree, 0), &Block::Image { url: "1.png".into(), alt: "one".into() });
+        assert_eq!(b(&tree, 1), &Block::Image { url: "2.png".into(), alt: "two".into() });
     }
 
     #[test]
     fn an_image_among_text_stays_a_link_run() {
-        let tree = parse("before ![alt](img.png) after");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("before ![alt](img.png) after");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         let link = runs.iter().find(|r| r.style.link.is_some()).unwrap();
@@ -687,32 +848,34 @@ mod tests {
 
     #[test]
     fn image_alt_flattens_nested_formatting_and_breaks() {
-        let tree = parse("![plain *bold* `code`\nmore](img.png)");
+        let tree = parse_full("![plain *bold* `code`\nmore](img.png)");
+        assert_eq!(tree.len(), 1);
         assert_eq!(
-            tree.blocks,
-            vec![Block::Image {
+            b(&tree, 0),
+            &Block::Image {
                 url: "img.png".into(),
                 alt: "plain bold code more".into(),
-            }]
+            }
         );
     }
 
     #[test]
     fn an_image_with_an_empty_alt_is_still_a_block() {
-        let tree = parse("![](img.png)");
+        let tree = parse_full("![](img.png)");
+        assert_eq!(tree.len(), 1);
         assert_eq!(
-            tree.blocks,
-            vec![Block::Image {
+            b(&tree, 0),
+            &Block::Image {
                 url: "img.png".into(),
                 alt: String::new(),
-            }]
+            }
         );
     }
 
     #[test]
     fn autolinks_bare_urls() {
-        let tree = parse("go to https://github.com/remorses/gpuix now");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("go to https://github.com/remorses/gpuix now");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         let link = runs.iter().find(|r| r.style.link.is_some()).unwrap();
@@ -721,8 +884,8 @@ mod tests {
 
     #[test]
     fn autolink_trims_trailing_punctuation_but_balances_parens() {
-        let tree = parse("see https://x.dev/a_(b), ok");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("see https://x.dev/a_(b), ok");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         let link = runs.iter().find(|r| r.style.link.is_some()).unwrap();
@@ -731,8 +894,8 @@ mod tests {
 
     #[test]
     fn does_not_autolink_glued_schemes() {
-        let tree = parse("foohttps://x.dev bar");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("foohttps://x.dev bar");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         assert!(runs.iter().all(|r| r.style.link.is_none()));
@@ -740,8 +903,8 @@ mod tests {
 
     #[test]
     fn parses_fenced_code_with_a_language_and_no_trailing_newline() {
-        let tree = parse("```ts\nconst a = 1\nconst b = 2\n```");
-        match &tree.blocks[0] {
+        let tree = parse_full("```ts\nconst a = 1\nconst b = 2\n```");
+        match b(&tree, 0) {
             Block::CodeBlock { language, code } => {
                 assert_eq!(language.as_deref(), Some("ts"));
                 assert_eq!(code, "const a = 1\nconst b = 2");
@@ -752,8 +915,8 @@ mod tests {
 
     #[test]
     fn parses_unordered_and_ordered_lists() {
-        let tree = parse("- a\n- b\n\n3. x\n4. y");
-        match &tree.blocks[0] {
+        let tree = parse_full("- a\n- b\n\n3. x\n4. y");
+        match b(&tree, 0) {
             Block::List {
                 ordered_start,
                 items,
@@ -763,7 +926,7 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        match &tree.blocks[1] {
+        match b(&tree, 1) {
             Block::List { ordered_start, .. } => assert_eq!(*ordered_start, Some(3)),
             other => panic!("{other:?}"),
         }
@@ -771,8 +934,8 @@ mod tests {
 
     #[test]
     fn parses_nested_lists() {
-        let tree = parse("- outer\n  - inner");
-        let Block::List { items, .. } = &tree.blocks[0] else {
+        let tree = parse_full("- outer\n  - inner");
+        let Block::List { items, .. } = b(&tree, 0) else {
             panic!("expected a list");
         };
         assert!(items[0]
@@ -782,8 +945,8 @@ mod tests {
 
     #[test]
     fn parses_block_quotes_with_nested_blocks() {
-        let tree = parse("> quoted\n>\n> - item");
-        let Block::BlockQuote { children } = &tree.blocks[0] else {
+        let tree = parse_full("> quoted\n>\n> - item");
+        let Block::BlockQuote { children } = b(&tree, 0) else {
             panic!("expected a block quote");
         };
         assert!(matches!(children[0], Block::Paragraph { .. }));
@@ -792,8 +955,8 @@ mod tests {
 
     #[test]
     fn parses_tables_with_alignment() {
-        let tree = parse("| a | b |\n|:--|--:|\n| 1 | 2 |");
-        match &tree.blocks[0] {
+        let tree = parse_full("| a | b |\n|:--|--:|\n| 1 | 2 |");
+        match b(&tree, 0) {
             Block::Table {
                 header,
                 rows,
@@ -809,14 +972,14 @@ mod tests {
 
     #[test]
     fn parses_horizontal_rules() {
-        let tree = parse("a\n\n---\n\nb");
-        assert!(matches!(tree.blocks[1], Block::Rule));
+        let tree = parse_full("a\n\n---\n\nb");
+        assert!(matches!(b(&tree, 1), Block::Rule));
     }
 
     #[test]
     fn task_list_markers_become_literal_text() {
-        let tree = parse("- [x] done\n- [ ] todo");
-        let Block::List { items, .. } = &tree.blocks[0] else {
+        let tree = parse_full("- [x] done\n- [ ] todo");
+        let Block::List { items, .. } = b(&tree, 0) else {
             panic!("expected a list");
         };
         let Block::Paragraph { runs } = &items[0][0] else {
@@ -827,8 +990,8 @@ mod tests {
 
     #[test]
     fn raw_html_renders_as_text_instead_of_vanishing() {
-        let tree = parse("<div>hi</div>");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("<div>hi</div>");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         assert!(flat(runs).contains("<div>hi</div>"));
@@ -836,14 +999,14 @@ mod tests {
 
     #[test]
     fn soft_breaks_become_spaces_and_hard_breaks_newlines() {
-        let tree = parse("one\ntwo");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("one\ntwo");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         assert_eq!(flat(runs), "one two");
 
-        let tree = parse("one  \ntwo");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("one  \ntwo");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         assert_eq!(flat(runs), "one\ntwo");
@@ -851,8 +1014,8 @@ mod tests {
 
     #[test]
     fn adjacent_runs_of_the_same_style_merge() {
-        let tree = parse("plain **a** **b**");
-        let Block::Paragraph { runs } = &tree.blocks[0] else {
+        let tree = parse_full("plain **a** **b**");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
             panic!("expected a paragraph");
         };
         // "a" and "b" are separated by a plain space, so three runs, not five.
@@ -861,13 +1024,190 @@ mod tests {
 
     #[test]
     fn an_empty_document_has_no_blocks() {
-        assert!(parse("").is_empty());
-        assert!(parse("   \n\n  ").is_empty());
+        assert!(parse_full("").is_empty());
+        assert!(parse_full("   \n\n  ").is_empty());
     }
 
     #[test]
     fn unclosed_fences_still_produce_a_code_block() {
-        let tree = parse("```rust\nfn main() {}");
-        assert!(matches!(tree.blocks[0], Block::CodeBlock { .. }));
+        let tree = parse_full("```rust\nfn main() {}");
+        assert!(matches!(b(&tree, 0), Block::CodeBlock { .. }));
+    }
+
+    // ── Incremental parse (ported from Comet) ───────────────────────────
+
+    const CORPORA: &[&str] = &[
+        "# Title\n\nHello **bold** and *italic* and `code` and ~~gone~~.\n",
+        "Paragraph one\nlazy continuation\n\nParagraph two with a [link](https://x.dev).\n",
+        "- item one\n- item two\n  - nested a\n  - nested b\n- item three\n\ntail\n",
+        "1. first\n2. second\n\n   loose paragraph in item\n\n3. third\n",
+        "```rust\nfn main() {\n    println!(\"hi\");\n}\n```\n\nafter code\n",
+        "intro\n\n```\nunclosed fence streaming",
+        "> quoted line\n> more quote\n>\n> - a list in a quote\n\nplain\n",
+        "| a | b |\n|---|---|\n| 1 | 2 |\n| 3 | 4 |\n\ndone\n",
+        "setext candidate\n===\n\nnext para\n---\n",
+        "***\n\ntext between rules\n\n---\n",
+        "- [x] done task\n- [ ] open task\n",
+        "    indented code line one\n    line two\n\npara\n",
+        "para with <span>inline html</span> inside\n\n<div>\nblock html\n</div>\n",
+        "###### deep heading\n\n#### h4\n",
+        "![a chart](https://example.com/chart.png)\n\n![one](1.png) ![two](2.png)\n",
+    ];
+
+    const STORY: &str = "\"How do we negotiate with machines that won't speak?\" someone asked.\n\nYuki almost laughed. \"You don't. You listen to the silence. And you finally understand what it means to be powerless.\"";
+
+    fn stream(chunks: usize, text: &str) -> IncrementalParser {
+        let mut p = IncrementalParser::new();
+        let bytes = text.as_bytes();
+        let mut start = 0;
+        while start < bytes.len() {
+            let mut end = (start + chunks).min(bytes.len());
+            while end < bytes.len() && !text.is_char_boundary(end) {
+                end += 1;
+            }
+            p.append(&text[start..end]);
+            start = end;
+        }
+        p
+    }
+
+    #[test]
+    fn incremental_matches_full_on_streamed_corpora() {
+        for (ci, corpus) in CORPORA.iter().enumerate() {
+            let full = parse_full(corpus);
+            for chunk in [1usize, 2, 3, 7, 16, 64] {
+                assert_eq!(
+                    stream(chunk, corpus).tree(),
+                    &full,
+                    "corpus {ci} diverged at chunk size {chunk}:\n{corpus}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn appends_keep_committed_blocks_identical() {
+        // Streaming stability invariant: blocks before the reparse boundary
+        // (everything but the last two top-level blocks) must be reused
+        // as-is across appends — same index, same value — so row/element keys
+        // never re-mount and earlier blocks can never visibly reflow.
+        for corpus in CORPORA {
+            let mut p = IncrementalParser::new();
+            let mut prev = p.tree().clone();
+            let bytes = corpus.as_bytes();
+            let mut start = 0;
+            while start < bytes.len() {
+                let mut end = (start + 3).min(bytes.len());
+                while end < bytes.len() && !corpus.is_char_boundary(end) {
+                    end += 1;
+                }
+                p.append(&corpus[start..end]);
+                start = end;
+
+                let cur = p.tree();
+                let committed = prev.blocks.len().saturating_sub(2);
+                assert!(
+                    cur.blocks.len() >= committed,
+                    "committed blocks disappeared:\n{corpus}"
+                );
+                for i in 0..committed {
+                    assert_eq!(
+                        cur.blocks[i], prev.blocks[i],
+                        "block {i} changed across an append:\n{corpus}"
+                    );
+                }
+                prev = cur.clone();
+            }
+        }
+    }
+
+    #[test]
+    fn incremental_matches_full_with_link_definitions() {
+        // Definitions act at a distance → parser falls back to full reparses,
+        // so parity must still hold.
+        let corpus = "See [docs] for more.\n\nMore text.\n\n[docs]: https://example.com\n";
+        let full = parse_full(corpus);
+        for chunk in [1usize, 3, 9] {
+            assert_eq!(stream(chunk, corpus).tree(), &full, "chunk {chunk}");
+        }
+        // The reference actually resolved into a link.
+        let has_link = full.blocks.iter().any(|b| match &b.block {
+            Block::Paragraph { runs } => runs.iter().any(|r| r.style.link.is_some()),
+            _ => false,
+        });
+        assert!(has_link, "expected [docs] to resolve to a link");
+    }
+
+    #[test]
+    fn set_text_appends_or_resets() {
+        let mut p = IncrementalParser::new();
+        p.set_text("hello");
+        p.set_text("hello world");
+        assert_eq!(p.tree(), &parse_full("hello world"));
+        // Non-append rewrites reset cleanly.
+        p.set_text("different");
+        assert_eq!(p.tree(), &parse_full("different"));
+        assert_eq!(p.source(), "different");
+    }
+
+    #[test]
+    fn incremental_appends_cost_tail_not_document() {
+        let mut p = IncrementalParser::new();
+        let para = "some paragraph text here\n\n";
+        let source = para.repeat(8);
+        p.reset(&source);
+        p.append(" tail");
+        // The reparse covers the last two blocks, not the eight-paragraph
+        // document, and still equals a full parse of the extended source.
+        assert!(p.last_parse_bytes() < source.len() / 2);
+        assert_eq!(p.tree(), &parse_full(&(source.clone() + " tail")));
+    }
+
+    #[test]
+    fn top_level_ranges_are_stable_anchors() {
+        let src = "first\n\nsecond\n\nthird";
+        let tree = parse_full(src);
+        assert_eq!(tree.len(), 3);
+        assert!(
+            tree.blocks
+                .windows(2)
+                .all(|w| w[0].range.start < w[1].range.start)
+        );
+        assert_eq!(&src[tree.blocks[1].range.clone()], "second\n");
+    }
+
+    #[test]
+    fn full_parse_keeps_trailing_quote_in_block() {
+        let tree = parse_full(STORY);
+        assert_eq!(tree.blocks.len(), 2, "two paragraphs expected");
+        let last = &tree.blocks[1];
+        assert!(STORY[last.range.clone()].ends_with("powerless.\""));
+    }
+
+    #[test]
+    fn streamed_boundary_at_quote_adds_no_block() {
+        // Stream with a commit boundary exactly between `powerless.` and `"`.
+        let split = STORY.len() - 1;
+        let mut p = IncrementalParser::new();
+        p.set_text(&STORY[..split]);
+        p.set_text(STORY);
+        let tree = p.tree();
+        assert_eq!(tree.blocks.len(), 2, "streamed split must not add blocks");
+        assert!(STORY[tree.blocks[1].range.clone()].ends_with("powerless.\""));
+    }
+
+    #[test]
+    fn streamed_small_chunks_match_full_parse() {
+        let mut p = IncrementalParser::new();
+        let mut fed = String::new();
+        for chunk in STORY.as_bytes().chunks(7) {
+            fed.push_str(std::str::from_utf8(chunk).unwrap());
+            p.set_text(&fed);
+        }
+        let full = parse_full(STORY);
+        assert_eq!(p.tree().blocks.len(), full.blocks.len());
+        for (a, b) in p.tree().blocks.iter().zip(full.blocks.iter()) {
+            assert_eq!(a.range, b.range);
+        }
     }
 }

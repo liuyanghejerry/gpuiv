@@ -8,13 +8,12 @@
 //! selection registry in document order, so a drag can start in a heading and
 //! end inside a fenced code block, and Cmd+C copies the whole span.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::SharedString;
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::markdown::parser::{parse, BlockTree};
+use crate::markdown::parser::{BlockTree, IncrementalParser};
 use crate::markdown::render::{render_tree, MdContext};
 use crate::renderer::emit_event_full;
 use crate::theme::{Theme, ThemeFonts};
@@ -35,31 +34,21 @@ impl CustomElementFactory for MarkdownFactory {
 pub struct MarkdownElement {
     source: String,
     theme: Theme,
-    /// Parsed tree for the current source. `Rc` so a frame clones a pointer
-    /// rather than every block, string and inline run in the document.
-    tree: Option<Rc<BlockTree>>,
-    parsed_len: Option<usize>,
-    parsed_hash: Option<u64>,
+    /// Streaming parse state: an append to `source` reparses only from the
+    /// last stable top-level block boundary, so a token-by-token feed costs
+    /// O(tail), not O(document). Sources that stop being a prefix extension
+    /// reset to a full parse. A same-source frame is a no-op (one `str`
+    /// compare, no hashing).
+    parser: IncrementalParser,
 }
 
 impl MarkdownElement {
-    fn tree(&mut self) -> Rc<BlockTree> {
-        let hash = hash64(&self.source);
-        let stale = self.parsed_hash != Some(hash) || self.parsed_len != Some(self.source.len());
-        if stale || self.tree.is_none() {
-            self.tree = Some(Rc::new(parse(&self.source)));
-            self.parsed_hash = Some(hash);
-            self.parsed_len = Some(self.source.len());
+    fn tree(&mut self) -> &BlockTree {
+        if self.parser.source() != self.source {
+            self.parser.set_text(&self.source);
         }
-        self.tree.clone().expect("just parsed")
+        self.parser.tree()
     }
-}
-
-fn hash64(source: &str) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    source.hash(&mut hasher);
-    hasher.finish()
 }
 
 impl CustomElement for MarkdownElement {
@@ -99,7 +88,7 @@ impl CustomElement for MarkdownElement {
             on_link,
             ctx.highlight_set.clone(),
         );
-        let body = render_tree(&tree, &mut md, window);
+        let body = render_tree(tree, &mut md, window);
 
         let container = gpui::div()
             .id(SharedString::from(format!("__gpuix_markdown_{}", ctx.id)))
@@ -134,6 +123,7 @@ impl CustomElement for MarkdownElement {
     }
 
     fn destroy(&mut self) {
-        self.tree = None;
+        // The parser (and its tree) drops with the element; nothing else
+        // holds shared state that needs unlinking here.
     }
 }
