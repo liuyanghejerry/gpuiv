@@ -178,6 +178,34 @@ export declare class GpuixRenderer {
   minimizeWindow(): void
   /** Hand a URL to the user's default browser / handler. */
   openUrl(url: string): void
+  /**
+   * Set the app's process-wide identity and user-visible name. Call once,
+   * early: Windows attributes toasts to the AppUserModelID, and the OS
+   * presents `name` wherever it names the app.
+   */
+  setAppIdentity(identifier: string, name: string): void
+  /**
+   * Post a notification to the OS notification center. A notification
+   * whose `tag` matches an earlier one replaces it where the platform
+   * supports it. Returns the effective tag — the described one, or a
+   * generated tag when omitted. On macOS, notifications only deliver from
+   * a packaged .app bundle; a bare `bun` process is skipped by the
+   * platform's bundle guard.
+   */
+  showSystemNotification(notification: SystemNotificationDesc): string
+  /**
+   * Remove the delivered or pending notification with this tag.
+   * Best-effort: platforms that cannot retract a notification once shown
+   * let it age out of the notification center on its own.
+   */
+  dismissSystemNotification(tag: string): void
+  /**
+   * Register the handler invoked when the user activates a system
+   * notification — by clicking its body or one of its action buttons.
+   * Replaces any earlier handler. The response carries the notification's
+   * `tag` and the pressed action's id (null for a body click).
+   */
+  onSystemNotificationResponse(callback: ((err: Error | null, arg: SystemNotificationResponseJs) => any)): void
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */
   writeClipboardImage(data: Buffer, width: number, height: number): void
   /**
@@ -433,6 +461,39 @@ export declare class TestGpuixRenderer {
    * the macOS menu bar would.
    */
   fireMenuAction(id: string): void
+  /** Test stand-in for the production `setAppIdentity`. */
+  setAppIdentity(identifier: string, name: string): void
+  /** The identity `setAppIdentity` installed, if any. */
+  getAppIdentity(): AppIdentity | null
+  /**
+   * Test stand-in for the production `showSystemNotification`: converts
+   * through the production path, then records. Like gpui's test platform,
+   * showing is a no-op until `setAppIdentity` ran. Assert with
+   * `getShownSystemNotifications` / `getDeliveredSystemNotifications` and
+   * drive activations with `fireSystemNotificationResponse`.
+   */
+  showSystemNotification(notification: SystemNotificationDesc): string
+  /** Test stand-in for the production `dismissSystemNotification`. */
+  dismissSystemNotification(tag: string): void
+  /** Test stand-in for the production `onSystemNotificationResponse`. */
+  onSystemNotificationResponse(callback: ((err: Error | null, arg: SystemNotificationResponseJs) => any)): void
+  /**
+   * Deliver a notification activation to the armed callback, the way the
+   * OS would. `actionId` null means the body itself was clicked.
+   */
+  fireSystemNotificationResponse(tag: string, actionId?: string | undefined | null): void
+  /**
+   * Every `showSystemNotification` call that had an identity armed, in
+   * order — including same-tag reposts.
+   */
+  getShownSystemNotifications(): Array<RecordedSystemNotification>
+  /**
+   * The notifications currently standing in the (fake) notification
+   * center: same-tag reposts replace, dismissals remove.
+   */
+  getDeliveredSystemNotifications(): Array<RecordedSystemNotification>
+  /** The tags `dismissSystemNotification` was called with, in order. */
+  getDismissedSystemNotifications(): Array<string>
   /** Test stand-in for the production `promptForNewPath`. */
   promptForNewPath(directory: string | undefined | null, suggestedName: string | undefined | null, callback: ((err: Error | null, arg: NewPathPromptOutcome) => any)): void
   /** Queue the next answer for `promptForNewPath`; `null` means cancelled. */
@@ -665,6 +726,12 @@ export declare class TestGpuixRenderer {
   advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
+}
+
+/** The app identity recorded by the test bridge, if any. */
+export interface AppIdentity {
+  identifier: string
+  name: string
 }
 
 /** A clipboard image decoded to straight-alpha RGBA. */
@@ -1006,6 +1073,64 @@ export interface RecordedMenuItem {
   disabled: boolean
   separator: boolean
   submenu: Array<RecordedMenuItem>
+}
+
+/**
+ * A notification as recorded by the test bridge, with every optional field
+ * resolved to its effective value.
+ */
+export interface RecordedSystemNotification {
+  tag: string
+  title: string
+  body: string
+  actions: Array<RecordedSystemNotificationAction>
+}
+
+export interface RecordedSystemNotificationAction {
+  id: string
+  label: string
+}
+
+/** A button offered on a system notification. */
+export interface SystemNotificationActionDesc {
+  /**
+   * Identifies the action in the response's `actionId` when the button is
+   * pressed.
+   */
+  id: string
+  /** The button's user-visible label. */
+  label: string
+}
+
+/** A notification as described from JS. */
+export interface SystemNotificationDesc {
+  /**
+   * Stable identity: posting again with the same tag replaces the earlier
+   * notification where the platform supports it, and responses carry the
+   * tag back. Omit it for an independent notification — a tag is generated
+   * and returned by the show call.
+   */
+  tag?: string
+  /** The notification's headline. */
+  title: string
+  /** Additional text displayed below the title. */
+  body?: string
+  /**
+   * Buttons offered on the notification. Platforms that cannot display
+   * action buttons show the notification without them.
+   */
+  actions?: Array<SystemNotificationActionDesc>
+}
+
+/** The payload delivered when the user activates a notification. */
+export interface SystemNotificationResponseJs {
+  /** The tag of the activated notification. */
+  tag: string
+  /**
+   * The pressed action button's id, or null when the notification body
+   * itself was activated.
+   */
+  actionId?: string
 }
 
 export interface WindowInsets {

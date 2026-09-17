@@ -213,6 +213,15 @@ pub struct TestGpuixRenderer {
     window_close_count: RefCell<u32>,
     new_path_prompt_answers: RefCell<VecDeque<Option<String>>>,
     last_new_path_prompt: RefCell<Option<(String, Option<String>)>>,
+    /// Notification records mirroring gpui's TestPlatform fake: showing is a
+    /// no-op until an app identity is set, and a same-tag notification
+    /// replaces the delivered one.
+    app_identity: RefCell<Option<(String, String)>>,
+    shown_notifications: RefCell<Vec<crate::notifications::RecordedSystemNotification>>,
+    delivered_notifications: RefCell<Vec<crate::notifications::RecordedSystemNotification>>,
+    dismissed_notifications: RefCell<Vec<String>>,
+    notification_response_handler:
+        RefCell<Option<ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>>>,
 }
 
 #[napi]
@@ -304,6 +313,11 @@ impl TestGpuixRenderer {
             window_close_count: RefCell::new(0),
             new_path_prompt_answers: RefCell::new(Default::default()),
             last_new_path_prompt: RefCell::new(None),
+            app_identity: RefCell::new(None),
+            shown_notifications: RefCell::new(Default::default()),
+            delivered_notifications: RefCell::new(Default::default()),
+            dismissed_notifications: RefCell::new(Default::default()),
+            notification_response_handler: RefCell::new(None),
         })
     }
 
@@ -708,6 +722,111 @@ impl TestGpuixRenderer {
         if let Some(handler) = self.menu_action_handler.borrow().as_ref() {
             handler.clone().call(Ok(id), ThreadsafeFunctionCallMode::NonBlocking);
         }
+    }
+
+    // ── System notifications (recorded) ────────────────────────────
+
+    /// Test stand-in for the production `setAppIdentity`.
+    #[napi]
+    pub fn set_app_identity(&self, identifier: String, name: String) {
+        *self.app_identity.borrow_mut() = Some((identifier, name));
+    }
+
+    /// The identity `setAppIdentity` installed, if any.
+    #[napi]
+    pub fn get_app_identity(&self) -> Option<crate::notifications::AppIdentity> {
+        self.app_identity
+            .borrow()
+            .as_ref()
+            .map(|(identifier, name)| crate::notifications::AppIdentity {
+                identifier: identifier.clone(),
+                name: name.clone(),
+            })
+    }
+
+    /// Test stand-in for the production `showSystemNotification`: converts
+    /// through the production path, then records. Like gpui's test platform,
+    /// showing is a no-op until `setAppIdentity` ran. Assert with
+    /// `getShownSystemNotifications` / `getDeliveredSystemNotifications` and
+    /// drive activations with `fireSystemNotificationResponse`.
+    #[napi]
+    pub fn show_system_notification(
+        &self,
+        notification: crate::notifications::SystemNotificationDesc,
+    ) -> Result<String> {
+        let tag = notification
+            .tag
+            .clone()
+            .unwrap_or_else(crate::notifications::next_notification_tag);
+        if self.app_identity.borrow().is_none() {
+            return Ok(tag);
+        }
+        let recorded =
+            crate::notifications::RecordedSystemNotification::from(&notification.to_gpui(&tag));
+        {
+            let mut delivered = self.delivered_notifications.borrow_mut();
+            match delivered.iter_mut().find(|shown| shown.tag == tag) {
+                Some(existing) => *existing = recorded.clone(),
+                None => delivered.push(recorded.clone()),
+            }
+        }
+        self.shown_notifications.borrow_mut().push(recorded);
+        Ok(tag)
+    }
+
+    /// Test stand-in for the production `dismissSystemNotification`.
+    #[napi]
+    pub fn dismiss_system_notification(&self, tag: String) {
+        self.dismissed_notifications.borrow_mut().push(tag.clone());
+        self.delivered_notifications
+            .borrow_mut()
+            .retain(|notification| notification.tag != tag);
+    }
+
+    /// Test stand-in for the production `onSystemNotificationResponse`.
+    #[napi]
+    pub fn on_system_notification_response(
+        &self,
+        callback: ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>,
+    ) -> Result<()> {
+        *self.notification_response_handler.borrow_mut() = Some(callback);
+        Ok(())
+    }
+
+    /// Deliver a notification activation to the armed callback, the way the
+    /// OS would. `actionId` null means the body itself was clicked.
+    #[napi]
+    pub fn fire_system_notification_response(&self, tag: String, action_id: Option<String>) {
+        if let Some(handler) = self.notification_response_handler.borrow().as_ref() {
+            handler.call(
+                Ok(crate::notifications::SystemNotificationResponseJs { tag, action_id }),
+                ThreadsafeFunctionCallMode::NonBlocking,
+            );
+        }
+    }
+
+    /// Every `showSystemNotification` call that had an identity armed, in
+    /// order — including same-tag reposts.
+    #[napi]
+    pub fn get_shown_system_notifications(
+        &self,
+    ) -> Vec<crate::notifications::RecordedSystemNotification> {
+        self.shown_notifications.borrow().clone()
+    }
+
+    /// The notifications currently standing in the (fake) notification
+    /// center: same-tag reposts replace, dismissals remove.
+    #[napi]
+    pub fn get_delivered_system_notifications(
+        &self,
+    ) -> Vec<crate::notifications::RecordedSystemNotification> {
+        self.delivered_notifications.borrow().clone()
+    }
+
+    /// The tags `dismissSystemNotification` was called with, in order.
+    #[napi]
+    pub fn get_dismissed_system_notifications(&self) -> Vec<String> {
+        self.dismissed_notifications.borrow().clone()
     }
 
     /// Test stand-in for the production `promptForNewPath`.
