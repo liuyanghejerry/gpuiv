@@ -206,6 +206,20 @@ export declare class GpuixRenderer {
    * `tag` and the pressed action's id (null for a body click).
    */
   onSystemNotificationResponse(callback: ((err: Error | null, arg: SystemNotificationResponseJs) => any)): void
+  /**
+   * Register the handler invoked when the platform asks the app to open
+   * one or more URLs — deep links, files dropped on the Dock icon, and
+   * friends. Replaces any earlier handler. URLs opened before the first
+   * registration are dropped.
+   */
+  onOpenUrls(callback: ((err: Error | null, arg: Array<string>) => any)): void
+  /**
+   * Register the app as the handler for a URL scheme (e.g. `myapp` for
+   * `myapp://` URLs). The callback receives `(null)` on success or the
+   * failure reason: macOS requires 12+, a bundle id, and an installed
+   * app; Windows and Linux report unsupported.
+   */
+  registerUrlScheme(scheme: string, callback: ((err: Error | null, ) => any)): void
   /** Put a straight-alpha RGBA image on the clipboard as PNG. */
   writeClipboardImage(data: Buffer, width: number, height: number): void
   /**
@@ -494,6 +508,26 @@ export declare class TestGpuixRenderer {
   getDeliveredSystemNotifications(): Array<RecordedSystemNotification>
   /** The tags `dismissSystemNotification` was called with, in order. */
   getDismissedSystemNotifications(): Array<string>
+  /** Test stand-in for the production `onOpenUrls`. */
+  onOpenUrls(callback: ((err: Error | null, arg: Array<string>) => any)): void
+  /**
+   * Deliver opened URLs to the armed `onOpenUrls` callback, the way the
+   * OS would on a deep link.
+   */
+  fireOpenUrls(urls: Array<string>): void
+  /**
+   * Test stand-in for the production `registerUrlScheme`: records the
+   * scheme and answers from the canned queue — an empty queue answers
+   * success, matching the platforms where registration succeeds.
+   */
+  registerUrlScheme(scheme: string, callback: ((err: Error | null, ) => any)): void
+  /** The scheme the last `registerUrlScheme` call named. */
+  getLastUrlScheme(): string | null
+  /**
+   * Queue the next answer for `registerUrlScheme`: the error message, or
+   * null for success.
+   */
+  setNextUrlSchemeError(error?: string | undefined | null): void
   /** Test stand-in for the production `promptForNewPath`. */
   promptForNewPath(directory: string | undefined | null, suggestedName: string | undefined | null, callback: ((err: Error | null, arg: NewPathPromptOutcome) => any)): void
   /** Queue the next answer for `promptForNewPath`; `null` means cancelled. */

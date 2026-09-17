@@ -692,6 +692,20 @@ export interface NativeRenderer {
   onSystemNotificationResponse?(
     callback: (error: Error | null, response: SystemNotificationResponse) => void
   ): void
+
+  // ── Deep links ─────────────────────────────────────────────────
+  /** Register the handler invoked when the platform asks the app to open
+   *  one or more URLs — deep links and friends. Replaces any earlier
+   *  handler. The callback receives `(null, urls)`. */
+  onOpenUrls?(callback: (error: Error | null, urls: string[]) => void): void
+  /** Register the app as the handler for a URL scheme (e.g. `"myapp"` for
+   *  `myapp://` URLs). The callback receives `(null)` on success or the
+   *  failure reason — macOS requires 12+, a bundle id, and an installed
+   *  app; Windows and Linux report unsupported. */
+  registerUrlScheme?(
+    scheme: string,
+    callback: (error: Error | null) => void
+  ): void
 }
 
 /** One entry of a [`MenuBarMenu`]. Exactly one of `separator`, `submenu`, or
