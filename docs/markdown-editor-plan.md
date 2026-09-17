@@ -51,13 +51,22 @@ bun scripts/dev.ts --shots                 # 有截图项时
 - [x] M0.5 round-trip：canonical 用例文档树相等 + 幂等；4 份 ColaMD 真实文档
       （outline-test / mermaid-test / PRINCIPLES / README）fixture 验证通过
 
-### M1 — 编辑核心（PM state/commands，纯 JS）
+### M1 — 编辑核心（PM state/commands，纯 JS，`packages/vue/src/markdown-editor/state.ts`）
 
-- [ ] M1.1 EditorState 创建/重置；`setMarkdown` 程序化替换不进撤销栈
-- [ ] M1.2 撤销/重做（prosemirror-history 接线 + 快捷键映射）
-- [ ] M1.3 input rules：`# `/`## `、`- `/`* `/`+ `、`1. `、```` ``` ````、`> `、`==x==`、`[] `/`[x] `
-- [ ] M1.4 格式命令：⌘B/⌘I/⌘K(链接)/删除线/行内码、列表 wrap/lift
-- [ ] M1.5 任务项翻转命令（⌘Enter / 点击复选框用）
+> 已完成。验证：`src/__tests__/markdown-editor-state.test.ts`（23 项）。实现记录：
+> `MarkdownEditorCore` 是 headless 控制器（无 prosemirror-view）；input rule 处理函数
+> 按 prosemirror-inputrules 的规范坐标顺序写（wrap 类规则**先 delete 再在 `tr.doc`
+> 里 resolve blockRange**，`findWrapping` 不传第 4 参——list_item 由内部推导）；
+> 快捷键→命令的接线在 M3.8（gpuiv 渲染层 onKeyDown）。
+
+- [x] M1.1 EditorState 创建/重置；`reset()`=setMarkdown 程序化替换不进撤销栈
+      （fresh state，`undoDepth()===0`）
+- [x] M1.2 撤销/重做（prosemirror-history 接线，undo/redo/undoDepth）
+- [x] M1.3 input rules：`# `~`###### `、`- `/`* `/`+ `、`1. `（保留 start）、
+      ```` ``` ````、`> `、`==x==`（mark 规则）、`[x] `/`[ ] `（list_item 翻转）
+- [x] M1.4 格式命令：strong/em/code/strikethrough/highlight（含空选区 storedMark）、
+      toggleLink（href）、toggleList wrap/unwrap（findWrapping）
+- [x] M1.5 任务项翻转命令（task→翻转 checked；plain→checked:true）
 
 ### M2 — 原生块编辑层（`packages/native` + host 元素）
 
