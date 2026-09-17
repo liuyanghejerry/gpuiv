@@ -884,6 +884,19 @@ impl TestGpuixRenderer {
         self.url_scheme_errors.borrow_mut().push_back(error);
     }
 
+    /// The offscreen test window's frame, through the same `Window::bounds()`
+    /// the production renderer reads. The visual test window opens offscreen
+    /// at (-10000, -10000) — assert on size, or on that sentinel origin.
+    #[napi]
+    pub fn get_window_bounds(&self) -> Result<crate::renderer::WindowBounds> {
+        with_test_state(|cx, window, _| {
+            cx.update_window(window, |_, window, _| {
+                crate::renderer::window_bounds_js(window.bounds())
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
     /// Test stand-in for the production `promptForNewPath`.
     #[napi]
     pub fn prompt_for_new_path(

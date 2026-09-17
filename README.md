@@ -2833,6 +2833,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Wayland layer-shell surfaces (`layerShell` window option: panels, docks, wallpapers; Linux/Wayland only)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`, `closeWindow`)
+- [x] Window position (`getWindowBounds()`; `x`/`y` window options restore a saved position)
 - [x] Window close interception (`onWindowShouldClose` vetoes and observes; `closeWindow()` confirms)
 - [x] Dock relaunch observer (`onReopen`, macOS)
 - [x] Runtime menu bars (`setMenus`; macOS)

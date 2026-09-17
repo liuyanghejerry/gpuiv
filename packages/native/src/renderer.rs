@@ -173,6 +173,39 @@ fn emit_open_urls(urls: Vec<String>) {
         callback.call(Ok(urls), ThreadsafeFunctionCallMode::NonBlocking);
     }
 }
+
+/// The window's frame on screen as reported to JS: logical points, origin at
+/// the main display's top-left.
+#[napi(object)]
+pub struct WindowBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+pub(crate) fn window_bounds_js(bounds: gpui::Bounds<gpui::Pixels>) -> WindowBounds {
+    WindowBounds {
+        x: f64::from(f32::from(bounds.origin.x)),
+        y: f64::from(f32::from(bounds.origin.y)),
+        width: f64::from(f32::from(bounds.size.width)),
+        height: f64::from(f32::from(bounds.size.height)),
+    }
+}
+
+/// A saved opening position, when the window options carry a complete one.
+/// A half-present pair is ignored — a position with one coordinate missing
+/// is a bug in whatever saved it, and opening half-centered would be worse
+/// than opening centered.
+pub(crate) fn requested_window_origin(
+    x: Option<f64>,
+    y: Option<f64>,
+) -> Option<gpui::Point<gpui::Pixels>> {
+    match (x, y) {
+        (Some(x), Some(y)) => Some(gpui::point(gpui::px(x as f32), gpui::px(y as f32))),
+        _ => None,
+    }
+}
 const SELECTION_SCROLL_EDGE_PX: f32 = 36.0;
 const SELECTION_SCROLL_MAX_STEP_PX: f32 = 24.0;
 
@@ -525,6 +558,9 @@ enum UiCommand {
     RegisterUrlScheme {
         scheme: String,
         callback: ThreadsafeFunction<()>,
+    },
+    GetWindowBounds {
+        response: SyncSender<WindowBounds>,
     },
 }
 
@@ -1021,6 +1057,11 @@ async fn run_ui_commands(
                     .detach();
                 })
             }
+            UiCommand::GetWindowBounds { response } => {
+                window.update(cx, move |_view, window, _cx| {
+                    response.send(window_bounds_js(window.bounds()));
+                })
+            }
         };
         if let Err(error) = result {
             // The last window can close mid-command; logging `window not found`
@@ -1281,11 +1322,13 @@ impl GpuixRenderer {
             // the keymap, so every binding must exist before it runs.
             #[cfg(target_os = "macos")]
             crate::app_menu::init(&app_name, cx);
-            let bounds = gpui::Bounds::centered(
-                None,
-                gpui::size(gpui::px(width as f32), gpui::px(height as f32)),
-                cx,
-            );
+            let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
+            // A saved x/y pair restores the last position; anything else
+            // opens centered, as before.
+            let bounds = match requested_window_origin(window_options.x, window_options.y) {
+                Some(origin) => gpui::Bounds { origin, size },
+                None => gpui::Bounds::centered(None, size, cx),
+            };
 
             match cx.open_window(
                 to_gpui_window_options(&window_options, bounds),
@@ -1450,12 +1493,17 @@ impl GpuixRenderer {
                             crate::custom_elements::img::init(cx);
                             let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
                             // A layer-shell surface is positioned by the compositor from its
-                            // anchor, so it opens at the origin; a normal window is centered.
+                            // anchor, so it opens at the origin; a saved x/y pair restores the
+                            // last position; a normal window is centered.
                             let bounds = if window_options.layer_shell.is_some() {
                                 gpui::Bounds {
                                     origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
                                     size,
                                 }
+                            } else if let Some(origin) =
+                                requested_window_origin(window_options.x, window_options.y)
+                            {
+                                gpui::Bounds { origin, size }
                             } else {
                                 gpui::Bounds::centered(None, size, cx)
                             };
@@ -1966,6 +2014,34 @@ impl GpuixRenderer {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::IsFullscreen { response })?;
             return recv_ui_response(receiver, "the fullscreen query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// The window's frame on screen: logical points, origin at the main
+    /// display's top-left, including the native titlebar where present
+    /// (`getWindowSize` reports the content viewport). Save it and pass it
+    /// back as the `x`/`y` window options to restore the position on the
+    /// next launch.
+    #[napi]
+    pub fn get_window_bounds(&self) -> Result<WindowBounds> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window_bounds_js(window.bounds()));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetWindowBounds { response })?;
+            return recv_ui_response(receiver, "the window bounds query");
         }
 
         #[cfg(not(any(
@@ -7131,6 +7207,12 @@ pub struct WindowOptions {
     /// Show the window when it opens. `false` opens it hidden; call
     /// `activateWindow()` to reveal it. Ignored on Linux.
     pub show: Option<bool>,
+    /// Open at this position instead of centered: the window's top-left
+    /// corner in screen coordinates (logical points, origin at the main
+    /// display's top-left). Pair with `getWindowBounds()` to restore a saved
+    /// position across launches. Ignored for a `layerShell` surface.
+    pub x: Option<f64>,
+    pub y: Option<f64>,
     /// The name macOS shows in the application menu, and in its "Hide" and
     /// "Quit" items. Defaults to `title`.
     pub app_name: Option<String>,
@@ -7158,6 +7240,8 @@ impl Default for WindowOptions {
             window_background: None,
             traffic_light_x: None,
             traffic_light_y: None,
+            x: None,
+            y: None,
             focus: Some(true),
             show: Some(true),
             app_name: None,
@@ -7298,6 +7382,20 @@ mod window_options_tests {
         let gpui_options = mapped(WindowOptions::default());
         assert!(gpui_options.focus);
         assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn a_complete_xy_pair_names_the_opening_origin() {
+        let origin = requested_window_origin(Some(120.0), Some(-40.0)).unwrap();
+        assert_eq!(f32::from(origin.x), 120.0);
+        assert_eq!(f32::from(origin.y), -40.0);
+    }
+
+    #[test]
+    fn a_half_present_xy_pair_is_ignored() {
+        assert!(requested_window_origin(Some(120.0), None).is_none());
+        assert!(requested_window_origin(None, Some(-40.0)).is_none());
+        assert!(requested_window_origin(None, None).is_none());
     }
 
     #[test]
