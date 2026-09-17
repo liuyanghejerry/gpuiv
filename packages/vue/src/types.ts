@@ -307,6 +307,12 @@ export interface GpuixTheme {
   diffHunkBg?: string
   fontSans?: string
   fontMono?: string
+  /** Fallback families tried after `fontSans` for glyphs it lacks. Empty or
+   *  absent keeps the platform's own cascade; set it to pin CJK/emoji
+   *  coverage on Windows and Linux. */
+  fontSansFallbacks?: string[]
+  /** Fallback families tried after `fontMono`. */
+  fontMonoFallbacks?: string[]
   syntax?: SyntaxTheme
   metrics?: GpuixMetrics
 }

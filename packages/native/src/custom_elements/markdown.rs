@@ -17,7 +17,7 @@ use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use crate::markdown::parser::{parse, BlockTree};
 use crate::markdown::render::{render_tree, MdContext};
 use crate::renderer::emit_event_full;
-use crate::theme::Theme;
+use crate::theme::{Theme, ThemeFonts};
 
 pub struct MarkdownFactory;
 
@@ -108,7 +108,7 @@ impl CustomElement for MarkdownElement {
             .w_full()
             .min_w_0()
             .text_color(theme.text)
-            .font_family(theme.font_sans.clone())
+            .theme_sans(&theme)
             .text_size(gpui::px(theme.metrics.md_text_size))
             .line_height(gpui::px(theme.metrics.md_line_height));
 

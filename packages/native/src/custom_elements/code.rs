@@ -96,12 +96,16 @@ struct Typography {
     text_size: f32,
     line_height: f32,
     plain: Hsla,
+    fallbacks: Vec<String>,
 }
 
 impl Typography {
     fn font(&self) -> Font {
         let mut font = gpui::font(self.family.clone());
         font.weight = self.weight;
+        if !self.fallbacks.is_empty() {
+            font.fallbacks = Some(gpui::FontFallbacks::from_fonts(self.fallbacks.clone()));
+        }
         font
     }
 }
@@ -142,6 +146,7 @@ fn typography(style: Option<&StyleDesc>, theme: &Theme, m: &Metrics) -> Typograp
             .and_then(crate::color::parse_color_rgba)
             .map(Hsla::from)
             .unwrap_or(theme.text),
+        fallbacks: theme.font_mono_fallbacks.clone(),
     }
 }
 

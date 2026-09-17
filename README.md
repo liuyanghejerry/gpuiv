@@ -2822,6 +2822,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`)
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images)
+- [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
 - [x] IME composition events (`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd`)
 - [x] Spinner loading primitive (`Spinner`, dots and pulse variants)
