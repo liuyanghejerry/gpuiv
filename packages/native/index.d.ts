@@ -174,6 +174,14 @@ export declare class GpuixRenderer {
   toggleFullscreen(): void
   /** Whether the window is currently fullscreen. */
   isFullscreen(): boolean
+  /**
+   * The window's frame on screen: logical points, origin at the main
+   * display's top-left, including the native titlebar where present
+   * (`getWindowSize` reports the content viewport). Save it and pass it
+   * back as the `x`/`y` window options to restore the position on the
+   * next launch.
+   */
+  getWindowBounds(): WindowBounds
   /** Minimize the window to the platform's taskbar / Dock. */
   minimizeWindow(): void
   /** Hand a URL to the user's default browser / handler. */
@@ -528,6 +536,12 @@ export declare class TestGpuixRenderer {
    * null for success.
    */
   setNextUrlSchemeError(error?: string | undefined | null): void
+  /**
+   * The offscreen test window's frame, through the same `Window::bounds()`
+   * the production renderer reads. The visual test window opens offscreen
+   * at (-10000, -10000) — assert on size, or on that sentinel origin.
+   */
+  getWindowBounds(): WindowBounds
   /** Test stand-in for the production `promptForNewPath`. */
   promptForNewPath(directory: string | undefined | null, suggestedName: string | undefined | null, callback: ((err: Error | null, arg: NewPathPromptOutcome) => any)): void
   /** Queue the next answer for `promptForNewPath`; `null` means cancelled. */
@@ -1167,6 +1181,17 @@ export interface SystemNotificationResponseJs {
   actionId?: string
 }
 
+/**
+ * The window's frame on screen as reported to JS: logical points, origin at
+ * the main display's top-left.
+ */
+export interface WindowBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface WindowInsets {
   safeArea: EdgeInsets
   ime: EdgeInsets
@@ -1202,6 +1227,14 @@ export interface WindowOptions {
    * `activateWindow()` to reveal it. Ignored on Linux.
    */
   show?: boolean
+  /**
+   * Open at this position instead of centered: the window's top-left
+   * corner in screen coordinates (logical points, origin at the main
+   * display's top-left). Pair with `getWindowBounds()` to restore a saved
+   * position across launches. Ignored for a `layerShell` surface.
+   */
+  x?: number
+  y?: number
   /**
    * The name macOS shows in the application menu, and in its "Hide" and
    * "Quit" items. Defaults to `title`.

@@ -778,6 +778,13 @@ export class TestRenderer implements NativeRenderer {
     return (this.native as { getMinimizeCalls?(): number }).getMinimizeCalls?.() ?? 0
   }
 
+  /** The test window's frame through the same `Window::bounds()` the
+   *  production renderer reads. The visual test window opens offscreen at
+   *  (-10000, -10000). */
+  getWindowBounds(): { x: number; y: number; width: number; height: number } {
+    return this.native.getWindowBounds?.() ?? { x: 0, y: 0, width: 0, height: 0 }
+  }
+
   /** Hand a URL to the default handler. The test bridge records it; assert
    *  with `getLastOpenedUrl`. */
   openUrl(url: string): void {
