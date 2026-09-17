@@ -221,7 +221,7 @@ pub fn render_tree(tree: &BlockTree, ctx: &mut MdContext, window: &Window) -> An
         .children(
             tree.blocks
                 .iter()
-                .map(|block| render_block(block, ctx, window))
+                .map(|top| render_block(&top.block, ctx, window))
                 .collect::<Vec<_>>(),
         )
         .into_any_element()
