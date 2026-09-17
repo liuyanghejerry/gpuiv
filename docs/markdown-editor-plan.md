@@ -1,0 +1,92 @@
+# Markdown WYSIWYG 编辑器（`<markdown-editor>`）实现计划与特性清单
+
+> 分支 `feat/markdown-wysiwyg`（基于 main @ `52e1287`）。目标：编辑内核能力对齐
+> ColaMD v2.4.3（`src/renderer/editor/editor.ts`）。追踪 issue：
+> [liuyanghejerry/gpuiv#101](https://github.com/liuyanghejerry/gpuiv/issues/101) P0-1。
+> 本文档的清单即工作队列：每项先写失败测试 → 实现 → 验证 → 勾选。
+
+## 架构（定稿，见 issue #101 可行性调研评论）
+
+- **headless ProseMirror 做文档模型与控制器**：只用 `prosemirror-model/state/transform/
+  inputrules/history/markdown` 六个包，**不用 `prosemirror-view`**（DOM 绑定）。
+- **每个 textblock 一个原生可编辑元素**：IME 组合限制在焦点块内，跨块组合不存在；
+  选区在 PM 模型层全局，绘制复用 gpuiv 每元素选区机制。
+- **装饰从 PM state 计算**（搜索高亮、标题落点闪烁），作为属性下发给原生块元素。
+- 原生支撑落在 `packages/native`（扩展 `custom_elements/` 或新元素 + 文本测量/命中测试
+  napi API）。**不改 `zed/` 子模块**；需要动 GPUI 即停（见停止规则）。
+
+## 验证命令（每项勾选前必跑）
+
+```bash
+cd packages/native && cargo test --lib     # 有原生改动时
+cd packages/vue && bun run test            # 每项必跑
+bun scripts/dev.ts --shots                 # 有截图项时
+```
+
+## 非目标
+
+数学公式与 Mermaid（P0-2/P0-3，公式块降级为代码块）、ColaMD 应用外壳（标签条/文件面板/
+文件监听）、富文本 HTML 剪贴板（P1）、脚注悬浮预览、≥512KB 强制源码模式、字数统计。
+
+## 队列
+
+### M0 — 模型与序列化层（纯 JS，`packages/vue/src/markdown-editor/model.ts`）
+
+> 已完成。验证：`packages/vue/src/__tests__/markdown-editor-model.test.ts`（27 项，纯 JS——
+> 模型层无渲染，GPU 支撑测试从 M2/M3 起）。两个实现记录：markdown-it 固定 `^14`
+> 与 prosemirror-markdown 的传递依赖同源（v15 自带类型且 `breaks` 行为已变，勿升）；
+> markdown-it v14/v15 都不把软换行转 hardbreak，解析侧直接 `softbreak → hard_break`
+> 节点实现 remark-breaks 语义。表格单元格序列化借用外层 state 的 `renderInline`
+> （mark 只在 renderInline 路径生效），借道前必须先 `write("")` flush 待关闭块。
+
+- [x] M0.1 schema：ColaMD 节点集（doc/paragraph/heading/blockquote/bullet_list/
+      ordered_list/list_item(checked)/code_block(info)/horizontal_rule/image/hard_break/
+      table 系列；marks：em/strong/code/strikethrough/link/highlight）
+- [x] M0.2 Markdown→doc 解析（markdown-it `^14` + `html:false`；自写 task-list 核心规则；
+      `softbreak → hard_break` = remark-breaks 语义）
+- [x] M0.3 doc→Markdown 序列化（软换行输出 `\n`；tight/loose 列表保持；有序列表 start；
+      表格列对齐；结尾补单个 `\n` 对齐 remark-stringify）
+- [x] M0.4 标记风格保持（bullet `*`/`-`/`+`、emphasis/strong `_`、fence `~~~`，
+      对齐 ColaMD markdown-style.ts 的探测逻辑）
+- [x] M0.5 round-trip：canonical 用例文档树相等 + 幂等；4 份 ColaMD 真实文档
+      （outline-test / mermaid-test / PRINCIPLES / README）fixture 验证通过
+
+### M1 — 编辑核心（PM state/commands，纯 JS）
+
+- [ ] M1.1 EditorState 创建/重置；`setMarkdown` 程序化替换不进撤销栈
+- [ ] M1.2 撤销/重做（prosemirror-history 接线 + 快捷键映射）
+- [ ] M1.3 input rules：`# `/`## `、`- `/`* `/`+ `、`1. `、```` ``` ````、`> `、`==x==`、`[] `/`[x] `
+- [ ] M1.4 格式命令：⌘B/⌘I/⌘K(链接)/删除线/行内码、列表 wrap/lift
+- [ ] M1.5 任务项翻转命令（⌘Enter / 点击复选框用）
+
+### M2 — 原生块编辑层（`packages/native` + host 元素）
+
+- [ ] M2.1 原生可编辑块元素：styled spans（颜色/weight/italic/下划线/删除线/背景）+
+      光标/选区/preedit（组合输入）——扩展 `custom_elements/input.rs` 或新元素
+- [ ] M2.2 候选窗跟随光标（IME bounds 上报已由 GPUI InputHandler 提供，验证富 spans 下正确）
+- [ ] M2.3 文本测量 + 命中测试 napi API（pos↔coords，供跨块选区与装饰定位）
+- [ ] M2.4 装饰下发通道（搜索高亮 range、闪烁 range 作为块属性）
+- [ ] M2.5 跨块选区绘制（拖拽选择、shift 点击扩展、跨块 ⌘C）
+
+### M3 — 组件与交互（`packages/vue` `<markdown-editor>`）
+
+- [ ] M3.1 组件外壳：props（source/theme）、change 事件、受控/非受控
+- [ ] M3.2 块级渲染：h1–h6、嵌套列表、引用、围栏代码（Syntect 高亮）、分隔线、图片、
+      GFM 表格（对齐）、任务列表（复选框点击翻转）、脚注
+- [ ] M3.3 行内渲染：em/strong/行内码/删除线/链接（点击/⌘点击 openUrl）/highlight/软换行
+- [ ] M3.4 标题锚点跳转 + 落点闪烁装饰
+- [ ] M3.5 源码模式切换（`<textarea>`，滚动比例恢复）
+- [ ] M3.6 纯文本 Markdown 复制/粘贴（跨块）
+- [ ] M3.7 ⌘F 搜索高亮（装饰从 PM state 计算下发）
+- [ ] M3.8 快捷键整合（格式命令、撤销、模式切换）
+
+### M4 — 示例与收尾
+
+- [ ] M4.1 `examples/markdown-editor.tsx` 演示 app
+- [ ] M4.2 `bun scripts/dev.ts --shots` 截图
+- [ ] M4.3 `.changeset`、README Status、issue #101 P0-1 勾选
+
+## 停止规则
+
+某能力在不改 `zed/` 的前提下连续 3 轮尝试无解（最可能：preedit 样式 run、候选窗定位、
+内联混排字号）→ 停止推进，把阻塞证据写到 issue #101 并汇报。不硬凑、不绕过 GPUI。
