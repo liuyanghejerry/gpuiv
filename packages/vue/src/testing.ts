@@ -27,6 +27,8 @@ import type {
   NewPathPromptOutcome,
   PathPromptOptions,
   PathPromptOutcome,
+  SystemNotificationOptions,
+  SystemNotificationResponse,
   WindowKeyEventHandlers,
 } from "./types.js"
 export type { ElementBounds }
@@ -37,6 +39,15 @@ import {
   nextWindowKeyEventId,
 } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
+
+/** A notification recorded by the native test bridge, with optional fields
+ *  resolved to their effective values. */
+interface RecordedNotification {
+  tag: string
+  title: string
+  body: string
+  actions: { id: string; label: string }[]
+}
 
 interface NativeTestRendererApi extends NativeRenderer {
   flush(): void
@@ -791,6 +802,65 @@ export class TestRenderer implements NativeRenderer {
   fireMenuAction(id: string): void {
     const native = this.native as { fireMenuAction?(id: string): void }
     native.fireMenuAction?.(id)
+  }
+
+  /** Set the app identity. The notification test bridge is a no-op until
+   *  this ran, mirroring gpui's test platform. */
+  setAppIdentity(identifier: string, name: string): void {
+    this.native.setAppIdentity?.(identifier, name)
+  }
+
+  getAppIdentity(): { identifier: string; name: string } | null {
+    const native = this.native as {
+      getAppIdentity?(): { identifier: string; name: string } | null
+    }
+    return native.getAppIdentity?.() ?? null
+  }
+
+  /** Post a system notification. The test bridge records it; assert with
+   *  `getShownSystemNotifications` / `getDeliveredSystemNotifications`. */
+  showSystemNotification(notification: SystemNotificationOptions): string {
+    return this.native.showSystemNotification?.(notification) ?? ""
+  }
+
+  /** Dismiss a recorded notification by tag. */
+  dismissSystemNotification(tag: string): void {
+    this.native.dismissSystemNotification?.(tag)
+  }
+
+  /** Arm the notification activation handler. */
+  onSystemNotificationResponse(
+    handler: (error: Error | null, response: SystemNotificationResponse) => void
+  ): void {
+    this.native.onSystemNotificationResponse?.(handler)
+  }
+
+  /** Deliver a notification activation to the armed handler, the way the OS
+   *  would. */
+  fireSystemNotificationResponse(tag: string, actionId: string | null): void {
+    const native = this.native as {
+      fireSystemNotificationResponse?(tag: string, actionId: string | null): void
+    }
+    native.fireSystemNotificationResponse?.(tag, actionId)
+  }
+
+  getShownSystemNotifications() {
+    const native = this.native as {
+      getShownSystemNotifications?(): RecordedNotification[]
+    }
+    return native.getShownSystemNotifications?.() ?? []
+  }
+
+  getDeliveredSystemNotifications() {
+    const native = this.native as {
+      getDeliveredSystemNotifications?(): RecordedNotification[]
+    }
+    return native.getDeliveredSystemNotifications?.() ?? []
+  }
+
+  getDismissedSystemNotifications(): string[] {
+    const native = this.native as { getDismissedSystemNotifications?(): string[] }
+    return native.getDismissedSystemNotifications?.() ?? []
   }
 
   /** Put a straight-alpha RGBA image on the platform's in-memory test

@@ -2,11 +2,20 @@
 export { createApp, createNativeRenderer, resetApp, startFrameLoop } from "./renderer.js"
 export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
 export { promptForPaths, promptForNewPath, setMenus } from "./dialogs.js"
+export {
+  dismissSystemNotification,
+  onSystemNotificationResponse,
+  setAppIdentity,
+  showSystemNotification,
+} from "./notifications.js"
 export type {
   NewPathPromptOptions,
   NewPathPromptOutcome,
   PathPromptOptions,
   PathPromptOutcome,
+  SystemNotificationAction,
+  SystemNotificationOptions,
+  SystemNotificationResponse,
 } from "./types.js"
 export { isPackaged, resourcesPath, resolveResourcesPath } from "./packaged.js"
 export type { ResourcesPathInput } from "./packaged.js"

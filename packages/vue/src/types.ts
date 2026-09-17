@@ -671,6 +671,27 @@ export interface NativeRenderer {
     suggestedName: string | undefined | null,
     callback: (error: Error | null, outcome: NewPathPromptOutcome) => void
   ): void
+
+  // ── System notifications ───────────────────────────────────────
+  /** Set the app's process-wide identity and user-visible name. Call once,
+   *  early: Windows attributes toasts to the AppUserModelID, and the OS
+   *  presents `name` wherever it names the app. */
+  setAppIdentity?(identifier: string, name: string): void
+  /** Post a notification to the OS notification center. Returns the
+   *  effective tag: the described one, or a generated tag when omitted.
+   *  Same-tag notifications replace each other where the platform
+   *  supports it. */
+  showSystemNotification?(notification: SystemNotificationOptions): string
+  /** Remove the delivered or pending notification with this tag.
+   *  Best-effort: platforms that cannot retract a notification let it age
+   *  out instead. */
+  dismissSystemNotification?(tag: string): void
+  /** Register the handler for notification activations — the body or an
+   *  action button. Replaces any earlier handler. The callback receives
+   *  `(null, response)`. */
+  onSystemNotificationResponse?(
+    callback: (error: Error | null, response: SystemNotificationResponse) => void
+  ): void
 }
 
 /** One entry of a [`MenuBarMenu`]. Exactly one of `separator`, `submenu`, or
@@ -708,6 +729,37 @@ export interface MenuBarMenu {
   items?: MenuItemSpec[]
   /** Gray the whole menu out. */
   disabled?: boolean
+}
+
+/** A button offered on a system notification. */
+export interface SystemNotificationAction {
+  /** Identifies the action in the response's `actionId` when pressed. */
+  id: string
+  /** The button's user-visible label. */
+  label: string
+}
+
+/** A notification posted to the OS notification center. */
+export interface SystemNotificationOptions {
+  /** Stable identity: posting again with the same tag replaces the earlier
+   *  notification where the platform supports it, and responses carry the
+   *  tag back. Omit for an independent notification. */
+  tag?: string
+  /** The notification's headline. */
+  title: string
+  /** Additional text displayed below the title. */
+  body?: string
+  /** Action buttons; platforms without button support show the body alone. */
+  actions?: SystemNotificationAction[]
+}
+
+/** The user's activation of a system notification. */
+export interface SystemNotificationResponse {
+  /** The `tag` of the activated notification. */
+  tag: string
+  /** The pressed action button's id; absent when the body itself was
+   *  clicked. */
+  actionId?: string | undefined
 }
 
 /** A clipboard image decoded to straight-alpha RGBA. */

@@ -500,6 +500,15 @@ enum UiCommand {
         suggested_name: Option<String>,
         callback: ThreadsafeFunction<NewPathPromptOutcome>,
     },
+    SetAppIdentity {
+        identifier: String,
+        name: String,
+    },
+    ShowSystemNotification(gpui::SystemNotification),
+    DismissSystemNotification(String),
+    SetSystemNotificationResponseCallback {
+        callback: ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>,
+    },
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -956,6 +965,33 @@ async fn run_ui_commands(
                     cx.prompt_for_new_path(std::path::Path::new(&directory), suggested_name.as_deref());
                 resolve_new_path_prompt(cx, receiver, callback);
             }),
+            UiCommand::SetAppIdentity { identifier, name } => {
+                window.update(cx, move |_view, _window, cx| {
+                    cx.set_app_identity(&identifier, &name);
+                })
+            }
+            UiCommand::ShowSystemNotification(notification) => {
+                window.update(cx, move |_view, _window, cx| {
+                    cx.show_system_notification(notification);
+                })
+            }
+            UiCommand::DismissSystemNotification(tag) => {
+                window.update(cx, move |_view, _window, cx| {
+                    cx.dismiss_system_notification(&tag);
+                })
+            }
+            UiCommand::SetSystemNotificationResponseCallback { callback } => {
+                window.update(cx, move |_view, _window, cx| {
+                    cx.on_system_notification_response(move |response, _cx| {
+                        callback.call(
+                            Ok(crate::notifications::SystemNotificationResponseJs::from(
+                                response,
+                            )),
+                            ThreadsafeFunctionCallMode::NonBlocking,
+                        );
+                    });
+                })
+            }
         };
         if let Err(error) = result {
             // The last window can close mid-command; logging `window not found`
@@ -1952,6 +1988,159 @@ impl GpuixRenderer {
         )))]
         {
             let _ = url;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Set the app's process-wide identity and user-visible name. Call once,
+    /// early: Windows attributes toasts to the AppUserModelID, and the OS
+    /// presents `name` wherever it names the app.
+    #[napi]
+    pub fn set_app_identity(&self, identifier: String, name: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| cx.set_app_identity(&identifier, &name));
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetAppIdentity { identifier, name });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (identifier, name);
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Post a notification to the OS notification center. A notification
+    /// whose `tag` matches an earlier one replaces it where the platform
+    /// supports it. Returns the effective tag — the described one, or a
+    /// generated tag when omitted. On macOS, notifications only deliver from
+    /// a packaged .app bundle; a bare `bun` process is skipped by the
+    /// platform's bundle guard.
+    #[napi]
+    pub fn show_system_notification(
+        &self,
+        notification: crate::notifications::SystemNotificationDesc,
+    ) -> Result<String> {
+        let tag = notification
+            .tag
+            .clone()
+            .unwrap_or_else(crate::notifications::next_notification_tag);
+        let converted = notification.to_gpui(&tag);
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| cx.show_system_notification(converted));
+            Ok(tag)
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self
+            .send_ui_command(UiCommand::ShowSystemNotification(converted))
+            .map(|()| tag);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = converted;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Remove the delivered or pending notification with this tag.
+    /// Best-effort: platforms that cannot retract a notification once shown
+    /// let it age out of the notification center on its own.
+    #[napi]
+    pub fn dismiss_system_notification(&self, tag: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| cx.dismiss_system_notification(&tag));
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::DismissSystemNotification(tag));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = tag;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Register the handler invoked when the user activates a system
+    /// notification — by clicking its body or one of its action buttons.
+    /// Replaces any earlier handler. The response carries the notification's
+    /// `tag` and the pressed action's id (null for a body click).
+    #[napi]
+    pub fn on_system_notification_response(
+        &self,
+        callback: ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                cx.on_system_notification_response(move |response, _cx| {
+                    callback.call(
+                        Ok(crate::notifications::SystemNotificationResponseJs::from(response)),
+                        ThreadsafeFunctionCallMode::NonBlocking,
+                    );
+                });
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetSystemNotificationResponseCallback { callback });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = callback;
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))

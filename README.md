@@ -2840,6 +2840,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
 - [x] Clipboard text (`writeClipboardText`, `readClipboardText`)
 - [x] Opening external URLs (`openUrl`)
+- [x] System notifications (`showSystemNotification`, `dismissSystemNotification`, `onSystemNotificationResponse`; `setAppIdentity` for toast attribution. macOS delivers only from a packaged `.app`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
