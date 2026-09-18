@@ -181,4 +181,24 @@ describeNative("editor spans / decorations / selection props", () => {
     expect(runs[0].strikethrough).toBe(true)
     app.unmount()
   })
+
+  it("measures caret positions and hit-tests points back to offsets", async () => {
+    const { app } = editorApp()
+    await app.settle()
+    const input = app.renderer.findByTestId("block")
+    const p0 = app.renderer.getInputTextPosition(input.id, 0)
+    const p5 = app.renderer.getInputTextPosition(input.id, 5)
+    const p11 = app.renderer.getInputTextPosition(input.id, 11)
+    expect(p0.length).toBe(2)
+    expect(p5.length).toBe(2)
+    expect(p5[0]).toBeGreaterThan(p0[0])
+    expect(p11[0]).toBeGreaterThan(p5[0])
+    // Same visual line: y equal for all offsets of a single-line input.
+    expect(p5[1]).toBeCloseTo(p0[1], 5)
+    // Round trip: the point of an offset hit-tests back to that offset.
+    expect(app.renderer.getInputTextOffset(input.id, p5[0], p5[1])).toBe(5)
+    expect(app.renderer.getInputTextOffset(input.id, p0[0], p0[1])).toBe(0)
+    expect(app.renderer.getInputTextOffset(input.id, p11[0], p11[1])).toBe(11)
+    app.unmount()
+  })
 })

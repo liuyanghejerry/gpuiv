@@ -1423,6 +1423,47 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Window-space caret position `[x, y]` for a UTF-16 offset of an editor,
+    /// or an empty array when the element has not been laid out. This is the
+    /// pos\u{2194}coords half of the WYSIWYG measurement API.
+    #[napi]
+    pub fn get_input_text_position(&self, element_id: f64, offset: f64) -> Result<Vec<f64>> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let point = view.update(cx, |_view, cx| {
+                entity.read(cx).window_point_for_utf16(offset as usize)
+            });
+            Ok(point
+                .map(|(x, y)| vec![f64::from(x), f64::from(y)])
+                .unwrap_or_default())
+        })
+    }
+
+    /// The closest UTF-16 offset in an editor for a window-space point, or -1
+    /// when the element has not been laid out.
+    #[napi]
+    pub fn get_input_text_offset(&self, element_id: f64, x: f64, y: f64) -> Result<f64> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let index = view.update(cx, |_view, cx| {
+                entity.read(cx).utf16_index_for_window_point(x as f32, y as f32)
+            });
+            Ok(index.map(|index| f64::from(index as u32)).unwrap_or(-1.0))
+        })
+    }
+
     /// Where the `decorations` prop of an editor landed on screen (pixel
     /// rects), for asserting search-highlight geometry.
     #[napi]
