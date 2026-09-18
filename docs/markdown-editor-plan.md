@@ -153,9 +153,17 @@ bun scripts/dev.ts --shots                 # 有截图项时
 
 ### M4 — 示例与收尾
 
-- [ ] M4.1 `examples/markdown-editor.tsx` 演示 app
-- [ ] M4.2 `bun scripts/dev.ts --shots` 截图
-- [ ] M4.3 `.changeset`、README Status、issue #101 P0-1 勾选
+> 完成（2026-09-18）。示例 app（`examples/markdown-editor.tsx`，`bun run markdown-editor`
+> 启动）带工具栏（模式切换/搜索框/next/状态行）与 outline 面板（跳转+闪烁）；
+> 截图测试 `markdown-editor-shot.test.tsx`（`bun scripts/dev.ts --shots
+> markdown-editor`，PNG 落 `packages/vue/screenshots/markdown-editor.png`）。
+
+- [x] M4.1 `examples/markdown-editor.tsx` 演示 app（含 ⌘F 搜索面板、源码模式切换、
+      outline 跳转；示例文档覆盖全部块型与行内样式）
+- [x] M4.2 `bun scripts/dev.ts --shots markdown-editor` 截图 + painted-text 断言 +
+      搜索高亮 smoke
+- [x] M4.3 `.changeset`（组件 minor + 原生 props minor）、README Status、
+      issue #101 P0-1 勾选
 
 ## 停止规则
 

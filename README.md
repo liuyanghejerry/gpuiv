@@ -2819,6 +2819,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] GPU-backed test renderer with screenshot capture
 - [x] Standalone build (pinned GPUI platform dependencies)
 - [x] Native text input and multiline textarea
+- [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block selection with markdown copy/paste, ⌘F search decorations, source mode, anchor jumps; styled spans / decorations / programmatic selection / `selectionChange` / clipboard interception props on `<input>`/`<textarea>`
 - [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`)
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images)
