@@ -697,12 +697,14 @@ export declare class TestGpuixRenderer {
   /**
    * Window-space caret position `[x, y]` for a UTF-16 offset of an editor,
    * or an empty array when the element has not been laid out. This is the
-   * pos\u{2194}coords half of the WYSIWYG measurement API.
+   * position-for-offset half of the WYSIWYG measurement API;
+   * `getInputTextOffset` is the offset-for-position half.
    */
   getInputTextPosition(elementId: number, offset: number): Array<number>
   /**
-   * The closest UTF-16 offset in an editor for a window-space point, or -1
-   * when the element has not been laid out.
+   * The closest UTF-16 offset in an editor for a window-space point. The
+   * offset is clamped into the text, and an element that has not been laid
+   * out reports 0 — this never returns -1.
    */
   getInputTextOffset(elementId: number, x: number, y: number): number
   /**

@@ -315,6 +315,8 @@ impl CustomElement for TextEditorElement {
         let emits_submit = ctx.events.contains("submit");
         let emits_key_down = ctx.events.contains("keyDown");
         let emits_key_up = ctx.events.contains("keyUp");
+        let emits_undo = ctx.events.contains("undo");
+        let emits_redo = ctx.events.contains("redo");
         let callback = ctx.event_callback.clone();
 
         let state = self
@@ -338,6 +340,8 @@ impl CustomElement for TextEditorElement {
                     emits_submit,
                     emits_key_down,
                     emits_key_up,
+                    emits_undo,
+                    emits_redo,
                     focus_handle: state_focus_handle,
                     content: value,
                     placeholder: placeholder.into(),
@@ -360,6 +364,7 @@ impl CustomElement for TextEditorElement {
                     last_bounds: None,
                     line_height: px(20.0),
                     font_size: px(16.0),
+                    text_align: gpui::TextAlign::Left,
                     content_height: 20.0,
                     content_width: 0.0,
                     display_is_placeholder: false,
@@ -388,6 +393,8 @@ impl CustomElement for TextEditorElement {
             state.emits_change = emits_change;
             state.emits_key_down = emits_key_down;
             state.emits_key_up = emits_key_up;
+            state.emits_undo = emits_undo;
+            state.emits_redo = emits_redo;
             if state.emits_submit != emits_submit {
                 state.emits_submit = emits_submit;
                 cx.notify();
@@ -575,7 +582,7 @@ impl CustomElement for TextEditorElement {
         &[
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
             "compositionStart", "compositionUpdate", "compositionEnd", "selectionChange",
-            "copy", "paste",
+            "copy", "cut", "paste", "backspaceStart", "undo", "redo",
         ]
     }
 
@@ -625,10 +632,29 @@ pub(crate) struct SpanDecoration {
     color: Option<gpui::Hsla>,
     font_weight: Option<gpui::FontWeight>,
     italic: bool,
-    underline: Option<gpui::Hsla>,
-    strikethrough: Option<gpui::Hsla>,
+    underline: Option<SpanLine>,
+    strikethrough: Option<SpanLine>,
     background: Option<gpui::Hsla>,
     font_family: Option<SharedString>,
+}
+
+/// An underline/strikethrough requested by a span. GPUI falls back to the
+/// run's text color only when the style's color is `None`, so a bare `true`
+/// in the prop maps to `Inherit` — a `Some` built from `Hsla::default()` is
+/// alpha 0 and paints nothing.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum SpanLine {
+    Inherit,
+    Colored(gpui::Hsla),
+}
+
+impl SpanLine {
+    fn color(self) -> Option<gpui::Hsla> {
+        match self {
+            SpanLine::Inherit => None,
+            SpanLine::Colored(color) => Some(color),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -680,6 +706,14 @@ fn parse_font_weight(value: Option<&serde_json::Value>) -> Option<gpui::FontWeig
     }
 }
 
+fn parse_span_line(value: Option<&serde_json::Value>) -> Option<SpanLine> {
+    match value {
+        Some(serde_json::Value::Bool(enabled)) => enabled.then_some(SpanLine::Inherit),
+        Some(serde_json::Value::String(_)) => parse_hsla(value).map(SpanLine::Colored),
+        _ => None,
+    }
+}
+
 fn parse_span_deco(item: &serde_json::Value) -> SpanDecoration {
     SpanDecoration {
         color: parse_hsla(item.get("color")),
@@ -688,18 +722,8 @@ fn parse_span_deco(item: &serde_json::Value) -> SpanDecoration {
             item.get("fontStyle").and_then(serde_json::Value::as_str),
             Some("italic")
         ),
-        underline: parse_hsla(item.get("underline")).or_else(|| {
-            item.get("underline")
-                .and_then(serde_json::Value::as_bool)
-                .filter(|enabled| *enabled)
-                .map(|_| gpui::Hsla::default())
-        }),
-        strikethrough: parse_hsla(item.get("strikethrough")).or_else(|| {
-            item.get("strikethrough")
-                .and_then(serde_json::Value::as_bool)
-                .filter(|enabled| *enabled)
-                .map(|_| gpui::Hsla::default())
-        }),
+        underline: parse_span_line(item.get("underline")),
+        strikethrough: parse_span_line(item.get("strikethrough")),
         background: parse_hsla(item.get("background")),
         font_family: item
             .get("fontFamily")
@@ -758,12 +782,19 @@ fn build_span_runs(
     spans: &[SpanProp],
     marked: Option<&Range<usize>>,
 ) -> (Vec<TextRun>, Vec<PaintedRunSummary>, bool) {
+    // Span offsets are UTF-16 (ProseMirror positions); convert each span once
+    // instead of re-walking the text for every segment × span pair.
+    let span_ranges: Vec<Range<usize>> = spans
+        .iter()
+        .map(|span| {
+            utf16_offset_to_utf8(text, span.start).min(text.len())
+                ..utf16_offset_to_utf8(text, span.end).min(text.len())
+        })
+        .collect();
     let mut boundaries = std::collections::BTreeSet::from([0, text.len()]);
-    for span in spans {
-        let start = utf16_offset_to_utf8(text, span.start);
-        let end = utf16_offset_to_utf8(text, span.end);
-        boundaries.insert(start.min(text.len()));
-        boundaries.insert(end.min(text.len()));
+    for span_range in &span_ranges {
+        boundaries.insert(span_range.start);
+        boundaries.insert(span_range.end);
     }
     if let Some(marked) = marked {
         boundaries.insert(marked.start.min(text.len()));
@@ -783,10 +814,8 @@ fn build_span_runs(
         let mut underline = None;
         let mut strikethrough = None;
         let mut background = None;
-        for span in spans {
-            let span_start = utf16_offset_to_utf8(text, span.start);
-            let span_end = utf16_offset_to_utf8(text, span.end);
-            if span_start >= end || span_end <= start {
+        for (span, span_range) in spans.iter().zip(&span_ranges) {
+            if span_range.start >= end || span_range.end <= start {
                 continue;
             }
             if let Some(span_color) = span.deco.color {
@@ -801,17 +830,17 @@ fn build_span_runs(
             if span.deco.italic {
                 font.style = FontStyle::Italic;
             }
-            if let Some(underline_color) = span.deco.underline {
+            if let Some(span_underline) = span.deco.underline {
                 underline = Some(UnderlineStyle {
-                    color: Some(underline_color),
+                    color: span_underline.color(),
                     thickness: px(1.0),
                     wavy: false,
                 });
             }
-            if let Some(strike_color) = span.deco.strikethrough {
+            if let Some(span_strikethrough) = span.deco.strikethrough {
                 strikethrough = Some(StrikethroughStyle {
                     thickness: px(1.0),
-                    color: Some(strike_color),
+                    color: span_strikethrough.color(),
                 });
             }
             if let Some(background_color) = span.deco.background {
@@ -892,7 +921,7 @@ mod span_tests {
 
     fn deco_strike() -> SpanDecoration {
         SpanDecoration {
-            strikethrough: Some(gpui::Hsla::default()),
+            strikethrough: Some(SpanLine::Inherit),
             ..Default::default()
         }
     }
@@ -1029,8 +1058,60 @@ mod span_tests {
         assert!(spans[0].deco.italic);
         assert!(spans[1].deco.background.is_some());
     }
-}
 
+    #[test]
+    fn boolean_decoration_inherits_the_run_color() {
+        let text = "abcdef";
+        let spans = parse_span_props(&serde_json::json!([
+            { "start": 0, "end": 3, "underline": true },
+            { "start": 3, "end": 6, "strikethrough": true },
+            { "start": 0, "end": 6, "underline": false, "strikethrough": false }
+        ]));
+        let base_color = gpui::rgba(0x00ff00ff).into();
+        let (runs, summary, _) = build_span_runs(text, &base_font(), base_color, &spans, None);
+        assert_eq!(runs.len(), 2);
+        // A bare `true` paints the line, and leaves the color to the run's
+        // text color: GPUI only falls back when the style color is `None`.
+        let underlined = &runs[0];
+        assert_eq!(
+            underlined.underline,
+            Some(UnderlineStyle {
+                color: None,
+                thickness: px(1.0),
+                wavy: false,
+            })
+        );
+        let struck = &runs[1];
+        assert_eq!(
+            struck.strikethrough,
+            Some(StrikethroughStyle {
+                thickness: px(1.0),
+                color: None,
+            })
+        );
+        assert!(summary[0].underline && !summary[0].strikethrough);
+        assert!(!summary[1].underline && summary[1].strikethrough);
+    }
+
+    #[test]
+    fn string_decoration_color_is_honored() {
+        let text = "abc";
+        let spans = parse_span_props(&serde_json::json!([
+            { "start": 0, "end": 3, "underline": "#ff0000" }
+        ]));
+        let (runs, _, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(
+            runs[0].underline.and_then(|style| style.color),
+            Some(gpui::rgba(0xff0000ff).into())
+        );
+    }
+}
 
 fn coalescing_edit(
     range: &Range<usize>,
@@ -1093,6 +1174,8 @@ pub(crate) struct TextEditorState {
     emits_submit: bool,
     emits_key_down: bool,
     emits_key_up: bool,
+    emits_undo: bool,
+    emits_redo: bool,
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
@@ -1115,6 +1198,7 @@ pub(crate) struct TextEditorState {
     last_bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
     font_size: Pixels,
+    text_align: gpui::TextAlign,
     content_height: f32,
     content_width: f32,
     display_is_placeholder: bool,
@@ -1436,6 +1520,11 @@ impl TextEditorState {
         if self.selected_range.is_empty() {
             let previous = self.previous_boundary(self.cursor_offset());
             if previous == self.cursor_offset() {
+                // Backspace is a native keybinding, so keyDown never reaches
+                // JS. A press with an empty selection at offset 0 is a native
+                // no-op; report it so the host can join with the previous
+                // block.
+                emit_event_full(&self.callback, self.element_id, "backspaceStart", |_| {});
                 return;
             }
             self.select_to(previous, cx);
@@ -1653,6 +1742,17 @@ impl TextEditorState {
         if self.read_only || self.selected_range.is_empty() {
             return;
         }
+        if self.intercept_clipboard {
+            // Same intent-reporting contract as `copy`, but a cut is for the
+            // host to perform through the model: deleting here would strip
+            // the text before the host serializes it.
+            let selection_utf16 = self.range_to_utf16(&self.selected_range.clone());
+            emit_event_full(&self.callback, self.element_id, "cut", |payload| {
+                payload.start_index = Some(selection_utf16.start as f64);
+                payload.end_index = Some(selection_utf16.end as f64);
+            });
+            return;
+        }
         self.copy(&Copy, window, cx);
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -1676,6 +1776,13 @@ impl TextEditorState {
         if self.read_only {
             return;
         }
+        if self.emits_undo {
+            // cmd-z is a native keybinding, so keyDown never reaches JS. A
+            // host with an `undo` listener owns the history (e.g. the
+            // document model's undo stack); skip the native one.
+            emit_event_full(&self.callback, self.element_id, "undo", |_| {});
+            return;
+        }
         if let Some(previous) = self.undo_stack.pop_back() {
             self.redo_stack.push(self.snapshot());
             self.restore(previous, cx);
@@ -1684,6 +1791,10 @@ impl TextEditorState {
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
+            return;
+        }
+        if self.emits_redo {
+            emit_event_full(&self.callback, self.element_id, "redo", |_| {});
             return;
         }
         if let Some(next) = self.redo_stack.pop() {
@@ -1966,6 +2077,7 @@ impl TextEditorState {
         // request_layout: an explicit lineHeight sets the row in pixels,
         // and without one a larger fontSize still grows the box.
         self.line_height = style.line_height_in_pixels(rem_size);
+        self.text_align = style.text_align;
         let color = if is_placeholder {
             gpui::rgba(0x8f8f8fff).into()
         } else {
@@ -2045,7 +2157,6 @@ impl TextEditorState {
         self.line_starts = line_starts;
         self.content_height
     }
-
 
     fn clamp_scroll(&mut self, viewport_width: f32, viewport_height: f32) {
         if self.follow_cursor {
@@ -2583,7 +2694,7 @@ impl gpui::Element for EditorTextElement {
             for quad in prepaint.decorations.drain(..) {
                 window.paint_quad(quad);
             }
-            let (lines, line_height, scroll_top, scroll_left, display, paint_backgrounds) =
+            let (lines, line_height, scroll_top, scroll_left, display, paint_backgrounds, text_align) =
                 self.input.update(cx, |input, _| {
                     let display = if input.content.is_empty() {
                         input.placeholder.clone()
@@ -2597,6 +2708,7 @@ impl gpui::Element for EditorTextElement {
                         input.scroll_left,
                         display,
                         input.has_background_runs,
+                        input.text_align,
                     )
                 });
             crate::text::log_painted_text(display);
@@ -2607,7 +2719,7 @@ impl gpui::Element for EditorTextElement {
                     line.paint_background(
                         point(bounds.left() - px(scroll_left), y),
                         line_height,
-                        gpui::TextAlign::Left,
+                        text_align,
                         Some(bounds),
                         window,
                         cx,
@@ -2617,7 +2729,7 @@ impl gpui::Element for EditorTextElement {
                 line.paint(
                     point(bounds.left() - px(scroll_left), y),
                     line_height,
-                    gpui::TextAlign::Left,
+                    text_align,
                     Some(bounds),
                     window,
                     cx,
