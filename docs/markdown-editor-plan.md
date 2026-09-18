@@ -227,6 +227,28 @@ split/join/insertMarkdownAt/toggleTaskItemAt）补齐直接单测。
 （GPUI 仅绘制期对齐，命中侧镜像需自实现 `aligned_origin_x`）；`toggleList` 解包
 丢弃任务 checked 态；拖拽跨块选区仍需原生捕获按压期外发 mouse-move（M2.5 降级项）。
 
+## 验收修正轮（2026-09-18，手工验收 → 修复）
+
+手工验收发现五项问题，全部修复：
+
+1. **表格单元格黑字**（组件漏传 `color`，原生默认黑）与**光标偏矮**（漏传
+   lineHeight）——单元格与正文行同待遇（`color: theme.text` + 像素 lineHeight）。
+2. **表格列溢出/右对齐文字被裁**：原生编辑器在不定宽度下回退测量 320px，flex
+   收缩失效，两格各 330 溢出 592 的行。改为显式百分比列宽（均分），右对齐
+   「Status」列随之正确绘制在格内。
+3. **搜索框输入第一个字符焦点即被正文抢走**：`(searchQuery, searchActiveIndex)`
+   watch 改为只在「query 不变、activeIndex 变化」（纯 next/prev 导航）时聚焦。
+4. **源码模式高度不填满**：源码分支根改为全高 flex 列 + textarea `flexGrow: 1`
+   （短文档填满可视列，长文档维持 maxRows 钳制 + 内部滚动）。
+5. **⌘A 无法全选文档、无右键菜单**：原生新增 `selectAll` 事件（宿主注册即接管，
+   跳过原生块内全选）与 `contextMenu` 事件（右击释放时发，带窗口坐标；右击按下
+   即聚焦、空选区落 caret、有选区则保留）。组件侧 ⌘A = 全文 docSelection（单块
+   文档退化为块内全选，单元格与源码 textarea 保持原生语义）；内建右键菜单
+   Copy/Cut/Paste/Select All，WYSIWYG 走 PM 管线、源码模式走 sourceText 剪贴。
+
+遗留限制不变（居中/右对齐格内 caret 命中仍按未对齐坐标；toggleList 解包丢任务态；
+拖拽跨块选区待原生增强）。
+
 ## 停止规则
 
 某能力在不改 `zed/` 的前提下连续 3 轮尝试无解（最可能：preedit 样式 run、候选窗定位、

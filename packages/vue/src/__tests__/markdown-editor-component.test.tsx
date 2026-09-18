@@ -264,7 +264,10 @@ describeNative("markdown-editor component", () => {
     const blocks = app.renderer.findByType("textarea")
     // Bold the second block: a mark-only command the native per-element undo
     // stack (which only tracks text edits) could never revert or redo.
-    app.renderer.nativeSimulateKeystrokes(blocks[1].id, "cmd-a")
+    // (cmd-a is document-wide now, so select the word natively instead.)
+    app.renderer.nativeSimulateKeystrokes(blocks[1].id, "home")
+    await app.settle()
+    app.renderer.nativeSimulateKeystrokes(blocks[1].id, "shift-end")
     await app.settle()
     app.renderer.nativeSimulateKeystrokes(blocks[1].id, "cmd-b")
     await app.settle()

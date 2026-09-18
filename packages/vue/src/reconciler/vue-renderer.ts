@@ -85,6 +85,7 @@ const EVENT_TYPES = new Set([
   "backspaceStart",
   "undo",
   "redo",
+  "selectAll",
 ])
 
 /// Props that reach Rust on EVERY element type, including div and text.

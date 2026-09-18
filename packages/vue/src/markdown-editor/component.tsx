@@ -844,7 +844,24 @@ export const MarkdownEditor = defineComponent({
     // keystroke before keyDown reaches JS, so editors opt into interception
     // and the component serializes (cross-block markdown), deletes, or
     // re-inserts parsed blocks itself.
-    const onBlockCopy = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+    //
+    // The copy/cut helpers are shared by the keyboard events (range from the
+    // native event payload) and the context menu (range from the tracked
+    // selection of the right-clicked block).
+    const selectionRangeOf = (
+      key: string,
+      event?: { startIndex?: number; endIndex?: number },
+    ): [number, number] => {
+      const tracked = selections.get(key)
+      const start = event?.startIndex ?? tracked?.[0] ?? 0
+      const end = event?.endIndex ?? tracked?.[1] ?? start
+      return [Math.min(start, end), Math.max(start, end)]
+    }
+
+    const copyBlockSelection = (
+      row: TextRow,
+      event?: { startIndex?: number; endIndex?: number },
+    ): void => {
       const renderer = getRenderer()
       if (!renderer?.writeClipboardText) return
       const markdown = serializeDocSelection()
@@ -852,14 +869,16 @@ export const MarkdownEditor = defineComponent({
         renderer.writeClipboardText(markdown)
         return
       }
-      const start = event.startIndex ?? 0
-      const end = event.endIndex ?? start
+      const [start, end] = selectionRangeOf(row.key, event)
       if (end > start) {
         renderer.writeClipboardText((blockTexts.get(row.key) ?? row.text).slice(start, end))
       }
     }
 
-    const onBlockCut = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+    const cutBlockSelection = (
+      row: TextRow,
+      event?: { startIndex?: number; endIndex?: number },
+    ): void => {
       const renderer = getRenderer()
       if (!renderer?.writeClipboardText) return
       const markdown = serializeDocSelection()
@@ -870,8 +889,7 @@ export const MarkdownEditor = defineComponent({
         if (caret !== null) focusDocPosition(caret)
         return
       }
-      const start = event.startIndex ?? 0
-      const end = event.endIndex ?? start
+      const [start, end] = selectionRangeOf(row.key, event)
       if (end <= start) return
       const text = blockTexts.get(row.key) ?? row.text
       renderer.writeClipboardText(text.slice(start, end))
@@ -880,6 +898,14 @@ export const MarkdownEditor = defineComponent({
       selections.set(row.key, [start, start])
       pendingSelectionProps.set(row.key, [start, start])
       touch()
+    }
+
+    const onBlockCopy = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+      copyBlockSelection(row, event)
+    }
+
+    const onBlockCut = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+      cutBlockSelection(row, event)
     }
 
     const onBlockPaste = (row: TextRow, inTable = false) => (event: { value?: string | null }) => {
@@ -951,6 +977,124 @@ export const MarkdownEditor = defineComponent({
       focusDocPosition(core.state.selection.head)
     }
 
+    // cmd-a is a native keybinding; text rows register a `selectAll` listener
+    // so the native editor reports the intent instead of selecting locally.
+    // A single text block keeps element-local behavior through the selection
+    // prop (the tracked selection must move for copy/cut and format
+    // shortcuts); multiple blocks become a cross-block docSelection.
+    const selectAllBlocks = () => {
+      const textRows = lastRows.filter((row): row is TextRow => row.kind === "text")
+      const first = textRows[0]
+      const last = textRows[textRows.length - 1]
+      if (!first || !last) return
+      if (first.key === last.key) {
+        const len = (blockTexts.get(first.key) ?? first.text).length
+        selections.set(first.key, [0, len])
+        pendingSelectionProps.set(first.key, [0, len])
+        version.value++
+        return
+      }
+      setDocSelection(
+        { key: first.key, offset: 0 },
+        { key: last.key, offset: (blockTexts.get(last.key) ?? last.text).length },
+      )
+    }
+
+    // ── Context menu ─────────────────────────────────────────────────
+    // Right-click on a text row (or the source textarea) opens a small
+    // floating menu at the event's window coordinates. `key` is the
+    // right-clicked block's key; null in source mode.
+    const contextMenu = ref<{ x: number; y: number; key: string | null } | null>(null)
+    // Tracked selection of the source textarea (it has no per-block map).
+    let sourceSelection: [number, number] = [0, 0]
+    let pendingSourceSelection: [number, number] | null = null
+
+    /** A pending source selection applies once; consuming the slot re-arms
+     *  it, so a repeated same-value request is not dropped by Rust's dedupe. */
+    const consumeSourceSelection = (): [number, number] | undefined => {
+      const pending = pendingSourceSelection
+      pendingSourceSelection = null
+      return pending ?? undefined
+    }
+
+    const onBlockContextMenu = (row: TextRow) => (event: { x?: number; y?: number }) => {
+      // Opening the menu must not clear an active docSelection: the native
+      // right-button press only moved the element caret, and the menu's
+      // Copy/Cut read the cross-block selection first.
+      contextMenu.value = { x: event.x ?? 0, y: event.y ?? 0, key: row.key }
+    }
+
+    const onSourceContextMenu = (event: { x?: number; y?: number }) => {
+      contextMenu.value = { x: event.x ?? 0, y: event.y ?? 0, key: null }
+    }
+
+    /** The current TextRow for a key — rows from the render where the menu
+     *  opened can be stale by the time an action runs. */
+    const rowForKey = (key: string): TextRow | null => {
+      const row = lastRows.find((candidate) => candidate.kind === "text" && candidate.key === key)
+      return row && row.kind === "text" ? row : null
+    }
+
+    type MenuTarget = { x: number; y: number; key: string | null }
+
+    const menuCopy = (menu: MenuTarget) => {
+      const renderer = getRenderer()
+      if (menu.key === null) {
+        const [start, end] = sourceSelection
+        const text = sourceText.value
+        if (end > start) renderer?.writeClipboardText?.(text.slice(start, end))
+        return
+      }
+      const row = rowForKey(menu.key)
+      if (row) copyBlockSelection(row)
+    }
+
+    const menuCut = (menu: MenuTarget) => {
+      const renderer = getRenderer()
+      if (menu.key === null) {
+        const [start, end] = sourceSelection
+        const text = sourceText.value
+        if (end <= start) return
+        renderer?.writeClipboardText?.(text.slice(start, end))
+        sourceText.value = text.slice(0, start) + text.slice(end)
+        sourceSelection = [start, start]
+        pendingSourceSelection = [start, start]
+        emit("change", sourceText.value)
+        return
+      }
+      const row = rowForKey(menu.key)
+      if (row) cutBlockSelection(row)
+    }
+
+    const menuPaste = (menu: MenuTarget) => {
+      const renderer = getRenderer()
+      const text = renderer?.readClipboardText?.()
+      if (!text) return
+      if (menu.key === null) {
+        const [start, end] = sourceSelection
+        const prev = sourceText.value
+        sourceText.value = prev.slice(0, start) + text + prev.slice(end)
+        const after = start + text.length
+        sourceSelection = [after, after]
+        pendingSourceSelection = [after, after]
+        emit("change", sourceText.value)
+        return
+      }
+      const row = rowForKey(menu.key)
+      // The same pipeline as a native paste: structured markdown inserts as
+      // blocks, code blocks stay literal, the caret is restored.
+      if (row) onBlockPaste(row)({ value: text })
+    }
+
+    const menuSelectAll = (menu: MenuTarget) => {
+      if (menu.key === null) {
+        sourceSelection = [0, sourceText.value.length]
+        pendingSourceSelection = [0, sourceText.value.length]
+        return
+      }
+      selectAllBlocks()
+    }
+
     const toggleTask = (itemPos: number) => {
       core.toggleTaskItemAt(itemPos)
       touch()
@@ -997,6 +1141,7 @@ export const MarkdownEditor = defineComponent({
       pendingExtend = null
       focusedKey = null
       prevFocusedKey = null
+      contextMenu.value = null
     }
 
     watch(
@@ -1030,17 +1175,23 @@ export const MarkdownEditor = defineComponent({
       },
     )
 
-    // Focus the active match only when the (query, index) pair changes.
-    // Doing this from rows() stole focus back to the match on every render —
-    // after each keystroke typed into another block.
-    watch([() => props.searchQuery, () => props.searchActiveIndex], () => {
-      const query = props.searchQuery.trim()
-      if (!query || props.searchActiveIndex < 0) return
-      const match = searchMatches.value[props.searchActiveIndex]
-      if (!match) return
-      pendingSelectionProps.set(match.key, [match.start, match.end])
-      focusBlock(match.key, match.end, match.start)
-    })
+    // Focus the active match only on pure next/prev navigation: the index
+    // changed while the query stayed put. A query change means the user is
+    // typing in the find box — focusing the match then would yank the caret
+    // out of the search input on the first keystroke. Decorations follow the
+    // query through rows() regardless.
+    watch(
+      [() => props.searchQuery, () => props.searchActiveIndex],
+      ([query, active], [prevQuery, prevActive]) => {
+        if (query !== prevQuery || active === prevActive) return
+        const trimmed = query.trim()
+        if (!trimmed || active < 0) return
+        const match = searchMatches.value[active]
+        if (!match) return
+        pendingSelectionProps.set(match.key, [match.start, match.end])
+        focusBlock(match.key, match.end, match.start)
+      },
+    )
 
     watch(searchMatches, (matches) => {
       if (matches.length !== lastMatchCount) {
@@ -1082,24 +1233,137 @@ export const MarkdownEditor = defineComponent({
       width: "100%",
       height: props.viewportHeight > 0 ? props.viewportHeight : undefined,
       overflow: props.viewportHeight > 0 ? ("scroll" as const) : undefined,
+      // Anchor for the context-menu overlay (absolute children anchor to the
+      // nearest positioned parent).
+      position: "relative" as const,
     })
+
+    // Source mode fills the visible column: a full-height flex column root
+    // with the textarea growing into it, so a short document no longer
+    // leaves a small strip. The viewportHeight path is unchanged — the root
+    // stays a fixed-height scroll container.
+    const sourceRootStyle = () => ({
+      width: "100%",
+      height: props.viewportHeight > 0 ? props.viewportHeight : "100%",
+      overflow: props.viewportHeight > 0 ? ("scroll" as const) : undefined,
+      display: "flex",
+      flexDirection: "column" as const,
+      position: "relative" as const,
+    })
+
+    /** Window coordinates from the contextMenu event, re-expressed relative
+     *  to the editor root so the absolute-positioned menu lands under the
+     *  pointer. A scrolling root (viewportHeight) offsets content by its
+     *  scroll offset, which is negative when scrolled down. */
+    const menuPosition = (x: number, y: number): { left: number; top: number } => {
+      const renderer = getRenderer()
+      // getElementBounds is not part of the NativeRenderer interface (the
+      // production napi renderer and the test renderer both implement it).
+      const querier = renderer as unknown as {
+        getElementBounds?: (id: number) => { x: number; y: number } | null
+      } | null
+      const bounds = rootId.value != null ? querier?.getElementBounds?.(rootId.value) : null
+      if (!bounds) return { left: x, top: y }
+      let top = y - bounds.y
+      const id = rootId.value
+      const scroll = id != null ? renderer?.getScrollOffset?.(id) : null
+      if (scroll) top -= scroll[1]
+      return { left: x - bounds.x, top }
+    }
+
+    const renderContextMenu = (theme: MarkdownEditorTheme): ReturnType<typeof h>[] => {
+      const menu = contextMenu.value
+      if (!menu) return []
+      const { left, top } = menuPosition(menu.x, menu.y)
+      const close = () => {
+        contextMenu.value = null
+      }
+      const item = (label: string, testId: string, action: (menu: MenuTarget) => void) =>
+        h(
+          "div",
+          {
+            key: testId,
+            testId,
+            onClick: () => {
+              // Snapshot before closing: the actions read the target from it.
+              const snapshot = contextMenu.value
+              close()
+              if (snapshot) action(snapshot)
+            },
+            style: {
+              paddingTop: 4,
+              paddingBottom: 4,
+              paddingLeft: 12,
+              paddingRight: 12,
+              fontSize: 12,
+              color: theme.text,
+            },
+          },
+          () => [label],
+        )
+      return [
+        // The backdrop swallows the click that dismisses the menu; it never
+        // reaches the blocks below, so their click handlers (and the
+        // docSelection they clear) stay untouched.
+        h("div", {
+          key: "md-menu-backdrop",
+          testId: "md-menu-backdrop",
+          onClick: close,
+          style: { position: "absolute", left: 0, top: 0, right: 0, bottom: 0 },
+        }),
+        h(
+          "div",
+          {
+            key: "md-menu",
+            testId: "md-menu",
+            style: {
+              position: "absolute",
+              left,
+              top,
+              minWidth: 140,
+              backgroundColor: "#262626",
+              borderWidth: 1,
+              borderColor: "#2a2a2a",
+              borderRadius: 6,
+              paddingTop: 4,
+              paddingBottom: 4,
+            },
+          },
+          () => [
+            item("Copy", "md-menu-copy", menuCopy),
+            item("Cut", "md-menu-cut", menuCut),
+            item("Paste", "md-menu-paste", menuPaste),
+            item("Select All", "md-menu-select-all", menuSelectAll),
+          ],
+        ),
+      ]
+    }
 
     return () => {
       const theme = mergedTheme.value
       if (props.mode === "source") {
-        return h("div", { ref: collectRootRef, style: rootStyle() }, () => [
+        return h("div", { ref: collectRootRef, style: sourceRootStyle() }, () => [
           h("textarea", {
             key: "md-source",
             ref: collectRef("md-source"),
             testId: "md-source",
             value: sourceText.value,
             minRows: 4,
+            selection: consumeSourceSelection(),
             onChange: (event: { value?: string | null }) => {
               sourceText.value = event.value ?? ""
               emit("change", sourceText.value)
             },
+            onSelectionChange: (event: { startIndex?: number; endIndex?: number }) => {
+              const anchor = event.startIndex ?? 0
+              sourceSelection = [anchor, event.endIndex ?? anchor]
+            },
+            onContextMenu: onSourceContextMenu,
             style: {
               width: "100%",
+              // Grow into the full-height column; long content keeps its
+              // measured height and overflows into the outer scroller.
+              flexGrow: 1,
               fontFamily: theme.monoFont,
               fontSize: 13,
               // Native lineHeight is absolute pixels, not a font-size factor.
@@ -1107,6 +1371,7 @@ export const MarkdownEditor = defineComponent({
               color: theme.text,
             },
           }),
+          ...renderContextMenu(theme),
         ])
       }
       const list = rows()
@@ -1157,8 +1422,10 @@ export const MarkdownEditor = defineComponent({
                     {
                       key: cell.key,
                       style: {
-                        flexGrow: 1,
-                        flexShrink: 1,
+                        // Explicit percentage width: a bare flex child relies
+                        // on shrink-to-fit, but the native editor measures a
+                        // fixed 320px under indefinite width and never shrinks.
+                        width: `${100 / row.cells.length}%`,
                         borderWidth: 1,
                         borderColor: "#444",
                         backgroundColor: cell.header ? "rgba(127,127,127,0.15)" : undefined,
@@ -1179,6 +1446,10 @@ export const MarkdownEditor = defineComponent({
                           fontSize: theme.fontSize,
                           textAlign: (cell.alignment || "left") as "left" | "center" | "right",
                           fontWeight: cell.header ? 650 : undefined,
+                          color: theme.text,
+                          // Native lineHeight is absolute pixels, not a
+                          // font-size factor — same treatment as text rows.
+                          lineHeight: Math.round(theme.fontSize * 1.7),
                         },
                         onChange: onBlockChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: theme.fontSize, indent: 0, quote: false, align: cell.alignment || "left" }),
                         onSelectionChange: onBlockSelectionChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: theme.fontSize, indent: 0, quote: false }),
@@ -1213,6 +1484,8 @@ export const MarkdownEditor = defineComponent({
             onPaste: onBlockPaste(row),
             onUndo: onBlockUndo,
             onRedo: onBlockRedo,
+            onSelectAll: selectAllBlocks,
+            onContextMenu: onBlockContextMenu(row),
             style: {
               width: "100%",
               fontSize: row.fontSize,
@@ -1294,7 +1567,10 @@ export const MarkdownEditor = defineComponent({
         }
         lastKind = row.kind
       }
-      return h("div", { ref: collectRootRef, style: rootStyle() }, () => children)
+      return h("div", { ref: collectRootRef, style: rootStyle() }, () => [
+        ...children,
+        ...renderContextMenu(theme),
+      ])
     }
   },
 })

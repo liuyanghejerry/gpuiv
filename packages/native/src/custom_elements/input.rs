@@ -317,6 +317,8 @@ impl CustomElement for TextEditorElement {
         let emits_key_up = ctx.events.contains("keyUp");
         let emits_undo = ctx.events.contains("undo");
         let emits_redo = ctx.events.contains("redo");
+        let emits_select_all = ctx.events.contains("selectAll");
+        let emits_context_menu = ctx.events.contains("contextMenu");
         let callback = ctx.event_callback.clone();
 
         let state = self
@@ -342,6 +344,8 @@ impl CustomElement for TextEditorElement {
                     emits_key_up,
                     emits_undo,
                     emits_redo,
+                    emits_select_all,
+                    emits_context_menu,
                     focus_handle: state_focus_handle,
                     content: value,
                     placeholder: placeholder.into(),
@@ -395,6 +399,8 @@ impl CustomElement for TextEditorElement {
             state.emits_key_up = emits_key_up;
             state.emits_undo = emits_undo;
             state.emits_redo = emits_redo;
+            state.emits_select_all = emits_select_all;
+            state.emits_context_menu = emits_context_menu;
             if state.emits_submit != emits_submit {
                 state.emits_submit = emits_submit;
                 cx.notify();
@@ -582,7 +588,8 @@ impl CustomElement for TextEditorElement {
         &[
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
             "compositionStart", "compositionUpdate", "compositionEnd", "selectionChange",
-            "copy", "cut", "paste", "backspaceStart", "undo", "redo",
+            "copy", "cut", "paste", "backspaceStart", "undo", "redo", "selectAll",
+            "contextMenu",
         ]
     }
 
@@ -1176,6 +1183,8 @@ pub(crate) struct TextEditorState {
     emits_key_up: bool,
     emits_undo: bool,
     emits_redo: bool,
+    emits_select_all: bool,
+    emits_context_menu: bool,
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
@@ -1597,6 +1606,13 @@ impl TextEditorState {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        if self.emits_select_all {
+            // cmd-a is a native keybinding, so keyDown never reaches JS. A
+            // host with a `selectAll` listener owns the selection scope (e.g.
+            // every block of a document); skip the element-local select-all.
+            emit_event_full(&self.callback, self.element_id, "selectAll", |_| {});
+            return;
+        }
         self.selected_range = 0..self.content.len();
         self.selection_reversed = false;
         self.reset_blink(cx);
@@ -1914,6 +1930,37 @@ impl TextEditorState {
         self.drag_position = None;
         self.drag_generation = self.drag_generation.wrapping_add(1);
         self.drag_autoscroll_active = false;
+    }
+
+    /// DOM right-button press: the editor takes focus, and an empty selection
+    /// collapses to a caret at the hit position. A non-empty selection is kept
+    /// so a right-click on it preserves the range for the menu action.
+    fn on_right_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.read_only {
+            window.request_text_input();
+        }
+        window.focus(&self.focus_handle, cx);
+        if self.selected_range.is_empty() {
+            self.move_to(self.index_for_mouse_position(event.position), cx);
+        }
+    }
+
+    /// The DOM `contextmenu` event fires on right-button RELEASE on macOS.
+    /// Coordinates are window-space; the host positions its menu from them.
+    fn on_context_menu(&mut self, event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        emit_event_full(&self.callback, self.element_id, "contextMenu", |payload| {
+            let (x, y) = crate::renderer::point_to_xy(event.position);
+            payload.x = Some(x);
+            payload.y = Some(y);
+            payload.button = Some(crate::renderer::mouse_button_to_u32(event.button));
+            payload.is_right_click = Some(true);
+            payload.modifiers = Some(event.modifiers.into());
+        });
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -2460,8 +2507,12 @@ impl gpui::Render for TextEditorState {
             .on_action(cx.listener(Self::newline))
             .on_action(cx.listener(Self::submit))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .when(self.emits_context_menu, |editor| {
+                editor.on_mouse_up(MouseButton::Right, cx.listener(Self::on_context_menu))
+            })
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .when(self.emits_key_down, move |editor| {
                 editor.on_key_down(move |event, _window, _cx| {
