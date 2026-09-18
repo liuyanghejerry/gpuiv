@@ -92,7 +92,9 @@ bun scripts/dev.ts --shots                 # 有截图项时
       光标/选区/preedit（组合输入）——扩展现有 `custom_elements/input.rs`
 - [x] M2.2 候选窗跟随光标（`bounds_for_range` 走 point_for_index，多 run 下不变；
       由 preedit 渲染测试与几何路径不变性覆盖，OS 候选窗本身无法自动化断言）
-- [ ] M2.3 文本测量 + 命中测试 napi API（pos↔coords，供跨块选区与装饰定位）
+- [x] M2.3 文本测量 + 命中测试 napi API（`getInputTextPosition`/`getInputTextOffset`
+      test renderer napi；跨块选区最终经"原生 caret 即命中结果"路线无需真实渲染器
+      版本，测量 API 供测试与覆盖层对齐用）
 - [x] M2.4 装饰下发通道（`decorations` prop → 分行 quad）
 - [x] M2.5 跨块选区（shift-点击扩展：原生 caret 即命中测试结果——selectionChange
       上报新块内偏移，无需在真实渲染器上暴露测量 API；选区按块渲染 selection 色
@@ -148,8 +150,10 @@ bun scripts/dev.ts --shots                 # 有截图项时
       通道，`searchMatches` 事件回报计数；active 命中聚焦所在块并经 `selection`
       prop 选中范围——装饰从组件层基于 PM 块文本计算下发；⌘F 面板由应用层接，
       example 会演示）
-- [x] M3.8 快捷键整合：格式命令（⌘B/I/E/K/⇧X/⇧H、⌘Enter 任务翻转）+ Enter 拆分
-      + Backspace 跨块合并；撤销/重做与模式切换快捷键待 M3.5/M3.6
+- [x] M3.8 快捷键整合：格式命令（⌘B/I/E/K/⇧X/⇧H、列表 ⌘⇧7 有序/⌘⇧8 无序/
+      ⌘⇧9 任务、⌘Enter 任务翻转）+ Enter 拆分 + Backspace 跨块合并。
+      块 textarea key 采用「身份优先、同位复用」混合策略：列表包裹移动节点保持
+      对象身份、input rule 转换保持位置——任一变化重建元素都会打断输入焦点
 
 ### M4 — 示例与收尾
 

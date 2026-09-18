@@ -100,6 +100,21 @@ interface TableRow {
 
 type ViewRow = TextRow | SpacerRow | TableRow
 
+// Textarea keys must survive the two ways a block changes identity:
+// structural moves (list wrapping moves the paragraph node object) keep the
+// object, input-rule conversions (paragraph -> heading) keep the position
+// but replace the object. Either change recreating the element would drop
+// focus mid-typing, so keys come from identity-first, position-fallback
+// remapping.
+const keyByNode = new WeakMap<PMNode, string>()
+const keyByPos = new Map<number, string>()
+function blockKeyFor(node: PMNode, pos: number): string {
+  const key = keyByNode.get(node) ?? keyByPos.get(pos) ?? `b${pos}`
+  keyByNode.set(node, key)
+  keyByPos.set(pos, key)
+  return key
+}
+
 function marksToSpans(
   marks: readonly Mark[],
   from: number,
@@ -199,7 +214,7 @@ function walkBlocks(
         const level = child.type.name === "heading" ? (child.attrs.level as number) : 0
         out.push({
           kind: "text",
-          key: `b${pos}`,
+          key: blockKeyFor(child, pos),
           pos,
           text,
           spans,
@@ -224,7 +239,7 @@ function walkBlocks(
         })
         out.push({
           kind: "text",
-          key: `b${pos}`,
+          key: blockKeyFor(child, pos),
           pos,
           text: child.textContent,
           spans: [],
@@ -294,7 +309,7 @@ function walkBlocks(
             const cellPos = rowPos + 1 + cellOffset
             const { text, spans } = flattenInline(cell, theme)
             cells.push({
-              key: `c${cellPos}`,
+              key: `c${blockKeyFor(cell, cellPos)}`,
               pos: cellPos,
               text,
               spans,
@@ -382,6 +397,7 @@ export const MarkdownEditor = defineComponent({
       let matchIndex = 0
       let matchCount = 0
       for (const row of out) {
+        if (row.kind === "text") keyPositions.set(row.key, row.pos)
         if (row.kind !== "text") continue
         blockTexts.set(row.key, row.text)
         const known = nativeTexts.get(row.key)
@@ -489,6 +505,17 @@ export const MarkdownEditor = defineComponent({
           }
           return
         }
+        // milkdown list keys: cmd-shift-7 ordered, cmd-shift-8 bullet,
+        // cmd-shift-9 task (toggles the current item).
+        if (mods.shift && (key === "7" || key === "8" || key === "9")) {
+          if (anchor === head) core.setSelection(contentStart + head)
+          else core.setSelection(contentStart + anchor, contentStart + head)
+          if (key === "8") core.toggleList("bullet")
+          else if (key === "7") core.toggleList("ordered");
+          else if (row.checkbox) core.toggleTaskItemAt(row.checkbox.itemPos)
+          touch()
+          return
+        }
         const mark = (() => {
           if (key === "b") return "strong"
           if (key === "i") return "em"
@@ -586,7 +613,8 @@ export const MarkdownEditor = defineComponent({
       return rowsList.map((row) => row.key)
     }
 
-    const rowPosOf = (key: string): number => Number(key.slice(1))
+    const keyPositions = new Map<string, number>()
+    const rowPosOf = (key: string): number => keyPositions.get(key) ?? 0
 
     const caretOf = (key: string): number => selections.get(key)?.[1] ?? blockTexts.get(key)?.length ?? 0
 
@@ -699,17 +727,19 @@ export const MarkdownEditor = defineComponent({
     )
 
     const jumpToHeading = (text: string): boolean => {
+      let foundNode: PMNode | null = null
       let foundPos: number | null = null
       core.state.doc.descendants((node, pos) => {
         if (foundPos !== null) return false
         if (node.type.name === "heading" && node.textContent.trim() === text.trim()) {
+          foundNode = node
           foundPos = pos
           return false
         }
         return true
       })
-      if (foundPos === null) return false
-      const key = `b${foundPos}`
+      if (foundNode === null || foundPos === null) return false
+      const key = blockKeyFor(foundNode, foundPos)
       if (flashTimer) clearTimeout(flashTimer)
       flashKey.value = key
       flashTimer = setTimeout(() => {

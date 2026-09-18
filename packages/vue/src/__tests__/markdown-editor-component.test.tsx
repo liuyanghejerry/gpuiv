@@ -124,6 +124,22 @@ describeNative("markdown-editor component", () => {
     app.unmount()
   })
 
+  it("cmd-shift-8 wraps the block in a bullet list", async () => {
+    const { app, md } = editorApp("")
+    await app.settle()
+    const block = app.renderer.findByTestId("md-b0")
+    app.renderer.focusElement(block.id)
+    app.renderer.nativeSimulateKeystrokes(block.id, "a")
+    await app.settle()
+    app.renderer.nativeSimulateKeystrokes(block.id, "cmd-shift-8")
+    await app.settle()
+    expect(md()).toBe("- a\n")
+    app.renderer.nativeSimulateKeystrokes(block.id, "cmd-shift-8")
+    await app.settle()
+    expect(md()).toBe("a\n")
+    app.unmount()
+  })
+
   it("shift-enter inserts a hard break inside the paragraph", async () => {
     const { app, md } = editorApp("")
     await app.settle()
