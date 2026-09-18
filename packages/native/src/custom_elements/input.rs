@@ -270,6 +270,7 @@ struct TextEditorElement {
     last_prop_value: Option<String>,
     value_revision: u64,
     applied_value_revision: u64,
+    intercept_clipboard: bool,
     theme: Theme,
     spans: Vec<SpanProp>,
     decorations: Vec<DecorationProp>,
@@ -289,6 +290,7 @@ impl TextEditorElement {
             last_prop_value: None,
             value_revision: 0,
             applied_value_revision: 0,
+            intercept_clipboard: false,
             theme: Theme::dark(),
             spans: Vec::new(),
             decorations: Vec::new(),
@@ -372,6 +374,7 @@ impl CustomElement for TextEditorElement {
                     decorations: Vec::new(),
                     external_selection: None,
                     last_emitted_selection: None,
+                    intercept_clipboard: false,
                     has_background_runs: false,
                     painted_run_summary: Vec::new(),
                     last_decoration_rects: Vec::new(),
@@ -414,6 +417,9 @@ impl CustomElement for TextEditorElement {
             if state.decorations != self.decorations {
                 state.decorations = self.decorations.clone();
                 cx.notify();
+            }
+            if state.intercept_clipboard != self.intercept_clipboard {
+                state.intercept_clipboard = self.intercept_clipboard;
             }
             match self.selection {
                 Some((anchor, head)) => {
@@ -533,6 +539,9 @@ impl CustomElement for TextEditorElement {
             "valueRevision" => {
                 self.value_revision = value.as_u64().unwrap_or(0)
             }
+            "interceptClipboard" => {
+                self.intercept_clipboard = value.as_bool().unwrap_or(false)
+            }
             "spans" => self.spans = parse_span_props(&value),
             "decorations" => self.decorations = parse_decoration_props(&value),
             "selection" => {
@@ -555,6 +564,7 @@ impl CustomElement for TextEditorElement {
             "maxRows",
             "theme",
             "valueRevision",
+            "interceptClipboard",
             "spans",
             "decorations",
             "selection",
@@ -565,6 +575,7 @@ impl CustomElement for TextEditorElement {
         &[
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
             "compositionStart", "compositionUpdate", "compositionEnd", "selectionChange",
+            "copy", "paste",
         ]
     }
 
@@ -1118,6 +1129,7 @@ pub(crate) struct TextEditorState {
     decorations: Vec<DecorationProp>,
     external_selection: Option<(usize, usize)>,
     last_emitted_selection: Option<(usize, usize)>,
+    intercept_clipboard: bool,
     has_background_runs: bool,
     painted_run_summary: Vec<PaintedRunSummary>,
     last_decoration_rects: Vec<DecorationRects>,
@@ -1619,6 +1631,17 @@ impl TextEditorState {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.intercept_clipboard {
+            // Keybindings consume cmd-c before keyDown reaches JS, so an
+            // opt-in editor reports the intent and the host serializes
+            // (e.g. cross-block markdown selection).
+            let selection_utf16 = self.range_to_utf16(&self.selected_range.clone());
+            emit_event_full(&self.callback, self.element_id, "copy", |payload| {
+                payload.start_index = Some(selection_utf16.start as f64);
+                payload.end_index = Some(selection_utf16.end as f64);
+            });
+            return;
+        }
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -1639,6 +1662,12 @@ impl TextEditorState {
             return;
         }
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            if self.intercept_clipboard {
+                emit_event_full(&self.callback, self.element_id, "paste", |payload| {
+                    payload.value = Some(text);
+                });
+                return;
+            }
             self.replace_text_in_range(None, &text, window, cx);
         }
     }

@@ -1,6 +1,7 @@
 import { defineComponent, h, nextTick, onBeforeUpdate, ref, watch, type PropType } from "vue"
 import type { Mark, Node as PMNode } from "prosemirror-model"
 import { useGpuix } from "../hooks/use-gpuix.js"
+import { editorSchema, serializeMarkdown } from "./model.js"
 import { MarkdownEditorCore } from "./state.js"
 
 /**
@@ -336,6 +337,18 @@ export const MarkdownEditor = defineComponent({
     const revisions = new Map<string, number>()
     const selections = new Map<string, [number, number]>()
     const pendingSelectionProps = new Map<string, [number, number]>()
+    // Cross-block selection: the native caret IS the hit-test result — a
+    // shift-click moves it in the target block and selectionChange reports
+    // the offset, so no native position API is needed on the real renderer.
+    const docSelection = ref<
+      | null
+      | { fromKey: string; fromPos: number; fromOffset: number; toKey: string; toPos: number; toOffset: number }
+    >(null)
+    let pendingExtend: { key: string; offset: number } | null = null
+    let focusedKey: string | null = null
+    let prevFocusedKey: string | null = null
+    const flashKey = ref<string | null>(null)
+    let flashTimer: ReturnType<typeof setTimeout> | null = null
     const sourceText = ref(props.source)
     const rootId = ref<number | null>(null)
     const collectRootRef = (el: unknown) => {
@@ -399,6 +412,23 @@ export const MarkdownEditor = defineComponent({
             at = lower.indexOf(needle, at + needle.length)
           }
           row.decorations = decorations
+        }
+        const sel = docSelection.value
+        if (sel) {
+          const order = rowOrder()
+          const fromIndex = order.indexOf(sel.fromKey)
+          const toIndex = order.indexOf(sel.toKey)
+          const index = order.indexOf(row.key)
+          if (index >= fromIndex && index <= toIndex) {
+            const start = index === fromIndex ? sel.fromOffset : 0
+            const end = index === toIndex ? sel.toOffset : row.text.length
+            if (end > start) {
+              row.decorations = [
+                ...(row.decorations ?? []),
+                { start, end, color: "rgba(124, 134, 255, 0.35)" },
+              ]
+            }
+          }
         }
       }
       if (matchCount !== lastMatchCount) {
@@ -509,7 +539,120 @@ export const MarkdownEditor = defineComponent({
         const anchor = event.startIndex ?? 0
         const head = event.endIndex ?? anchor
         selections.set(row.key, [anchor, head])
+        // A caret event implies this block holds focus.
+        if (focusedKey !== row.key) {
+          prevFocusedKey = focusedKey
+          focusedKey = row.key
+        }
+        if (pendingExtend && pendingExtend.key !== row.key) {
+          const from = pendingExtend
+          pendingExtend = null
+          setDocSelection(from, { key: row.key, offset: head })
+        }
       }
+
+    const setDocSelection = (
+      from: { key: string; offset: number },
+      to: { key: string; offset: number },
+    ) => {
+      const order = rowOrder()
+      const fromIndex = order.indexOf(from.key)
+      const toIndex = order.indexOf(to.key)
+      if (fromIndex === -1 || toIndex === -1) return
+      const [start, end] =
+        fromIndex <= toIndex
+          ? [
+              { ...from, pos: rowPosOf(from.key) },
+              { ...to, pos: rowPosOf(to.key) },
+            ]
+          : [
+              { ...to, pos: rowPosOf(to.key) },
+              { ...from, pos: rowPosOf(from.key) },
+            ]
+      docSelection.value = {
+        fromKey: start.key,
+        fromPos: start.pos,
+        fromOffset: start.offset,
+        toKey: end.key,
+        toPos: end.pos,
+        toOffset: end.offset,
+      }
+      version.value++
+    }
+
+    const rowOrder = (): string[] => {
+      const rowsList: ViewRow[] = []
+      walkBlocks(core.state.doc, 0, { indent: 0, quote: false }, mergedTheme, rowsList)
+      return rowsList.map((row) => row.key)
+    }
+
+    const rowPosOf = (key: string): number => Number(key.slice(1))
+
+    const caretOf = (key: string): number => selections.get(key)?.[1] ?? blockTexts.get(key)?.length ?? 0
+
+    // Editor mouse events do not bubble past the native element, but `click`
+    // carries modifiers — shift-click on another block extends the selection
+    // from the previously focused block's caret. (True drag-extension would
+    // need native mouse-move emission during a captured press.)
+    const onBlockClick = (row: TextRow) => (event: { modifiers?: Record<string, boolean> }) => {
+      const mods = event.modifiers ?? {}
+      const anchorKey = focusedKey !== row.key ? focusedKey : prevFocusedKey
+      if (mods.shift && anchorKey && anchorKey !== row.key) {
+        // The caret in this block moved on mouse-down; its selectionChange
+        // may have arrived before this click — read the fresh offset, and
+        // keep the pending arm for the opposite order.
+        setDocSelection(
+          { key: anchorKey, offset: caretOf(anchorKey) },
+          { key: row.key, offset: caretOf(row.key) },
+        )
+        return
+      }
+      docSelection.value = null
+    }
+
+    // cmd-c/cmd-v are native keybindings: the actions consume the keystroke
+    // before keyDown reaches JS, so editors opt into interception and the
+    // component serializes (cross-block markdown) or re-inserts parsed
+    // blocks itself.
+    const onBlockCopy = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+      const renderer = getRenderer()
+      if (!renderer?.writeClipboardText) return
+      const markdown = serializeDocSelection()
+      if (markdown !== null) {
+        renderer.writeClipboardText(markdown)
+        return
+      }
+      const start = event.startIndex ?? 0
+      const end = event.endIndex ?? start
+      if (end > start) {
+        renderer.writeClipboardText((blockTexts.get(row.key) ?? row.text).slice(start, end))
+      }
+    }
+
+    const onBlockPaste = (row: TextRow) => (event: { value?: string | null }) => {
+      const text = event.value ?? ""
+      if (!text) return
+      const caret = selections.get(row.key)?.[1] ?? row.text.length
+      if (text.includes("\n\n")) {
+        core.insertMarkdownAt(row.pos, caret, text)
+      } else {
+        const prev = blockTexts.get(row.key) ?? row.text
+        const next = prev.slice(0, caret) + text + prev.slice(caret)
+        core.editBlock(row.pos, prev, next)
+      }
+      touch()
+    }
+
+    const serializeDocSelection = (): string | null => {
+      const sel = docSelection.value
+      if (!sel || sel.fromKey === sel.toKey) return null
+      const from = sel.fromPos + 1 + sel.fromOffset
+      const to = sel.toPos + 1 + sel.toOffset
+      if (to <= from) return null
+      const slice = core.state.doc.slice(from, to)
+      const wrapped = editorSchema.topNodeType.createAndFill(null, slice.content)
+      return wrapped ? serializeMarkdown(wrapped) : null
+    }
 
     const toggleTask = (itemPos: number) => {
       core.toggleTaskItemAt(itemPos)
@@ -555,10 +698,32 @@ export const MarkdownEditor = defineComponent({
       },
     )
 
+    const jumpToHeading = (text: string): boolean => {
+      let foundPos: number | null = null
+      core.state.doc.descendants((node, pos) => {
+        if (foundPos !== null) return false
+        if (node.type.name === "heading" && node.textContent.trim() === text.trim()) {
+          foundPos = pos
+          return false
+        }
+        return true
+      })
+      if (foundPos === null) return false
+      const key = `b${foundPos}`
+      if (flashTimer) clearTimeout(flashTimer)
+      flashKey.value = key
+      flashTimer = setTimeout(() => {
+        flashKey.value = null
+      }, 1400)
+      focusBlock(key, 0)
+      return true
+    }
+
     expose({
       getMarkdown,
       core: () => core,
       focusBlockByKey: (key: string, caret: number) => focusBlock(key, caret),
+      jumpToHeading,
     })
 
     const rootStyle = () => ({
@@ -643,7 +808,8 @@ export const MarkdownEditor = defineComponent({
                     {
                       key: cell.key,
                       style: {
-                        flex: 1,
+                        flexGrow: 1,
+                        flexShrink: 1,
                         borderWidth: 1,
                         borderColor: "#444",
                         backgroundColor: cell.header ? "rgba(127,127,127,0.15)" : undefined,
@@ -674,6 +840,13 @@ export const MarkdownEditor = defineComponent({
             ),
           )
         } else if (row.kind === "text") {
+          // A measured element inside a flex row collapses (a gpuiv/Taffy
+          // interplay), which also breaks click hit-testing — so block
+          // heights are explicit: hard-break lines × line height, clamped
+          // like the native maxRows.
+          const lines = Math.min(Math.max(row.text.split("\n").length, 1), 10)
+          const lineHeightFactor = row.mono ? 1.45 : 1.7
+          const rowHeight = Math.round(lines * row.fontSize * lineHeightFactor)
           const editor = h("textarea", {
             key: row.key,
             ref: collectRef(row.key),
@@ -688,8 +861,13 @@ export const MarkdownEditor = defineComponent({
             onChange: onBlockChange(row),
             onKeyDown: onBlockKeyDown(row),
             onSelectionChange: onBlockSelectionChange(row),
+            interceptClipboard: true,
+            onClick: onBlockClick(row),
+            onCopy: onBlockCopy(row),
+            onPaste: onBlockPaste(row),
             style: {
-              flex: 1,
+              width: "100%",
+              height: rowHeight,
               fontSize: row.fontSize,
               fontWeight: row.fontWeight,
               fontFamily: row.mono ? mergedTheme.monoFont : undefined,
@@ -731,6 +909,23 @@ export const MarkdownEditor = defineComponent({
             )
           }
           lineChildren.push(editor)
+          if (flashKey.value === row.key) {
+            lineChildren.push(
+              h("div", {
+                key: `${row.key}-flash`,
+                testId: "md-flash",
+                style: {
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  backgroundColor: "rgba(255, 214, 0, 0.25)",
+                  pointerEvents: "none",
+                },
+              }),
+            )
+          }
           children.push(
             h(
               "div",
@@ -738,6 +933,7 @@ export const MarkdownEditor = defineComponent({
                 key: row.key,
                 style: {
                   display: "flex",
+                  position: "relative",
                   marginLeft: row.indent * 22,
                   paddingLeft: row.quote ? 10 : 0,
                   borderWidth: row.quote ? 0 : undefined,

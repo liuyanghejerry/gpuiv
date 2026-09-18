@@ -354,6 +354,26 @@ export class MarkdownEditorCore {
     return blockPos - 1
   }
 
+  /** Insert parsed markdown blocks at a caret inside a textblock. The
+   *  native editor's own raw paste is healed away by the component's
+   *  authoritative resync once the doc diverges from its content. */
+  insertMarkdownAt(blockPos: number, caret: number, markdown: string): void {
+    const parsed = parseMarkdown(markdown)
+    const node = this.state.doc.nodeAt(blockPos)
+    if (!node) return
+    const tr = this.state.tr
+    if (caret >= node.content.size) {
+      // At the block end there is nothing to keep after the split — insert
+      // the parsed blocks as siblings directly.
+      tr.insert(blockPos + node.nodeSize, parsed.content)
+    } else {
+      const cut = blockPos + 1 + caret
+      tr.split(cut)
+      tr.insert(cut + 1, parsed.content)
+    }
+    this.dispatch(tr)
+  }
+
   /** Flip the task state of the list item at itemPos. */
   toggleTaskItemAt(itemPos: number): void {
     const node = this.state.doc.nodeAt(itemPos)

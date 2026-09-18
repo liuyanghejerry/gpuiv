@@ -94,7 +94,13 @@ bun scripts/dev.ts --shots                 # 有截图项时
       由 preedit 渲染测试与几何路径不变性覆盖，OS 候选窗本身无法自动化断言）
 - [ ] M2.3 文本测量 + 命中测试 napi API（pos↔coords，供跨块选区与装饰定位）
 - [x] M2.4 装饰下发通道（`decorations` prop → 分行 quad）
-- [ ] M2.5 跨块选区绘制（拖拽选择、shift 点击扩展、跨块 ⌘C；`selection` prop 已就位）
+- [x] M2.5 跨块选区（shift-点击扩展：原生 caret 即命中测试结果——selectionChange
+      上报新块内偏移，无需在真实渲染器上暴露测量 API；选区按块渲染 selection 色
+      decorations。**降级项**：拖拽跨块扩展需原生在被捕获按压期间外发 mouse-move，
+      记为后续原生增强；块内拖拽选择原生可用）
+- [x]（M2 附注）测量元素在 flex 行内高度塌陷（gpuiv/Taffy 交互）且连带点击
+      hit-test 失效——组件以显式高度（硬换行行数 × 行高，maxRows 钳制）规避，
+      软换行增高降级为内部滚动；根因留给原生布局层后续修
 
 ### M3 — 组件与交互（`packages/vue` `<markdown-editor>`）
 
@@ -125,12 +131,19 @@ bun scripts/dev.ts --shots                 # 有截图项时
       脚注定义块（`[^n]:` 标记 + 0.92x 字号）与行内引用（\uFFFC 单字符占位 +
       accent 下划线——单字符保持 PM 偏移对齐，编辑该字符即编辑 Markdown 引用）
 - [x] M3.3 行内渲染：em/strong/行内码/删除线/highlight/链接（样式+下划线）/软换行
-- [ ] M3.4 标题锚点跳转 + 落点闪烁装饰
+- [x] M3.4 标题锚点跳转 + 落点闪烁（`jumpToHeading(text)` expose：定位标题块、
+      聚焦其 textarea、1.4s 黄色落点覆盖层 `md-flash`；文档内 `#` 链接点击属
+      ColaMD 的 DOM 拦截行为，gpuiv 编辑器内点击归原生 caret，跳转由应用层
+      outline/锚点 UI 调用）
 - [x] M3.5 源码模式切换（`mode="source"` prop：单一等宽 textarea，改动经
       `core.reset()` 回流（undo 清空符合 ColaMD 语义）；`viewportHeight` 设置后
       组件根为滚动容器，切换时按 scrollTo-探测最大滚动→比例→恢复（用现有
       scrollTo/getScrollOffset API，无需新增原生接口））
-- [ ] M3.6 纯文本 Markdown 复制/粘贴（跨块）
+- [x] M3.6 纯文本 Markdown 复制/粘贴（跨块复制=PM slice 序列化为 Markdown 写剪贴板；
+      多块粘贴=解析剪贴板 Markdown 经 `insertMarkdownAt` 成块插入；单行粘贴走原生。
+      关键机制：**cmd-c/cmd-v 是原生 keybinding，动作消费后 keyDown 到不了 JS**——
+      编辑器开 `interceptClipboard` 后原生只发 `copy`/`paste` 事件（copy 带 UTF-16
+      选区，paste 带剪贴板文本），组件侧完成序列化/结构化插入）
 - [x] M3.7 搜索高亮（`searchQuery`/`searchActiveIndex` props：命中走 decorations
       通道，`searchMatches` 事件回报计数；active 命中聚焦所在块并经 `selection`
       prop 选中范围——装饰从组件层基于 PM 块文本计算下发；⌘F 面板由应用层接，
