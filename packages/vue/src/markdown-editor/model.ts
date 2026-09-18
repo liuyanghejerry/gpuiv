@@ -55,11 +55,13 @@ export const editorSchema = new Schema({
     },
     marks: {
       link: { attrs: { href: {}, title: { default: null } }, inclusive: false },
-      em: {},
-      strong: {},
+      // Typing at a styled range's boundary must not inherit the style
+      // (milkdown/ColaMD behavior); `code` keeps default inclusivity.
+      em: { inclusive: false },
+      strong: { inclusive: false },
       code: { code: true },
-      strikethrough: {},
-      highlight: {},
+      strikethrough: { inclusive: false },
+      highlight: { inclusive: false },
     },
   })
 
@@ -390,7 +392,13 @@ function padCell(text: string, width: number, alignment: string | null): string 
 }
 
 export function serializeMarkdown(doc: PMNode, style: MarkerStyle = defaultMarkerStyle): string {
-  const out = createSerializer(style).serialize(doc)
+  let out = createSerializer(style).serialize(doc)
+  // An empty trailing textblock writes nothing (its block close never
+  // flushes), which would silently drop the block the user just split into.
+  const last = doc.lastChild
+  if (last?.type.name === "paragraph" && last.content.size === 0 && !out.endsWith("\n\n")) {
+    out += out.endsWith("\n") ? "\n" : "\n\n"
+  }
   // remark-stringify convention: the serialized document ends with a newline.
   return out.endsWith("\n") ? out : out + "\n"
 }

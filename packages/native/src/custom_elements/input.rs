@@ -268,6 +268,8 @@ struct TextEditorElement {
     min_rows: usize,
     max_rows: usize,
     last_prop_value: Option<String>,
+    value_revision: u64,
+    applied_value_revision: u64,
     theme: Theme,
     spans: Vec<SpanProp>,
     decorations: Vec<DecorationProp>,
@@ -285,6 +287,8 @@ impl TextEditorElement {
             min_rows: 1,
             max_rows: if multiline { 10 } else { 1 },
             last_prop_value: None,
+            value_revision: 0,
+            applied_value_revision: 0,
             theme: Theme::dark(),
             spans: Vec::new(),
             decorations: Vec::new(),
@@ -367,6 +371,7 @@ impl CustomElement for TextEditorElement {
                     spans: Vec::new(),
                     decorations: Vec::new(),
                     external_selection: None,
+                    last_emitted_selection: None,
                     has_background_runs: false,
                     painted_run_summary: Vec::new(),
                     last_decoration_rects: Vec::new(),
@@ -394,7 +399,14 @@ impl CustomElement for TextEditorElement {
             }
             if prop_changed {
                 state.sync_prop_value(self.value.clone(), cx);
+            } else if self.value_revision != self.applied_value_revision {
+                // The document model rewrote this block (input rule, undo,
+                // formatting) so the new value is authoritative even when it
+                // equals the previously applied one. Bypass echo suppression.
+                state.pending_values.clear();
+                state.set_external_text(self.value.clone(), cx);
             }
+            self.applied_value_revision = self.value_revision;
             if state.spans != self.spans {
                 state.spans = self.spans.clone();
                 cx.notify();
@@ -518,6 +530,9 @@ impl CustomElement for TextEditorElement {
                     as usize
             }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
+            "valueRevision" => {
+                self.value_revision = value.as_u64().unwrap_or(0)
+            }
             "spans" => self.spans = parse_span_props(&value),
             "decorations" => self.decorations = parse_decoration_props(&value),
             "selection" => {
@@ -539,6 +554,7 @@ impl CustomElement for TextEditorElement {
             "minRows",
             "maxRows",
             "theme",
+            "valueRevision",
             "spans",
             "decorations",
             "selection",
@@ -548,7 +564,7 @@ impl CustomElement for TextEditorElement {
     fn supported_events(&self) -> &'static [&'static str] {
         &[
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
-            "compositionStart", "compositionUpdate", "compositionEnd",
+            "compositionStart", "compositionUpdate", "compositionEnd", "selectionChange",
         ]
     }
 
@@ -1101,6 +1117,7 @@ pub(crate) struct TextEditorState {
     spans: Vec<SpanProp>,
     decorations: Vec<DecorationProp>,
     external_selection: Option<(usize, usize)>,
+    last_emitted_selection: Option<(usize, usize)>,
     has_background_runs: bool,
     painted_run_summary: Vec<PaintedRunSummary>,
     last_decoration_rects: Vec<DecorationRects>,
@@ -1169,6 +1186,8 @@ impl TextEditorState {
         let end = self.content.len();
         self.selected_range = end..end;
         self.selection_reversed = false;
+        let content_end = self.offset_to_utf16(self.content.len());
+        self.last_emitted_selection = Some((content_end, content_end));
         self.marked_range = None;
         self.scroll_top = 0.0;
         self.scroll_left = 0.0;
@@ -1201,6 +1220,8 @@ impl TextEditorState {
             cx.notify();
         }
         self.external_selection = Some((anchor_utf16, head_utf16));
+        // The selection came from JS; do not echo it back as a user event.
+        self.last_emitted_selection = Some((anchor_utf16, head_utf16));
     }
 
     fn emit_change(&mut self) {
@@ -1213,6 +1234,50 @@ impl TextEditorState {
                 payload.value = Some(self.content.clone());
             });
         }
+    }
+
+    /// Window-space caret position for a UTF-16 offset, for the measurement
+    /// API the WYSIWYG component uses to align overlays and extend
+    /// selections across blocks.
+    pub(crate) fn window_point_for_utf16(&self, offset_utf16: usize) -> Option<(f32, f32)> {
+        let index = self.offset_from_utf16(offset_utf16);
+        let point = self.point_for_index(index)?;
+        let bounds = self.last_bounds?;
+        Some((
+            f32::from(bounds.left() + point.x) - self.scroll_left,
+            f32::from(bounds.top() + point.y) - self.scroll_top,
+        ))
+    }
+
+    /// Hit-test a window-space point to the closest UTF-16 offset.
+    pub(crate) fn utf16_index_for_window_point(&self, x: f32, y: f32) -> Option<usize> {
+        let index = self.index_for_mouse_position(point(px(x), px(y)));
+        Some(self.offset_to_utf16(index))
+    }
+
+    /// Push-selection model: emit `selectionChange` (UTF-16 anchor/head)
+    /// whenever the selection last painted differs from the last emitted one.
+    /// Called once per paint so bursts of changes collapse into one event.
+    fn emit_selection_change(&mut self) {
+        let selection_utf16 = self.range_to_utf16(&self.selected_range);
+        let (anchor, head) = if self.selection_reversed {
+            (selection_utf16.end, selection_utf16.start)
+        } else {
+            (selection_utf16.start, selection_utf16.end)
+        };
+        if self.last_emitted_selection == Some((anchor, head)) {
+            return;
+        }
+        self.last_emitted_selection = Some((anchor, head));
+        emit_event_full(
+            &self.callback,
+            self.element_id,
+            "selectionChange",
+            |payload| {
+                payload.start_index = Some(anchor as f64);
+                payload.end_index = Some(head as f64);
+            },
+        );
     }
 
     /// Snapshot of the last-laid-out runs, for the test surface.
@@ -2540,6 +2605,9 @@ impl gpui::Element for EditorTextElement {
                     window.paint_quad(caret);
                 }
             }
+            self.input.update(cx, |input, _| {
+                input.emit_selection_change();
+            });
         });
     }
 }

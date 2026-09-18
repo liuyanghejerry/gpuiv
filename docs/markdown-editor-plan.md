@@ -95,15 +95,38 @@ bun scripts/dev.ts --shots                 # 有截图项时
 
 ### M3 — 组件与交互（`packages/vue` `<markdown-editor>`）
 
-- [ ] M3.1 组件外壳：props（source/theme）、change 事件、受控/非受控
-- [ ] M3.2 块级渲染：h1–h6、嵌套列表、引用、围栏代码（Syntect 高亮）、分隔线、图片、
-      GFM 表格（对齐）、任务列表（复选框点击翻转）、脚注
-- [ ] M3.3 行内渲染：em/strong/行内码/删除线/链接（点击/⌘点击 openUrl）/highlight/软换行
+> M3.1/M3.2（除脚注与代码高亮）/M3.3/M3.8（格式命令部分）完成（2026-09-18）。
+> 组件在 `packages/vue/src/markdown-editor/component.tsx`，已从包入口导出。
+> 两个本轮落地的关键机制：
+>
+> 1. **`valueRevision` 权威重同步**（原生 prop + 组件分歧检测）：input rule/撤销/格式
+>    命令改写块文本后，PM 文本与原生内容会分叉，而 value prop 可能恰好等于上次值
+>    （registry 无 diff → 永不纠正）。组件维护 `nativeTexts`（原生上次上报）与
+>    `blockTexts`（PM 当前），分歧时递增该块的 valueRevision，Rust 侧绕过回显抑制
+>    强制 `set_external_text`。这是 echo-suppression 设计的必要补丁。
+> 2. **`selectionChange` 事件**（input.rs paint 期去重 emit，UTF-16 anchor/head；
+>    外部设置不回声）：组件据此跟踪每块原生选区，⌘B/⌘I/⌘E/⌘⇧X/⌘⇧H/⌘K（剪贴板取
+>    URL，同 ColaMD）映射到 PM 选区后走 M1 命令。
+>
+> Enter 语义零原生改动对齐 ColaMD：textarea 绑 onSubmit 后 enter=Submit（→
+> `splitBlockAt`，列表内拆 item），shift-enter=原生换行（hard_break）。
+> schema 修正：em/strong/strikethrough/highlight `inclusive: false`（边界输入不继承
+> 样式）；序列化器补结尾空段落（拆分出的空块不再被吞）。Backspace-at-0 → join 前块。
+> 验证：`markdown-editor-component.test.tsx` 9 项 GPU 测试（渲染样式/标记/复选框、
+> input rule 全链路、Enter 拆分+焦点转移、复选框点击翻转、⌘B 全选加粗、shift-enter
+> 软换行、边界输入不吞 mark、块内 IME）。
+
+- [x] M3.1 组件外壳：props（source/theme）、change 事件、`getMarkdown()` expose
+- [x] M3.2 块级渲染：h1–h6、嵌套列表（marker/缩进/任务复选框）、引用、围栏代码
+      （ColaMD 同款无高亮）、分隔线、图片、GFM 表格（对齐、单元格可编辑）
+      ——脚注渲染未做（schema 亦缺 footnote，见 M0 遗留）
+- [x] M3.3 行内渲染：em/strong/行内码/删除线/highlight/链接（样式+下划线）/软换行
 - [ ] M3.4 标题锚点跳转 + 落点闪烁装饰
 - [ ] M3.5 源码模式切换（`<textarea>`，滚动比例恢复）
 - [ ] M3.6 纯文本 Markdown 复制/粘贴（跨块）
 - [ ] M3.7 ⌘F 搜索高亮（装饰从 PM state 计算下发）
-- [ ] M3.8 快捷键整合（格式命令、撤销、模式切换）
+- [x] M3.8 快捷键整合：格式命令（⌘B/I/E/K/⇧X/⇧H、⌘Enter 任务翻转）+ Enter 拆分
+      + Backspace 跨块合并；撤销/重做与模式切换快捷键待 M3.5/M3.6
 
 ### M4 — 示例与收尾
 

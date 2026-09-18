@@ -695,6 +695,17 @@ export declare class TestGpuixRenderer {
    */
   getPaintedInputRuns(elementId: number): Array<InputRunInfo>
   /**
+   * Window-space caret position `[x, y]` for a UTF-16 offset of an editor,
+   * or an empty array when the element has not been laid out. This is the
+   * pos\u{2194}coords half of the WYSIWYG measurement API.
+   */
+  getInputTextPosition(elementId: number, offset: number): Array<number>
+  /**
+   * The closest UTF-16 offset in an editor for a window-space point, or -1
+   * when the element has not been laid out.
+   */
+  getInputTextOffset(elementId: number, x: number, y: number): number
+  /**
    * Where the `decorations` prop of an editor landed on screen (pixel
    * rects), for asserting search-highlight geometry.
    */

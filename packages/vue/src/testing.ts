@@ -121,6 +121,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getPaintedHighlights(): HighlightMatch[]
   getPaintedInputRuns(elementId: number): InputRunInfo[]
   getInputDecorations(elementId: number): InputDecorationInfo[]
+  getInputTextPosition(elementId: number, offset: number): number[]
+  getInputTextOffset(elementId: number, x: number, y: number): number
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -993,6 +995,16 @@ export class TestRenderer implements NativeRenderer {
   /** Where the `decorations` prop of an editor landed (pixel rects). */
   getInputDecorations(elementId: number): InputDecorationInfo[] {
     return this.native.getInputDecorations(elementId)
+  }
+
+  /** Window-space caret position `[x, y]` for a UTF-16 offset, or `[]`. */
+  getInputTextPosition(elementId: number, offset: number): number[] {
+    return this.native.getInputTextPosition(elementId, offset)
+  }
+
+  /** Closest UTF-16 offset for a window-space point, or -1. */
+  getInputTextOffset(elementId: number, x: number, y: number): number {
+    return this.native.getInputTextOffset(elementId, x, y)
   }
 
   /** Syntax-cache counters as `[hits, misses, documents]`. */

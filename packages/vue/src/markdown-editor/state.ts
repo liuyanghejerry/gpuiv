@@ -282,4 +282,87 @@ export class MarkdownEditorCore {
   undoDepth(): number {
     return undoDepth(this.state)
   }
+
+  /** Replace a textblock's plain text. Only the changed middle range is
+   *  replaced, so marks outside the edit survive and typing inside a marked
+   *  word inherits that mark. prevText/nextText use "\n" for hard_breaks,
+   *  which cost one doc position each — text offsets map 1:1. */
+  editBlock(blockPos: number, prevText: string, nextText: string): void {
+    if (prevText === nextText) return
+    const node = this.state.doc.nodeAt(blockPos)
+    if (!node || !node.isTextblock) return
+    const contentStart = blockPos + 1
+    const contentEnd = blockPos + node.nodeSize - 1
+    let prefix = 0
+    const maxPrefix = Math.min(prevText.length, nextText.length)
+    while (prefix < maxPrefix && prevText[prefix] === nextText[prefix]) prefix++
+    let suffix = 0
+    const maxSuffix = Math.min(prevText.length - prefix, nextText.length - prefix)
+    while (
+      suffix < maxSuffix &&
+      prevText[prevText.length - 1 - suffix] === nextText[nextText.length - 1 - suffix]
+    ) {
+      suffix++
+    }
+    const from = contentStart + prefix
+    const to = contentEnd - suffix
+    const inserted = nextText.slice(prefix, nextText.length - suffix)
+    const tr = this.state.tr.insertText(inserted, from, to)
+    // PM selection follows the edit so input rules and format commands see
+    // the caret; the native editor keeps drawing its own caret.
+    tr.setSelection(TextSelection.create(tr.doc, from + inserted.length))
+    this.dispatch(tr)
+    const ruleTr = runInputRules(this.state)
+    if (ruleTr) {
+      ruleTr.setMeta("appendedTransaction", tr)
+      this.dispatch(ruleTr)
+    }
+  }
+
+  /** Split the textblock at a UTF-16 caret offset (Enter). Inside a list
+   *  item the item splits too. Returns the doc position of the new
+   *  textblock, or null. */
+  splitBlockAt(blockPos: number, caret: number): number | null {
+    const doc = this.state.doc
+    if (!doc.nodeAt(blockPos)?.isTextblock) return null
+    const splitPos = blockPos + 1 + caret
+    const $ = doc.resolve(splitPos)
+    let depth = 1
+    for (let d = $.depth; d > 0; d--) {
+      if ($.node(d).type.name === "list_item") {
+        depth = $.depth - d + 1
+        break
+      }
+    }
+    const tr = this.state.tr.split(splitPos, depth)
+    this.dispatch(tr)
+    // The second half's textblock starts after the split boundary.
+    const after = this.state.doc.resolve(Math.min(splitPos + 2, this.state.doc.content.size))
+    return after.depth > 0 ? after.before(after.depth) : null
+  }
+
+  /** Merge the textblock into its previous sibling (Backspace at offset 0).
+   *  Returns the doc caret position at the join point, or null. */
+  joinWithPreviousBlock(blockPos: number): number | null {
+    const doc = this.state.doc
+    if (!doc.nodeAt(blockPos)) return null
+    const $ = doc.resolve(blockPos)
+    if (!$.nodeBefore) return null
+    const tr = this.state.tr
+    tr.join(blockPos)
+    this.dispatch(tr)
+    return blockPos - 1
+  }
+
+  /** Flip the task state of the list item at itemPos. */
+  toggleTaskItemAt(itemPos: number): void {
+    const node = this.state.doc.nodeAt(itemPos)
+    if (!node || node.type.name !== "list_item") return
+    const tr = this.state.tr
+    tr.setNodeMarkup(itemPos, null, {
+      ...node.attrs,
+      checked: node.attrs.checked == null ? true : !node.attrs.checked,
+    })
+    this.dispatch(tr)
+  }
 }
