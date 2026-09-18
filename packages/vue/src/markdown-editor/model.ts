@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it"
+import footnote from "markdown-it-footnote"
 import mark from "markdown-it-mark"
 import { Mark as PMMark, Node as PMNode, Schema } from "prosemirror-model"
 import { MarkdownParser, MarkdownSerializer, MarkdownSerializerState } from "prosemirror-markdown"
@@ -49,6 +50,18 @@ export const editorSchema = new Schema({
       },
       hard_break: { inline: true, group: "inline", selectable: false, atom: true },
       table: { content: "table_row+", group: "block" },
+      footnote_definition: {
+        content: "block+",
+        group: "block",
+        defining: true,
+        attrs: { label: { default: "" } },
+      },
+      footnote_reference: {
+        inline: true,
+        group: "inline",
+        atom: true,
+        attrs: { label: { default: "" } },
+      },
       table_row: { content: "(table_header | table_cell)+" },
       table_header: { content: "inline*", attrs: { alignment: { default: null } }, defining: true },
       table_cell: { content: "inline*", attrs: { alignment: { default: null } } },
@@ -107,6 +120,7 @@ function alignmentFrom(token: MinimalToken): { alignment: string | null } {
 function createTokenizer() {
   const md = new MarkdownIt({ html: false, breaks: true })
   md.use(mark)
+  md.use(footnote)
   md.core.ruler.after("inline", "gpuiv_task_lists", taskListRule as (state: unknown) => void)
   return md
 }
@@ -159,6 +173,20 @@ export const markdownParser = new MarkdownParser(editorSchema, markdownTokenizer
   tr: { block: "table_row" },
   th: { block: "table_header", getAttrs: alignmentFrom },
   td: { block: "table_cell", getAttrs: alignmentFrom },
+  footnote_block: { ignore: true },
+  footnote: {
+    block: "footnote_definition",
+    getAttrs: (tok: MinimalToken & { meta?: { label?: string | number } | null }) => ({
+      label: String(tok.meta?.label ?? ""),
+    }),
+  },
+  footnote_anchor: { ignore: true, noCloseToken: true },
+  footnote_ref: {
+    node: "footnote_reference",
+    getAttrs: (tok: MinimalToken & { meta?: { label?: string | number } | null }) => ({
+      label: String(tok.meta?.label ?? ""),
+    }),
+  },
   em: { mark: "em" },
   strong: { mark: "strong" },
   s: { mark: "strikethrough" },
@@ -301,6 +329,20 @@ function createSerializer(style: MarkerStyle): MarkdownSerializer {
         // the public type; track it through the same field.
         const s = state as MarkdownSerializerState & { inAutolink: boolean | undefined }
         state.text(node.text ?? "", !s.inAutolink)
+      },
+      footnote_reference(state, node) {
+        state.write(`[^${node.attrs.label ?? ""}]`)
+      },
+      footnote_definition(state, node) {
+        state.write(`[^${node.attrs.label ?? ""}]: `)
+        const first = node.firstChild
+        if (node.childCount === 1 && first?.type.name === "paragraph") {
+          state.renderInline(first)
+          state.closeBlock(node)
+          return
+        }
+        state.closeBlock(node)
+        state.wrapBlock("    ", null, node, () => state.renderContent(node))
       },
       table(state, node) {
         // Flush any pending block close into the real buffer first: the cell

@@ -1,4 +1,4 @@
-import { defineComponent, h, nextTick, onBeforeUpdate, ref, type PropType } from "vue"
+import { defineComponent, h, nextTick, onBeforeUpdate, ref, watch, type PropType } from "vue"
 import type { Mark, Node as PMNode } from "prosemirror-model"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import { MarkdownEditorCore } from "./state.js"
@@ -152,6 +152,17 @@ function flattenInline(
       text += child.text ?? ""
     } else if (child.type.name === "hard_break") {
       text += "\n"
+    } else if (child.type.name === "footnote_reference") {
+      // One char per atom keeps text offsets aligned with PM positions.
+      // \uFFFC renders as the object-replacement glyph; the accent span
+      // marks it as a reference until a dedicated chip exists.
+      spans.push({
+        start: text.length,
+        end: text.length + 1,
+        color: theme.accent,
+        underline: true,
+      })
+      text += "\uFFFC"
     }
   })
   return { text, spans }
@@ -263,6 +274,17 @@ function walkBlocks(
         })
         break
       }
+      case "footnote_definition": {
+        const defCtx: WalkContext = {
+          ...ctx,
+          marker: `[^${child.attrs.label ?? ""}]:`,
+          markerWidth: 54,
+          checkbox: undefined,
+          fontSize: theme.fontSize * 0.92,
+        }
+        walkBlocks(child, pos + 1, defCtx, theme, out)
+        break
+      }
       case "table": {
         child.forEach((row, rowOffset) => {
           const rowPos = pos + 1 + rowOffset
@@ -294,8 +316,12 @@ export const MarkdownEditor = defineComponent({
   props: {
     source: { type: String, default: "" },
     theme: { type: Object as PropType<Partial<MarkdownEditorTheme>>, default: () => ({}) },
+    searchQuery: { type: String, default: "" },
+    searchActiveIndex: { type: Number, default: -1 },
+    mode: { type: String as PropType<"wysiwyg" | "source">, default: "wysiwyg" },
+    viewportHeight: { type: Number, default: 0 },
   },
-  emits: ["change"],
+  emits: ["change", "searchMatches"],
   setup(props, { emit, expose }) {
     const mergedTheme = { ...defaultTheme, ...props.theme } as MarkdownEditorTheme
     const core = new MarkdownEditorCore(props.source)
@@ -309,7 +335,15 @@ export const MarkdownEditor = defineComponent({
     const nativeTexts = new Map<string, string>()
     const revisions = new Map<string, number>()
     const selections = new Map<string, [number, number]>()
+    const pendingSelectionProps = new Map<string, [number, number]>()
+    const sourceText = ref(props.source)
+    const rootId = ref<number | null>(null)
+    const collectRootRef = (el: unknown) => {
+      rootId.value = (el as { id?: number } | null)?.id ?? null
+    }
+    let lastMatchCount = -1
     const pendingFocus = ref<{ key: string; caret: number } | null>(null)
+    let focusTarget: { key: string; caret: number } | null = null
 
     const hostIds = new Map<string, number>()
     const collectRef = (key: string) => (el: unknown) => {
@@ -331,6 +365,9 @@ export const MarkdownEditor = defineComponent({
       void version.value
       const out: ViewRow[] = []
       walkBlocks(core.state.doc, 0, { indent: 0, quote: false }, mergedTheme, out)
+      const query = props.searchQuery.trim()
+      let matchIndex = 0
+      let matchCount = 0
       for (const row of out) {
         if (row.kind !== "text") continue
         blockTexts.set(row.key, row.text)
@@ -341,6 +378,32 @@ export const MarkdownEditor = defineComponent({
           }
           nativeTexts.set(row.key, row.text)
         }
+        if (query) {
+          const lower = row.text.toLowerCase()
+          const needle = query.toLowerCase()
+          const decorations: { start: number; end: number; color: string }[] = []
+          let at = lower.indexOf(needle)
+          while (at !== -1) {
+            const active = matchIndex === props.searchActiveIndex
+            decorations.push({
+              start: at,
+              end: at + query.length,
+              color: active ? "rgba(255, 170, 0, 0.75)" : "rgba(255, 214, 0, 0.35)",
+            })
+            if (active) {
+              pendingSelectionProps.set(row.key, [at, at + query.length])
+              focusTarget = { key: row.key, caret: at }
+            }
+            matchIndex++
+            matchCount++
+            at = lower.indexOf(needle, at + needle.length)
+          }
+          row.decorations = decorations
+        }
+      }
+      if (matchCount !== lastMatchCount) {
+        lastMatchCount = matchCount
+        emit("searchMatches", matchCount)
       }
       return out
     }
@@ -453,14 +516,86 @@ export const MarkdownEditor = defineComponent({
       touch()
     }
 
+    const captureScrollRatio = (): number => {
+      const renderer = getRenderer()
+      if (!renderer?.scrollTo || !renderer.getScrollOffset || rootId.value == null) return 0
+      const before = renderer.getScrollOffset(rootId.value)
+      if (!before) return 0
+      renderer.scrollTo(rootId.value, 0, 1e9)
+      const max = renderer.getScrollOffset(rootId.value)
+      renderer.scrollTo(rootId.value, 0, before[1] ?? 0)
+      if (!max) return 0
+      const maxY = max[1] ?? 0
+      return maxY > 0 ? (before[1] ?? 0) / maxY : 0
+    }
+
+    const restoreScrollRatio = (ratio: number): void => {
+      const renderer = getRenderer()
+      if (!renderer?.scrollTo || !renderer.getScrollOffset || rootId.value == null) return
+      renderer.scrollTo(rootId.value, 0, 1e9)
+      const max = renderer.getScrollOffset(rootId.value)
+      if (!max) return
+      renderer.scrollTo(rootId.value, 0, ratio * (max[1] ?? 0))
+    }
+
+    watch(
+      () => props.mode,
+      (mode) => {
+        const ratio = captureScrollRatio()
+        if (mode === "source") {
+          sourceText.value = core.getMarkdown()
+        } else {
+          core.reset(sourceText.value)
+          nativeTexts.clear()
+          revisions.clear()
+          pendingSelectionProps.clear()
+        }
+        version.value++
+        void nextTick(() => restoreScrollRatio(ratio))
+      },
+    )
+
     expose({
       getMarkdown,
       core: () => core,
       focusBlockByKey: (key: string, caret: number) => focusBlock(key, caret),
     })
 
+    const rootStyle = () => ({
+      width: "100%",
+      height: props.viewportHeight > 0 ? props.viewportHeight : undefined,
+      overflow: props.viewportHeight > 0 ? ("scroll" as const) : undefined,
+    })
+
     return () => {
+      if (props.mode === "source") {
+        return h("div", { ref: collectRootRef, style: rootStyle() }, () => [
+          h("textarea", {
+            key: "md-source",
+            ref: collectRef("md-source"),
+            testId: "md-source",
+            value: sourceText.value,
+            minRows: 4,
+            onChange: (event: { value?: string | null }) => {
+              sourceText.value = event.value ?? ""
+              emit("change", sourceText.value)
+            },
+            style: {
+              width: "100%",
+              fontFamily: mergedTheme.monoFont,
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: mergedTheme.text,
+            },
+          }),
+        ])
+      }
       const list = rows()
+      if (focusTarget && props.searchActiveIndex >= 0) {
+        const target = focusTarget
+        focusTarget = null
+        focusBlock(target.key, target.caret)
+      }
       const children: ReturnType<typeof h>[] = []
       let lastKind = ""
       for (const row of list) {
@@ -547,6 +682,7 @@ export const MarkdownEditor = defineComponent({
             valueRevision: revisions.get(row.key) ?? 0,
             spans: row.spans,
             decorations: row.decorations,
+            selection: pendingSelectionProps.get(row.key),
             minRows: 1,
             onSubmit: () => onBlockSubmit(row),
             onChange: onBlockChange(row),
@@ -615,7 +751,7 @@ export const MarkdownEditor = defineComponent({
         }
         lastKind = row.kind
       }
-      return h("div", { style: { width: "100%" } }, () => children)
+      return h("div", { ref: collectRootRef, style: rootStyle() }, () => children)
     }
   },
 })

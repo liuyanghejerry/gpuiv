@@ -50,6 +50,9 @@ bun scripts/dev.ts --shots                 # 有截图项时
       对齐 ColaMD markdown-style.ts 的探测逻辑）
 - [x] M0.5 round-trip：canonical 用例文档树相等 + 幂等；4 份 ColaMD 真实文档
       （outline-test / mermaid-test / PRINCIPLES / README）fixture 验证通过
+- [x] M0.6（遗留补齐）脚注：markdown-it-footnote 插件 + footnote_definition/
+      footnote_reference 节点 + 序列化（[^label]: 定义块、[^label] 引用）；round-trip
+      文档树相等 + 幂等（多定义间补空行，字节级差异可接受）
 
 ### M1 — 编辑核心（PM state/commands，纯 JS，`packages/vue/src/markdown-editor/state.ts`）
 
@@ -118,13 +121,20 @@ bun scripts/dev.ts --shots                 # 有截图项时
 
 - [x] M3.1 组件外壳：props（source/theme）、change 事件、`getMarkdown()` expose
 - [x] M3.2 块级渲染：h1–h6、嵌套列表（marker/缩进/任务复选框）、引用、围栏代码
-      （ColaMD 同款无高亮）、分隔线、图片、GFM 表格（对齐、单元格可编辑）
-      ——脚注渲染未做（schema 亦缺 footnote，见 M0 遗留）
+      （ColaMD 同款无高亮）、分隔线、图片、GFM 表格（对齐、单元格可编辑）、
+      脚注定义块（`[^n]:` 标记 + 0.92x 字号）与行内引用（\uFFFC 单字符占位 +
+      accent 下划线——单字符保持 PM 偏移对齐，编辑该字符即编辑 Markdown 引用）
 - [x] M3.3 行内渲染：em/strong/行内码/删除线/highlight/链接（样式+下划线）/软换行
 - [ ] M3.4 标题锚点跳转 + 落点闪烁装饰
-- [ ] M3.5 源码模式切换（`<textarea>`，滚动比例恢复）
+- [x] M3.5 源码模式切换（`mode="source"` prop：单一等宽 textarea，改动经
+      `core.reset()` 回流（undo 清空符合 ColaMD 语义）；`viewportHeight` 设置后
+      组件根为滚动容器，切换时按 scrollTo-探测最大滚动→比例→恢复（用现有
+      scrollTo/getScrollOffset API，无需新增原生接口））
 - [ ] M3.6 纯文本 Markdown 复制/粘贴（跨块）
-- [ ] M3.7 ⌘F 搜索高亮（装饰从 PM state 计算下发）
+- [x] M3.7 搜索高亮（`searchQuery`/`searchActiveIndex` props：命中走 decorations
+      通道，`searchMatches` 事件回报计数；active 命中聚焦所在块并经 `selection`
+      prop 选中范围——装饰从组件层基于 PM 块文本计算下发；⌘F 面板由应用层接，
+      example 会演示）
 - [x] M3.8 快捷键整合：格式命令（⌘B/I/E/K/⇧X/⇧H、⌘Enter 任务翻转）+ Enter 拆分
       + Backspace 跨块合并；撤销/重做与模式切换快捷键待 M3.5/M3.6
 
