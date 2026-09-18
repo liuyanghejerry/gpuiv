@@ -1,7 +1,7 @@
 import { history, undo, undoDepth, redo } from "prosemirror-history"
 import { InputRule } from "prosemirror-inputrules"
 import { Fragment, Node as PMNode } from "prosemirror-model"
-import { findWrapping } from "prosemirror-transform"
+import { canJoin, findWrapping } from "prosemirror-transform"
 import { EditorState, TextSelection, Transaction } from "prosemirror-state"
 import { detectMarkerStyle, editorSchema, parseMarkdown, serializeMarkdown } from "./model.js"
 import type { MarkerStyle } from "./model.js"
@@ -40,12 +40,19 @@ interface EditorInputRule {
   rule: InputRule
   match: RegExp
   handler: (state: EditorState, match: RegExpMatchArray, start: number, end: number) => Transaction | null
+  /** Block-structure rule (`# `, `- `, …): fires only in a top-level
+   *  paragraph, never inside list items/quotes/cells (milkdown behavior). */
+  block?: boolean
+  /** Inline mark rule: suppressed while a `code` mark is active, so `==x==`
+   *  typed inside an inline code span stays literal. */
+  mark?: boolean
 }
 
 const defineRule = (
   match: RegExp,
   handler: (state: EditorState, match: RegExpMatchArray, start: number, end: number) => Transaction | null,
-): EditorInputRule => ({ rule: new InputRule(match, handler), match, handler })
+  flags?: { block?: boolean; mark?: boolean },
+): EditorInputRule => ({ rule: new InputRule(match, handler), match, handler, ...flags })
 
 const headingRule = defineRule(/^(#{1,6}) $/, (state, match, start, end) => {
   const $start = state.doc.resolve(start)
@@ -54,7 +61,7 @@ const headingRule = defineRule(/^(#{1,6}) $/, (state, match, start, end) => {
     return null
   }
   return state.tr.delete(start, end).setBlockType(start, start, editorSchema.nodes.heading, { level })
-})
+}, { block: true })
 
 const bulletRule = defineRule(/^([-*+]) $/, (state, _match, start, end) => {
   const tr = state.tr.delete(start, end)
@@ -63,7 +70,7 @@ const bulletRule = defineRule(/^([-*+]) $/, (state, _match, start, end) => {
   const wrapping = findWrapping(range, editorSchema.nodes.bullet_list, { tight: true })
   if (!wrapping) return null
   return tr.wrap(range, wrapping)
-})
+}, { block: true })
 
 const orderedRule = defineRule(/^(\d+)\. $/, (state, match, start, end) => {
   const order = parseInt(match[1], 10) || 1
@@ -73,7 +80,7 @@ const orderedRule = defineRule(/^(\d+)\. $/, (state, match, start, end) => {
   const wrapping = findWrapping(range, editorSchema.nodes.ordered_list, { order, tight: true })
   if (!wrapping) return null
   return tr.wrap(range, wrapping)
-})
+}, { block: true })
 
 const quoteRule = defineRule(/^> $/, (state, _match, start, end) => {
   const tr = state.tr.delete(start, end)
@@ -82,7 +89,7 @@ const quoteRule = defineRule(/^> $/, (state, _match, start, end) => {
   const wrapping = findWrapping(range, editorSchema.nodes.blockquote)
   if (!wrapping) return null
   return tr.wrap(range, wrapping)
-})
+}, { block: true })
 
 const fenceRule = defineRule(/^```$/, (state, _match, start, end) => {
   const $start = state.doc.resolve(start)
@@ -90,7 +97,7 @@ const fenceRule = defineRule(/^```$/, (state, _match, start, end) => {
     return null
   }
   return state.tr.delete(start, end).setBlockType(start, start, editorSchema.nodes.code_block, { info: "" })
-})
+}, { block: true })
 
 const taskRule = defineRule(/^\[( |x|X)\] $/, (state, match, start, end) => {
   const $from = state.doc.resolve(start)
@@ -115,7 +122,7 @@ const highlightRule = defineRule(/==([^=]+)==$/, (state, match, start, end) => {
   tr.delete(start, start + 2)
   tr.addMark(start, end - 4, editorSchema.marks.highlight.create())
   return tr
-})
+}, { mark: true })
 
 const inputRules: EditorInputRule[] = [
   headingRule,
@@ -131,7 +138,12 @@ function runInputRules(state: EditorState): Transaction | null {
   const { $from } = state.selection
   if (!$from.parent.isTextblock || $from.parent.type.spec.code) return null
   const textBefore = $from.parent.textBetween(0, $from.parentOffset, null, "\ufffc")
+  const topLevelParagraph = $from.depth === 1 && $from.parent.type.name === "paragraph"
+  const marks = state.storedMarks ?? $from.marks()
+  const codeMarkActive = marks.some((mark) => mark.type.name === "code")
   for (const rule of inputRules) {
+    if (rule.block && !topLevelParagraph) continue
+    if (rule.mark && codeMarkActive) continue
     const match = rule.match.exec(textBefore)
     if (!match) continue
     const start = state.selection.from - match[0].length
@@ -165,6 +177,12 @@ export class MarkdownEditorCore {
 
   getMarkdown(): string {
     return serializeMarkdown(this.state.doc, this.markerStyle)
+  }
+
+  /** The marker style detected from the source (or default) — the component
+   *  needs it to serialize cross-block selections consistently. */
+  getMarkerStyle(): MarkerStyle {
+    return { ...this.markerStyle }
   }
 
   dispatch(tr: Transaction): void {
@@ -241,9 +259,33 @@ export class MarkdownEditorCore {
       const range = $from.blockRange($to)
       if (!range) return
       const listType = editorSchema.nodes[listName]
-      const wrapping = findWrapping(range, listType, { tight: true })
-      if (!wrapping) return
-      tr.wrap(range, wrapping)
+      // One list item per covered textblock (standard wrapInList behavior) —
+      // a single tr.wrap of the whole range would nest every block in ONE
+      // item. Only when the range covers sibling textblocks directly;
+      // structure-crossing selections (into quotes/lists/past an hr) keep
+      // the old behavior.
+      const blocks: PMNode[] = []
+      const parent = range.parent
+      for (let i = range.startIndex; i < range.endIndex; i++) {
+        const child = parent.child(i)
+        if (!child.isTextblock) {
+          blocks.length = 0
+          break
+        }
+        blocks.push(child)
+      }
+      if (blocks.length > 1) {
+        const itemType = editorSchema.nodes.list_item
+        tr.replaceWith(
+          range.start,
+          range.end,
+          listType.create({ tight: true }, blocks.map((block) => itemType.create(null, block))),
+        )
+      } else {
+        const wrapping = findWrapping(range, listType, { tight: true })
+        if (!wrapping) return
+        tr.wrap(range, wrapping)
+      }
     } else {
       const listPos = $from.before(depth)
       const listEnd = $from.after(depth)
@@ -261,7 +303,9 @@ export class MarkdownEditorCore {
     if (depth === null) return
     const tr = this.state.tr
     $from.doc.nodesBetween($from.before(depth), $to.pos, (node, pos) => {
-      if (node.type.name === "list_item" && node.attrs.checked !== undefined) {
+      // checked defaults to null (never undefined); null means "plain item"
+      // and flips to a checked task, matching toggleTaskItemAt.
+      if (node.type.name === "list_item") {
         tr.setNodeMarkup(pos, null, {
           ...node.attrs,
           checked: node.attrs.checked == null ? true : !node.attrs.checked,
@@ -307,7 +351,30 @@ export class MarkdownEditorCore {
     const from = contentStart + prefix
     const to = contentEnd - suffix
     const inserted = nextText.slice(prefix, nextText.length - suffix)
-    const tr = this.state.tr.insertText(inserted, from, to)
+    const tr = this.state.tr
+    if (inserted.includes("\n") && !node.type.spec.code) {
+      // Keep the tree parse-equivalent: a literal "\n" in a text node would
+      // diverge from a reparse, which yields hard_break nodes. Insert
+      // segment-by-segment (backwards, so `from` stays valid) with explicit
+      // hard_breaks between them; insertText keeps its mark inheritance,
+      // and the breaks carry the same marks so a marked run spanning the
+      // edit stays one run — exactly what a reparse produces.
+      // Code blocks keep literal newlines — their content is text-only.
+      const insertMarks =
+        tr.storedMarks ??
+        (to === from
+          ? this.state.doc.resolve(from).marks()
+          : this.state.doc.resolve(from).marksAcross(this.state.doc.resolve(to))) ??
+        undefined
+      tr.delete(from, to)
+      const segments = inserted.split("\n")
+      for (let i = segments.length - 1; i >= 0; i--) {
+        if (segments[i]) tr.insertText(segments[i], from)
+        if (i > 0) tr.insert(from, editorSchema.nodes.hard_break.create(null, null, insertMarks))
+      }
+    } else {
+      tr.insertText(inserted, from, to)
+    }
     // PM selection follows the edit so input rules and format commands see
     // the caret; the native editor keeps drawing its own caret.
     tr.setSelection(TextSelection.create(tr.doc, from + inserted.length))
@@ -320,13 +387,19 @@ export class MarkdownEditorCore {
   }
 
   /** Split the textblock at a UTF-16 caret offset (Enter). Inside a list
-   *  item the item splits too. Returns the doc position of the new
-   *  textblock, or null. */
+   *  item the item splits too. Returns the doc position of the NEW
+   *  textblock, or null. Splits inside table cells are refused: splitting a
+   *  cell would corrupt table geometry. */
   splitBlockAt(blockPos: number, caret: number): number | null {
     const doc = this.state.doc
-    if (!doc.nodeAt(blockPos)?.isTextblock) return null
-    const splitPos = blockPos + 1 + caret
+    const node = doc.nodeAt(blockPos)
+    if (!node?.isTextblock) return null
+    const splitPos = Math.min(blockPos + 1 + caret, blockPos + node.nodeSize - 1)
     const $ = doc.resolve(splitPos)
+    for (let d = 0; d <= $.depth; d++) {
+      const name = $.node(d).type.name
+      if (name === "table_cell" || name === "table_header") return null
+    }
     let depth = 1
     for (let d = $.depth; d > 0; d--) {
       if ($.node(d).type.name === "list_item") {
@@ -336,32 +409,84 @@ export class MarkdownEditorCore {
     }
     const tr = this.state.tr.split(splitPos, depth)
     this.dispatch(tr)
-    // The second half's textblock starts after the split boundary.
-    const after = this.state.doc.resolve(Math.min(splitPos + 2, this.state.doc.content.size))
-    return after.depth > 0 ? after.before(after.depth) : null
+    // Return the first textblock at/after the split boundary — the new block.
+    // (Resolving splitPos + 2 and taking before(depth) lands between the
+    // item_close/item_open tokens on a list split and returns the LIST.)
+    let newPos: number | null = null
+    this.state.doc.nodesBetween(splitPos, this.state.doc.content.size, (child, pos) => {
+      if (newPos !== null) return false
+      if (child.isTextblock && pos >= splitPos) {
+        newPos = pos
+        return false
+      }
+      return true
+    })
+    return newPos
   }
 
   /** Merge the textblock into its previous sibling (Backspace at offset 0).
-   *  Returns the doc caret position at the join point, or null. */
+   *  Never throws. Returns the doc caret position at the join point:
+   *  - previous sibling is an atom (hr): it is deleted; the caret stays at
+   *    this block's start.
+   *  - joinable non-code textblocks (canJoin): the blocks merge; the caret
+   *    sits at the join point.
+   *  - anything else (list/table/code_block/blockquote/…): the doc is left
+   *    unchanged and the caret moves to the end of the previous sibling's
+   *    deepest last textblock.
+   *  Returns null only when there is no previous sibling. */
   joinWithPreviousBlock(blockPos: number): number | null {
     const doc = this.state.doc
-    if (!doc.nodeAt(blockPos)) return null
+    const node = doc.nodeAt(blockPos)
+    if (!node) return null
     const $ = doc.resolve(blockPos)
-    if (!$.nodeBefore) return null
-    const tr = this.state.tr
-    tr.join(blockPos)
-    this.dispatch(tr)
-    return blockPos - 1
+    const prev = $.nodeBefore
+    if (!prev) return null
+    if (prev.isAtom) {
+      const tr = this.state.tr.delete(blockPos - prev.nodeSize, blockPos)
+      this.dispatch(tr)
+      // The block shifted left by the atom's size; caret at its content start.
+      return blockPos - prev.nodeSize + 1
+    }
+    if (
+      prev.isTextblock &&
+      node.isTextblock &&
+      !prev.type.spec.code &&
+      !node.type.spec.code &&
+      canJoin(doc, blockPos)
+    ) {
+      const tr = this.state.tr
+      tr.join(blockPos)
+      this.dispatch(tr)
+      return blockPos - 1
+    }
+    // Unjoinable: do not restructure — move the caret to the end of the
+    // previous sibling's deepest last textblock instead.
+    let target = prev
+    let pos = blockPos - prev.nodeSize
+    while (!target.isTextblock) {
+      const last = target.lastChild
+      if (!last) return null
+      pos = pos + 1 + (target.content.size - last.nodeSize)
+      target = last
+    }
+    return pos + target.nodeSize - 1
   }
 
   /** Insert parsed markdown blocks at a caret inside a textblock. The
    *  native editor's own raw paste is healed away by the component's
-   *  authoritative resync once the doc diverges from its content. */
+   *  authoritative resync once the doc diverges from its content.
+   *  Code-block targets take the text literally — no parsing, no split. */
   insertMarkdownAt(blockPos: number, caret: number, markdown: string): void {
-    const parsed = parseMarkdown(markdown)
     const node = this.state.doc.nodeAt(blockPos)
-    if (!node) return
+    if (!node || !node.isTextblock) return
     const tr = this.state.tr
+    if (node.type.spec.code) {
+      const at = Math.min(blockPos + 1 + caret, blockPos + node.nodeSize - 1)
+      tr.insertText(markdown, at)
+      this.dispatch(tr)
+      return
+    }
+    const parsed = parseMarkdown(markdown)
     if (caret >= node.content.size) {
       // At the block end there is nothing to keep after the split — insert
       // the parsed blocks as siblings directly.

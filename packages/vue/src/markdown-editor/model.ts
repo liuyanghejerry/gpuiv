@@ -72,9 +72,11 @@ export const editorSchema = new Schema({
       // (milkdown/ColaMD behavior); `code` keeps default inclusivity.
       em: { inclusive: false },
       strong: { inclusive: false },
-      code: { code: true },
       strikethrough: { inclusive: false },
       highlight: { inclusive: false },
+      // Declared last so `code` always sorts innermost: a node carrying
+      // code+highlight must serialize as `==`code`==`, not `==hi== `==code==``.
+      code: { code: true },
     },
   })
 
@@ -226,8 +228,11 @@ export function detectMarkerStyle(md: string): MarkerStyle {
   const ranked = Object.entries(bullets).sort((a, b) => b[1] - a[1])
   const bullet = ranked[0][1] > 0 ? ranked[0][0] : defaultMarkerStyle.bullet
 
-  const emStar = countMatches(md, /\*[^*\n]+\*/g)
-  const emUnderscore = countMatches(md, /_[^_\n]+_/g)
+  // Strip strong runs before counting emphasis: `**c**` would otherwise
+  // match `\*[^*\n]+\*` at its inner `*c*` and skew the em tally.
+  const withoutStrong = md.replace(/\*\*[^*\n]+\*\*/g, "").replace(/__[^_\n]+__/g, "")
+  const emStar = countMatches(withoutStrong, /\*[^*\n]+\*/g)
+  const emUnderscore = countMatches(withoutStrong, /_[^_\n]+_/g)
   const strongStar = countMatches(md, /\*\*[^*\n]+\*\*/g)
   const strongUnderscore = countMatches(md, /__[^_\n]+__/g)
 
@@ -357,12 +362,18 @@ function createSerializer(style: MarkerStyle): MarkdownSerializer {
             if (rows.length === 0) alignments[index] = cell.attrs.alignment ?? null
             // Marks are only applied by renderInline, so borrow the outer
             // state with its output buffer swapped out for the cell text.
-            const s = state as MarkdownSerializerState & { out: string }
+            // delim must be blanked too, or a blockquote/list prefix leaks
+            // into the cell text through write().
+            const s = state as MarkdownSerializerState & { out: string; delim: string }
             const saved = s.out
+            const savedDelim = s.delim
             s.out = ""
+            s.delim = ""
             state.renderInline(cell)
-            cells.push(s.out.replace(/\n/g, " ").trim())
+            // Pipes would otherwise split the cell in two on reparse.
+            cells.push(s.out.replace(/\|/g, "\\|").replace(/\n/g, " ").trim())
             s.out = saved
+            s.delim = savedDelim
           })
           rows.push(cells)
         })
@@ -385,8 +396,16 @@ function createSerializer(style: MarkerStyle): MarkdownSerializer {
             })
             .join(" | ") +
           " |"
-        const lines = rows.map((cells, i) => (i === 0 ? [renderRow(cells), delimiter] : [renderRow(cells)]).join("\n"))
-        state.write(lines.join("\n"))
+        const lines = rows.flatMap((cells, i) => (i === 0 ? [renderRow(cells), delimiter] : [renderRow(cells)]))
+        // Per-line writes, mirroring state.text(): one multi-line write would
+        // bypass the "> "/list delimiter that write() emits at line starts,
+        // leaving a table inside a blockquote unquoted past the first line.
+        const s = state as MarkdownSerializerState & { out: string }
+        for (let i = 0; i < lines.length; i++) {
+          state.write()
+          s.out += lines[i]
+          if (i !== lines.length - 1) s.out += "\n"
+        }
         state.closeBlock(node)
       },
     },

@@ -132,7 +132,7 @@ const App = defineComponent({
           <text style={{ fontSize: 11, color: "#8a8a8a" }}>{status.value}</text>
         </div>
         <div style={{ display: "flex", flexDirection: "row", flexGrow: 1, minHeight: 0 }}>
-          <div style={{ width: 640, paddingTop: 16, paddingBottom: 16, paddingLeft: 24, paddingRight: 24 }}>
+          <div testId="editor-column" style={{ width: 640, minHeight: 0, overflow: "scroll", paddingTop: 16, paddingBottom: 16, paddingLeft: 24, paddingRight: 24 }}>
             <MarkdownEditor
               ref={(el: any) => (editor.value = el)}
               source={DOCUMENT}

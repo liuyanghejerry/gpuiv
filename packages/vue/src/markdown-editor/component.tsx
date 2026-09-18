@@ -1,7 +1,17 @@
-import { defineComponent, h, nextTick, onBeforeUpdate, ref, watch, type PropType } from "vue"
+import {
+  computed,
+  defineComponent,
+  h,
+  nextTick,
+  onBeforeUpdate,
+  onUnmounted,
+  ref,
+  watch,
+  type PropType,
+} from "vue"
 import type { Mark, Node as PMNode } from "prosemirror-model"
 import { useGpuix } from "../hooks/use-gpuix.js"
-import { editorSchema, serializeMarkdown } from "./model.js"
+import { editorSchema, parseMarkdown, serializeMarkdown } from "./model.js"
 import { MarkdownEditorCore } from "./state.js"
 
 /**
@@ -68,6 +78,8 @@ interface TextRow {
   quote: boolean
   marker?: string
   markerWidth?: number
+  /** Position of the enclosing list_item, task or not (⌘⇧9 target). */
+  itemPos?: number
   checkbox?: { itemPos: number; checked: boolean }
   align?: string
   decorations?: { start: number; end: number; color: string }[]
@@ -100,19 +112,113 @@ interface TableRow {
 
 type ViewRow = TextRow | SpacerRow | TableRow
 
-// Textarea keys must survive the two ways a block changes identity:
-// structural moves (list wrapping moves the paragraph node object) keep the
-// object, input-rule conversions (paragraph -> heading) keep the position
-// but replace the object. Either change recreating the element would drop
-// focus mid-typing, so keys come from identity-first, position-fallback
-// remapping.
-const keyByNode = new WeakMap<PMNode, string>()
-const keyByPos = new Map<number, string>()
-function blockKeyFor(node: PMNode, pos: number): string {
-  const key = keyByNode.get(node) ?? keyByPos.get(pos) ?? `b${pos}`
-  keyByNode.set(node, key)
-  keyByPos.set(pos, key)
-  return key
+/**
+ * Per-instance key allocation for block textareas.
+ *
+ * Keys must survive the two ways a block changes identity: structural moves
+ * (list wrapping moves the paragraph node object) keep the object, input-rule
+ * conversions (paragraph -> heading) keep the position but replace the
+ * object. Either change recreating the element would drop focus mid-typing,
+ * so keys are identity-first with a position fallback.
+ *
+ * The position map is double-buffered: each render reads fallbacks from the
+ * previous render's map and writes a fresh one, so a stale position entry can
+ * never hand one key to two live blocks (the wrap→unwrap→Enter bug). Within a
+ * render, identity keys of surviving blocks are reserved up front and every
+ * fresh key is checked against that taken set, so keys stay unique.
+ */
+class BlockKeyAllocator {
+  private byNode = new WeakMap<PMNode, string>()
+  private byPos = new Map<number, string>()
+  private counter = 0
+  private taken = new Set<string>()
+  private nextPos = new Map<number, string>()
+
+  private identityKeys(doc: PMNode): Set<string> {
+    const keys = new Set<string>()
+    doc.descendants((node) => {
+      if (node.isTextblock) {
+        const key = this.byNode.get(node)
+        if (key) keys.add(key)
+      }
+      return true
+    })
+    return keys
+  }
+
+  private mint(pos: number): string {
+    const positional = `b${pos}`
+    if (!this.taken.has(positional)) return positional
+    let key = ""
+    do {
+      key = `g${this.counter++}`
+    } while (this.taken.has(key))
+    return key
+  }
+
+  /** Start a render pass: reserve the identity keys of live textblocks so a
+   *  position fallback cannot steal a moved block's key, then allocate into
+   *  a fresh position map. */
+  beginPass(doc: PMNode): void {
+    this.taken = this.identityKeys(doc)
+    this.nextPos = new Map()
+  }
+
+  /** Allocate the key for one block during a pass (document order). */
+  allocate(node: PMNode, pos: number): string {
+    let key = this.byNode.get(node)
+    if (!key) {
+      const fallback = this.byPos.get(pos)
+      key = fallback !== undefined && !this.taken.has(fallback) ? fallback : this.mint(pos)
+      this.byNode.set(node, key)
+    }
+    this.taken.add(key)
+    this.nextPos.set(pos, key)
+    return key
+  }
+
+  endPass(): void {
+    this.byPos = this.nextPos
+  }
+
+  /** The key a block will render with, computed exactly like allocate() but
+   *  usable between renders (after split/join/paste): the choice is seeded
+   *  into byNode, so the next pass takes the identity path and agrees. */
+  resolve(doc: PMNode, pos: number): string | null {
+    const node = doc.nodeAt(pos)
+    if (!node || !node.isTextblock) return null
+    const existing = this.byNode.get(node)
+    if (existing) return existing
+    const previousTaken = this.taken
+    this.taken = this.identityKeys(doc)
+    const fallback = this.byPos.get(pos)
+    const key = fallback !== undefined && !this.taken.has(fallback) ? fallback : this.mint(pos)
+    this.taken = previousTaken
+    this.byNode.set(node, key)
+    return key
+  }
+
+  /** Read-only key lookup for derived computations (search matches): mirrors
+   *  the last pass without allocating. */
+  peek(node: PMNode, pos: number): string {
+    return this.byNode.get(node) ?? this.byPos.get(pos) ?? `b${pos}`
+  }
+}
+
+/** The last textblock whose node start is strictly before doc position
+ *  `pos` — the block a caret at `pos` belongs to (a position on a block-open
+ *  boundary reads as the end of the previous block). */
+function textblockBefore(doc: PMNode, pos: number): { node: PMNode; pos: number } | null {
+  let found: { node: PMNode; pos: number } | null = null
+  doc.descendants((node, nodePos) => {
+    if (nodePos >= pos) return false
+    if (node.isTextblock) {
+      found = { node, pos: nodePos }
+      return false
+    }
+    return true
+  })
+  return found
 }
 
 function marksToSpans(
@@ -179,6 +285,10 @@ function flattenInline(
         underline: true,
       })
       text += "\uFFFC"
+    } else if (child.type.name === "image") {
+      // Same one-char atom placeholder as footnote_reference (state.ts maps
+      // it back to the image node, attrs intact, on edit).
+      text += "\uFFFC"
     }
   })
   return { text, spans }
@@ -189,6 +299,7 @@ interface WalkContext {
   quote: boolean
   marker?: string
   markerWidth?: number
+  itemPos?: number
   checkbox?: { itemPos: number; checked: boolean }
   fontSize?: number
   fontWeight?: number
@@ -201,6 +312,7 @@ function walkBlocks(
   contentStart: number,
   ctx: WalkContext,
   theme: MarkdownEditorTheme,
+  keyFor: (node: PMNode, pos: number) => string,
   out: ViewRow[],
 ): void {
   let orderedIndex = 0
@@ -214,7 +326,7 @@ function walkBlocks(
         const level = child.type.name === "heading" ? (child.attrs.level as number) : 0
         out.push({
           kind: "text",
-          key: blockKeyFor(child, pos),
+          key: keyFor(child, pos),
           pos,
           text,
           spans,
@@ -224,6 +336,7 @@ function walkBlocks(
           quote: ctx.quote,
           marker: ctx.marker,
           markerWidth: ctx.markerWidth,
+          itemPos: ctx.itemPos,
           checkbox: ctx.checkbox,
           align: ctx.tableAlign,
         })
@@ -232,14 +345,14 @@ function walkBlocks(
       case "code_block": {
         out.push({
           kind: "code-info",
-          key: `i${pos}`,
+          key: `info${pos}`,
           info: (child.attrs.info as string) || "",
           indent: ctx.indent,
           quote: ctx.quote,
         })
         out.push({
           kind: "text",
-          key: blockKeyFor(child, pos),
+          key: keyFor(child, pos),
           pos,
           text: child.textContent,
           spans: [],
@@ -247,16 +360,17 @@ function walkBlocks(
           mono: true,
           indent: ctx.indent,
           quote: ctx.quote,
+          itemPos: ctx.itemPos,
         })
         break
       }
       case "horizontal_rule":
-        out.push({ kind: "hr", key: `b${pos}`, indent: ctx.indent, quote: ctx.quote })
+        out.push({ kind: "hr", key: `hr${pos}`, indent: ctx.indent, quote: ctx.quote })
         break
       case "image":
         out.push({
           kind: "image",
-          key: `b${pos}`,
+          key: `img${pos}`,
           src: String(child.attrs.src ?? ""),
           alt: child.attrs.alt ? String(child.attrs.alt) : undefined,
           indent: ctx.indent,
@@ -264,7 +378,14 @@ function walkBlocks(
         })
         break
       case "blockquote":
-        walkBlocks(child, pos + 1, { ...ctx, quote: true, marker: undefined, checkbox: undefined }, theme, out)
+        walkBlocks(
+          child,
+          pos + 1,
+          { ...ctx, quote: true, marker: undefined, itemPos: undefined, checkbox: undefined },
+          theme,
+          keyFor,
+          out,
+        )
         break
       case "bullet_list":
       case "ordered_list": {
@@ -284,9 +405,10 @@ function walkBlocks(
             indent: ctx.indent + 1,
             marker,
             markerWidth: ordered ? 26 : 18,
+            itemPos,
             checkbox,
           }
-          walkBlocks(item, itemPos + 1, itemCtx, theme, out)
+          walkBlocks(item, itemPos + 1, itemCtx, theme, keyFor, out)
         })
         break
       }
@@ -295,10 +417,11 @@ function walkBlocks(
           ...ctx,
           marker: `[^${child.attrs.label ?? ""}]:`,
           markerWidth: 54,
+          itemPos: undefined,
           checkbox: undefined,
           fontSize: theme.fontSize * 0.92,
         }
-        walkBlocks(child, pos + 1, defCtx, theme, out)
+        walkBlocks(child, pos + 1, defCtx, theme, keyFor, out)
         break
       }
       case "table": {
@@ -309,7 +432,7 @@ function walkBlocks(
             const cellPos = rowPos + 1 + cellOffset
             const { text, spans } = flattenInline(cell, theme)
             cells.push({
-              key: `c${blockKeyFor(cell, cellPos)}`,
+              key: `c${keyFor(cell, cellPos)}`,
               pos: cellPos,
               text,
               spans,
@@ -317,7 +440,7 @@ function walkBlocks(
               header: cell.type.name === "table_header",
             })
           })
-          out.push({ kind: "table", key: `r${rowPos}`, cells })
+          out.push({ kind: "table", key: `trow${rowPos}`, cells })
         })
         break
       }
@@ -325,6 +448,12 @@ function walkBlocks(
         break
     }
   })
+}
+
+interface SearchMatch {
+  key: string
+  start: number
+  end: number
 }
 
 export const MarkdownEditor = defineComponent({
@@ -339,9 +468,10 @@ export const MarkdownEditor = defineComponent({
   },
   emits: ["change", "searchMatches"],
   setup(props, { emit, expose }) {
-    const mergedTheme = { ...defaultTheme, ...props.theme } as MarkdownEditorTheme
+    const mergedTheme = computed(() => ({ ...defaultTheme, ...props.theme }) as MarkdownEditorTheme)
     const core = new MarkdownEditorCore(props.source)
     const version = ref(0)
+    const keyAlloc = new BlockKeyAllocator()
     // blockTexts: what the PM doc holds (editBlock's `prev`).
     // nativeTexts: what the native editor holds (its last change report).
     // When they diverge (input rule, undo, formatting rewrote the block),
@@ -370,8 +500,12 @@ export const MarkdownEditor = defineComponent({
       rootId.value = (el as { id?: number } | null)?.id ?? null
     }
     let lastMatchCount = -1
-    const pendingFocus = ref<{ key: string; caret: number } | null>(null)
-    let focusTarget: { key: string; caret: number } | null = null
+    const pendingFocus = ref<{ key: string; head: number; anchor: number } | null>(null)
+    // The rows of the latest render: rowOrder() and keyPositions read them
+    // from event handlers, where re-walking the doc would allocate keys a
+    // second time.
+    let lastRows: ViewRow[] = []
+    const keyPositions = new Map<string, number>()
 
     const hostIds = new Map<string, number>()
     const collectRef = (key: string) => (el: unknown) => {
@@ -387,18 +521,66 @@ export const MarkdownEditor = defineComponent({
     onBeforeUpdate(() => {
       hostIds.clear()
     })
+    onUnmounted(() => {
+      if (flashTimer) clearTimeout(flashTimer)
+    })
+
+    /** Every case-insensitive match of searchQuery, in document order.
+     *  Keys resolve read-only through the allocator (peek), so this never
+     *  allocates. Recomputed on doc edits via `version`. */
+    const searchMatches = computed((): SearchMatch[] => {
+      void version.value
+      const query = props.searchQuery.trim()
+      if (!query) return []
+      const needle = query.toLowerCase()
+      const out: ViewRow[] = []
+      walkBlocks(
+        core.state.doc,
+        0,
+        { indent: 0, quote: false },
+        mergedTheme.value,
+        (node, pos) => keyAlloc.peek(node, pos),
+        out,
+      )
+      const matches: SearchMatch[] = []
+      for (const row of out) {
+        if (row.kind !== "text") continue
+        const lower = row.text.toLowerCase()
+        let at = lower.indexOf(needle)
+        while (at !== -1) {
+          matches.push({ key: row.key, start: at, end: at + query.length })
+          at = lower.indexOf(needle, at + needle.length)
+        }
+      }
+      return matches
+    })
 
     const rows = (): ViewRow[] => {
       // touch version for reactivity
       void version.value
+      const theme = mergedTheme.value
       const out: ViewRow[] = []
-      walkBlocks(core.state.doc, 0, { indent: 0, quote: false }, mergedTheme, out)
-      const query = props.searchQuery.trim()
-      let matchIndex = 0
-      let matchCount = 0
+      keyAlloc.beginPass(core.state.doc)
+      walkBlocks(core.state.doc, 0, { indent: 0, quote: false }, theme, (node, pos) => keyAlloc.allocate(node, pos), out)
+      keyAlloc.endPass()
+      lastRows = out
+      keyPositions.clear()
+      const matchesByKey = new Map<string, { start: number; end: number; index: number }[]>()
+      searchMatches.value.forEach((match, index) => {
+        const list = matchesByKey.get(match.key)
+        const entry = { start: match.start, end: match.end, index }
+        if (list) list.push(entry)
+        else matchesByKey.set(match.key, [entry])
+      })
+      // One order list per render for the cross-block selection decoration,
+      // not one re-walk per row.
+      const sel = docSelection.value
+      const order = sel ? out.map((row) => row.key) : null
+      const fromIndex = sel && order ? order.indexOf(sel.fromKey) : -1
+      const toIndex = sel && order ? order.indexOf(sel.toKey) : -1
       for (const row of out) {
-        if (row.kind === "text") keyPositions.set(row.key, row.pos)
         if (row.kind !== "text") continue
+        keyPositions.set(row.key, row.pos)
         blockTexts.set(row.key, row.text)
         const known = nativeTexts.get(row.key)
         if (known === undefined || known !== row.text) {
@@ -407,33 +589,18 @@ export const MarkdownEditor = defineComponent({
           }
           nativeTexts.set(row.key, row.text)
         }
-        if (query) {
-          const lower = row.text.toLowerCase()
-          const needle = query.toLowerCase()
-          const decorations: { start: number; end: number; color: string }[] = []
-          let at = lower.indexOf(needle)
-          while (at !== -1) {
-            const active = matchIndex === props.searchActiveIndex
-            decorations.push({
-              start: at,
-              end: at + query.length,
-              color: active ? "rgba(255, 170, 0, 0.75)" : "rgba(255, 214, 0, 0.35)",
-            })
-            if (active) {
-              pendingSelectionProps.set(row.key, [at, at + query.length])
-              focusTarget = { key: row.key, caret: at }
-            }
-            matchIndex++
-            matchCount++
-            at = lower.indexOf(needle, at + needle.length)
-          }
-          row.decorations = decorations
+        const rowMatches = matchesByKey.get(row.key)
+        if (rowMatches) {
+          row.decorations = rowMatches.map((match) => ({
+            start: match.start,
+            end: match.end,
+            color:
+              match.index === props.searchActiveIndex
+                ? "rgba(255, 170, 0, 0.75)"
+                : "rgba(255, 214, 0, 0.35)",
+          }))
         }
-        const sel = docSelection.value
-        if (sel) {
-          const order = rowOrder()
-          const fromIndex = order.indexOf(sel.fromKey)
-          const toIndex = order.indexOf(sel.toKey)
+        if (sel && order && fromIndex !== -1 && toIndex !== -1) {
           const index = order.indexOf(row.key)
           if (index >= fromIndex && index <= toIndex) {
             const start = index === fromIndex ? sel.fromOffset : 0
@@ -447,21 +614,20 @@ export const MarkdownEditor = defineComponent({
           }
         }
       }
-      if (matchCount !== lastMatchCount) {
-        lastMatchCount = matchCount
-        emit("searchMatches", matchCount)
-      }
       return out
     }
 
-    const getMarkdown = () => core.getMarkdown()
+    const getMarkdown = () => (props.mode === "source" ? sourceText.value : core.getMarkdown())
     const touch = () => {
+      // Any edit invalidates the cross-block selection: its positions are
+      // pre-edit coordinates and would decorate/copy the wrong ranges.
+      docSelection.value = null
       version.value++
       emit("change", core.getMarkdown())
     }
 
-    const focusBlock = (key: string, caret: number) => {
-      pendingFocus.value = { key, caret }
+    const focusBlock = (key: string, head: number, anchor = head) => {
+      pendingFocus.value = { key, head, anchor }
       void nextTick(() => {
         const target = pendingFocus.value
         pendingFocus.value = null
@@ -470,9 +636,22 @@ export const MarkdownEditor = defineComponent({
         const id = hostIds.get(target.key)
         if (renderer?.focusElement && id !== undefined) {
           renderer.focusElement(id)
-          selections.set(target.key, [target.caret, target.caret])
+          selections.set(target.key, [target.anchor, target.head])
         }
       })
+    }
+
+    /** Focus the textblock whose content spans doc position `pos`, caret at
+     *  exactly that offset (not the block end, which is where the
+     *  value-resync would otherwise leave it). */
+    const focusDocPosition = (pos: number) => {
+      const hit = textblockBefore(core.state.doc, pos)
+      if (!hit) return
+      const key = keyAlloc.resolve(core.state.doc, hit.pos)
+      if (key === null) return
+      const caret = Math.max(0, Math.min(pos - hit.pos - 1, hit.node.content.size))
+      pendingSelectionProps.set(key, [caret, caret])
+      focusBlock(key, caret)
     }
 
     const onBlockChange = (row: TextRow) => (event: { value?: string | null }) => {
@@ -488,7 +667,7 @@ export const MarkdownEditor = defineComponent({
       const caret = selections.get(row.key)?.[1] ?? row.text.length
       const newPos = core.splitBlockAt(row.pos, caret)
       touch()
-      if (newPos !== null) focusBlock(`b${newPos}`, 0)
+      if (newPos !== null) focusDocPosition(newPos + 1)
     }
 
     const onBlockKeyDown = (row: TextRow) => (event: { key?: string; modifiers?: Record<string, boolean> }) => {
@@ -506,13 +685,13 @@ export const MarkdownEditor = defineComponent({
           return
         }
         // milkdown list keys: cmd-shift-7 ordered, cmd-shift-8 bullet,
-        // cmd-shift-9 task (toggles the current item).
+        // cmd-shift-9 task (plain items become checked tasks).
         if (mods.shift && (key === "7" || key === "8" || key === "9")) {
           if (anchor === head) core.setSelection(contentStart + head)
           else core.setSelection(contentStart + anchor, contentStart + head)
           if (key === "8") core.toggleList("bullet")
-          else if (key === "7") core.toggleList("ordered");
-          else if (row.checkbox) core.toggleTaskItemAt(row.checkbox.itemPos)
+          else if (key === "7") core.toggleList("ordered")
+          else if (row.itemPos !== undefined) core.toggleTaskItemAt(row.itemPos)
           touch()
           return
         }
@@ -549,16 +728,19 @@ export const MarkdownEditor = defineComponent({
         }
         return
       }
-      if (key === "backspace" && anchor === 0 && head === 0) {
-        const caret = core.joinWithPreviousBlock(row.pos)
-        touch()
-        if (caret !== null) {
-          // Position of the merged textblock: walk back from the join point.
-          const $ = core.state.doc.resolve(caret)
-          const blockPos = $.before($.depth)
-          focusBlock(`b${blockPos}`, caret - blockPos - 1)
-        }
-      }
+    }
+
+    // Backspace is a native keybinding, so keyDown never reaches JS. A press
+    // with an empty selection at offset 0 is a native no-op and arrives here
+    // instead — the component owns the cross-block join.
+    const onBlockBackspaceStart = (row: TextRow) => () => {
+      const before = core.state
+      const caret = core.joinWithPreviousBlock(row.pos)
+      if (caret === null) return
+      // Unjoinable predecessors (list/table/code/quote) leave the doc
+      // untouched and just hand back the caret target — no change to emit.
+      if (core.state !== before) touch()
+      focusDocPosition(caret)
     }
 
     const onBlockSelectionChange =
@@ -607,13 +789,8 @@ export const MarkdownEditor = defineComponent({
       version.value++
     }
 
-    const rowOrder = (): string[] => {
-      const rowsList: ViewRow[] = []
-      walkBlocks(core.state.doc, 0, { indent: 0, quote: false }, mergedTheme, rowsList)
-      return rowsList.map((row) => row.key)
-    }
+    const rowOrder = (): string[] => lastRows.map((row) => row.key)
 
-    const keyPositions = new Map<string, number>()
     const rowPosOf = (key: string): number => keyPositions.get(key) ?? 0
 
     const caretOf = (key: string): number => selections.get(key)?.[1] ?? blockTexts.get(key)?.length ?? 0
@@ -638,10 +815,35 @@ export const MarkdownEditor = defineComponent({
       docSelection.value = null
     }
 
-    // cmd-c/cmd-v are native keybindings: the actions consume the keystroke
-    // before keyDown reaches JS, so editors opt into interception and the
-    // component serializes (cross-block markdown) or re-inserts parsed
-    // blocks itself.
+    const serializeDocSelection = (): string | null => {
+      const sel = docSelection.value
+      if (!sel || sel.fromKey === sel.toKey) return null
+      const from = sel.fromPos + 1 + sel.fromOffset
+      const to = sel.toPos + 1 + sel.toOffset
+      if (to <= from) return null
+      const slice = core.state.doc.slice(from, to)
+      const wrapped = editorSchema.topNodeType.createAndFill(null, slice.content)
+      return wrapped ? serializeMarkdown(wrapped, core.getMarkerStyle()) : null
+    }
+
+    /** Delete the cross-block selection through the model. Returns the doc
+     *  position the caret should land on (the selection start). */
+    const deleteDocSelection = (): number | null => {
+      const sel = docSelection.value
+      if (!sel) return null
+      const from = sel.fromPos + 1 + sel.fromOffset
+      const to = sel.toPos + 1 + sel.toOffset
+      if (to <= from) return null
+      // deleteRange degrades gracefully across structure boundaries (tables)
+      // where a raw tr.delete would throw.
+      core.dispatch(core.state.tr.deleteRange(from, to))
+      return from
+    }
+
+    // cmd-c/cmd-x/cmd-v are native keybindings: the actions consume the
+    // keystroke before keyDown reaches JS, so editors opt into interception
+    // and the component serializes (cross-block markdown), deletes, or
+    // re-inserts parsed blocks itself.
     const onBlockCopy = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
       const renderer = getRenderer()
       if (!renderer?.writeClipboardText) return
@@ -657,29 +859,96 @@ export const MarkdownEditor = defineComponent({
       }
     }
 
-    const onBlockPaste = (row: TextRow) => (event: { value?: string | null }) => {
-      const text = event.value ?? ""
-      if (!text) return
-      const caret = selections.get(row.key)?.[1] ?? row.text.length
-      if (text.includes("\n\n")) {
-        core.insertMarkdownAt(row.pos, caret, text)
-      } else {
-        const prev = blockTexts.get(row.key) ?? row.text
-        const next = prev.slice(0, caret) + text + prev.slice(caret)
-        core.editBlock(row.pos, prev, next)
+    const onBlockCut = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+      const renderer = getRenderer()
+      if (!renderer?.writeClipboardText) return
+      const markdown = serializeDocSelection()
+      if (markdown !== null) {
+        renderer.writeClipboardText(markdown)
+        const caret = deleteDocSelection()
+        touch()
+        if (caret !== null) focusDocPosition(caret)
+        return
       }
+      const start = event.startIndex ?? 0
+      const end = event.endIndex ?? start
+      if (end <= start) return
+      const text = blockTexts.get(row.key) ?? row.text
+      renderer.writeClipboardText(text.slice(start, end))
+      // Native does not delete under interceptClipboard — the component owns it.
+      core.editBlock(row.pos, text, text.slice(0, start) + text.slice(end))
+      selections.set(row.key, [start, start])
+      pendingSelectionProps.set(row.key, [start, start])
       touch()
     }
 
-    const serializeDocSelection = (): string | null => {
-      const sel = docSelection.value
-      if (!sel || sel.fromKey === sel.toKey) return null
-      const from = sel.fromPos + 1 + sel.fromOffset
-      const to = sel.toPos + 1 + sel.toOffset
-      if (to <= from) return null
-      const slice = core.state.doc.slice(from, to)
-      const wrapped = editorSchema.topNodeType.createAndFill(null, slice.content)
-      return wrapped ? serializeMarkdown(wrapped) : null
+    const onBlockPaste = (row: TextRow, inTable = false) => (event: { value?: string | null }) => {
+      const text = event.value ?? ""
+      if (!text) return
+      let prev = blockTexts.get(row.key) ?? row.text
+      const [anchor, head] = selections.get(row.key) ?? [prev.length, prev.length]
+      const selStart = Math.min(anchor, head, prev.length)
+      const selEnd = Math.min(Math.max(anchor, head), prev.length)
+      const caret = selStart
+      if (selEnd > selStart) {
+        // Paste is intercepted: the native editor left its content untouched,
+        // so the covered range is removed through the model first.
+        const without = prev.slice(0, selStart) + prev.slice(selEnd)
+        core.editBlock(row.pos, prev, without)
+        prev = without
+      }
+      const node = core.state.doc.nodeAt(row.pos)
+      if (!node || !node.isTextblock) return
+      const isCode = node.type.spec.code === true
+      // Structure beats a newline heuristic: parse the text and insert as
+      // blocks when it is anything but a single plain paragraph ("- a\n- b"
+      // must become a list, not literal text). Code blocks and table cells
+      // always take the text literally.
+      const parsed = !isCode && !inTable ? parseMarkdown(text) : null
+      const structured =
+        parsed !== null &&
+        parsed.childCount > 0 &&
+        (parsed.childCount > 1 || parsed.firstChild?.type.name !== "paragraph")
+      if (isCode || structured) {
+        core.insertMarkdownAt(row.pos, caret, text)
+        touch()
+        if (isCode) {
+          // Raw insert: the caret lands right after the pasted text.
+          focusDocPosition(row.pos + 1 + caret + text.length)
+        } else if (parsed) {
+          // After the last inserted block. At the block end insertMarkdownAt
+          // appends siblings; mid-block it splits first and inserts between.
+          const end =
+            caret >= node.content.size
+              ? row.pos + node.nodeSize + parsed.content.size
+              : row.pos + 1 + caret + 1 + parsed.content.size
+          focusDocPosition(end)
+        }
+        return
+      }
+      const next = prev.slice(0, caret) + text + prev.slice(caret)
+      core.editBlock(row.pos, prev, next)
+      // The authoritative resync lands the caret at the block end
+      // (set_external_text); push the intended caret through the selection
+      // prop instead.
+      const after = caret + text.length
+      selections.set(row.key, [after, after])
+      pendingSelectionProps.set(row.key, [after, after])
+      touch()
+    }
+
+    // Registering undo/redo listeners makes the native editor skip its own
+    // undo stack: PM history is the single source of truth.
+    const onBlockUndo = () => {
+      if (!core.undo()) return
+      touch()
+      focusDocPosition(core.state.selection.head)
+    }
+
+    const onBlockRedo = () => {
+      if (!core.redo()) return
+      touch()
+      focusDocPosition(core.state.selection.head)
     }
 
     const toggleTask = (itemPos: number) => {
@@ -687,26 +956,47 @@ export const MarkdownEditor = defineComponent({
       touch()
     }
 
+    // Scroll offsets are negative pixel values (scroll down = more negative
+    // y), so "max scroll" is probed with a large negative offset.
     const captureScrollRatio = (): number => {
       const renderer = getRenderer()
       if (!renderer?.scrollTo || !renderer.getScrollOffset || rootId.value == null) return 0
       const before = renderer.getScrollOffset(rootId.value)
       if (!before) return 0
-      renderer.scrollTo(rootId.value, 0, 1e9)
+      renderer.scrollTo(rootId.value, 0, -1e9)
       const max = renderer.getScrollOffset(rootId.value)
       renderer.scrollTo(rootId.value, 0, before[1] ?? 0)
-      if (!max) return 0
-      const maxY = max[1] ?? 0
-      return maxY > 0 ? (before[1] ?? 0) / maxY : 0
+      const maxY = max?.[1] ?? 0
+      return maxY < 0 ? (before[1] ?? 0) / maxY : 0
     }
 
     const restoreScrollRatio = (ratio: number): void => {
       const renderer = getRenderer()
       if (!renderer?.scrollTo || !renderer.getScrollOffset || rootId.value == null) return
-      renderer.scrollTo(rootId.value, 0, 1e9)
+      renderer.scrollTo(rootId.value, 0, -1e9)
       const max = renderer.getScrollOffset(rootId.value)
       if (!max) return
       renderer.scrollTo(rootId.value, 0, ratio * (max[1] ?? 0))
+    }
+
+    /** A pending selection applies once; consuming the entry re-arms it, so a
+     *  repeated same-value request is not dropped by Rust's dedupe. */
+    const consumePendingSelection = (key: string): [number, number] | undefined => {
+      const pending = pendingSelectionProps.get(key)
+      if (pending) pendingSelectionProps.delete(key)
+      return pending
+    }
+
+    const clearBlockState = () => {
+      blockTexts.clear()
+      nativeTexts.clear()
+      revisions.clear()
+      selections.clear()
+      pendingSelectionProps.clear()
+      docSelection.value = null
+      pendingExtend = null
+      focusedKey = null
+      prevFocusedKey = null
     }
 
     watch(
@@ -717,29 +1007,61 @@ export const MarkdownEditor = defineComponent({
           sourceText.value = core.getMarkdown()
         } else {
           core.reset(sourceText.value)
-          nativeTexts.clear()
-          revisions.clear()
-          pendingSelectionProps.clear()
+          clearBlockState()
         }
         version.value++
         void nextTick(() => restoreScrollRatio(ratio))
       },
     )
 
+    watch(
+      () => props.source,
+      (source) => {
+        if (props.mode === "source") {
+          if (source !== sourceText.value) sourceText.value = source
+          return
+        }
+        // A parent feeding `change` back into `source` must not flush the
+        // undo history — only reset on a genuine external replacement.
+        if (source === core.getMarkdown()) return
+        core.reset(source)
+        clearBlockState()
+        version.value++
+      },
+    )
+
+    // Focus the active match only when the (query, index) pair changes.
+    // Doing this from rows() stole focus back to the match on every render —
+    // after each keystroke typed into another block.
+    watch([() => props.searchQuery, () => props.searchActiveIndex], () => {
+      const query = props.searchQuery.trim()
+      if (!query || props.searchActiveIndex < 0) return
+      const match = searchMatches.value[props.searchActiveIndex]
+      if (!match) return
+      pendingSelectionProps.set(match.key, [match.start, match.end])
+      focusBlock(match.key, match.end, match.start)
+    })
+
+    watch(searchMatches, (matches) => {
+      if (matches.length !== lastMatchCount) {
+        lastMatchCount = matches.length
+        emit("searchMatches", matches.length)
+      }
+    })
+
     const jumpToHeading = (text: string): boolean => {
-      let foundNode: PMNode | null = null
       let foundPos: number | null = null
       core.state.doc.descendants((node, pos) => {
         if (foundPos !== null) return false
         if (node.type.name === "heading" && node.textContent.trim() === text.trim()) {
-          foundNode = node
           foundPos = pos
           return false
         }
         return true
       })
-      if (foundNode === null || foundPos === null) return false
-      const key = blockKeyFor(foundNode, foundPos)
+      if (foundPos === null) return false
+      const key = keyAlloc.resolve(core.state.doc, foundPos)
+      if (key === null) return false
       if (flashTimer) clearTimeout(flashTimer)
       flashKey.value = key
       flashTimer = setTimeout(() => {
@@ -763,6 +1085,7 @@ export const MarkdownEditor = defineComponent({
     })
 
     return () => {
+      const theme = mergedTheme.value
       if (props.mode === "source") {
         return h("div", { ref: collectRootRef, style: rootStyle() }, () => [
           h("textarea", {
@@ -777,20 +1100,16 @@ export const MarkdownEditor = defineComponent({
             },
             style: {
               width: "100%",
-              fontFamily: mergedTheme.monoFont,
+              fontFamily: theme.monoFont,
               fontSize: 13,
-              lineHeight: 1.6,
-              color: mergedTheme.text,
+              // Native lineHeight is absolute pixels, not a font-size factor.
+              lineHeight: 21,
+              color: theme.text,
             },
           }),
         ])
       }
       const list = rows()
-      if (focusTarget && props.searchActiveIndex >= 0) {
-        const target = focusTarget
-        focusTarget = null
-        focusBlock(target.key, target.caret)
-      }
       const children: ReturnType<typeof h>[] = []
       let lastKind = ""
       for (const row of list) {
@@ -823,7 +1142,7 @@ export const MarkdownEditor = defineComponent({
         } else if (row.kind === "code-info") {
           if (row.info) {
             children.push(
-              h("text", { key: row.key, style: { color: mergedTheme.muted, fontSize: 11 } }, () => [row.info]),
+              h("text", { key: row.key, style: { color: theme.muted, fontSize: 11 } }, () => [row.info]),
             )
           }
         } else if (row.kind === "table") {
@@ -857,12 +1176,12 @@ export const MarkdownEditor = defineComponent({
                         minRows: 1,
                         style: {
                           width: "100%",
-                          fontSize: mergedTheme.fontSize,
+                          fontSize: theme.fontSize,
                           textAlign: (cell.alignment || "left") as "left" | "center" | "right",
                           fontWeight: cell.header ? 650 : undefined,
                         },
-                        onChange: onBlockChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: mergedTheme.fontSize, indent: 0, quote: false, align: cell.alignment || "left" }),
-                        onSelectionChange: onBlockSelectionChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: mergedTheme.fontSize, indent: 0, quote: false }),
+                        onChange: onBlockChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: theme.fontSize, indent: 0, quote: false, align: cell.alignment || "left" }),
+                        onSelectionChange: onBlockSelectionChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: theme.fontSize, indent: 0, quote: false }),
                       }),
                     ],
                   ),
@@ -870,13 +1189,8 @@ export const MarkdownEditor = defineComponent({
             ),
           )
         } else if (row.kind === "text") {
-          // A measured element inside a flex row collapses (a gpuiv/Taffy
-          // interplay), which also breaks click hit-testing — so block
-          // heights are explicit: hard-break lines × line height, clamped
-          // like the native maxRows.
-          const lines = Math.min(Math.max(row.text.split("\n").length, 1), 10)
-          const lineHeightFactor = row.mono ? 1.45 : 1.7
-          const rowHeight = Math.round(lines * row.fontSize * lineHeightFactor)
+          // Native lineHeight is absolute pixels, not a font-size factor.
+          const lineHeightPx = Math.round(row.fontSize * (row.mono ? 1.45 : 1.7))
           const editor = h("textarea", {
             key: row.key,
             ref: collectRef(row.key),
@@ -885,26 +1199,29 @@ export const MarkdownEditor = defineComponent({
             valueRevision: revisions.get(row.key) ?? 0,
             spans: row.spans,
             decorations: row.decorations,
-            selection: pendingSelectionProps.get(row.key),
+            selection: consumePendingSelection(row.key),
             minRows: 1,
             onSubmit: () => onBlockSubmit(row),
             onChange: onBlockChange(row),
             onKeyDown: onBlockKeyDown(row),
             onSelectionChange: onBlockSelectionChange(row),
+            onBackspaceStart: onBlockBackspaceStart(row),
             interceptClipboard: true,
             onClick: onBlockClick(row),
             onCopy: onBlockCopy(row),
+            onCut: onBlockCut(row),
             onPaste: onBlockPaste(row),
+            onUndo: onBlockUndo,
+            onRedo: onBlockRedo,
             style: {
               width: "100%",
-              height: rowHeight,
               fontSize: row.fontSize,
               fontWeight: row.fontWeight,
-              fontFamily: row.mono ? mergedTheme.monoFont : undefined,
-              backgroundColor: row.mono ? mergedTheme.codeBackground : undefined,
+              fontFamily: row.mono ? theme.monoFont : undefined,
+              backgroundColor: row.mono ? theme.codeBackground : undefined,
               textAlign: (row.align || "left") as "left" | "center" | "right",
-              color: mergedTheme.text,
-              lineHeight: row.mono ? 1.45 : 1.7,
+              color: theme.text,
+              lineHeight: lineHeightPx,
             },
           })
           const lineChildren: ReturnType<typeof h>[] = []
@@ -920,8 +1237,8 @@ export const MarkdownEditor = defineComponent({
                   marginTop: 4,
                   marginRight: 6,
                   borderWidth: 1,
-                  borderColor: row.checkbox.checked ? mergedTheme.accent : "#777",
-                  backgroundColor: row.checkbox.checked ? mergedTheme.accent : undefined,
+                  borderColor: row.checkbox.checked ? theme.accent : "#777",
+                  backgroundColor: row.checkbox.checked ? theme.accent : undefined,
                   borderRadius: 3,
                 },
               }),
@@ -932,7 +1249,7 @@ export const MarkdownEditor = defineComponent({
                 "text",
                 {
                   key: `${row.key}-marker`,
-                  style: { width: row.markerWidth ?? 18, color: mergedTheme.muted },
+                  style: { width: row.markerWidth ?? 18, color: theme.muted },
                 },
                 () => [row.marker ?? ""],
               ),
@@ -968,7 +1285,7 @@ export const MarkdownEditor = defineComponent({
                   paddingLeft: row.quote ? 10 : 0,
                   borderWidth: row.quote ? 0 : undefined,
                   borderLeftWidth: row.quote ? 3 : undefined,
-                  borderColor: row.quote ? mergedTheme.quoteBar : undefined,
+                  borderColor: row.quote ? theme.quoteBar : undefined,
                 },
               },
               () => lineChildren,

@@ -48,6 +48,13 @@ same rule set as WPT's gentest and Automattic/node-canvas's
 [`test/wpt/generate.js`](https://github.com/Automattic/node-canvas/blob/master/test/wpt/generate.js)
 (MIT) port of it.
 
+## Test fixtures
+
+`packages/vue/src/__tests__/fixtures/colamd/` vendors real documents from
+**[ColaMD](https://github.com/marswaveai/colamd)** (MIT, Copyright (c) 2026
+marswave.ai). They back the markdown round-trip parity tests of
+`<markdown-editor>`.
+
 ## Bundled grammars
 
 Syntax highlighting bundles the following Tree-sitter components. Versions are

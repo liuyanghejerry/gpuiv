@@ -137,6 +137,13 @@ describe("markdown model: marker style detection", () => {
     expect(style.strong).toBe("__")
   })
 
+  it("does not count **strong** runs toward the *em* tally", () => {
+    const style = detectMarkerStyle("**a** **b** **c** and _d_")
+    expect(style.emphasis).toBe("_")
+    expect(style.strong).toBe("**")
+    expect(detectMarkerStyle("**a** and *b*").emphasis).toBe("*")
+  })
+
   it("picks tilde fences", () => {
     expect(detectMarkerStyle("~~~\nx\n~~~\n").fence).toBe("~~~")
   })
@@ -193,6 +200,46 @@ describe("markdown model: serialize + round-trip", () => {
     const out = serialize(parse("~~~\nx\n~~~"), detectMarkerStyle("~~~\nx\n~~~"))
     expect(out).toBe("~~~\nx\n~~~\n")
   })
+
+  it("serializes code innermost when combined with other marks", () => {
+    // `code` is the last mark in the schema, so it opens last (innermost):
+    // ==`code`==, not ==hi== `==code==`.
+    for (const md of ["==hi `code`==", "~~a `b` c~~", "**`b`**"]) {
+      const doc = parse(md)
+      const out = serialize(doc, detectMarkerStyle(md))
+      expect(out).toBe(md + "\n")
+      expect(parse(out).eq(doc), `doc-equal round trip for ${JSON.stringify(md)}`)
+    }
+  })
+
+  it("escapes pipes in table cell text", () => {
+    const md = "| a\\|b | c |\n| --- | --- |\n| d | e |\n"
+    const doc = parse(md)
+    expect(doc.child(0).child(0).child(0).textContent).toBe("a|b")
+    const out = serialize(doc, detectMarkerStyle(md))
+    expect(out).toContain("a\\|b")
+    expect(parse(out).eq(doc)).toBe(true)
+  })
+
+  it("serializes tables inside blockquotes with per-line > prefixes", () => {
+    const md = "> | A | B |\n> | --- | --- |\n> | a | b |\n"
+    const doc = parse(md)
+    const out = serialize(doc, detectMarkerStyle(md))
+    expect(out.trimEnd().split("\n").every((line) => line.startsWith("> "))).toBe(true)
+    expect(parse(out).eq(doc)).toBe(true)
+    expect(serialize(parse(out), detectMarkerStyle(out))).toBe(out)
+  })
+
+  it("round-trips inline images with their attrs", () => {
+    const md = 'a ![alt](img.png "t") b'
+    const doc = parse(md)
+    const img = doc.child(0).child(1)
+    expect(img.type.name).toBe("image")
+    expect(img.attrs).toEqual({ src: "img.png", alt: "alt", title: "t" })
+    const out = serialize(doc, detectMarkerStyle(md))
+    expect(out).toBe(md + "\n")
+    expect(parse(out).eq(doc)).toBe(true)
+  })
 })
 
 describe("markdown model: ColaMD real documents", () => {
@@ -210,14 +257,14 @@ describe("markdown model: ColaMD real documents", () => {
   }
 
   it("keeps task bullets and checkbox markers from the source", () => {
-    const md = fixture("outline-test.md")
+    // outline-test.md has zero task items — assert on a snippet that
+    // actually exercises checkboxes.
+    const md = "# t\n\n- [x] done\n- [ ] todo\n- plain\n"
     const out = serialize(parse(md), detectMarkerStyle(md))
-    if (/^[-*+] \[[ x]\] /m.test(md)) {
-      expect(out).toMatch(/^[-*+] \[[ x]\] /m)
-    }
-    if (/^- /m.test(md)) {
-      expect(out).toMatch(/^- /m)
-    }
+    expect(out).toBe(md)
+    expect(out).toMatch(/^- \[x\] done$/m)
+    expect(out).toMatch(/^- \[ \] todo$/m)
+    expect(out).toMatch(/^- plain$/m)
   })
 })
 
