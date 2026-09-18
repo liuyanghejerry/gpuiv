@@ -30,6 +30,44 @@ use crate::renderer::{
 };
 use crate::retained_tree::RetainedTree;
 
+/// One styled run of an editor element, as laid out in the last frame.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct InputRunInfo {
+    pub text: String,
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub background: Option<String>,
+    pub font_family: Option<String>,
+}
+
+/// A pixel rect of one editor decoration.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct InputDecorationRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Where one `decorations` range of an editor landed on screen.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct InputDecorationInfo {
+    pub start: f64,
+    pub end: f64,
+    pub color: String,
+    pub rects: Vec<InputDecorationRect>,
+}
+
+fn rgba_hex(value: u32) -> String {
+    format!("#{:08x}", value)
+}
+
 /// The request the last test `promptForNewPath` call received.
 #[derive(Debug, Clone)]
 #[napi(object)]
@@ -1352,6 +1390,72 @@ impl TestGpuixRenderer {
             .into_iter()
             .map(Into::into)
             .collect())
+    }
+
+    /// The styled runs of an `<input>`/`<textarea>` element as laid out in the
+    /// last frame: the `spans` prop resolved to concrete text/style pairs.
+    /// This is how WYSIWYG tests assert inline styling.
+    #[napi]
+    pub fn get_painted_input_runs(&self, element_id: f64) -> Result<Vec<InputRunInfo>> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let state = view.update(cx, |_view, cx| entity.read(cx).painted_run_snapshot());
+            Ok(state
+                .into_iter()
+                .into_iter()
+                .map(|run| InputRunInfo {
+                    text: run.text,
+                    color: rgba_hex(run.color),
+                    bold: run.bold,
+                    italic: run.italic,
+                    underline: run.underline,
+                    strikethrough: run.strikethrough,
+                    background: run.background.map(rgba_hex),
+                    font_family: run.font_family,
+                })
+                .collect())
+        })
+    }
+
+    /// Where the `decorations` prop of an editor landed on screen (pixel
+    /// rects), for asserting search-highlight geometry.
+    #[napi]
+    pub fn get_input_decorations(&self, element_id: f64) -> Result<Vec<InputDecorationInfo>> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let state = view.update(cx, |_view, cx| entity.read(cx).decoration_rects_snapshot());
+            Ok(state
+                .into_iter()
+                .into_iter()
+                .map(|deco| InputDecorationInfo {
+                    start: deco.start as f64,
+                    end: deco.end as f64,
+                    color: rgba_hex(deco.color),
+                    rects: deco
+                        .rects
+                        .into_iter()
+                        .map(|bounds| InputDecorationRect {
+                            x: f64::from(f32::from(bounds.origin.x)),
+                            y: f64::from(f32::from(bounds.origin.y)),
+                            width: f64::from(f32::from(bounds.size.width)),
+                            height: f64::from(f32::from(bounds.size.height)),
+                        })
+                        .collect(),
+                })
+                .collect())
+        })
     }
 
     /// Drag-select from one point to another: mouse down, move, up.

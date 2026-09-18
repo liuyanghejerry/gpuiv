@@ -70,12 +70,28 @@ bun scripts/dev.ts --shots                 # 有截图项时
 
 ### M2 — 原生块编辑层（`packages/native` + host 元素）
 
-- [ ] M2.1 原生可编辑块元素：styled spans（颜色/weight/italic/下划线/删除线/背景）+
-      光标/选区/preedit（组合输入）——扩展 `custom_elements/input.rs` 或新元素
-- [ ] M2.2 候选窗跟随光标（IME bounds 上报已由 GPUI InputHandler 提供，验证富 spans 下正确）
+> M2.1/M2.2/M2.4 完成（2026-09-18）。实现落在 `custom_elements/input.rs` 的
+> `<input>`/`<textarea>` 上，三个新 custom prop：`spans`（UTF-16 偏移的
+> `{start,end,fontWeight?,fontStyle?,underline?,strikethrough?,background?,color?,fontFamily?}`，
+> 可重叠、PM mark 组合语义）、`decorations`（搜索高亮 range → quad，复用选区的
+> 三段式分行几何）、`selection`（UTF-16 anchor/head，补上"JS 无法编程设置编辑器
+> 选区"这个比 spans 更关键的缺口）。run 构造在 `build_span_runs`（span 叠加 +
+> preedit 强制下划线 + 相邻合并），placeholder 分支忽略 spans；带背景 span 时
+> 走 `WrappedLine::paint_background`。光标/命中/选区/IME bounds 全部经由
+> WrappedLine 几何查询，天然跨 run 正确。span 不得改 font size（行高假设）——
+> 块级字号由宿主 div 样式承担，符合 markdown 块结构。测试面：
+> `getPaintedInputRuns`（runs 摘要）与 `getInputDecorations`（像素矩形）两个
+> test_renderer getter。验证：Rust 单测 8 项（span_tests）+ GPU 测试 6 项
+> （`markdown-editor-native.test.tsx`：样式 run、值回显抑制下 spans 保持、
+> preedit 跨 span 下划线、装饰矩形、程序化选区替换、背景+删除线）。
+
+- [x] M2.1 原生可编辑块元素：styled spans（颜色/weight/italic/下划线/删除线/背景）+
+      光标/选区/preedit（组合输入）——扩展现有 `custom_elements/input.rs`
+- [x] M2.2 候选窗跟随光标（`bounds_for_range` 走 point_for_index，多 run 下不变；
+      由 preedit 渲染测试与几何路径不变性覆盖，OS 候选窗本身无法自动化断言）
 - [ ] M2.3 文本测量 + 命中测试 napi API（pos↔coords，供跨块选区与装饰定位）
-- [ ] M2.4 装饰下发通道（搜索高亮 range、闪烁 range 作为块属性）
-- [ ] M2.5 跨块选区绘制（拖拽选择、shift 点击扩展、跨块 ⌘C）
+- [x] M2.4 装饰下发通道（`decorations` prop → 分行 quad）
+- [ ] M2.5 跨块选区绘制（拖拽选择、shift 点击扩展、跨块 ⌘C；`selection` prop 已就位）
 
 ### M3 — 组件与交互（`packages/vue` `<markdown-editor>`）
 

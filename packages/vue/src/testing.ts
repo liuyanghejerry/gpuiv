@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process"
 import type { Component } from "vue"
 import type { App } from "vue"
 import { nextTick } from "vue"
-import type { EventPayload, HighlightMatch } from "@gpuiv/native"
+import type { EventPayload, HighlightMatch, InputDecorationInfo, InputRunInfo } from "@gpuiv/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
@@ -119,6 +119,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSelectedText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
+  getPaintedInputRuns(elementId: number): InputRunInfo[]
+  getInputDecorations(elementId: number): InputDecorationInfo[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -979,6 +981,18 @@ export class TestRenderer implements NativeRenderer {
    *  way to assert on `highlight` without a screenshot. */
   getPaintedHighlights(): HighlightMatch[] {
     return this.native.getPaintedHighlights()
+  }
+
+  /** The styled runs an `<input>`/`<textarea>` laid out in the last frame —
+   *  the `spans` prop resolved to concrete text/style pairs. The only way to
+   *  assert inline styling without a screenshot. */
+  getPaintedInputRuns(elementId: number): InputRunInfo[] {
+    return this.native.getPaintedInputRuns(elementId)
+  }
+
+  /** Where the `decorations` prop of an editor landed (pixel rects). */
+  getInputDecorations(elementId: number): InputDecorationInfo[] {
+    return this.native.getInputDecorations(elementId)
   }
 
   /** Syntax-cache counters as `[hits, misses, documents]`. */

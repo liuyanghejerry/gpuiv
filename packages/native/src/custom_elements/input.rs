@@ -13,11 +13,12 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context,
-    CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
-    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent, SharedString, Style, Task, TextRun,
-    TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine,
+    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem,
+    Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler,
+    Font, FocusHandle, FontStyle, FontWeight, GlobalElementId, KeyBinding, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
+    SharedString, StrikethroughStyle, Style, Task, TextRun, TextStyle, UTF16Selection,
+    UnderlineStyle, Window, WrappedLine,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -268,6 +269,9 @@ struct TextEditorElement {
     max_rows: usize,
     last_prop_value: Option<String>,
     theme: Theme,
+    spans: Vec<SpanProp>,
+    decorations: Vec<DecorationProp>,
+    selection: Option<(usize, usize)>,
     state: Option<Entity<TextEditorState>>,
 }
 
@@ -282,6 +286,9 @@ impl TextEditorElement {
             max_rows: if multiline { 10 } else { 1 },
             last_prop_value: None,
             theme: Theme::dark(),
+            spans: Vec::new(),
+            decorations: Vec::new(),
+            selection: None,
             state: None,
         }
     }
@@ -357,6 +364,12 @@ impl CustomElement for TextEditorElement {
                     undo_stack: VecDeque::new(),
                     redo_stack: Vec::new(),
                     last_edit: None,
+                    spans: Vec::new(),
+                    decorations: Vec::new(),
+                    external_selection: None,
+                    has_background_runs: false,
+                    painted_run_summary: Vec::new(),
+                    last_decoration_rects: Vec::new(),
                 })
             })
             .clone();
@@ -381,6 +394,22 @@ impl CustomElement for TextEditorElement {
             }
             if prop_changed {
                 state.sync_prop_value(self.value.clone(), cx);
+            }
+            if state.spans != self.spans {
+                state.spans = self.spans.clone();
+                cx.notify();
+            }
+            if state.decorations != self.decorations {
+                state.decorations = self.decorations.clone();
+                cx.notify();
+            }
+            match self.selection {
+                Some((anchor, head)) => {
+                    if state.external_selection != Some((anchor, head)) {
+                        state.apply_external_selection(anchor, head, cx);
+                    }
+                }
+                None => state.external_selection = None,
             }
         });
         self.last_prop_value = Some(self.value.clone());
@@ -489,6 +518,15 @@ impl CustomElement for TextEditorElement {
                     as usize
             }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
+            "spans" => self.spans = parse_span_props(&value),
+            "decorations" => self.decorations = parse_decoration_props(&value),
+            "selection" => {
+                self.selection = value.as_array().and_then(|items| {
+                    let anchor = items.first()?.as_u64()? as usize;
+                    let head = items.get(1)?.as_u64()? as usize;
+                    Some((anchor, head))
+                })
+            }
             _ => {}
         }
     }
@@ -501,6 +539,9 @@ impl CustomElement for TextEditorElement {
             "minRows",
             "maxRows",
             "theme",
+            "spans",
+            "decorations",
+            "selection",
         ]
     }
 
@@ -545,6 +586,424 @@ struct LastEdit {
     edit: CoalescingEdit,
     when: Instant,
 }
+
+/// Inline style overlay for one UTF-16 range of the editor text.
+///
+/// The WYSIWYG architecture keeps ProseMirror (JS) as the document model: the
+/// native editor renders spans computed from it and never edits styles. All
+/// offsets are UTF-16, matching PM positions, and are resolved against the
+/// current value at layout time so a stale span simply clips.
+#[derive(Clone, PartialEq, Default)]
+pub(crate) struct SpanDecoration {
+    color: Option<gpui::Hsla>,
+    font_weight: Option<gpui::FontWeight>,
+    italic: bool,
+    underline: Option<gpui::Hsla>,
+    strikethrough: Option<gpui::Hsla>,
+    background: Option<gpui::Hsla>,
+    font_family: Option<SharedString>,
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct SpanProp {
+    start: usize,
+    end: usize,
+    deco: SpanDecoration,
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct DecorationProp {
+    start: usize,
+    end: usize,
+    color: gpui::Hsla,
+}
+
+/// One painted run, recorded for the test surface (`getPaintedInputRuns`).
+#[derive(Clone, PartialEq)]
+pub(crate) struct PaintedRunSummary {
+    pub text: String,
+    pub color: u32,
+    pub background: Option<u32>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub font_family: Option<String>,
+}
+
+fn parse_hsla(value: Option<&serde_json::Value>) -> Option<gpui::Hsla> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .and_then(crate::color::parse_color_rgba)
+        .map(gpui::Hsla::from)
+}
+
+fn parse_font_weight(value: Option<&serde_json::Value>) -> Option<gpui::FontWeight> {
+    match value {
+        Some(serde_json::Value::Number(number)) => {
+            number.as_f64().map(|weight| FontWeight(weight as f32))
+        }
+        Some(serde_json::Value::String(name)) => match name.as_str() {
+            "bold" => Some(FontWeight::BOLD),
+            "semibold" => Some(FontWeight::SEMIBOLD),
+            "normal" => Some(FontWeight::NORMAL),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn parse_span_deco(item: &serde_json::Value) -> SpanDecoration {
+    SpanDecoration {
+        color: parse_hsla(item.get("color")),
+        font_weight: parse_font_weight(item.get("fontWeight")),
+        italic: matches!(
+            item.get("fontStyle").and_then(serde_json::Value::as_str),
+            Some("italic")
+        ),
+        underline: parse_hsla(item.get("underline")).or_else(|| {
+            item.get("underline")
+                .and_then(serde_json::Value::as_bool)
+                .filter(|enabled| *enabled)
+                .map(|_| gpui::Hsla::default())
+        }),
+        strikethrough: parse_hsla(item.get("strikethrough")).or_else(|| {
+            item.get("strikethrough")
+                .and_then(serde_json::Value::as_bool)
+                .filter(|enabled| *enabled)
+                .map(|_| gpui::Hsla::default())
+        }),
+        background: parse_hsla(item.get("background")),
+        font_family: item
+            .get("fontFamily")
+            .and_then(serde_json::Value::as_str)
+            .map(SharedString::from),
+    }
+}
+
+pub(crate) fn parse_span_props(value: &serde_json::Value) -> Vec<SpanProp> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut spans: Vec<SpanProp> = items
+        .iter()
+        .filter_map(|item| {
+            let start = item.get("start")?.as_u64()? as usize;
+            let end = item.get("end")?.as_u64()? as usize;
+            if end <= start {
+                return None;
+            }
+            Some(SpanProp {
+                start,
+                end,
+                deco: parse_span_deco(item),
+            })
+        })
+        .collect();
+    spans.sort_by_key(|span| span.start);
+    spans
+}
+
+pub(crate) fn parse_decoration_props(value: &serde_json::Value) -> Vec<DecorationProp> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let start = item.get("start")?.as_u64()? as usize;
+            let end = item.get("end")?.as_u64()? as usize;
+            let color = parse_hsla(item.get("color")).unwrap_or(gpui::rgba(0xffe06666).into());
+            (end > start).then_some(DecorationProp { start, end, color })
+        })
+        .collect()
+}
+
+/// Build the exact-cover run list for the editor text: base `TextStyle`
+/// overlaid by spans, with the IME marked range forced to an underline on top.
+/// Spans may overlap (ProseMirror marks compose); later spans win field by
+/// field. Returns the runs, a per-run summary for tests, and whether any run
+/// carries a background (so paint can call `paint_background`).
+fn build_span_runs(
+    text: &str,
+    base_font: &Font,
+    base_color: gpui::Hsla,
+    spans: &[SpanProp],
+    marked: Option<&Range<usize>>,
+) -> (Vec<TextRun>, Vec<PaintedRunSummary>, bool) {
+    let mut boundaries = std::collections::BTreeSet::from([0, text.len()]);
+    for span in spans {
+        let start = utf16_offset_to_utf8(text, span.start);
+        let end = utf16_offset_to_utf8(text, span.end);
+        boundaries.insert(start.min(text.len()));
+        boundaries.insert(end.min(text.len()));
+    }
+    if let Some(marked) = marked {
+        boundaries.insert(marked.start.min(text.len()));
+        boundaries.insert(marked.end.min(text.len()));
+    }
+
+    let mut runs: Vec<TextRun> = Vec::new();
+    let mut summary: Vec<PaintedRunSummary> = Vec::new();
+    let mut has_background = false;
+    let mut boundaries = boundaries.into_iter().peekable();
+    while let (Some(start), Some(&end)) = (boundaries.next(), boundaries.peek()) {
+        if end <= start {
+            continue;
+        }
+        let mut font = base_font.clone();
+        let mut color = base_color;
+        let mut underline = None;
+        let mut strikethrough = None;
+        let mut background = None;
+        for span in spans {
+            let span_start = utf16_offset_to_utf8(text, span.start);
+            let span_end = utf16_offset_to_utf8(text, span.end);
+            if span_start >= end || span_end <= start {
+                continue;
+            }
+            if let Some(span_color) = span.deco.color {
+                color = span_color;
+            }
+            if let Some(weight) = span.deco.font_weight {
+                font.weight = weight;
+            }
+            if let Some(family) = &span.deco.font_family {
+                font.family = family.clone();
+            }
+            if span.deco.italic {
+                font.style = FontStyle::Italic;
+            }
+            if let Some(underline_color) = span.deco.underline {
+                underline = Some(UnderlineStyle {
+                    color: Some(underline_color),
+                    thickness: px(1.0),
+                    wavy: false,
+                });
+            }
+            if let Some(strike_color) = span.deco.strikethrough {
+                strikethrough = Some(StrikethroughStyle {
+                    thickness: px(1.0),
+                    color: Some(strike_color),
+                });
+            }
+            if let Some(background_color) = span.deco.background {
+                background = Some(background_color);
+            }
+        }
+        if let Some(marked) = marked {
+            if marked.start <= start && end <= marked.end {
+                underline = Some(UnderlineStyle {
+                    color: Some(color),
+                    thickness: px(1.0),
+                    wavy: false,
+                });
+            }
+        }
+        if background.is_some() {
+            has_background = true;
+        }
+        let run = TextRun {
+            len: end - start,
+            font,
+            color,
+            background_color: background,
+            underline,
+            strikethrough,
+        };
+        if let Some(last) = runs.last_mut() {
+            if last.font == run.font
+                && last.color == run.color
+                && last.background_color == run.background_color
+                && last.underline == run.underline
+                && last.strikethrough == run.strikethrough
+            {
+                last.len += run.len;
+                if let Some(entry) = summary.last_mut() {
+                    entry.text.push_str(&text[start..end]);
+                }
+                continue;
+            }
+        }
+        runs.push(run);
+        summary.push(PaintedRunSummary {
+            text: text[start..end].to_string(),
+            color: u32::from(gpui::Rgba::from(color)),
+            background: background.map(|bg| u32::from(gpui::Rgba::from(bg))),
+            bold: runs.last().is_some_and(|run| run.font.weight >= FontWeight::SEMIBOLD),
+            italic: runs.last().is_some_and(|run| run.font.style == FontStyle::Italic),
+            underline: runs.last().is_some_and(|run| run.underline.is_some()),
+            strikethrough: runs.last().is_some_and(|run| run.strikethrough.is_some()),
+            font_family: runs.last().and_then(|run| {
+                (run.font.family != base_font.family).then(|| run.font.family.to_string())
+            }),
+        });
+    }
+    (runs, summary, has_background)
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::*;
+
+    fn base_font() -> Font {
+        let mut font = Font::default();
+        font.family = "Helvetica".into();
+        font
+    }
+
+    fn span(start: usize, end: usize, deco: SpanDecoration) -> SpanProp {
+        SpanProp { start, end, deco }
+    }
+
+    fn deco_bold() -> SpanDecoration {
+        SpanDecoration {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        }
+    }
+
+    fn deco_strike() -> SpanDecoration {
+        SpanDecoration {
+            strikethrough: Some(gpui::Hsla::default()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn runs_cover_text_exactly() {
+        let text = "hello world";
+        let (runs, summary, _) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &[], None);
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
+        assert_eq!(runs.len(), 1);
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].text, text);
+    }
+
+    #[test]
+    fn spans_split_runs_and_report_style() {
+        let text = "abc def";
+        let spans = vec![span(0, 3, deco_bold()), span(4, 7, deco_strike())];
+        let (runs, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(runs.len(), 3);
+        assert_eq!(
+            summary.iter().map(|entry| entry.text.as_str()).collect::<Vec<_>>(),
+            vec!["abc", " ", "def"]
+        );
+        assert!(summary[0].bold);
+        assert!(!summary[1].bold);
+        assert!(summary[2].strikethrough);
+    }
+
+    #[test]
+    fn overlapping_spans_compose() {
+        let text = "abcdef";
+        let spans = vec![
+            span(0, 6, SpanDecoration {
+                background: Some(gpui::Hsla::default()),
+                ..Default::default()
+            }),
+            span(2, 4, deco_bold()),
+        ];
+        let (runs, summary, has_background) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert!(has_background);
+        assert_eq!(
+            summary.iter().map(|entry| entry.text.as_str()).collect::<Vec<_>>(),
+            vec!["ab", "cd", "ef"]
+        );
+        assert!(!summary[0].bold);
+        assert!(summary[1].bold);
+        assert!(summary.iter().all(|entry| entry.background.is_some()));
+        assert!(runs.iter().all(|run| run.len > 0));
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
+    }
+
+    #[test]
+    fn marked_range_forces_underline_over_spans() {
+        let text = "nihao";
+        let spans = vec![span(0, 5, deco_bold())];
+        let (runs, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            Some(&(1..3)),
+        );
+        assert!(runs.len() >= 3);
+        assert!(summary.iter().any(|entry| entry.underline && entry.text == "ih"));
+        assert!(summary.iter().all(|entry| entry.bold));
+    }
+
+    #[test]
+    fn stale_spans_clip_to_text() {
+        let text = "ab";
+        let spans = vec![span(0, 99, deco_bold())];
+        let (runs, _, _) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
+    }
+
+    #[test]
+    fn adjacent_identical_runs_merge() {
+        let text = "abc";
+        let spans = vec![span(0, 3, deco_bold())];
+        // Two spans producing the same style on both sides of a boundary merge.
+        let spans = vec![span(0, 1, deco_bold()), span(1, 3, deco_bold())];
+        let (runs, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(summary[0].text, "abc");
+    }
+
+    #[test]
+    fn utf16_offsets_map_through_surrogate_pairs() {
+        let text = "a😀b";
+        // 😀 is one UTF-16 unit pair (2), so UTF-16 offset 3 is after it.
+        let spans = vec![span(3, 4, deco_bold())];
+        let (_, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(summary[summary.len() - 1].text, "b");
+        assert!(summary[summary.len() - 1].bold);
+    }
+
+    #[test]
+    fn parses_span_props_from_json() {
+        let value = serde_json::json!([
+            { "start": 0, "end": 2, "fontWeight": 700, "fontStyle": "italic" },
+            { "start": 4, "end": 9, "background": "#11223344" },
+            { "start": 5, "end": 5 }
+        ]);
+        let spans = parse_span_props(&value);
+        assert_eq!(spans.len(), 2);
+        assert!(spans[0].deco.font_weight.is_some());
+        assert!(spans[0].deco.italic);
+        assert!(spans[1].deco.background.is_some());
+    }
+}
+
 
 fn coalescing_edit(
     range: &Range<usize>,
@@ -639,6 +1098,22 @@ pub(crate) struct TextEditorState {
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
     last_edit: Option<LastEdit>,
+    spans: Vec<SpanProp>,
+    decorations: Vec<DecorationProp>,
+    external_selection: Option<(usize, usize)>,
+    has_background_runs: bool,
+    painted_run_summary: Vec<PaintedRunSummary>,
+    last_decoration_rects: Vec<DecorationRects>,
+}
+
+/// Where a decoration range landed on screen, recorded at prepaint for the
+/// test surface (`getInputDecorations`).
+#[derive(Clone, PartialEq)]
+pub(crate) struct DecorationRects {
+    pub start: usize,
+    pub end: usize,
+    pub color: u32,
+    pub rects: Vec<Bounds<Pixels>>,
 }
 
 impl TextEditorState {
@@ -705,6 +1180,29 @@ impl TextEditorState {
         cx.notify();
     }
 
+    /// Move the caret/selection from JS (UTF-16 offsets, anchor/head like the
+    /// DOM). The native editor stays authoritative while typing — JS applies
+    /// this only when it must move the selection itself (find-next, restore).
+    fn apply_external_selection(
+        &mut self,
+        anchor_utf16: usize,
+        head_utf16: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let len = self.content.len();
+        let anchor = self.offset_from_utf16(anchor_utf16).min(len);
+        let head = self.offset_from_utf16(head_utf16).min(len);
+        let reversed = anchor > head;
+        let range = if reversed { head..anchor } else { anchor..head };
+        if self.selected_range != range || self.selection_reversed != reversed {
+            self.selected_range = range;
+            self.selection_reversed = reversed;
+            self.reset_blink(cx);
+            cx.notify();
+        }
+        self.external_selection = Some((anchor_utf16, head_utf16));
+    }
+
     fn emit_change(&mut self) {
         if self.emits_change {
             self.pending_values.push_back(self.content.clone());
@@ -715,6 +1213,16 @@ impl TextEditorState {
                 payload.value = Some(self.content.clone());
             });
         }
+    }
+
+    /// Snapshot of the last-laid-out runs, for the test surface.
+    pub(crate) fn painted_run_snapshot(&self) -> Vec<PaintedRunSummary> {
+        self.painted_run_summary.clone()
+    }
+
+    /// Snapshot of where decoration ranges landed on screen, for tests.
+    pub(crate) fn decoration_rects_snapshot(&self) -> Vec<DecorationRects> {
+        self.last_decoration_rects.clone()
     }
 
     fn emit_submit(&self) {
@@ -1381,21 +1889,44 @@ impl TextEditorState {
             }),
             strikethrough: None,
         };
-        let runs = match self.marked_range.as_ref() {
-            Some(marked) if !is_placeholder => vec![
-                run(marked.start, false),
-                run(marked.len(), true),
-                run(display.len() - marked.end, false),
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect(),
-            _ => vec![run(display.len(), false)],
-        };
-        let wrap_width = self.multiline.then_some(width);
+        if is_placeholder {
+            self.display_is_placeholder = true;
+            self.spans_applied(&[], false);
+            let runs = match self.marked_range.as_ref() {
+                Some(marked) => vec![
+                    run(marked.start, false),
+                    run(marked.len(), true),
+                    run(display.len() - marked.end, false),
+                ]
+                .into_iter()
+                .filter(|run| run.len > 0)
+                .collect(),
+                _ => vec![run(display.len(), false)],
+            };
+            return self.shape_and_measure(display, runs, self.multiline.then_some(width), window);
+        }
+        self.display_is_placeholder = false;
+        let (runs, summary, has_background) =
+            build_span_runs(&display, &style.font(), color, &self.spans, self.marked_range.as_ref());
+        self.spans_applied(&summary, has_background);
+        self.shape_and_measure(display, runs, self.multiline.then_some(width), window)
+    }
+
+    fn spans_applied(&mut self, summary: &[PaintedRunSummary], has_background: bool) {
+        self.painted_run_summary = summary.to_vec();
+        self.has_background_runs = has_background;
+    }
+
+    fn shape_and_measure(
+        &mut self,
+        display: SharedString,
+        runs: Vec<TextRun>,
+        wrap_width: Option<Pixels>,
+        window: &mut Window,
+    ) -> f32 {
         let lines = window
             .text_system()
-            .shape_text(display, font_size, &runs, wrap_width, None)
+            .shape_text(display, self.font_size, &runs, wrap_width, None)
             .map(|lines| lines.into_vec())
             .unwrap_or_default();
         let mut line_starts = Vec::with_capacity(lines.len());
@@ -1416,11 +1947,11 @@ impl TextEditorState {
             .iter()
             .map(|line| f32::from(line.unwrapped_layout.width))
             .fold(0.0, f32::max);
-        self.display_is_placeholder = is_placeholder;
         self.last_lines = lines;
         self.line_starts = line_starts;
         self.content_height
     }
+
 
     fn clamp_scroll(&mut self, viewport_width: f32, viewport_height: f32) {
         if self.follow_cursor {
@@ -1765,6 +2296,53 @@ struct EditorTextElement {
 struct EditorPrepaint {
     caret: Option<PaintQuad>,
     selection: Vec<PaintQuad>,
+    decorations: Vec<PaintQuad>,
+}
+
+/// The one-to-three fill quads covering a text range on screen, identical to
+/// how the editor paints its own selection: same line one rect, spanning
+/// lines first-to-right-edge / full middle lines / last-from-left-edge.
+fn range_quads(
+    start: Point<Pixels>,
+    end: Point<Pixels>,
+    origin: Point<Pixels>,
+    bounds: Bounds<Pixels>,
+    line_height: Pixels,
+    color: gpui::Hsla,
+) -> Vec<PaintQuad> {
+    if start.y == end.y {
+        return vec![fill(
+            Bounds::from_corners(
+                point(origin.x + start.x, origin.y + start.y),
+                point(origin.x + end.x, origin.y + start.y + line_height),
+            ),
+            color,
+        )];
+    }
+    let mut quads = vec![fill(
+        Bounds::from_corners(
+            point(origin.x + start.x, origin.y + start.y),
+            point(bounds.right(), origin.y + start.y + line_height),
+        ),
+        color,
+    )];
+    if end.y > start.y + line_height {
+        quads.push(fill(
+            Bounds::from_corners(
+                point(origin.x, origin.y + start.y + line_height),
+                point(bounds.right(), origin.y + end.y),
+            ),
+            color,
+        ));
+    }
+    quads.push(fill(
+        Bounds::from_corners(
+            point(origin.x, origin.y + end.y),
+            point(origin.x + end.x, origin.y + end.y + line_height),
+        ),
+        color,
+    ));
+    quads
 }
 
 impl gpui::Element for EditorTextElement {
@@ -1844,42 +2422,42 @@ impl gpui::Element for EditorTextElement {
             input.point_for_index(input.selected_range.start),
             input.point_for_index(input.selected_range.end),
         ) {
-            let color = gpui::rgba(0x7c86ff59);
-            if start.y == end.y {
-                selection.push(fill(
-                    Bounds::from_corners(
-                        point(origin.x + start.x, origin.y + start.y),
-                        point(origin.x + end.x, origin.y + start.y + input.line_height),
-                    ),
-                    color,
-                ));
-            } else {
-                selection.push(fill(
-                    Bounds::from_corners(
-                        point(origin.x + start.x, origin.y + start.y),
-                        point(bounds.right(), origin.y + start.y + input.line_height),
-                    ),
-                    color,
-                ));
-                if end.y > start.y + input.line_height {
-                    selection.push(fill(
-                        Bounds::from_corners(
-                            point(origin.x, origin.y + start.y + input.line_height),
-                            point(bounds.right(), origin.y + end.y),
-                        ),
-                        color,
-                    ));
-                }
-                selection.push(fill(
-                    Bounds::from_corners(
-                        point(origin.x, origin.y + end.y),
-                        point(origin.x + end.x, origin.y + end.y + input.line_height),
-                    ),
-                    color,
-                ));
+            selection = range_quads(
+                start,
+                end,
+                origin,
+                bounds,
+                input.line_height,
+                gpui::rgba(0x7c86ff59).into(),
+            );
+        }
+        let mut decorations = Vec::new();
+        let mut decoration_rects = Vec::new();
+        for deco in &input.decorations {
+            let range = input.range_from_utf16(&(deco.start..deco.end));
+            if let (Some(start), Some(end)) = (
+                input.point_for_index(range.start.min(input.content.len())),
+                input.point_for_index(range.end.min(input.content.len())),
+            ) {
+                let quads = range_quads(start, end, origin, bounds, input.line_height, deco.color);
+                decoration_rects.push(DecorationRects {
+                    start: deco.start,
+                    end: deco.end,
+                    color: u32::from(gpui::Rgba::from(deco.color)),
+                    rects: quads.iter().map(|quad| quad.bounds).collect(),
+                });
+                decorations.extend(quads);
             }
         }
-        EditorPrepaint { caret, selection }
+        let state = self.input.clone();
+        state.update(cx, |input, _| {
+            input.last_decoration_rects = decoration_rects;
+        });
+        EditorPrepaint {
+            caret,
+            selection,
+            decorations,
+        }
     }
 
     fn paint(
@@ -1908,7 +2486,10 @@ impl gpui::Element for EditorTextElement {
             for quad in prepaint.selection.drain(..) {
                 window.paint_quad(quad);
             }
-            let (lines, line_height, scroll_top, scroll_left, display) =
+            for quad in prepaint.decorations.drain(..) {
+                window.paint_quad(quad);
+            }
+            let (lines, line_height, scroll_top, scroll_left, display, paint_backgrounds) =
                 self.input.update(cx, |input, _| {
                     let display = if input.content.is_empty() {
                         input.placeholder.clone()
@@ -1921,12 +2502,24 @@ impl gpui::Element for EditorTextElement {
                         input.scroll_top,
                         input.scroll_left,
                         display,
+                        input.has_background_runs,
                     )
                 });
             crate::text::log_painted_text(display);
             let mut y = bounds.top() - px(scroll_top);
             for line in &lines {
                 let height = line.size(line_height).height;
+                if paint_backgrounds {
+                    line.paint_background(
+                        point(bounds.left() - px(scroll_left), y),
+                        line_height,
+                        gpui::TextAlign::Left,
+                        Some(bounds),
+                        window,
+                        cx,
+                    )
+                    .ok();
+                }
                 line.paint(
                     point(bounds.left() - px(scroll_left), y),
                     line_height,

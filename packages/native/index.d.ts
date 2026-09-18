@@ -689,6 +689,17 @@ export declare class TestGpuixRenderer {
   /** Every highlight wash painted in the last frame, in paint order. */
   getPaintedHighlights(): Array<HighlightMatch>
   /**
+   * The styled runs of an `<input>`/`<textarea>` element as laid out in the
+   * last frame: the `spans` prop resolved to concrete text/style pairs.
+   * This is how WYSIWYG tests assert inline styling.
+   */
+  getPaintedInputRuns(elementId: number): Array<InputRunInfo>
+  /**
+   * Where the `decorations` prop of an editor landed on screen (pixel
+   * rects), for asserting search-highlight geometry.
+   */
+  getInputDecorations(elementId: number): Array<InputDecorationInfo>
+  /**
    * Drag-select from one point to another: mouse down, move, up.
    *
    * A single helper rather than three calls because the listeners that drive
@@ -984,6 +995,34 @@ export interface HighlightRect {
   y: number
   width: number
   height: number
+}
+
+/** Where one `decorations` range of an editor landed on screen. */
+export interface InputDecorationInfo {
+  start: number
+  end: number
+  color: string
+  rects: Array<InputDecorationRect>
+}
+
+/** A pixel rect of one editor decoration. */
+export interface InputDecorationRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** One styled run of an editor element, as laid out in the last frame. */
+export interface InputRunInfo {
+  text: string
+  color: string
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  strikethrough: boolean
+  background?: string
+  fontFamily?: string
 }
 
 /** A menu for the application menu bar, as described from JS. */
