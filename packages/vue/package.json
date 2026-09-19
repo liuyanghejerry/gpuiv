@@ -5,6 +5,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
+    "./single-instance": {
+      "types": "./dist/single-instance.d.ts",
+      "import": "./dist/single-instance.js",
+      "default": "./dist/single-instance.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",

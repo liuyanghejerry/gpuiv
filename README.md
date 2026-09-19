@@ -28,6 +28,7 @@ cd examples && bun --hot chat.tsx
 | **blurred window** | `bun --hot blurred-window.tsx` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
+| **single-instance** | `bun --hot single-instance.tsx ./notes.md` | Elect one process before creating a window; forward later CLI launches with their original working directory |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **error-handling** | `bun --hot error-handling.tsx` | The runtime error story end to end: overlay + Reload, an `onErrorCaptured` boundary, and an `onRuntimeError` report log |
 | **open-files** | `bun --hot open-files.tsx` | Reusable file/deep-link delivery; `open-files.package.ts` declares Markdown document support for a macOS `.app` |
@@ -2669,6 +2670,32 @@ devtools hook lands where Vue reads it; the DOM-only calls become no-ops).
 They exist only for that client: a connect that fails removes them again, so
 the rest of the process never sees a browser that is not there.
 
+## Single-instance apps
+
+`acquireSingleInstance` elects one process per app/profile before any window is
+created. Later launches forward `{ argv, cwd }` to the primary, which queues them
+until the application is ready. Import from `@gpuiv/vue/single-instance` to avoid
+loading the native renderer in secondary processes.
+
+```ts
+import { acquireSingleInstance } from '@gpuiv/vue/single-instance'
+
+const instance = await acquireSingleInstance({
+  appId: 'dev.example.notes',
+  directory: userDataDirectory,
+  launch: { argv: process.argv.slice(2), cwd: process.cwd() },
+})
+if (!instance.isPrimary) process.exit(0)
+// Now createApp(...). Consume later launches with await instance.nextRequest().
+```
+
+The OS releases ownership when the primary exits or crashes. Local forwarding
+is authenticated; port conflicts, timeouts and queue overload reject instead
+of silently starting a second UI. Applications own CLI parsing, tabs, saves and
+window activation. See [the contract and limits](./docs/single-instance.md) and
+[`examples/single-instance.tsx`](./examples/single-instance.tsx). OS file
+associations and multiple windows are separate capabilities.
+
 ## Packaging
 
 `@gpuiv/packager` turns an app into a double-clickable product: one
@@ -2959,6 +2986,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window position (`getWindowBounds()`; `x`/`y` window options restore a saved position)
 - [x] Window close interception (`onWindowShouldClose` vetoes and observes; `closeWindow()` confirms)
 - [x] Dock relaunch observer (`onReopen`, macOS)
+- [x] Single-instance election and authenticated launch forwarding (`acquireSingleInstance`, startup queue, cwd preservation and crash recovery)
 - [x] Runtime menu bars (`setMenus`; macOS)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
