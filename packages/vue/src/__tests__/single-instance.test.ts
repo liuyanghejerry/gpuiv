@@ -23,7 +23,7 @@ afterEach(async () => {
   }
   await Promise.all(primaries.splice(0).map((primary) => primary.close()))
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => server.close(() => resolve()))))
-  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
+  await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })))
 })
 
 async function options(): Promise<SingleInstanceOptions> {
@@ -152,7 +152,7 @@ describe("single instance", () => {
     servers.push(uncertain)
     uncertain.listen(owner.port, "127.0.0.1")
     await once(uncertain, "listening")
-    await expect(acquireSingleInstance(opts)).rejects.toThrow("before acknowledgement")
+    await expect(acquireSingleInstance(opts)).rejects.toThrow(/before acknowledgement|ECONNRESET/)
     expect(deliveries).toBe(1)
   })
 

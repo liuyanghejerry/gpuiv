@@ -28,9 +28,9 @@ cd examples && bun --hot chat.tsx
 | **blurred window** | `bun --hot blurred-window.tsx` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
+| **single-instance** | `bun --hot single-instance.tsx ./notes.md` | Elect one process before creating a window; forward later CLI launches with their original working directory |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **error-handling** | `bun --hot error-handling.tsx` | The runtime error story end to end: overlay + Reload, an `onErrorCaptured` boundary, and an `onRuntimeError` report log |
-| **single-instance** | `bun --hot single-instance.tsx ./notes.md` | Elect one process before creating a window; forward later CLI launches with their original working directory |
 
 All of them live in [`examples/`](./examples) and use hardcoded data.
 
@@ -2921,13 +2921,13 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window position (`getWindowBounds()`; `x`/`y` window options restore a saved position)
 - [x] Window close interception (`onWindowShouldClose` vetoes and observes; `closeWindow()` confirms)
 - [x] Dock relaunch observer (`onReopen`, macOS)
+- [x] Single-instance election and authenticated launch forwarding (`acquireSingleInstance`, startup queue, cwd preservation and crash recovery)
 - [x] Runtime menu bars (`setMenus`; macOS)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
 - [x] Clipboard text (`writeClipboardText`, `readClipboardText`)
 - [x] Opening external URLs (`openUrl`)
 - [x] Deep links (`onOpenUrls`, `registerUrlScheme`)
-- [x] Single-instance election and authenticated launch forwarding (`acquireSingleInstance`, startup queue, cwd preservation and crash recovery)
 - [x] System notifications (`showSystemNotification`, `dismissSystemNotification`, `onSystemNotificationResponse`; `setAppIdentity` for toast attribution. macOS delivers only from a packaged `.app`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
