@@ -49,3 +49,47 @@ Local verification (2026-09-19): release native build and `cargo test --lib`
 The user's unrelated untracked `combobox-aschild-debug.test.tsx` is excluded.
 An initial unrestricted parallel run hit two subprocess timeouts; each passed
 in isolation and the complete bounded-concurrency rerun passed.
+
+## Continued delivery: single-instance bootstrap
+
+The file-open delivery is tracked separately in
+[PR #104](https://github.com/liuyanghejerry/gpuiv/pull/104). This topic branches
+from main independently and does not require that PR's APIs.
+
+- [x] `acquireSingleInstance`, including a native-free package subpath, runs
+  before createApp and elects one process per app/profile.
+- [x] Subsequent launches preserve argv/cwd, including empty relaunches,
+  relative arguments, Chinese and spaces. Apps own flag parsing and tabs.
+- [x] Queue before UI readiness, bounded authenticated IPC, acknowledged
+  delivery, explicit collision/timeout/overload errors, idempotent teardown.
+- [x] Kernel-owned lifetime: no stale-file deletion or PID reuse races after
+  an owner crash. Five-process elections and abrupt-kill recovery pass under
+  Node, Bun and a compiled Bun executable on macOS.
+- [x] Standalone example and [documented delivery guarantees](./single-instance.md).
+- [ ] Windows/Linux OS file-association registration and packaged acceptance.
+- [ ] Native multi-window lifecycle; this API elects processes, not windows.
+
+Validation: Vue TypeScript build and complete suite (60 files, 977 passed,
+141 existing skips; two workers, unrelated untracked debug file excluded).
+The 11 single-instance tests include Node, Bun and compiled Bun multi-process
+runs. The macOS example `.app` also passes packaging and automation screenshot
+smoke. Windows execution is left to CI; no local Windows/Linux run is claimed.
+
+ColaMD reference: `src/main/index.ts` single-instance section (#99/#100) passes
+second-launch argv to file-opening logic and reveals the existing window on an
+empty launch. The reusable API carries that input without adopting ColaMD's
+Markdown filtering, window selection or save queues.
+
+### HTML clipboard upstream findings (2026-09-19)
+
+Zed already has three open implementations of actual HTML clipboard flavors:
+[#56452](https://github.com/zed-industries/zed/pull/56452),
+[#62706](https://github.com/zed-industries/zed/pull/62706), and
+[#64112](https://github.com/zed-industries/zed/pull/64112), associated with
+[#61966](https://github.com/zed-industries/zed/issues/61966). They modify GPUI and
+the platform clipboard backends rather than storing HTML in string metadata.
+Per `docs/agents/zed-workflow.md`, follow those PRs instead of maintaining a
+competing GPUI workaround. Revisit when one merges into the GPUI fork: audit
+**read** support as well as the advertised HTML **write** path, bump the
+submodule, then add napi/Vue APIs and editor integration. This does not mark
+HTML clipboard complete.

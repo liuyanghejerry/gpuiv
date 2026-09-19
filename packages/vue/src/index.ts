@@ -20,6 +20,8 @@ export type {
 } from "./types.js"
 export { isPackaged, resourcesPath, resolveResourcesPath } from "./packaged.js"
 export type { ResourcesPathInput } from "./packaged.js"
+export { acquireSingleInstance } from "./single-instance.js"
+export type { InstanceLaunch, SingleInstanceOptions, SingleInstance, PrimaryInstance, SecondaryInstance } from "./single-instance.js"
 export { createUpdater } from "./updater.js"
 export {
   applyDarwinSwap,
