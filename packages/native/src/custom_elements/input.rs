@@ -1923,6 +1923,18 @@ impl TextEditorState {
         let Some(bounds) = self.last_bounds else {
             return 0;
         };
+        // A delegated document drag leaves this textblock. Match GPUI's
+        // input example: above/below the block means its start/end, not the
+        // same x on its first/last line. Ordinary scrollable inputs retain
+        // Comet's edge-clamped autoscroll hit testing.
+        if self.is_selecting && self.emits_selection_drag {
+            if position.y < bounds.top() {
+                return 0;
+            }
+            if position.y > bounds.bottom() {
+                return self.content.len();
+            }
+        }
         self.index_for_point(point(
             position.x - bounds.left() + px(self.scroll_left),
             position.y - bounds.top() + px(self.scroll_top),
@@ -2067,6 +2079,9 @@ impl TextEditorState {
     }
 
     fn drag_selection_position(&self, position: Point<Pixels>) -> Point<Pixels> {
+        if self.emits_selection_drag {
+            return position;
+        }
         let Some(bounds) = self.last_bounds else {
             return position;
         };

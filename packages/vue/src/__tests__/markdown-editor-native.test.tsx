@@ -12,6 +12,36 @@ import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("editor spans / decorations / selection props", () => {
+  it("extends a delegated drag to the block boundary regardless of horizontal position", async () => {
+    const drags: any[] = []
+    const App = defineComponent({
+      setup: () => () => (
+        <div style={{ paddingTop: 80, width: 400 }}>
+          <textarea testId="drag-block" value={"first line\nsecond line"} minRows={2}
+            onSelectionDrag={(event) => drags.push(event)} />
+        </div>
+      ),
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const block = app.renderer.findByTestId("drag-block")!
+    const bounds = app.renderer.getElementBounds(block.id)!
+    const [x, y] = app.renderer.getInputTextPosition(block.id, 3)
+    app.renderer.nativeSimulateMouseDown(x, y + 2, 0)
+    app.renderer.nativeSimulateMouseMove(x, bounds.y + bounds.height + 30, 0)
+    await app.settle()
+    expect(drags.at(-1)).toMatchObject({ startIndex: 3, endIndex: 22 })
+    app.renderer.nativeSimulateMouseMove(x, bounds.y - 30, 0)
+    await app.settle()
+    expect(drags.at(-1)).toMatchObject({ startIndex: 3, endIndex: 0 })
+    const [backX, backY] = app.renderer.getInputTextPosition(block.id, 6)
+    app.renderer.nativeSimulateMouseMove(backX, backY + 2, 0)
+    await app.settle()
+    expect(drags.at(-1)).toMatchObject({ startIndex: 3, endIndex: 6 })
+    app.renderer.nativeSimulateMouseUp(backX, backY + 2, 0)
+    app.unmount()
+  })
+
   // "hello world": bold "hello", italic+underline "world"
   const spansFor = (text: string) => {
     if (!text.startsWith("hello")) return []
