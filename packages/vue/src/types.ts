@@ -566,6 +566,9 @@ export interface NativeRenderer {
   /** Arm or disarm the window close and reopen observers. Both emit on the
    *  same event id as the window key events. */
   setWindowObservers?(shouldClose: boolean, reopen: boolean, eventId: number): void
+  /** Arm or disarm the window-level `selectionChange` event on its own
+   *  event id. */
+  setWindowSelectionChange?(enabled: boolean, eventId: number): void
   /** Close the window for real, past an armed `onWindowShouldClose` veto.
    *  Closing the last window quits the app. */
   closeWindow?(): void
@@ -905,6 +908,10 @@ export interface WindowKeyEventHandlers {
   onWindowShouldClose?: () => void
   /** A Dock-icon relaunch of the running process (macOS). */
   onReopen?: () => void
+  /** Window-level text selection. Fires when the selected ranges change;
+   *  `value` is the joined selected text, omitted when the selection is
+   *  empty. An unchanged frame does not fire. */
+  onSelectionChange?: (event: EventPayload) => void
 }
 
 // One renderer root. Event handlers stay on this object so two live roots
@@ -922,4 +929,7 @@ export interface Container {
    *  replacement. */
   windowKeyEventHandlers: WindowKeyEventHandlers
   windowKeyEventId: number
+  /** Separate generation for `selectionChange`; a queued event from an old
+   *  root cannot enter its replacement either. */
+  windowSelectionEventId: number
 }

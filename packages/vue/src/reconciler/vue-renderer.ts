@@ -243,7 +243,8 @@ export function createGpuivRendererHost(
   inner: NativeRenderer,
   ids: { nextElementId: number },
   windowKeyEventHandlers: WindowKeyEventHandlers = {},
-  windowKeyEventId = 0
+  windowKeyEventId = 0,
+  windowSelectionEventId = 0
 ): GpuivRendererHost {
   const host = createBatchedHost(inner)
   const container: Container = {
@@ -252,6 +253,7 @@ export function createGpuivRendererHost(
     eventHandlers: new Map(),
     windowKeyEventHandlers,
     windowKeyEventId,
+    windowSelectionEventId,
   }
   // Events always arrive with the raw renderer (renderer.ts, testing.ts), and
   // the facade's flushMutations looks the container up by `inner` — only the

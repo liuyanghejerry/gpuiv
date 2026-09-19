@@ -202,6 +202,31 @@ impl SelectionState {
         }
         Some(join_spans(&self.spans))
     }
+
+    /// Identity of the current selected range set. Empty selection is `0`.
+    ///
+    /// `onSelectionChange` keys on this so an unchanged frame does not emit.
+    pub fn identity(&self) -> u64 {
+        if !self.active {
+            return 0;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut any = false;
+        for span in self.spans.iter().filter(|span| !span.range.is_empty()) {
+            span.key.hash(&mut hasher);
+            span.range.start.hash(&mut hasher);
+            span.range.end.hash(&mut hasher);
+            span.group.hash(&mut hasher);
+            span.text.hash(&mut hasher);
+            any = true;
+        }
+        if !any {
+            0
+        } else {
+            hasher.finish()
+        }
+    }
 }
 
 fn extend_virtualized_drag(
@@ -391,8 +416,12 @@ mod tests {
         assert_eq!(sel.wash_range("p3"), None);
         assert_eq!(sel.end_active_drag().as_deref(), Some("paragraph\nsecond"));
         assert_eq!(sel.selected_text().as_deref(), Some("paragraph\nsecond"));
+        let identity = sel.identity();
+        assert_ne!(identity, 0);
+        assert_eq!(sel.identity(), identity);
         sel.clear();
         assert_eq!(sel.selected_text(), None);
+        assert_eq!(sel.identity(), 0);
     }
 
     #[test]

@@ -14,6 +14,7 @@ import {
   handleGpuixEvent,
   idAllocatorFor,
   nextWindowKeyEventId,
+  nextWindowSelectionEventId,
 } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
 import { hmrReloadCount, hmrSettledDuplicates, noteHmrMount } from "./hmr/runtime.js"
@@ -558,7 +559,7 @@ function mountTree(
   if (!host) {
     throw new Error("GPUIX renderer is not initialized")
   }
-  const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen } = options
+  const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen, onSelectionChange } = options
   const previous = slot.handle
   slot.handle = undefined
   if (previous) {
@@ -571,11 +572,13 @@ function mountTree(
   slot.mountSerial = (slot.mountSerial ?? 0) + 1
 
   const windowKeyEventId = nextWindowKeyEventId(host)
+  const windowSelectionEventId = nextWindowSelectionEventId(host)
   const gpuivHost = createGpuivRendererHost(
     host,
     idAllocatorFor(host),
-    { onKeyDown, onKeyUp, onWindowShouldClose, onReopen },
-    windowKeyEventId
+    { onKeyDown, onKeyUp, onWindowShouldClose, onReopen, onSelectionChange },
+    windowKeyEventId,
+    windowSelectionEventId
   )
   // Bind the render-level observer to this root. A remount replaces it, and
   // events from the unmounted tree find no handlers, so they never reach the
@@ -585,6 +588,7 @@ function mountTree(
   try {
     host.setWindowKeyEvents?.(Boolean(onKeyDown), Boolean(onKeyUp), windowKeyEventId)
     host.setWindowObservers?.(Boolean(onWindowShouldClose), Boolean(onReopen), windowKeyEventId)
+    host.setWindowSelectionChange?.(Boolean(onSelectionChange), windowSelectionEventId)
   } catch (error) {
     gpuivHost.detach()
     throw error
@@ -618,6 +622,7 @@ function mountTree(
       if (gpuivHost.detach()) {
         host.setWindowKeyEvents?.(false, false, windowKeyEventId)
         host.setWindowObservers?.(false, false, windowKeyEventId)
+        host.setWindowSelectionChange?.(false, windowSelectionEventId)
       }
     },
   }
