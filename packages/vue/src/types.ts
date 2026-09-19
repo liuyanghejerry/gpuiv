@@ -428,6 +428,10 @@ export interface ElementProps {
   onInput?: (event: EventPayload) => void
   /** Enter on `<input>`, or Enter on `<textarea>` when this listener is set. */
   onSubmit?: (event: EventPayload) => void
+  /** Fires while a native input drag is active, even after the pointer leaves
+   *  that input. Coordinates are window-space; start/end are UTF-16
+   *  anchor/head offsets in the input where the drag began. */
+  onSelectionDrag?: (event: EventPayload) => void
 
   // ── Native component events ─────────────────────────────────────
   onToggleFile?: (event: EventPayload) => void
@@ -567,6 +571,8 @@ export interface NativeRenderer {
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
    *  x and y are negative pixel values (scroll down = more negative y). */
   scrollTo?(elementId: number, x: number, y: number): void
+  /** Reveal an input's current caret line through its nearest scroll ancestor. */
+  scrollInputCaretIntoView?(elementId: number): void
   /** Scroll a child into view by its index in the children list.
    *  `offsetInItem` is in pixels; a negative value anchors the viewport top
    *  above the item, resolved against measured row heights at layout time. */
@@ -583,6 +589,14 @@ export interface NativeRenderer {
   getSelectedText?(): string | null
   /** Drop the current selection. */
   clearSelection?(): void
+  /** Last painted window-space bounds for an element. */
+  getElementBounds?(
+    elementId: number
+  ): { x: number; y: number; width: number; height: number } | null
+  /** Closest UTF-16 text offset for a window-space point in an input. */
+  getInputTextOffset?(elementId: number, x: number, y: number): number
+  /** `[elementId, utf16Offset]` for the closest painted input candidate. */
+  getInputTextHit?(elementIds: number[], x: number, y: number): number[]
 
   // ── Canvas API ─────────────────────────────────────────────────
   /** Upload a full RGBA pixel buffer for a `<canvas>` element and repaint.

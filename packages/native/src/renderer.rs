@@ -503,6 +503,19 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
+    GetInputTextOffset {
+        id: u64,
+        x: f32,
+        y: f32,
+        response: SyncSender<std::result::Result<Option<usize>, String>>,
+    },
+    GetInputTextHit {
+        ids: Vec<u64>,
+        x: f32,
+        y: f32,
+        response: SyncSender<Option<(u64, usize)>>,
+    },
+    ScrollInputCaretIntoView(u64),
     FocusElement(u64),
     SetPointerCapture(u64),
     ReleasePointerCapture,
@@ -780,6 +793,31 @@ async fn run_ui_commands(
                     window.on_next_frame(move |_window, _cx| {
                         response.send(crate::automation::get_bounds(id)).ok();
                     });
+                })
+            }
+            UiCommand::GetInputTextOffset { id, x, y, response } => {
+                window.update(cx, move |view, _window, cx| {
+                    let result = view
+                        .custom_registry
+                        .editor_entity(id)
+                        .ok_or_else(|| format!("element {id} is not a text editor"))
+                        .map(|entity| entity.read(cx).utf16_index_for_window_point(x, y));
+                    response.send(result).ok();
+                })
+            }
+            UiCommand::GetInputTextHit {
+                ids,
+                x,
+                y,
+                response,
+            } => window.update(cx, move |view, _window, cx| {
+                response.send(view.input_text_hit(&ids, x, y, cx)).ok();
+            }),
+            UiCommand::ScrollInputCaretIntoView(id) => {
+                window.update(cx, move |view, window, cx| {
+                    view.scroll_input_caret_into_view(id, cx);
+                    cx.notify();
+                    window.refresh();
                 })
             }
             UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
@@ -1179,6 +1217,64 @@ impl GpuixRenderer {
         )))]
         {
             let _ = id;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    fn input_text_offset(&self, id: u64, x: f32, y: f32) -> Result<Option<usize>> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| {
+            let entity = view
+                .custom_registry
+                .editor_entity(id)
+                .ok_or_else(|| Error::from_reason(format!("element {id} is not a text editor")))?;
+            Ok(entity.read(cx).utf16_index_for_window_point(x, y))
+        })?;
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetInputTextOffset { id, x, y, response })?;
+            return recv_ui_response(receiver, "the input text offset query")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (id, x, y);
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    fn input_text_hit(&self, ids: Vec<u64>, x: f32, y: f32) -> Result<Option<(u64, usize)>> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| view.input_text_hit(&ids, x, y, cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetInputTextHit {
+                ids,
+                x,
+                y,
+                response,
+            })?;
+            return recv_ui_response(receiver, "the input text hit query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (ids, x, y);
             Err(Error::from_reason("Unsupported operating system"))
         }
     }
@@ -2884,6 +2980,30 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Minimally scroll the closest vertical scroll ancestor until the
+    /// input's current caret line is visible.
+    #[napi]
+    pub fn scroll_input_caret_into_view(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.scroll_input_caret_into_view(id, cx);
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ScrollInputCaretIntoView(id));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Scroll a child into view by its index in the children list.
     ///
     /// For a `<virtual-list>` the scroll is queued and applied on the next
@@ -3034,6 +3154,31 @@ impl GpuixRenderer {
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<ElementBounds>> {
         let id = to_element_id(id)?;
         Ok(self.element_bounds(id)?.map(ElementBounds::from_painted))
+    }
+
+    /// The closest UTF-16 offset in an input/textarea for a window-space
+    /// point. The point is clamped into the text; -1 means it has not laid out.
+    #[napi]
+    pub fn get_input_text_offset(&self, element_id: f64, x: f64, y: f64) -> Result<f64> {
+        let id = to_element_id(element_id)?;
+        Ok(self
+            .input_text_offset(id, x as f32, y as f32)?
+            .map(|index| f64::from(index as u32))
+            .unwrap_or(-1.0))
+    }
+
+    /// Return `[elementId, utf16Offset]` for the input nearest a window-space
+    /// point, or an empty array when none of the supplied inputs has painted.
+    #[napi]
+    pub fn get_input_text_hit(&self, element_ids: Vec<f64>, x: f64, y: f64) -> Result<Vec<f64>> {
+        let ids = element_ids
+            .into_iter()
+            .map(to_element_id)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(self
+            .input_text_hit(ids, x as f32, y as f32)?
+            .map(|(id, offset)| vec![id as f64, f64::from(offset as u32)])
+            .unwrap_or_default())
     }
 
     #[napi]
@@ -3801,6 +3946,18 @@ impl WebGpuixRenderer {
         Ok(())
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = scrollInputCaretIntoView)]
+    pub fn scroll_input_caret_into_view(
+        &self,
+        element_id: f64,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        update_web_window(move |view, _window, cx| {
+            view.scroll_input_caret_into_view(id, cx);
+            cx.notify();
+        })
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = scrollToItem)]
     pub fn scroll_to_item(
         &self,
@@ -3902,6 +4059,47 @@ impl WebGpuixRenderer {
             return Ok(wasm_bindgen::JsValue::NULL);
         };
         element_bounds_js(bounds)
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getInputTextOffset)]
+    pub fn get_input_text_offset(
+        &self,
+        element_id: f64,
+        x: f64,
+        y: f64,
+    ) -> Result<f64, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let index = update_web_window(move |view, _window, cx| {
+            let entity = view.custom_registry.editor_entity(id).ok_or_else(|| {
+                wasm_bindgen::JsValue::from_str(&format!("element {id} is not a text editor"))
+            })?;
+            Ok::<_, wasm_bindgen::JsValue>(
+                entity
+                    .read(cx)
+                    .utf16_index_for_window_point(x as f32, y as f32),
+            )
+        })??;
+        Ok(index.map(|index| f64::from(index as u32)).unwrap_or(-1.0))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getInputTextHit)]
+    pub fn get_input_text_hit(
+        &self,
+        element_ids: Vec<f64>,
+        x: f64,
+        y: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let ids = element_ids
+            .into_iter()
+            .map(web_element_id)
+            .collect::<Result<Vec<_>, _>>()?;
+        let hit = update_web_window(move |view, _window, cx| {
+            view.input_text_hit(&ids, x as f32, y as f32, cx)
+        })?;
+        Ok(match hit {
+            Some((id, offset)) => web_number_array([id as f64, f64::from(offset as u32)]),
+            None => web_number_array([]),
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getAllText)]
@@ -4949,6 +5147,103 @@ impl GpuixView {
         self.focus_handles.iter().find_map(|(id, handle)| {
             handle.is_focused(window).then_some(*id)
         })
+    }
+
+    /// Hit-test a window point against an ordered set of native inputs in one
+    /// UI-thread visit. The nearest painted rectangle wins, so gaps between
+    /// Markdown blocks extend naturally to their closest text row.
+    pub(crate) fn input_text_hit(
+        &mut self,
+        ids: &[u64],
+        x: f32,
+        y: f32,
+        cx: &gpui::App,
+    ) -> Option<(u64, usize)> {
+        let mut best: Option<(u64, usize, f32)> = None;
+        for id in ids {
+            let Some(entity) = self.custom_registry.editor_entity(*id) else {
+                continue;
+            };
+            let input = entity.read(cx);
+            let Some(score) = input.window_distance_squared(x, y) else {
+                continue;
+            };
+            let Some(offset) = input.utf16_index_for_window_point(x, y) else {
+                continue;
+            };
+            if best.is_none_or(|(_, _, best_score)| score < best_score) {
+                best = Some((*id, offset, score));
+            }
+        }
+        best.map(|(id, offset, _)| (id, offset))
+    }
+
+    /// Reveal the current caret through the nearest retained-tree ancestor
+    /// with a vertical ScrollHandle. Inputs sized to their full content have
+    /// no internal vertical range, so keyboard navigation must move the one
+    /// outer document scroller instead.
+    pub(crate) fn scroll_input_caret_into_view(
+        &mut self,
+        id: u64,
+        cx: &gpui::App,
+    ) -> bool {
+        let Some(entity) = self.custom_registry.editor_entity(id) else {
+            return false;
+        };
+        let Some(caret) = entity.read(cx).window_caret_bounds() else {
+            return false;
+        };
+        let ancestors = {
+            let tree = self.tree.lock().unwrap();
+            let mut ids = Vec::new();
+            let mut current = tree.elements.get(&id).and_then(|element| element.parent);
+            while let Some(ancestor) = current {
+                ids.push(ancestor);
+                current = tree
+                    .elements
+                    .get(&ancestor)
+                    .and_then(|element| element.parent);
+            }
+            ids
+        };
+
+        let caret_top = f32::from(caret.top());
+        let caret_bottom = f32::from(caret.bottom());
+        for ancestor in ancestors {
+            let Some(handle) = self.scroll_handles.get(&ancestor) else {
+                continue;
+            };
+            let max_y = f32::from(handle.max_offset().y);
+            // Horizontal-only scrollers also own a ScrollHandle. Skip them so
+            // the enclosing document scroller remains the vertical owner.
+            if max_y <= 0.0 {
+                continue;
+            }
+            let viewport = handle.bounds();
+            let viewport_top = f32::from(viewport.top());
+            let viewport_bottom = f32::from(viewport.bottom());
+            let delta = if caret_top < viewport_top {
+                viewport_top - caret_top
+            } else if caret_bottom > viewport_bottom {
+                viewport_bottom - caret_bottom
+            } else {
+                0.0
+            };
+            if delta == 0.0 {
+                return false;
+            }
+
+            let offset = handle.offset();
+            let current_y = f32::from(offset.y);
+            let next_y = (current_y + delta).clamp(-max_y, 0.0);
+            let applied = next_y - current_y;
+            if applied == 0.0 {
+                return false;
+            }
+            handle.set_offset(gpui::point(offset.x, gpui::px(next_y)));
+            return true;
+        }
+        false
     }
 
     fn descendant_ids(&self, ancestor: u64) -> HashSet<u64> {

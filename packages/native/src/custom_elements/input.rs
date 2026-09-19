@@ -13,11 +13,12 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem, Context,
-    CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
-    GlobalElementId, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent, SharedString, Style, Task, TextRun,
-    TextStyle, UTF16Selection, UnderlineStyle, Window, WrappedLine,
+    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem,
+    Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler,
+    Font, FocusHandle, FontStyle, FontWeight, GlobalElementId, KeyBinding, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
+    SharedString, StrikethroughStyle, Style, Task, TextRun, TextStyle, UTF16Selection,
+    UnderlineStyle, Window, WrappedLine,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -70,7 +71,6 @@ const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
 const TEXTAREA_SUBMIT_KEY_CONTEXT: &str = "GpuixTextareaSubmit";
 const CARET_BLINK_MS: u64 = 500;
 const CARET_WIDTH: Pixels = px(2.0);
-const CARET_HEIGHT_RATIO: f32 = 0.75;
 const DRAG_SCROLL_FRAME_MS: u64 = 16;
 const UNDO_COALESCE: Duration = Duration::from_millis(700);
 const UNDO_LIMIT: usize = 200;
@@ -79,16 +79,11 @@ fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS) % 2 == 0
 }
 
-// Size the bar to cap height, not the line box. Default leading is phi, so a
-// full-height caret sticks out above and below the glyphs. Cap height is about
-// 0.75em; the em square itself still looks taller than the letters.
-fn caret_rect(origin: Point<Pixels>, line_height: Pixels, font_size: Pixels) -> Bounds<Pixels> {
-    let height = (font_size * CARET_HEIGHT_RATIO).min(line_height);
-    let y_offset = (line_height - height) / 2.;
-    Bounds::new(
-        point(origin.x, origin.y + y_offset),
-        size(CARET_WIDTH, height),
-    )
+// Match GPUI's input example and the Comet source this editor follows: the
+// caret occupies the shaped line box. A cap-height bar looked detached from
+// tall glyphs and was especially short in Markdown's generous line spacing.
+fn caret_rect(origin: Point<Pixels>, line_height: Pixels) -> Bounds<Pixels> {
+    Bounds::new(origin, size(CARET_WIDTH, line_height))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -267,7 +262,13 @@ struct TextEditorElement {
     min_rows: usize,
     max_rows: usize,
     last_prop_value: Option<String>,
+    value_revision: u64,
+    applied_value_revision: u64,
+    intercept_clipboard: bool,
     theme: Theme,
+    spans: Vec<SpanProp>,
+    decorations: Vec<DecorationProp>,
+    selection: Option<(usize, usize)>,
     state: Option<Entity<TextEditorState>>,
 }
 
@@ -281,7 +282,13 @@ impl TextEditorElement {
             min_rows: 1,
             max_rows: if multiline { 10 } else { 1 },
             last_prop_value: None,
+            value_revision: 0,
+            applied_value_revision: 0,
+            intercept_clipboard: false,
             theme: Theme::dark(),
+            spans: Vec::new(),
+            decorations: Vec::new(),
+            selection: None,
             state: None,
         }
     }
@@ -302,6 +309,11 @@ impl CustomElement for TextEditorElement {
         let emits_submit = ctx.events.contains("submit");
         let emits_key_down = ctx.events.contains("keyDown");
         let emits_key_up = ctx.events.contains("keyUp");
+        let emits_undo = ctx.events.contains("undo");
+        let emits_redo = ctx.events.contains("redo");
+        let emits_select_all = ctx.events.contains("selectAll");
+        let emits_context_menu = ctx.events.contains("contextMenu");
+        let emits_selection_drag = ctx.events.contains("selectionDrag");
         let callback = ctx.event_callback.clone();
 
         let state = self
@@ -325,6 +337,11 @@ impl CustomElement for TextEditorElement {
                     emits_submit,
                     emits_key_down,
                     emits_key_up,
+                    emits_undo,
+                    emits_redo,
+                    emits_select_all,
+                    emits_context_menu,
+                    emits_selection_drag,
                     focus_handle: state_focus_handle,
                     content: value,
                     placeholder: placeholder.into(),
@@ -347,16 +364,26 @@ impl CustomElement for TextEditorElement {
                     last_bounds: None,
                     line_height: px(20.0),
                     font_size: px(16.0),
+                    text_align: gpui::TextAlign::Left,
                     content_height: 20.0,
                     content_width: 0.0,
                     display_is_placeholder: false,
                     caret_color,
+                    selection_color: gpui::rgba(0x7c86ff59).into(),
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
                     undo_stack: VecDeque::new(),
                     redo_stack: Vec::new(),
                     last_edit: None,
+                    spans: Vec::new(),
+                    decorations: Vec::new(),
+                    external_selection: None,
+                    last_emitted_selection: None,
+                    intercept_clipboard: false,
+                    has_background_runs: false,
+                    painted_run_summary: Vec::new(),
+                    last_decoration_rects: Vec::new(),
                 })
             })
             .clone();
@@ -367,6 +394,16 @@ impl CustomElement for TextEditorElement {
             state.emits_change = emits_change;
             state.emits_key_down = emits_key_down;
             state.emits_key_up = emits_key_up;
+            state.emits_undo = emits_undo;
+            state.emits_redo = emits_redo;
+            state.emits_select_all = emits_select_all;
+            state.emits_context_menu = emits_context_menu;
+            state.emits_selection_drag = emits_selection_drag;
+            state.selection_color = ctx.style
+                .and_then(|style| style.selection_color.as_deref())
+                .and_then(crate::color::parse_color_rgba)
+                .map(Into::into)
+                .unwrap_or_else(|| gpui::rgba(0x7c86ff59).into());
             if state.emits_submit != emits_submit {
                 state.emits_submit = emits_submit;
                 cx.notify();
@@ -381,6 +418,32 @@ impl CustomElement for TextEditorElement {
             }
             if prop_changed {
                 state.sync_prop_value(self.value.clone(), cx);
+            } else if self.value_revision != self.applied_value_revision {
+                // The document model rewrote this block (input rule, undo,
+                // formatting) so the new value is authoritative even when it
+                // equals the previously applied one. Bypass echo suppression.
+                state.pending_values.clear();
+                state.set_external_text(self.value.clone(), cx);
+            }
+            self.applied_value_revision = self.value_revision;
+            if state.spans != self.spans {
+                state.spans = self.spans.clone();
+                cx.notify();
+            }
+            if state.decorations != self.decorations {
+                state.decorations = self.decorations.clone();
+                cx.notify();
+            }
+            if state.intercept_clipboard != self.intercept_clipboard {
+                state.intercept_clipboard = self.intercept_clipboard;
+            }
+            match self.selection {
+                Some((anchor, head)) => {
+                    if state.external_selection != Some((anchor, head)) {
+                        state.apply_external_selection(anchor, head, cx);
+                    }
+                }
+                None => state.external_selection = None,
             }
         });
         self.last_prop_value = Some(self.value.clone());
@@ -489,6 +552,21 @@ impl CustomElement for TextEditorElement {
                     as usize
             }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
+            "valueRevision" => {
+                self.value_revision = value.as_u64().unwrap_or(0)
+            }
+            "interceptClipboard" => {
+                self.intercept_clipboard = value.as_bool().unwrap_or(false)
+            }
+            "spans" => self.spans = parse_span_props(&value),
+            "decorations" => self.decorations = parse_decoration_props(&value),
+            "selection" => {
+                self.selection = value.as_array().and_then(|items| {
+                    let anchor = items.first()?.as_u64()? as usize;
+                    let head = items.get(1)?.as_u64()? as usize;
+                    Some((anchor, head))
+                })
+            }
             _ => {}
         }
     }
@@ -501,13 +579,20 @@ impl CustomElement for TextEditorElement {
             "minRows",
             "maxRows",
             "theme",
+            "valueRevision",
+            "interceptClipboard",
+            "spans",
+            "decorations",
+            "selection",
         ]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
-            "compositionStart", "compositionUpdate", "compositionEnd",
+            "compositionStart", "compositionUpdate", "compositionEnd", "selectionChange",
+            "copy", "cut", "paste", "backspaceStart", "undo", "redo", "selectAll",
+            "contextMenu", "selectionDrag",
         ]
     }
 
@@ -544,6 +629,498 @@ struct CoalescingEdit {
 struct LastEdit {
     edit: CoalescingEdit,
     when: Instant,
+}
+
+/// Inline style overlay for one UTF-16 range of the editor text.
+///
+/// The WYSIWYG architecture keeps ProseMirror (JS) as the document model: the
+/// native editor renders spans computed from it and never edits styles. All
+/// offsets are UTF-16, matching PM positions, and are resolved against the
+/// current value at layout time so a stale span simply clips.
+#[derive(Clone, PartialEq, Default)]
+pub(crate) struct SpanDecoration {
+    color: Option<gpui::Hsla>,
+    font_weight: Option<gpui::FontWeight>,
+    italic: bool,
+    underline: Option<SpanLine>,
+    strikethrough: Option<SpanLine>,
+    background: Option<gpui::Hsla>,
+    font_family: Option<SharedString>,
+}
+
+/// An underline/strikethrough requested by a span. GPUI falls back to the
+/// run's text color only when the style's color is `None`, so a bare `true`
+/// in the prop maps to `Inherit` — a `Some` built from `Hsla::default()` is
+/// alpha 0 and paints nothing.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum SpanLine {
+    Inherit,
+    Colored(gpui::Hsla),
+}
+
+impl SpanLine {
+    fn color(self) -> Option<gpui::Hsla> {
+        match self {
+            SpanLine::Inherit => None,
+            SpanLine::Colored(color) => Some(color),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct SpanProp {
+    start: usize,
+    end: usize,
+    deco: SpanDecoration,
+}
+
+#[derive(Clone, PartialEq)]
+pub(crate) struct DecorationProp {
+    start: usize,
+    end: usize,
+    color: gpui::Hsla,
+}
+
+/// One painted run, recorded for the test surface (`getPaintedInputRuns`).
+#[derive(Clone, PartialEq)]
+pub(crate) struct PaintedRunSummary {
+    pub text: String,
+    pub color: u32,
+    pub background: Option<u32>,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub font_family: Option<String>,
+}
+
+fn parse_hsla(value: Option<&serde_json::Value>) -> Option<gpui::Hsla> {
+    value
+        .and_then(serde_json::Value::as_str)
+        .and_then(crate::color::parse_color_rgba)
+        .map(gpui::Hsla::from)
+}
+
+fn parse_font_weight(value: Option<&serde_json::Value>) -> Option<gpui::FontWeight> {
+    match value {
+        Some(serde_json::Value::Number(number)) => {
+            number.as_f64().map(|weight| FontWeight(weight as f32))
+        }
+        Some(serde_json::Value::String(name)) => match name.as_str() {
+            "bold" => Some(FontWeight::BOLD),
+            "semibold" => Some(FontWeight::SEMIBOLD),
+            "normal" => Some(FontWeight::NORMAL),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn parse_span_line(value: Option<&serde_json::Value>) -> Option<SpanLine> {
+    match value {
+        Some(serde_json::Value::Bool(enabled)) => enabled.then_some(SpanLine::Inherit),
+        Some(serde_json::Value::String(_)) => parse_hsla(value).map(SpanLine::Colored),
+        _ => None,
+    }
+}
+
+fn parse_span_deco(item: &serde_json::Value) -> SpanDecoration {
+    SpanDecoration {
+        color: parse_hsla(item.get("color")),
+        font_weight: parse_font_weight(item.get("fontWeight")),
+        italic: matches!(
+            item.get("fontStyle").and_then(serde_json::Value::as_str),
+            Some("italic")
+        ),
+        underline: parse_span_line(item.get("underline")),
+        strikethrough: parse_span_line(item.get("strikethrough")),
+        background: parse_hsla(item.get("background")),
+        font_family: item
+            .get("fontFamily")
+            .and_then(serde_json::Value::as_str)
+            .map(SharedString::from),
+    }
+}
+
+pub(crate) fn parse_span_props(value: &serde_json::Value) -> Vec<SpanProp> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    let mut spans: Vec<SpanProp> = items
+        .iter()
+        .filter_map(|item| {
+            let start = item.get("start")?.as_u64()? as usize;
+            let end = item.get("end")?.as_u64()? as usize;
+            if end <= start {
+                return None;
+            }
+            Some(SpanProp {
+                start,
+                end,
+                deco: parse_span_deco(item),
+            })
+        })
+        .collect();
+    spans.sort_by_key(|span| span.start);
+    spans
+}
+
+pub(crate) fn parse_decoration_props(value: &serde_json::Value) -> Vec<DecorationProp> {
+    let Some(items) = value.as_array() else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let start = item.get("start")?.as_u64()? as usize;
+            let end = item.get("end")?.as_u64()? as usize;
+            let color = parse_hsla(item.get("color")).unwrap_or(gpui::rgba(0xffe06666).into());
+            (end > start).then_some(DecorationProp { start, end, color })
+        })
+        .collect()
+}
+
+/// Build the exact-cover run list for the editor text: base `TextStyle`
+/// overlaid by spans, with the IME marked range forced to an underline on top.
+/// Spans may overlap (ProseMirror marks compose); later spans win field by
+/// field. Returns the runs, a per-run summary for tests, and whether any run
+/// carries a background (so paint can call `paint_background`).
+fn build_span_runs(
+    text: &str,
+    base_font: &Font,
+    base_color: gpui::Hsla,
+    spans: &[SpanProp],
+    marked: Option<&Range<usize>>,
+) -> (Vec<TextRun>, Vec<PaintedRunSummary>, bool) {
+    // Span offsets are UTF-16 (ProseMirror positions); convert each span once
+    // instead of re-walking the text for every segment × span pair.
+    let span_ranges: Vec<Range<usize>> = spans
+        .iter()
+        .map(|span| {
+            utf16_offset_to_utf8(text, span.start).min(text.len())
+                ..utf16_offset_to_utf8(text, span.end).min(text.len())
+        })
+        .collect();
+    let mut boundaries = std::collections::BTreeSet::from([0, text.len()]);
+    for span_range in &span_ranges {
+        boundaries.insert(span_range.start);
+        boundaries.insert(span_range.end);
+    }
+    if let Some(marked) = marked {
+        boundaries.insert(marked.start.min(text.len()));
+        boundaries.insert(marked.end.min(text.len()));
+    }
+
+    let mut runs: Vec<TextRun> = Vec::new();
+    let mut summary: Vec<PaintedRunSummary> = Vec::new();
+    let mut has_background = false;
+    let mut boundaries = boundaries.into_iter().peekable();
+    while let (Some(start), Some(&end)) = (boundaries.next(), boundaries.peek()) {
+        if end <= start {
+            continue;
+        }
+        let mut font = base_font.clone();
+        let mut color = base_color;
+        let mut underline = None;
+        let mut strikethrough = None;
+        let mut background = None;
+        for (span, span_range) in spans.iter().zip(&span_ranges) {
+            if span_range.start >= end || span_range.end <= start {
+                continue;
+            }
+            if let Some(span_color) = span.deco.color {
+                color = span_color;
+            }
+            if let Some(weight) = span.deco.font_weight {
+                font.weight = weight;
+            }
+            if let Some(family) = &span.deco.font_family {
+                font.family = family.clone();
+            }
+            if span.deco.italic {
+                font.style = FontStyle::Italic;
+            }
+            if let Some(span_underline) = span.deco.underline {
+                underline = Some(UnderlineStyle {
+                    color: span_underline.color(),
+                    thickness: px(1.0),
+                    wavy: false,
+                });
+            }
+            if let Some(span_strikethrough) = span.deco.strikethrough {
+                strikethrough = Some(StrikethroughStyle {
+                    thickness: px(1.0),
+                    color: span_strikethrough.color(),
+                });
+            }
+            if let Some(background_color) = span.deco.background {
+                background = Some(background_color);
+            }
+        }
+        if let Some(marked) = marked {
+            if marked.start <= start && end <= marked.end {
+                underline = Some(UnderlineStyle {
+                    color: Some(color),
+                    thickness: px(1.0),
+                    wavy: false,
+                });
+            }
+        }
+        if background.is_some() {
+            has_background = true;
+        }
+        let run = TextRun {
+            len: end - start,
+            font,
+            color,
+            background_color: background,
+            underline,
+            strikethrough,
+        };
+        if let Some(last) = runs.last_mut() {
+            if last.font == run.font
+                && last.color == run.color
+                && last.background_color == run.background_color
+                && last.underline == run.underline
+                && last.strikethrough == run.strikethrough
+            {
+                last.len += run.len;
+                if let Some(entry) = summary.last_mut() {
+                    entry.text.push_str(&text[start..end]);
+                }
+                continue;
+            }
+        }
+        runs.push(run);
+        summary.push(PaintedRunSummary {
+            text: text[start..end].to_string(),
+            color: u32::from(gpui::Rgba::from(color)),
+            background: background.map(|bg| u32::from(gpui::Rgba::from(bg))),
+            bold: runs.last().is_some_and(|run| run.font.weight >= FontWeight::SEMIBOLD),
+            italic: runs.last().is_some_and(|run| run.font.style == FontStyle::Italic),
+            underline: runs.last().is_some_and(|run| run.underline.is_some()),
+            strikethrough: runs.last().is_some_and(|run| run.strikethrough.is_some()),
+            font_family: runs.last().and_then(|run| {
+                (run.font.family != base_font.family).then(|| run.font.family.to_string())
+            }),
+        });
+    }
+    (runs, summary, has_background)
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::*;
+
+    fn base_font() -> Font {
+        let mut font = Font::default();
+        font.family = "Helvetica".into();
+        font
+    }
+
+    fn span(start: usize, end: usize, deco: SpanDecoration) -> SpanProp {
+        SpanProp { start, end, deco }
+    }
+
+    fn deco_bold() -> SpanDecoration {
+        SpanDecoration {
+            font_weight: Some(FontWeight::BOLD),
+            ..Default::default()
+        }
+    }
+
+    fn deco_strike() -> SpanDecoration {
+        SpanDecoration {
+            strikethrough: Some(SpanLine::Inherit),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn runs_cover_text_exactly() {
+        let text = "hello world";
+        let (runs, summary, _) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &[], None);
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
+        assert_eq!(runs.len(), 1);
+        assert_eq!(summary.len(), 1);
+        assert_eq!(summary[0].text, text);
+    }
+
+    #[test]
+    fn spans_split_runs_and_report_style() {
+        let text = "abc def";
+        let spans = vec![span(0, 3, deco_bold()), span(4, 7, deco_strike())];
+        let (runs, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(runs.len(), 3);
+        assert_eq!(
+            summary.iter().map(|entry| entry.text.as_str()).collect::<Vec<_>>(),
+            vec!["abc", " ", "def"]
+        );
+        assert!(summary[0].bold);
+        assert!(!summary[1].bold);
+        assert!(summary[2].strikethrough);
+    }
+
+    #[test]
+    fn overlapping_spans_compose() {
+        let text = "abcdef";
+        let spans = vec![
+            span(0, 6, SpanDecoration {
+                background: Some(gpui::Hsla::default()),
+                ..Default::default()
+            }),
+            span(2, 4, deco_bold()),
+        ];
+        let (runs, summary, has_background) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert!(has_background);
+        assert_eq!(
+            summary.iter().map(|entry| entry.text.as_str()).collect::<Vec<_>>(),
+            vec!["ab", "cd", "ef"]
+        );
+        assert!(!summary[0].bold);
+        assert!(summary[1].bold);
+        assert!(summary.iter().all(|entry| entry.background.is_some()));
+        assert!(runs.iter().all(|run| run.len > 0));
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
+    }
+
+    #[test]
+    fn marked_range_forces_underline_over_spans() {
+        let text = "nihao";
+        let spans = vec![span(0, 5, deco_bold())];
+        let (runs, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            Some(&(1..3)),
+        );
+        assert!(runs.len() >= 3);
+        assert!(summary.iter().any(|entry| entry.underline && entry.text == "ih"));
+        assert!(summary.iter().all(|entry| entry.bold));
+    }
+
+    #[test]
+    fn stale_spans_clip_to_text() {
+        let text = "ab";
+        let spans = vec![span(0, 99, deco_bold())];
+        let (runs, _, _) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
+        assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
+    }
+
+    #[test]
+    fn adjacent_identical_runs_merge() {
+        let text = "abc";
+        let spans = vec![span(0, 3, deco_bold())];
+        // Two spans producing the same style on both sides of a boundary merge.
+        let spans = vec![span(0, 1, deco_bold()), span(1, 3, deco_bold())];
+        let (runs, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(runs.len(), 1);
+        assert_eq!(summary[0].text, "abc");
+    }
+
+    #[test]
+    fn utf16_offsets_map_through_surrogate_pairs() {
+        let text = "a😀b";
+        // 😀 is one UTF-16 unit pair (2), so UTF-16 offset 3 is after it.
+        let spans = vec![span(3, 4, deco_bold())];
+        let (_, summary, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(summary[summary.len() - 1].text, "b");
+        assert!(summary[summary.len() - 1].bold);
+    }
+
+    #[test]
+    fn parses_span_props_from_json() {
+        let value = serde_json::json!([
+            { "start": 0, "end": 2, "fontWeight": 700, "fontStyle": "italic" },
+            { "start": 4, "end": 9, "background": "#11223344" },
+            { "start": 5, "end": 5 }
+        ]);
+        let spans = parse_span_props(&value);
+        assert_eq!(spans.len(), 2);
+        assert!(spans[0].deco.font_weight.is_some());
+        assert!(spans[0].deco.italic);
+        assert!(spans[1].deco.background.is_some());
+    }
+
+    #[test]
+    fn boolean_decoration_inherits_the_run_color() {
+        let text = "abcdef";
+        let spans = parse_span_props(&serde_json::json!([
+            { "start": 0, "end": 3, "underline": true },
+            { "start": 3, "end": 6, "strikethrough": true },
+            { "start": 0, "end": 6, "underline": false, "strikethrough": false }
+        ]));
+        let base_color = gpui::rgba(0x00ff00ff).into();
+        let (runs, summary, _) = build_span_runs(text, &base_font(), base_color, &spans, None);
+        assert_eq!(runs.len(), 2);
+        // A bare `true` paints the line, and leaves the color to the run's
+        // text color: GPUI only falls back when the style color is `None`.
+        let underlined = &runs[0];
+        assert_eq!(
+            underlined.underline,
+            Some(UnderlineStyle {
+                color: None,
+                thickness: px(1.0),
+                wavy: false,
+            })
+        );
+        let struck = &runs[1];
+        assert_eq!(
+            struck.strikethrough,
+            Some(StrikethroughStyle {
+                thickness: px(1.0),
+                color: None,
+            })
+        );
+        assert!(summary[0].underline && !summary[0].strikethrough);
+        assert!(!summary[1].underline && summary[1].strikethrough);
+    }
+
+    #[test]
+    fn string_decoration_color_is_honored() {
+        let text = "abc";
+        let spans = parse_span_props(&serde_json::json!([
+            { "start": 0, "end": 3, "underline": "#ff0000" }
+        ]));
+        let (runs, _, _) = build_span_runs(
+            text,
+            &base_font(),
+            gpui::Hsla::default(),
+            &spans,
+            None,
+        );
+        assert_eq!(
+            runs[0].underline.and_then(|style| style.color),
+            Some(gpui::rgba(0xff0000ff).into())
+        );
+    }
 }
 
 fn coalescing_edit(
@@ -607,6 +1184,11 @@ pub(crate) struct TextEditorState {
     emits_submit: bool,
     emits_key_down: bool,
     emits_key_up: bool,
+    emits_undo: bool,
+    emits_redo: bool,
+    emits_select_all: bool,
+    emits_context_menu: bool,
+    emits_selection_drag: bool,
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
@@ -629,16 +1211,36 @@ pub(crate) struct TextEditorState {
     last_bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
     font_size: Pixels,
+    text_align: gpui::TextAlign,
     content_height: f32,
     content_width: f32,
     display_is_placeholder: bool,
     caret_color: gpui::Hsla,
+    selection_color: gpui::Hsla,
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
     undo_stack: VecDeque<EditSnapshot>,
     redo_stack: Vec<EditSnapshot>,
     last_edit: Option<LastEdit>,
+    spans: Vec<SpanProp>,
+    decorations: Vec<DecorationProp>,
+    external_selection: Option<(usize, usize)>,
+    last_emitted_selection: Option<(usize, usize)>,
+    intercept_clipboard: bool,
+    has_background_runs: bool,
+    painted_run_summary: Vec<PaintedRunSummary>,
+    last_decoration_rects: Vec<DecorationRects>,
+}
+
+/// Where a decoration range landed on screen, recorded at prepaint for the
+/// test surface (`getInputDecorations`).
+#[derive(Clone, PartialEq)]
+pub(crate) struct DecorationRects {
+    pub start: usize,
+    pub end: usize,
+    pub color: u32,
+    pub rects: Vec<Bounds<Pixels>>,
 }
 
 impl TextEditorState {
@@ -694,6 +1296,8 @@ impl TextEditorState {
         let end = self.content.len();
         self.selected_range = end..end;
         self.selection_reversed = false;
+        let content_end = self.offset_to_utf16(self.content.len());
+        self.last_emitted_selection = Some((content_end, content_end));
         self.marked_range = None;
         self.scroll_top = 0.0;
         self.scroll_left = 0.0;
@@ -703,6 +1307,31 @@ impl TextEditorState {
         self.redo_stack.clear();
         self.last_edit = None;
         cx.notify();
+    }
+
+    /// Move the caret/selection from JS (UTF-16 offsets, anchor/head like the
+    /// DOM). The native editor stays authoritative while typing — JS applies
+    /// this only when it must move the selection itself (find-next, restore).
+    fn apply_external_selection(
+        &mut self,
+        anchor_utf16: usize,
+        head_utf16: usize,
+        cx: &mut Context<Self>,
+    ) {
+        let len = self.content.len();
+        let anchor = self.offset_from_utf16(anchor_utf16).min(len);
+        let head = self.offset_from_utf16(head_utf16).min(len);
+        let reversed = anchor > head;
+        let range = if reversed { head..anchor } else { anchor..head };
+        if self.selected_range != range || self.selection_reversed != reversed {
+            self.selected_range = range;
+            self.selection_reversed = reversed;
+            self.reset_blink(cx);
+            cx.notify();
+        }
+        self.external_selection = Some((anchor_utf16, head_utf16));
+        // The selection came from JS; do not echo it back as a user event.
+        self.last_emitted_selection = Some((anchor_utf16, head_utf16));
     }
 
     fn emit_change(&mut self) {
@@ -715,6 +1344,101 @@ impl TextEditorState {
                 payload.value = Some(self.content.clone());
             });
         }
+    }
+
+    /// Window-space caret position for a UTF-16 offset, for the measurement
+    /// API the WYSIWYG component uses to align overlays and extend
+    /// selections across blocks.
+    pub(crate) fn window_point_for_utf16(&self, offset_utf16: usize) -> Option<(f32, f32)> {
+        let index = self.offset_from_utf16(offset_utf16);
+        let point = self.point_for_index(index)?;
+        let bounds = self.last_bounds?;
+        Some((
+            f32::from(bounds.left() + point.x) - self.scroll_left,
+            f32::from(bounds.top() + point.y) - self.scroll_top,
+        ))
+    }
+
+    /// Last-painted caret rectangle in window coordinates. The renderer uses
+    /// this to reveal a tall, content-sized textarea through its scrolling
+    /// ancestor; the textarea itself has no internal vertical scroll range.
+    pub(crate) fn window_caret_bounds(&self) -> Option<Bounds<Pixels>> {
+        let cursor = self.point_for_index(self.cursor_offset())?;
+        let bounds = self.last_bounds?;
+        Some(caret_rect(
+            point(
+                bounds.left() + cursor.x - px(self.scroll_left),
+                bounds.top() + cursor.y - px(self.scroll_top),
+            ),
+            self.line_height,
+        ))
+    }
+
+    /// Hit-test a window-space point to the closest UTF-16 offset.
+    pub(crate) fn utf16_index_for_window_point(&self, x: f32, y: f32) -> Option<usize> {
+        let index = self.index_for_mouse_position(point(px(x), px(y)));
+        Some(self.offset_to_utf16(index))
+    }
+
+    /// Squared distance from a window-space point to the editor's painted
+    /// rectangle. Zero means the point is inside; callers use this to bridge
+    /// the visual gaps between adjacent Markdown blocks in one native query.
+    pub(crate) fn window_distance_squared(&self, x: f32, y: f32) -> Option<f32> {
+        let bounds = self.last_bounds?;
+        let left = f32::from(bounds.left());
+        let top = f32::from(bounds.top());
+        let right = f32::from(bounds.right());
+        let bottom = f32::from(bounds.bottom());
+        let dx = if x < left {
+            left - x
+        } else if x > right {
+            x - right
+        } else {
+            0.0
+        };
+        let dy = if y < top {
+            top - y
+        } else if y > bottom {
+            y - bottom
+        } else {
+            0.0
+        };
+        Some(dx * dx + dy * dy)
+    }
+
+    /// Push-selection model: emit `selectionChange` (UTF-16 anchor/head)
+    /// whenever the selection last painted differs from the last emitted one.
+    /// Called once per paint so bursts of changes collapse into one event.
+    fn emit_selection_change(&mut self) {
+        let selection_utf16 = self.range_to_utf16(&self.selected_range);
+        let (anchor, head) = if self.selection_reversed {
+            (selection_utf16.end, selection_utf16.start)
+        } else {
+            (selection_utf16.start, selection_utf16.end)
+        };
+        if self.last_emitted_selection == Some((anchor, head)) {
+            return;
+        }
+        self.last_emitted_selection = Some((anchor, head));
+        emit_event_full(
+            &self.callback,
+            self.element_id,
+            "selectionChange",
+            |payload| {
+                payload.start_index = Some(anchor as f64);
+                payload.end_index = Some(head as f64);
+            },
+        );
+    }
+
+    /// Snapshot of the last-laid-out runs, for the test surface.
+    pub(crate) fn painted_run_snapshot(&self) -> Vec<PaintedRunSummary> {
+        self.painted_run_summary.clone()
+    }
+
+    /// Snapshot of where decoration ranges landed on screen, for tests.
+    pub(crate) fn decoration_rects_snapshot(&self) -> Vec<DecorationRects> {
+        self.last_decoration_rects.clone()
     }
 
     fn emit_submit(&self) {
@@ -851,6 +1575,11 @@ impl TextEditorState {
         if self.selected_range.is_empty() {
             let previous = self.previous_boundary(self.cursor_offset());
             if previous == self.cursor_offset() {
+                // Backspace is a native keybinding, so keyDown never reaches
+                // JS. A press with an empty selection at offset 0 is a native
+                // no-op; report it so the host can join with the previous
+                // block.
+                emit_event_full(&self.callback, self.element_id, "backspaceStart", |_| {});
                 return;
             }
             self.select_to(previous, cx);
@@ -923,6 +1652,13 @@ impl TextEditorState {
     }
 
     fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        if self.emits_select_all {
+            // cmd-a is a native keybinding, so keyDown never reaches JS. A
+            // host with a `selectAll` listener owns the selection scope (e.g.
+            // every block of a document); skip the element-local select-all.
+            emit_event_full(&self.callback, self.element_id, "selectAll", |_| {});
+            return;
+        }
         self.selected_range = 0..self.content.len();
         self.selection_reversed = false;
         self.reset_blink(cx);
@@ -1046,6 +1782,17 @@ impl TextEditorState {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.intercept_clipboard {
+            // Keybindings consume cmd-c before keyDown reaches JS, so an
+            // opt-in editor reports the intent and the host serializes
+            // (e.g. cross-block markdown selection).
+            let selection_utf16 = self.range_to_utf16(&self.selected_range.clone());
+            emit_event_full(&self.callback, self.element_id, "copy", |payload| {
+                payload.start_index = Some(selection_utf16.start as f64);
+                payload.end_index = Some(selection_utf16.end as f64);
+            });
+            return;
+        }
         if !self.selected_range.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(
                 self.content[self.selected_range.clone()].to_string(),
@@ -1057,6 +1804,17 @@ impl TextEditorState {
         if self.read_only || self.selected_range.is_empty() {
             return;
         }
+        if self.intercept_clipboard {
+            // Same intent-reporting contract as `copy`, but a cut is for the
+            // host to perform through the model: deleting here would strip
+            // the text before the host serializes it.
+            let selection_utf16 = self.range_to_utf16(&self.selected_range.clone());
+            emit_event_full(&self.callback, self.element_id, "cut", |payload| {
+                payload.start_index = Some(selection_utf16.start as f64);
+                payload.end_index = Some(selection_utf16.end as f64);
+            });
+            return;
+        }
         self.copy(&Copy, window, cx);
         self.replace_text_in_range(None, "", window, cx);
     }
@@ -1066,12 +1824,25 @@ impl TextEditorState {
             return;
         }
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
+            if self.intercept_clipboard {
+                emit_event_full(&self.callback, self.element_id, "paste", |payload| {
+                    payload.value = Some(text);
+                });
+                return;
+            }
             self.replace_text_in_range(None, &text, window, cx);
         }
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
+            return;
+        }
+        if self.emits_undo {
+            // cmd-z is a native keybinding, so keyDown never reaches JS. A
+            // host with an `undo` listener owns the history (e.g. the
+            // document model's undo stack); skip the native one.
+            emit_event_full(&self.callback, self.element_id, "undo", |_| {});
             return;
         }
         if let Some(previous) = self.undo_stack.pop_back() {
@@ -1082,6 +1853,10 @@ impl TextEditorState {
 
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
+            return;
+        }
+        if self.emits_redo {
+            emit_event_full(&self.callback, self.element_id, "redo", |_| {});
             return;
         }
         if let Some(next) = self.redo_stack.pop() {
@@ -1126,7 +1901,7 @@ impl TextEditorState {
                 .take(line_index)
                 .map(|line| line.size(self.line_height).height)
                 .sum();
-            return Some(point(local.x, local.y + y_offset));
+            return Some(point(local.x + self.line_alignment_offset(line, local.y), local.y + y_offset));
         }
         None
     }
@@ -1140,7 +1915,8 @@ impl TextEditorState {
             let height = f32::from(line.size(self.line_height).height);
             let line_start = self.line_starts.get(line_index).copied().unwrap_or(0);
             if y < height || line_index + 1 == self.last_lines.len() {
-                let local = point(position.x, px(y.min(height - 1.0).max(0.0)));
+                let local_y = px(y.min(height - 1.0).max(0.0));
+                let local = point(position.x - self.line_alignment_offset(line, local_y), local_y);
                 let index = line
                     .closest_index_for_position(local, self.line_height)
                     .unwrap_or_else(|index| index);
@@ -1151,10 +1927,44 @@ impl TextEditorState {
         self.content.len()
     }
 
+    /// GPUI's WrappedLine positions are unaligned, while paint/paint_background
+    /// align each visual row inside the supplied bounds (line.rs aligned_origin_x).
+    /// Translate to that same coordinate space using GPUI's shaped glyph and
+    /// wrap positions; never change the layout or its glyph positions.
+    fn line_alignment_offset(&self, line: &WrappedLine, y: Pixels) -> Pixels {
+        let Some(bounds) = self.last_bounds else { return px(0.0) };
+        let row = (f32::from(y) / f32::from(self.line_height)).floor().max(0.0) as usize;
+        let boundary_x = |index: usize| {
+            line.wrap_boundaries().get(index).map(|boundary| {
+                line.runs()[boundary.run_ix].glyphs[boundary.glyph_ix].position.x
+            })
+        };
+        let start = row.checked_sub(1).and_then(boundary_x).unwrap_or(px(0.0));
+        let end = boundary_x(row).unwrap_or(line.unwrapped_layout.width);
+        let remaining = bounds.size.width - (end - start);
+        match self.text_align {
+            gpui::TextAlign::Left => px(0.0),
+            gpui::TextAlign::Center => remaining / 2.0,
+            gpui::TextAlign::Right => remaining,
+        }
+    }
+
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {
         let Some(bounds) = self.last_bounds else {
             return 0;
         };
+        // A delegated document drag leaves this textblock. Match GPUI's
+        // input example: above/below the block means its start/end, not the
+        // same x on its first/last line. Ordinary scrollable inputs retain
+        // Comet's edge-clamped autoscroll hit testing.
+        if self.is_selecting && self.emits_selection_drag {
+            if position.y < bounds.top() {
+                return 0;
+            }
+            if position.y > bounds.bottom() {
+                return self.content.len();
+            }
+        }
         self.index_for_point(point(
             position.x - bounds.left() + px(self.scroll_left),
             position.y - bounds.top() + px(self.scroll_top),
@@ -1196,11 +2006,55 @@ impl TextEditorState {
         }
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        if self.is_selecting && self.emits_selection_drag {
+            emit_event_full(
+                &self.callback,
+                self.element_id,
+                "selectionDrag",
+                |payload| {
+                    let (x, y) = crate::renderer::point_to_xy(event.position);
+                    payload.x = Some(x);
+                    payload.y = Some(y);
+                    payload.value = Some("end".to_string());
+                },
+            );
+        }
         self.is_selecting = false;
         self.drag_position = None;
         self.drag_generation = self.drag_generation.wrapping_add(1);
         self.drag_autoscroll_active = false;
+    }
+
+    /// DOM right-button press: the editor takes focus, and an empty selection
+    /// collapses to a caret at the hit position. A non-empty selection is kept
+    /// so a right-click on it preserves the range for the menu action.
+    fn on_right_mouse_down(
+        &mut self,
+        event: &MouseDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.read_only {
+            window.request_text_input();
+        }
+        window.focus(&self.focus_handle, cx);
+        if self.selected_range.is_empty() {
+            self.move_to(self.index_for_mouse_position(event.position), cx);
+        }
+    }
+
+    /// The DOM `contextmenu` event fires on right-button RELEASE on macOS.
+    /// Coordinates are window-space; the host positions its menu from them.
+    fn on_context_menu(&mut self, event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        emit_event_full(&self.callback, self.element_id, "contextMenu", |payload| {
+            let (x, y) = crate::renderer::point_to_xy(event.position);
+            payload.x = Some(x);
+            payload.y = Some(y);
+            payload.button = Some(crate::renderer::mouse_button_to_u32(event.button));
+            payload.is_right_click = Some(true);
+            payload.modifiers = Some(event.modifiers.into());
+        });
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
@@ -1208,6 +2062,26 @@ impl TextEditorState {
             self.drag_position = Some(event.position);
             let position = self.drag_selection_position(event.position);
             self.select_to(self.index_for_mouse_position(position), cx);
+            if self.emits_selection_drag {
+                let selection_utf16 = self.range_to_utf16(&self.selected_range);
+                let (anchor, head) = if self.selection_reversed {
+                    (selection_utf16.end, selection_utf16.start)
+                } else {
+                    (selection_utf16.start, selection_utf16.end)
+                };
+                emit_event_full(
+                    &self.callback,
+                    self.element_id,
+                    "selectionDrag",
+                    |payload| {
+                        let (x, y) = crate::renderer::point_to_xy(event.position);
+                        payload.x = Some(x);
+                        payload.y = Some(y);
+                        payload.start_index = Some(anchor as f64);
+                        payload.end_index = Some(head as f64);
+                    },
+                );
+            }
             if self.multiline
                 && self.drag_scroll_delta(event.position) != 0.0
                 && !self.drag_autoscroll_active
@@ -1235,6 +2109,9 @@ impl TextEditorState {
     }
 
     fn drag_selection_position(&self, position: Point<Pixels>) -> Point<Pixels> {
+        if self.emits_selection_drag {
+            return position;
+        }
         let Some(bounds) = self.last_bounds else {
             return position;
         };
@@ -1364,6 +2241,7 @@ impl TextEditorState {
         // request_layout: an explicit lineHeight sets the row in pixels,
         // and without one a larger fontSize still grows the box.
         self.line_height = style.line_height_in_pixels(rem_size);
+        self.text_align = style.text_align;
         let color = if is_placeholder {
             gpui::rgba(0x8f8f8fff).into()
         } else {
@@ -1381,21 +2259,44 @@ impl TextEditorState {
             }),
             strikethrough: None,
         };
-        let runs = match self.marked_range.as_ref() {
-            Some(marked) if !is_placeholder => vec![
-                run(marked.start, false),
-                run(marked.len(), true),
-                run(display.len() - marked.end, false),
-            ]
-            .into_iter()
-            .filter(|run| run.len > 0)
-            .collect(),
-            _ => vec![run(display.len(), false)],
-        };
-        let wrap_width = self.multiline.then_some(width);
+        if is_placeholder {
+            self.display_is_placeholder = true;
+            self.spans_applied(&[], false);
+            let runs = match self.marked_range.as_ref() {
+                Some(marked) => vec![
+                    run(marked.start, false),
+                    run(marked.len(), true),
+                    run(display.len() - marked.end, false),
+                ]
+                .into_iter()
+                .filter(|run| run.len > 0)
+                .collect(),
+                _ => vec![run(display.len(), false)],
+            };
+            return self.shape_and_measure(display, runs, self.multiline.then_some(width), window);
+        }
+        self.display_is_placeholder = false;
+        let (runs, summary, has_background) =
+            build_span_runs(&display, &style.font(), color, &self.spans, self.marked_range.as_ref());
+        self.spans_applied(&summary, has_background);
+        self.shape_and_measure(display, runs, self.multiline.then_some(width), window)
+    }
+
+    fn spans_applied(&mut self, summary: &[PaintedRunSummary], has_background: bool) {
+        self.painted_run_summary = summary.to_vec();
+        self.has_background_runs = has_background;
+    }
+
+    fn shape_and_measure(
+        &mut self,
+        display: SharedString,
+        runs: Vec<TextRun>,
+        wrap_width: Option<Pixels>,
+        window: &mut Window,
+    ) -> f32 {
         let lines = window
             .text_system()
-            .shape_text(display, font_size, &runs, wrap_width, None)
+            .shape_text(display, self.font_size, &runs, wrap_width, None)
             .map(|lines| lines.into_vec())
             .unwrap_or_default();
         let mut line_starts = Vec::with_capacity(lines.len());
@@ -1416,7 +2317,6 @@ impl TextEditorState {
             .iter()
             .map(|line| f32::from(line.unwrapped_layout.width))
             .fold(0.0, f32::max);
-        self.display_is_placeholder = is_placeholder;
         self.last_lines = lines;
         self.line_starts = line_starts;
         self.content_height
@@ -1639,7 +2539,6 @@ impl EntityInputHandler for TextEditorState {
                 bounds.top() + start.y - px(self.scroll_top),
             ),
             self.line_height,
-            self.font_size,
         ))
     }
 
@@ -1724,8 +2623,12 @@ impl gpui::Render for TextEditorState {
             .on_action(cx.listener(Self::newline))
             .on_action(cx.listener(Self::submit))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .when(self.emits_context_menu, |editor| {
+                editor.on_mouse_up(MouseButton::Right, cx.listener(Self::on_context_menu))
+            })
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .when(self.emits_key_down, move |editor| {
                 editor.on_key_down(move |event, _window, _cx| {
@@ -1765,6 +2668,53 @@ struct EditorTextElement {
 struct EditorPrepaint {
     caret: Option<PaintQuad>,
     selection: Vec<PaintQuad>,
+    decorations: Vec<PaintQuad>,
+}
+
+/// The one-to-three fill quads covering a text range on screen, identical to
+/// how the editor paints its own selection: same line one rect, spanning
+/// lines first-to-right-edge / full middle lines / last-from-left-edge.
+fn range_quads(
+    start: Point<Pixels>,
+    end: Point<Pixels>,
+    origin: Point<Pixels>,
+    bounds: Bounds<Pixels>,
+    line_height: Pixels,
+    color: gpui::Hsla,
+) -> Vec<PaintQuad> {
+    if start.y == end.y {
+        return vec![fill(
+            Bounds::from_corners(
+                point(origin.x + start.x, origin.y + start.y),
+                point(origin.x + end.x, origin.y + start.y + line_height),
+            ),
+            color,
+        )];
+    }
+    let mut quads = vec![fill(
+        Bounds::from_corners(
+            point(origin.x + start.x, origin.y + start.y),
+            point(bounds.right(), origin.y + start.y + line_height),
+        ),
+        color,
+    )];
+    if end.y > start.y + line_height {
+        quads.push(fill(
+            Bounds::from_corners(
+                point(origin.x, origin.y + start.y + line_height),
+                point(bounds.right(), origin.y + end.y),
+            ),
+            color,
+        ));
+    }
+    quads.push(fill(
+        Bounds::from_corners(
+            point(origin.x, origin.y + end.y),
+            point(origin.x + end.x, origin.y + end.y + line_height),
+        ),
+        color,
+    ));
+    quads
 }
 
 impl gpui::Element for EditorTextElement {
@@ -1836,7 +2786,6 @@ impl gpui::Element for EditorTextElement {
                 caret_rect(
                     point(origin.x + caret_point.x, origin.y + caret_point.y),
                     input.line_height,
-                    input.font_size,
                 ),
                 input.caret_color,
             ));
@@ -1844,42 +2793,42 @@ impl gpui::Element for EditorTextElement {
             input.point_for_index(input.selected_range.start),
             input.point_for_index(input.selected_range.end),
         ) {
-            let color = gpui::rgba(0x7c86ff59);
-            if start.y == end.y {
-                selection.push(fill(
-                    Bounds::from_corners(
-                        point(origin.x + start.x, origin.y + start.y),
-                        point(origin.x + end.x, origin.y + start.y + input.line_height),
-                    ),
-                    color,
-                ));
-            } else {
-                selection.push(fill(
-                    Bounds::from_corners(
-                        point(origin.x + start.x, origin.y + start.y),
-                        point(bounds.right(), origin.y + start.y + input.line_height),
-                    ),
-                    color,
-                ));
-                if end.y > start.y + input.line_height {
-                    selection.push(fill(
-                        Bounds::from_corners(
-                            point(origin.x, origin.y + start.y + input.line_height),
-                            point(bounds.right(), origin.y + end.y),
-                        ),
-                        color,
-                    ));
-                }
-                selection.push(fill(
-                    Bounds::from_corners(
-                        point(origin.x, origin.y + end.y),
-                        point(origin.x + end.x, origin.y + end.y + input.line_height),
-                    ),
-                    color,
-                ));
+            selection = range_quads(
+                start,
+                end,
+                origin,
+                bounds,
+                input.line_height,
+                input.selection_color,
+            );
+        }
+        let mut decorations = Vec::new();
+        let mut decoration_rects = Vec::new();
+        for deco in &input.decorations {
+            let range = input.range_from_utf16(&(deco.start..deco.end));
+            if let (Some(start), Some(end)) = (
+                input.point_for_index(range.start.min(input.content.len())),
+                input.point_for_index(range.end.min(input.content.len())),
+            ) {
+                let quads = range_quads(start, end, origin, bounds, input.line_height, deco.color);
+                decoration_rects.push(DecorationRects {
+                    start: deco.start,
+                    end: deco.end,
+                    color: u32::from(gpui::Rgba::from(deco.color)),
+                    rects: quads.iter().map(|quad| quad.bounds).collect(),
+                });
+                decorations.extend(quads);
             }
         }
-        EditorPrepaint { caret, selection }
+        let state = self.input.clone();
+        state.update(cx, |input, _| {
+            input.last_decoration_rects = decoration_rects;
+        });
+        EditorPrepaint {
+            caret,
+            selection,
+            decorations,
+        }
     }
 
     fn paint(
@@ -1905,10 +2854,7 @@ impl gpui::Element for EditorTextElement {
             }
         });
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            for quad in prepaint.selection.drain(..) {
-                window.paint_quad(quad);
-            }
-            let (lines, line_height, scroll_top, scroll_left, display) =
+            let (lines, line_height, scroll_top, scroll_left, display, paint_backgrounds, text_align) =
                 self.input.update(cx, |input, _| {
                     let display = if input.content.is_empty() {
                         input.placeholder.clone()
@@ -1921,22 +2867,48 @@ impl gpui::Element for EditorTextElement {
                         input.scroll_top,
                         input.scroll_left,
                         display,
+                        input.has_background_runs,
+                        input.text_align,
                     )
                 });
             crate::text::log_painted_text(display);
             let mut y = bounds.top() - px(scroll_top);
             for line in &lines {
                 let height = line.size(line_height).height;
+                if paint_backgrounds {
+                    line.paint_background(
+                        point(bounds.left() - px(scroll_left), y),
+                        line_height,
+                        text_align,
+                        Some(bounds),
+                        window,
+                        cx,
+                    )
+                    .ok();
+                }
+                y += height;
+            }
+            // GPUI paints run backgrounds separately from glyphs. Put the
+            // selection above those backgrounds so inline code/highlights
+            // cannot hide the selected range, while glyphs remain on top.
+            for quad in prepaint.decorations.drain(..) {
+                window.paint_quad(quad);
+            }
+            for quad in prepaint.selection.drain(..) {
+                window.paint_quad(quad);
+            }
+            let mut y = bounds.top() - px(scroll_top);
+            for line in &lines {
                 line.paint(
                     point(bounds.left() - px(scroll_left), y),
                     line_height,
-                    gpui::TextAlign::Left,
+                    text_align,
                     Some(bounds),
                     window,
                     cx,
                 )
                 .ok();
-                y += height;
+                y += line.size(line_height).height;
             }
             self.input.update(cx, |input, _| input.last_lines = lines);
             let caret_shown = self
@@ -1947,6 +2919,9 @@ impl gpui::Element for EditorTextElement {
                     window.paint_quad(caret);
                 }
             }
+            self.input.update(cx, |input, _| {
+                input.emit_selection_change();
+            });
         });
     }
 }
@@ -1985,16 +2960,10 @@ mod tests {
     }
 
     #[test]
-    fn caret_matches_the_font_size_inside_the_line() {
-        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0), px(16.0));
-        assert_eq!(bounds.origin, point(px(10.0), px(8.0)));
-        assert_eq!(bounds.size, size(px(2.0), px(12.0)));
-        assert_eq!(
-            caret_rect(point(px(0.0), px(0.0)), px(20.0), px(40.0))
-                .size
-                .height,
-            px(20.0)
-        );
+    fn caret_fills_the_shaped_line_box() {
+        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0));
+        assert_eq!(bounds.origin, point(px(10.0), px(4.0)));
+        assert_eq!(bounds.size, size(px(2.0), px(20.0)));
     }
 
     fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {

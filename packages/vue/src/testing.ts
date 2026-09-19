@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process"
 import type { Component } from "vue"
 import type { App } from "vue"
 import { nextTick } from "vue"
-import type { EventPayload, HighlightMatch } from "@gpuiv/native"
+import type { EventPayload, HighlightMatch, InputDecorationInfo, InputRunInfo } from "@gpuiv/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
@@ -107,6 +107,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateImeCommit(elementId: number, text: string): void
   simulateImeCancel(elementId: number): void
   scrollTo(elementId: number, x: number, y: number): void
+  scrollInputCaretIntoView(elementId: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
   getListScrollTop(elementId: number): number[] | null
@@ -119,6 +120,11 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSelectedText(): string | null
   getPaintedText(): string[]
   getPaintedHighlights(): HighlightMatch[]
+  getPaintedInputRuns(elementId: number): InputRunInfo[]
+  getInputDecorations(elementId: number): InputDecorationInfo[]
+  getInputTextPosition(elementId: number, offset: number): number[]
+  getInputTextOffset(elementId: number, x: number, y: number): number
+  getInputTextHit(elementIds: number[], x: number, y: number): number[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -690,6 +696,13 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
+  /** Reveal an input's current caret line through its nearest scroll ancestor. */
+  scrollInputCaretIntoView(elementId: number): void {
+    this.native.flush()
+    this.native.scrollInputCaretIntoView(elementId)
+    this.native.flush()
+  }
+
   /** Scroll a child into view by its index in the children list.
    *
    *  `offsetInItem` is in pixels. A negative value anchors the viewport top
@@ -979,6 +992,32 @@ export class TestRenderer implements NativeRenderer {
    *  way to assert on `highlight` without a screenshot. */
   getPaintedHighlights(): HighlightMatch[] {
     return this.native.getPaintedHighlights()
+  }
+
+  /** The styled runs an `<input>`/`<textarea>` laid out in the last frame —
+   *  the `spans` prop resolved to concrete text/style pairs. The only way to
+   *  assert inline styling without a screenshot. */
+  getPaintedInputRuns(elementId: number): InputRunInfo[] {
+    return this.native.getPaintedInputRuns(elementId)
+  }
+
+  /** Where the `decorations` prop of an editor landed (pixel rects). */
+  getInputDecorations(elementId: number): InputDecorationInfo[] {
+    return this.native.getInputDecorations(elementId)
+  }
+
+  /** Window-space caret position `[x, y]` for a UTF-16 offset, or `[]`. */
+  getInputTextPosition(elementId: number, offset: number): number[] {
+    return this.native.getInputTextPosition(elementId, offset)
+  }
+
+  /** Closest UTF-16 offset for a window-space point, or -1. */
+  getInputTextOffset(elementId: number, x: number, y: number): number {
+    return this.native.getInputTextOffset(elementId, x, y)
+  }
+
+  getInputTextHit(elementIds: number[], x: number, y: number): number[] {
+    return this.native.getInputTextHit(elementIds, x, y)
   }
 
   /** Syntax-cache counters as `[hits, misses, documents]`. */

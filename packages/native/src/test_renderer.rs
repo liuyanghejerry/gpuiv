@@ -30,6 +30,44 @@ use crate::renderer::{
 };
 use crate::retained_tree::RetainedTree;
 
+/// One styled run of an editor element, as laid out in the last frame.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct InputRunInfo {
+    pub text: String,
+    pub color: String,
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub strikethrough: bool,
+    pub background: Option<String>,
+    pub font_family: Option<String>,
+}
+
+/// A pixel rect of one editor decoration.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct InputDecorationRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Where one `decorations` range of an editor landed on screen.
+#[derive(Debug, Clone)]
+#[napi(object)]
+pub struct InputDecorationInfo {
+    pub start: f64,
+    pub end: f64,
+    pub color: String,
+    pub rects: Vec<InputDecorationRect>,
+}
+
+fn rgba_hex(value: u32) -> String {
+    format!("#{:08x}", value)
+}
+
 /// The request the last test `promptForNewPath` call received.
 #[derive(Debug, Clone)]
 #[napi(object)]
@@ -1354,6 +1392,132 @@ impl TestGpuixRenderer {
             .collect())
     }
 
+    /// The styled runs of an `<input>`/`<textarea>` element as laid out in the
+    /// last frame: the `spans` prop resolved to concrete text/style pairs.
+    /// This is how WYSIWYG tests assert inline styling.
+    #[napi]
+    pub fn get_painted_input_runs(&self, element_id: f64) -> Result<Vec<InputRunInfo>> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let state = view.update(cx, |_view, cx| entity.read(cx).painted_run_snapshot());
+            Ok(state
+                .into_iter()
+                .map(|run| InputRunInfo {
+                    text: run.text,
+                    color: rgba_hex(run.color),
+                    bold: run.bold,
+                    italic: run.italic,
+                    underline: run.underline,
+                    strikethrough: run.strikethrough,
+                    background: run.background.map(rgba_hex),
+                    font_family: run.font_family,
+                })
+                .collect())
+        })
+    }
+
+    /// Window-space caret position `[x, y]` for a UTF-16 offset of an editor,
+    /// or an empty array when the element has not been laid out. This is the
+    /// position-for-offset half of the WYSIWYG measurement API;
+    /// `getInputTextOffset` is the offset-for-position half.
+    #[napi]
+    pub fn get_input_text_position(&self, element_id: f64, offset: f64) -> Result<Vec<f64>> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let point = view.update(cx, |_view, cx| {
+                entity.read(cx).window_point_for_utf16(offset as usize)
+            });
+            Ok(point
+                .map(|(x, y)| vec![f64::from(x), f64::from(y)])
+                .unwrap_or_default())
+        })
+    }
+
+    /// The closest UTF-16 offset in an editor for a window-space point. The
+    /// offset is clamped into the text, and an element that has not been laid
+    /// out reports 0 — this never returns -1.
+    #[napi]
+    pub fn get_input_text_offset(&self, element_id: f64, x: f64, y: f64) -> Result<f64> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let index = view.update(cx, |_view, cx| {
+                entity.read(cx).utf16_index_for_window_point(x as f32, y as f32)
+            });
+            Ok(index.map(|index| f64::from(index as u32)).unwrap_or(-1.0))
+        })
+    }
+
+    /// `[elementId, utf16Offset]` for the closest painted input among the
+    /// supplied candidates, or an empty array when none has laid out.
+    #[napi]
+    pub fn get_input_text_hit(&self, element_ids: Vec<f64>, x: f64, y: f64) -> Result<Vec<f64>> {
+        let ids = element_ids
+            .into_iter()
+            .map(to_element_id)
+            .collect::<Result<Vec<_>>>()?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let hit = view.update(cx, |view, cx| {
+                view.input_text_hit(&ids, x as f32, y as f32, cx)
+            });
+            Ok(hit
+                .map(|(id, offset)| vec![id as f64, f64::from(offset as u32)])
+                .unwrap_or_default())
+        })
+    }
+
+    /// Where the `decorations` prop of an editor landed on screen (pixel
+    /// rects), for asserting search-highlight geometry.
+    #[napi]
+    pub fn get_input_decorations(&self, element_id: f64) -> Result<Vec<InputDecorationInfo>> {
+        let id = to_element_id(element_id)?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let entity = view
+                .update(cx, |view, _| view.custom_registry.editor_entity(id))
+                .ok_or_else(|| {
+                    Error::from_reason(format!("element {id} is not a text editor"))
+                })?;
+            let state = view.update(cx, |_view, cx| entity.read(cx).decoration_rects_snapshot());
+            Ok(state
+                .into_iter()
+                .map(|deco| InputDecorationInfo {
+                    start: deco.start as f64,
+                    end: deco.end as f64,
+                    color: rgba_hex(deco.color),
+                    rects: deco
+                        .rects
+                        .into_iter()
+                        .map(|bounds| InputDecorationRect {
+                            x: f64::from(f32::from(bounds.origin.x)),
+                            y: f64::from(f32::from(bounds.origin.y)),
+                            width: f64::from(f32::from(bounds.size.width)),
+                            height: f64::from(f32::from(bounds.size.height)),
+                        })
+                        .collect(),
+                })
+                .collect())
+        })
+    }
+
     /// Drag-select from one point to another: mouse down, move, up.
     ///
     /// A single helper rather than three calls because the listeners that drive
@@ -1390,6 +1554,24 @@ impl TestGpuixRenderer {
                     if let Some(handle) = view.scroll_handles.get(&id) {
                         handle.set_offset(gpui::point(gpui::px(x as f32), gpui::px(y as f32)));
                     }
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Scroll the nearest vertical scroll ancestor just enough to reveal the
+    /// input's current caret line. Call flush() after to repaint at the offset.
+    #[napi]
+    pub fn scroll_input_caret_into_view(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    view.scroll_input_caret_into_view(id, cx);
+                    cx.notify();
                 });
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;

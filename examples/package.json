@@ -6,6 +6,7 @@
     "counter": "bun --hot counter.tsx",
     "blurred-window": "bun --hot blurred-window.tsx",
     "diff": "bun --hot diff.tsx",
+    "markdown-editor": "bun --hot markdown-editor.tsx",
     "error-handling": "bun --hot error-handling.tsx",
     "test": "vitest run",
     "native-text": "bun --hot native-text.tsx",

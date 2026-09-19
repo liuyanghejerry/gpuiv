@@ -296,6 +296,11 @@ export declare class GpuixRenderer {
    */
   scrollTo(elementId: number, x: number, y: number): void
   /**
+   * Minimally scroll the closest vertical scroll ancestor until the
+   * input's current caret line is visible.
+   */
+  scrollInputCaretIntoView(elementId: number): void
+  /**
    * Scroll a child into view by its index in the children list.
    *
    * For a `<virtual-list>` the scroll is queued and applied on the next
@@ -321,6 +326,16 @@ export declare class GpuixRenderer {
   getScrollOffset(elementId: number): Array<number> | null
   getAutomationTree(): string
   getElementBounds(id: number): ElementBounds | null
+  /**
+   * The closest UTF-16 offset in an input/textarea for a window-space
+   * point. The point is clamped into the text; -1 means it has not laid out.
+   */
+  getInputTextOffset(elementId: number, x: number, y: number): number
+  /**
+   * Return `[elementId, utf16Offset]` for the input nearest a window-space
+   * point, or an empty array when none of the supplied inputs has painted.
+   */
+  getInputTextHit(elementIds: Array<number>, x: number, y: number): Array<number>
   getAllText(): Array<string>
   getPaintedText(): Array<string>
   /**
@@ -689,6 +704,35 @@ export declare class TestGpuixRenderer {
   /** Every highlight wash painted in the last frame, in paint order. */
   getPaintedHighlights(): Array<HighlightMatch>
   /**
+   * The styled runs of an `<input>`/`<textarea>` element as laid out in the
+   * last frame: the `spans` prop resolved to concrete text/style pairs.
+   * This is how WYSIWYG tests assert inline styling.
+   */
+  getPaintedInputRuns(elementId: number): Array<InputRunInfo>
+  /**
+   * Window-space caret position `[x, y]` for a UTF-16 offset of an editor,
+   * or an empty array when the element has not been laid out. This is the
+   * position-for-offset half of the WYSIWYG measurement API;
+   * `getInputTextOffset` is the offset-for-position half.
+   */
+  getInputTextPosition(elementId: number, offset: number): Array<number>
+  /**
+   * The closest UTF-16 offset in an editor for a window-space point. The
+   * offset is clamped into the text, and an element that has not been laid
+   * out reports 0 — this never returns -1.
+   */
+  getInputTextOffset(elementId: number, x: number, y: number): number
+  /**
+   * `[elementId, utf16Offset]` for the closest painted input among the
+   * supplied candidates, or an empty array when none has laid out.
+   */
+  getInputTextHit(elementIds: Array<number>, x: number, y: number): Array<number>
+  /**
+   * Where the `decorations` prop of an editor landed on screen (pixel
+   * rects), for asserting search-highlight geometry.
+   */
+  getInputDecorations(elementId: number): Array<InputDecorationInfo>
+  /**
    * Drag-select from one point to another: mouse down, move, up.
    *
    * A single helper rather than three calls because the listeners that drive
@@ -703,6 +747,11 @@ export declare class TestGpuixRenderer {
    * Call flush() after to apply the offset and re-render.
    */
   scrollTo(elementId: number, x: number, y: number): void
+  /**
+   * Scroll the nearest vertical scroll ancestor just enough to reveal the
+   * input's current caret line. Call flush() after to repaint at the offset.
+   */
+  scrollInputCaretIntoView(elementId: number): void
   /**
    * Scroll a child into view by its index in the children list.
    * Call flush() after to apply and re-render. For a `<virtual-list>` the
@@ -830,9 +879,15 @@ export interface EventPayload {
    * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
    */
   eventType: string
-  /** Mouse X position in window coordinates (pixels). */
+  /**
+   * Mouse X position in window coordinates (pixels). Populated for mouse
+   * events and input `selectionDrag`.
+   */
   x?: number
-  /** Mouse Y position in window coordinates (pixels). */
+  /**
+   * Mouse Y position in window coordinates (pixels). Populated for mouse
+   * events and input `selectionDrag`.
+   */
   y?: number
   /**
    * Which mouse button: 0=left, 1=middle, 2=right.
@@ -907,16 +962,22 @@ export interface EventPayload {
    * Element-defined string payload.
    * Populated for: `<diff>` toggleFile (the file path), showMore (the
    * hidden line count), and lineClick (the line text); `<markdown>`
-   * linkClick (the URL).
+   * linkClick (the URL); input selectionDrag (`"end"` on release).
    */
   value?: string
   /** Line number on the pre-change side. Populated for: `<diff>` lineClick. */
   oldLine?: number
   /** Line number on the post-change side. Populated for: `<diff>` lineClick. */
   newLine?: number
-  /** First visible logical index. Populated for: `<virtual-list>` visibleRange. */
+  /**
+   * First visible logical index, or a text selection's UTF-16 anchor.
+   * Populated for: visibleRange, selectionChange, selectionDrag.
+   */
   startIndex?: number
-  /** Exclusive end of the visible logical range. Populated for: visibleRange. */
+  /**
+   * Exclusive visible index, or a text selection's UTF-16 head.
+   * Populated for: visibleRange, selectionChange, selectionDrag.
+   */
   endIndex?: number
   /**
    * Matches found by this element's `highlight` prop. Counted once per match
@@ -984,6 +1045,34 @@ export interface HighlightRect {
   y: number
   width: number
   height: number
+}
+
+/** Where one `decorations` range of an editor landed on screen. */
+export interface InputDecorationInfo {
+  start: number
+  end: number
+  color: string
+  rects: Array<InputDecorationRect>
+}
+
+/** A pixel rect of one editor decoration. */
+export interface InputDecorationRect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/** One styled run of an editor element, as laid out in the last frame. */
+export interface InputRunInfo {
+  text: string
+  color: string
+  bold: boolean
+  italic: boolean
+  underline: boolean
+  strikethrough: boolean
+  background?: string
+  fontFamily?: string
 }
 
 /** A menu for the application menu bar, as described from JS. */
