@@ -64,6 +64,8 @@ const defaultTheme: MarkdownEditorTheme = {
 
 const HEADING_SCALE = [1.8, 1.45, 1.25, 1.1, 1.0, 1.0]
 const HEADING_WEIGHT = [700, 700, 650, 650, 600, 600]
+const TASK_CHECKMARK_SVG =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.25 8.25 6.5 11.5 12.75 4.75" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
 interface EditableRow {
   key: string
@@ -1681,19 +1683,16 @@ export const MarkdownEditor = defineComponent({
                 },
                 row.checkbox.checked
                   ? () => [
-                      h(
-                        "text",
-                        {
-                          key: `${row.key}-checkmark`,
-                          style: {
-                            color: "#ffffff",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            lineHeight: 12,
-                          },
+                      h("svg", {
+                        key: `${row.key}-checkmark`,
+                        source: TASK_CHECKMARK_SVG,
+                        style: {
+                          width: 12,
+                          height: 12,
+                          color: "#ffffff",
+                          pointerEvents: "none",
                         },
-                        () => ["✓"],
-                      ),
+                      }),
                     ]
                   : undefined,
               ),

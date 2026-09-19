@@ -103,14 +103,15 @@ describeNative("markdown-editor component", () => {
     const check = app.renderer.findByTestId("md-check-1")
     expect(check.style.alignItems).toBe("center")
     expect(check.style.justifyContent).toBe("center")
-    const checkmark = app.renderer.findByText("✓")
-    expect(check.children).toContain(checkmark?.parentId)
+    const checkmark = app.renderer.findByType("svg")[0]
+    expect(checkmark.parentId).toBe(check.id)
+    expect(checkmark.style).toMatchObject({ width: 12, height: 12 })
     const bounds = app.renderer.getElementBounds(check.id)!
     app.renderer.nativeSimulateMouseDown(bounds.x + 8, bounds.y + 8, 0)
     app.renderer.nativeSimulateMouseUp(bounds.x + 8, bounds.y + 8, 0)
     await app.settle()
     expect(md()).toBe("- [ ] done\n- [ ] todo\n")
-    expect(app.renderer.findByText("✓")).toBeUndefined()
+    expect(app.renderer.findByType("svg")).toHaveLength(0)
     app.unmount()
   })
 
