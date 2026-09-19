@@ -1894,7 +1894,7 @@ impl TextEditorState {
                 .take(line_index)
                 .map(|line| line.size(self.line_height).height)
                 .sum();
-            return Some(point(local.x, local.y + y_offset));
+            return Some(point(local.x + self.line_alignment_offset(line, local.y), local.y + y_offset));
         }
         None
     }
@@ -1908,7 +1908,8 @@ impl TextEditorState {
             let height = f32::from(line.size(self.line_height).height);
             let line_start = self.line_starts.get(line_index).copied().unwrap_or(0);
             if y < height || line_index + 1 == self.last_lines.len() {
-                let local = point(position.x, px(y.min(height - 1.0).max(0.0)));
+                let local_y = px(y.min(height - 1.0).max(0.0));
+                let local = point(position.x - self.line_alignment_offset(line, local_y), local_y);
                 let index = line
                     .closest_index_for_position(local, self.line_height)
                     .unwrap_or_else(|index| index);
@@ -1917,6 +1918,28 @@ impl TextEditorState {
             y -= height;
         }
         self.content.len()
+    }
+
+    /// GPUI's WrappedLine positions are unaligned, while paint/paint_background
+    /// align each visual row inside the supplied bounds (line.rs aligned_origin_x).
+    /// Translate to that same coordinate space using GPUI's shaped glyph and
+    /// wrap positions; never change the layout or its glyph positions.
+    fn line_alignment_offset(&self, line: &WrappedLine, y: Pixels) -> Pixels {
+        let Some(bounds) = self.last_bounds else { return px(0.0) };
+        let row = (f32::from(y) / f32::from(self.line_height)).floor().max(0.0) as usize;
+        let boundary_x = |index: usize| {
+            line.wrap_boundaries().get(index).map(|boundary| {
+                line.runs()[boundary.run_ix].glyphs[boundary.glyph_ix].position.x
+            })
+        };
+        let start = row.checked_sub(1).and_then(boundary_x).unwrap_or(px(0.0));
+        let end = boundary_x(row).unwrap_or(line.unwrapped_layout.width);
+        let remaining = bounds.size.width - (end - start);
+        match self.text_align {
+            gpui::TextAlign::Left => px(0.0),
+            gpui::TextAlign::Center => remaining / 2.0,
+            gpui::TextAlign::Right => remaining,
+        }
     }
 
     fn index_for_mouse_position(&self, position: Point<Pixels>) -> usize {

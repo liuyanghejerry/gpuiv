@@ -1384,7 +1384,27 @@ export const MarkdownEditor = defineComponent({
       return true
     }
 
+    const clearSelectionAtPoint = (event: { x?: number; y?: number; button?: number }) => {
+      if (contextMenu.value || (event.button !== undefined && event.button !== 0)) return
+      if (event.x === undefined || event.y === undefined) return
+      const renderer = getRenderer()
+      for (const id of hostIds.values()) {
+        const bounds = renderer?.getElementBounds?.(id)
+        if (bounds && event.x >= bounds.x && event.x <= bounds.x + bounds.width &&
+            event.y >= bounds.y && event.y <= bounds.y + bounds.height) return
+      }
+      docSelection.value = null
+      pendingExtend = null
+      for (const [key, [, head]] of selections) {
+        selections.set(key, [head, head])
+        pendingSelectionProps.set(key, [head, head])
+      }
+      if (props.mode === "source") pendingSourceSelection = [sourceSelection[1], sourceSelection[1]]
+      version.value++
+    }
+
     expose({
+      clearSelectionAtPoint,
       getMarkdown,
       core: () => core,
       focusBlockByKey: (key: string, caret: number) => focusBlock(key, caret),
@@ -1500,7 +1520,7 @@ export const MarkdownEditor = defineComponent({
     return () => {
       const theme = mergedTheme.value
       if (props.mode === "source") {
-        return h("div", { ref: collectRootRef, style: sourceRootStyle() }, () => [
+        return h("div", { ref: collectRootRef, onMouseDown: clearSelectionAtPoint, style: sourceRootStyle() }, () => [
           h("textarea", {
             key: "md-source",
             ref: collectRef("md-source"),
@@ -1786,7 +1806,7 @@ export const MarkdownEditor = defineComponent({
         }
         previous = row
       }
-      return h("div", { ref: collectRootRef, style: rootStyle() }, () => [
+      return h("div", { ref: collectRootRef, onMouseDown: clearSelectionAtPoint, style: rootStyle() }, () => [
         ...children,
         ...renderContextMenu(theme),
       ])

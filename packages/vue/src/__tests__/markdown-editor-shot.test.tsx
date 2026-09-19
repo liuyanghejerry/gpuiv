@@ -72,6 +72,21 @@ describeNative("markdown-editor example screenshot", () => {
     app.unmount()
   })
 
+  it("clears selection when clicking the blank outline area outside the editor", async () => {
+    const app = createTestApp(App, { width: 940, height: 720 })
+    await app.settle()
+    const blocks = app.renderer.findByType("textarea")
+    app.renderer.focusElement(blocks[0].id)
+    app.renderer.nativeSimulateKeystrokes(blocks[0].id, "cmd-a")
+    await app.settle()
+    expect(app.renderer.getInputDecorations(blocks[1].id).length).toBeGreaterThan(0)
+    app.renderer.nativeSimulateMouseDown(900, 600, 0)
+    app.renderer.nativeSimulateMouseUp(900, 600, 0)
+    await app.settle()
+    expect(app.renderer.getInputDecorations(blocks[1].id)).toHaveLength(0)
+    app.unmount()
+  })
+
   it("keeps source mode inside the same full-height reading column", async () => {
     const app = createTestApp(App, { width: 940, height: 720 })
     await app.settle()

@@ -12,6 +12,30 @@ import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("editor spans / decorations / selection props", () => {
+  it.each(["center", "right"])("aligns %s text hit testing and decoration rectangles", async (textAlign) => {
+    const App = defineComponent({
+      setup: () => () => <textarea testId="aligned" value="Status" minRows={1}
+        decorations={[{ start: 0, end: 6, color: "#8888ff88" }]}
+        style={{ width: 300, textAlign, fontSize: 16 }} />,
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const block = app.renderer.findByTestId("aligned")!
+    const bounds = app.renderer.getElementBounds(block.id)!
+    const start = app.renderer.getInputTextPosition(block.id, 0)
+    const end = app.renderer.getInputTextPosition(block.id, 6)
+    if (textAlign === "right") expect(end[0]).toBeCloseTo(bounds.x + bounds.width, 1)
+    else expect((start[0] + end[0]) / 2).toBeCloseTo(bounds.x + bounds.width / 2, 1)
+    for (const offset of [0, 2, 6]) {
+      const [x, y] = app.renderer.getInputTextPosition(block.id, offset)
+      expect(app.renderer.getInputTextOffset(block.id, x, y + 2)).toBe(offset)
+    }
+    const rect = app.renderer.getInputDecorations(block.id)[0].rects[0]
+    expect(rect.x).toBeCloseTo(start[0], 1)
+    expect(rect.x + rect.width).toBeCloseTo(end[0], 1)
+    app.unmount()
+  })
+
   it("extends a delegated drag to the block boundary regardless of horizontal position", async () => {
     const drags: any[] = []
     const App = defineComponent({

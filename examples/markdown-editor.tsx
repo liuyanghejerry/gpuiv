@@ -100,7 +100,7 @@ const App = defineComponent({
     )
 
     return () => (
-      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", backgroundColor: "#f0edea" }}>
+      <div onMouseDown={(event: any) => editor.value?.clearSelectionAtPoint(event)} style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", backgroundColor: "#f0edea" }}>
         <div
           style={{
             display: "flex",
