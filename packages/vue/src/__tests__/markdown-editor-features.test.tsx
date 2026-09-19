@@ -315,8 +315,13 @@ describeNative("markdown-editor footnotes / search / source mode", () => {
     for (const cell of cells) {
       expect(cell.x + cell.width).toBeLessThanOrEqual(paragraph.x + paragraph.width + 0.5)
     }
-    // Header row: left cell abuts the right cell without a gap or overlap.
-    expect(cells[1].x - (cells[0].x + cells[0].width)).toBeLessThanOrEqual(12)
+    // Compare the actual cell boxes: text is inset by the cell padding.
+    const boxes = app.renderer.findByType("textarea")
+      .filter((el) => el.testId?.startsWith("md-cell-"))
+      .map((el) => app.renderer.getElementBounds(el.parentId)!)
+      .sort((a, b) => a.y - b.y || a.x - b.x)
+    expect(boxes[1].x).toBeCloseTo(boxes[0].x + boxes[0].width, 1)
+    expect(boxes[2].y).toBeCloseTo(boxes[0].y + boxes[0].height, 1)
     app.unmount()
   })
 

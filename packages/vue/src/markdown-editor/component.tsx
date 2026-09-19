@@ -48,6 +48,16 @@ export interface MarkdownEditorTheme {
   quoteBar: string
   monoFont: string
   fontSize: number
+  border?: string
+  codeBlockBackground?: string
+  tableHeaderBackground?: string
+  fontFamily?: string
+  /** Body line height as a font-size multiplier. */
+  lineHeight?: number
+  strongText?: string
+  codeBlockText?: string
+  quoteBackground?: string
+  menuBackground?: string
 }
 
 const defaultTheme: MarkdownEditorTheme = {
@@ -59,11 +69,14 @@ const defaultTheme: MarkdownEditorTheme = {
   highlight: "rgba(255, 214, 0, 0.35)",
   quoteBar: "#5a5a5a",
   monoFont: "Menlo",
-  fontSize: 15,
+  fontSize: 16,
+  border: "#272d34",
+  codeBlockBackground: "#161b22",
+  tableHeaderBackground: "#161b22",
 }
 
-const HEADING_SCALE = [1.8, 1.45, 1.25, 1.1, 1.0, 1.0]
-const HEADING_WEIGHT = [700, 700, 650, 650, 600, 600]
+const HEADING_SCALE = [2, 1.5, 1.25, 1, 1, 1]
+const HEADING_WEIGHT = [700, 600, 600, 600, 600, 600]
 const TASK_CHECKMARK_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M3.25 8.25 6.5 11.5 12.75 4.75" fill="none" stroke="#000" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
@@ -80,6 +93,8 @@ interface EditableRow {
 
 interface TextRow extends EditableRow {
   kind: "text"
+  headingLevel?: number
+  info?: string
   fontSize: number
   fontWeight?: number
   mono?: boolean
@@ -91,11 +106,10 @@ interface TextRow extends EditableRow {
 }
 
 interface SpacerRow {
-  kind: "hr" | "image" | "code-info"
+  kind: "hr" | "image"
   key: string
   src?: string
   alt?: string
-  info?: string
   indent: number
   quote: boolean
 }
@@ -246,7 +260,8 @@ function marksToSpans(
     const span: MarkdownEditorSpan = { start: from, end: to }
     switch (mark.type.name) {
       case "strong":
-        span.fontWeight = 700
+        span.fontWeight = 600
+        span.color = theme.strongText
         break
       case "em":
         span.fontStyle = "italic"
@@ -338,8 +353,12 @@ function walkBlocks(
       case "heading": {
         const { text, spans } = flattenInline(child, theme)
         const level = child.type.name === "heading" ? (child.attrs.level as number) : 0
+        if (ctx.checkbox?.checked && text.length) {
+          spans.push({ start: 0, end: text.length, strikethrough: true, color: theme.muted })
+        }
         out.push({
           kind: "text",
+          headingLevel: level,
           key: keyFor(child, pos),
           pos,
           text,
@@ -358,19 +377,13 @@ function walkBlocks(
       }
       case "code_block": {
         out.push({
-          kind: "code-info",
-          key: `info${pos}`,
-          info: (child.attrs.info as string) || "",
-          indent: ctx.indent,
-          quote: ctx.quote,
-        })
-        out.push({
           kind: "text",
+          info: (child.attrs.info as string) || "",
           key: keyFor(child, pos),
           pos,
           text: child.textContent,
           spans: [],
-          fontSize: theme.fontSize,
+          fontSize: theme.fontSize * 0.875,
           mono: true,
           indent: ctx.indent,
           quote: ctx.quote,
@@ -1466,9 +1479,9 @@ export const MarkdownEditor = defineComponent({
               left,
               top,
               minWidth: 140,
-              backgroundColor: "#262626",
+              backgroundColor: theme.menuBackground ?? "#262626",
               borderWidth: 1,
-              borderColor: "#2a2a2a",
+              borderColor: theme.border,
               borderRadius: 6,
               paddingTop: 4,
               paddingBottom: 4,
@@ -1517,9 +1530,9 @@ export const MarkdownEditor = defineComponent({
               flexGrow: 1,
               flexShrink: 0,
               fontFamily: theme.monoFont,
-              fontSize: 13,
+              fontSize: 14,
               // Native lineHeight is absolute pixels, not a font-size factor.
-              lineHeight: 21,
+              lineHeight: 24,
               color: theme.text,
             },
           }),
@@ -1528,11 +1541,23 @@ export const MarkdownEditor = defineComponent({
       }
       const list = rows()
       const children: ReturnType<typeof h>[] = []
-      let lastKind = ""
+      let previous: ViewRow | undefined
       for (const row of list) {
-        // Inter-block spacing, like ColaMD's 0.6em paragraph rhythm.
-        const spacer =
-          lastKind !== "" && row.kind !== "table" ? h("div", { style: { height: 7 } }) : null
+        // CSS-like collapsed margins, expressed in native pixels. Lists have
+        // a tighter rhythm; headings and code need distinct section spacing.
+        const margin = (block: ViewRow, before: boolean): number => {
+          if (block.kind === "hr") return theme.fontSize * 2
+          if (block.kind === "table" || (block.kind === "text" && block.mono)) return theme.fontSize
+          if (block.kind === "text" && block.headingLevel) {
+            return block.fontSize * (before ? (block.headingLevel === 1 ? 1.5 : block.headingLevel === 2 ? 1.25 : 1) : 0.5)
+          }
+          if (block.kind === "text" && block.itemPos !== undefined) return theme.fontSize * 0.25
+          return theme.fontSize * 0.5
+        }
+        const gap = previous
+          ? previous.kind === "table" && row.kind === "table" ? 0 : Math.max(margin(previous, false), margin(row, true))
+          : 0
+        const spacer = gap ? h("div", { key: `${row.key}-gap`, style: { height: gap, flexShrink: 0 } }) : null
         if (spacer) children.push(spacer)
         if (row.kind === "hr") {
           children.push(
@@ -1541,9 +1566,7 @@ export const MarkdownEditor = defineComponent({
               style: {
                 marginLeft: row.indent * 22,
                 height: 1,
-                backgroundColor: "#4a4a4a",
-                marginTop: 6,
-                marginBottom: 6,
+                backgroundColor: theme.border,
               },
             }),
           )
@@ -1556,19 +1579,14 @@ export const MarkdownEditor = defineComponent({
               style: { marginLeft: row.indent * 22, maxHeight: 320 },
             }),
           )
-        } else if (row.kind === "code-info") {
-          if (row.info) {
-            children.push(
-              h("text", { key: row.key, style: { color: theme.muted, fontSize: 11 } }, () => [row.info]),
-            )
-          }
         } else if (row.kind === "table") {
+          const continuesTable = previous?.kind === "table"
           children.push(
             h(
               "div",
               { key: row.key, style: { display: "flex", width: "100%" } },
               () =>
-                row.cells.map((cell) =>
+                row.cells.map((cell, index) =>
                   h(
                     "div",
                     {
@@ -1578,10 +1596,16 @@ export const MarkdownEditor = defineComponent({
                         // on shrink-to-fit, but the native editor measures a
                         // fixed 320px under indefinite width and never shrinks.
                         width: `${100 / row.cells.length}%`,
-                        borderWidth: 1,
-                        borderColor: "#444",
-                        backgroundColor: cell.header ? "rgba(127,127,127,0.15)" : undefined,
-                        padding: 4,
+                        borderTopWidth: continuesTable ? 0 : 1,
+                        borderBottomWidth: 1,
+                        borderLeftWidth: index === 0 ? 1 : 0,
+                        borderRightWidth: 1,
+                        borderColor: theme.border,
+                        backgroundColor: cell.header ? theme.tableHeaderBackground : undefined,
+                        paddingTop: 8,
+                        paddingBottom: 8,
+                        paddingLeft: 12,
+                        paddingRight: 12,
                       },
                     },
                     () => [
@@ -1598,12 +1622,13 @@ export const MarkdownEditor = defineComponent({
                         style: {
                           width: "100%",
                           fontSize: theme.fontSize,
+                          fontFamily: theme.fontFamily,
                           textAlign: (cell.alignment || "left") as "left" | "center" | "right",
-                          fontWeight: cell.header ? 650 : undefined,
+                          fontWeight: cell.header ? 600 : undefined,
                           color: theme.text,
                           // Native lineHeight is absolute pixels, not a
                           // font-size factor — same treatment as text rows.
-                          lineHeight: Math.round(theme.fontSize * 1.7),
+                          lineHeight: theme.fontSize * (theme.lineHeight ?? 1.75),
                         },
                         onChange: onBlockChange(cell),
                         onKeyDown: onBlockKeyDown(cell, false),
@@ -1624,7 +1649,7 @@ export const MarkdownEditor = defineComponent({
           )
         } else if (row.kind === "text") {
           // Native lineHeight is absolute pixels, not a font-size factor.
-          const lineHeightPx = Math.round(row.fontSize * (row.mono ? 1.45 : 1.7))
+          const lineHeightPx = row.fontSize * (row.mono ? 1.6 : row.headingLevel === 1 ? 1.25 : row.headingLevel === 2 ? 1.3 : (theme.lineHeight ?? 1.75))
           const editor = h("textarea", {
             key: row.key,
             ref: collectRef(row.key),
@@ -1652,12 +1677,13 @@ export const MarkdownEditor = defineComponent({
             onContextMenu: onBlockContextMenu(row),
             style: {
               width: "100%",
+              minWidth: 0,
+              flexGrow: 1,
               fontSize: row.fontSize,
               fontWeight: row.fontWeight,
-              fontFamily: row.mono ? theme.monoFont : undefined,
-              backgroundColor: row.mono ? theme.codeBackground : undefined,
+              fontFamily: row.mono ? theme.monoFont : theme.fontFamily,
               textAlign: (row.align || "left") as "left" | "center" | "right",
-              color: theme.text,
+              color: row.mono ? (theme.codeBlockText ?? theme.text) : row.quote ? theme.muted : theme.text,
               lineHeight: lineHeightPx,
             },
           })
@@ -1673,7 +1699,8 @@ export const MarkdownEditor = defineComponent({
                   style: {
                     width: 16,
                     height: 16,
-                    marginTop: 4,
+                    marginTop: (lineHeightPx - 16) / 2,
+                    flexShrink: 0,
                     marginRight: 6,
                     borderWidth: 1,
                     borderColor: row.checkbox.checked ? theme.accent : "#777",
@@ -1705,11 +1732,14 @@ export const MarkdownEditor = defineComponent({
                 "text",
                 {
                   key: `${row.key}-marker`,
-                  style: { width: row.markerWidth ?? 18, color: theme.muted },
+                  style: { width: row.markerWidth ?? 18, flexShrink: 0, fontFamily: theme.fontFamily, fontSize: row.fontSize, lineHeight: lineHeightPx, color: theme.muted },
                 },
                 () => [row.marker ?? ""],
               ),
             )
+          }
+          if (row.mono && row.info) {
+            lineChildren.push(h("text", { style: { color: theme.muted, fontSize: 11, marginBottom: 8 } }, () => [row.info!]))
           }
           lineChildren.push(editor)
           if (flashKey.value === row.key) {
@@ -1736,19 +1766,25 @@ export const MarkdownEditor = defineComponent({
                 key: row.key,
                 style: {
                   display: "flex",
+                  flexDirection: row.mono ? "column" : "row",
                   position: "relative",
-                  marginLeft: row.indent * 22,
-                  paddingLeft: row.quote ? 10 : 0,
+                  marginLeft: Math.max(0, row.indent * 24 - (row.marker ? (row.markerWidth ?? 18) : row.checkbox ? 22 : 0)),
+                  padding: row.mono ? 16 : row.quote && theme.quoteBackground ? 15 : undefined,
+                  backgroundColor: row.mono ? theme.codeBlockBackground : row.quote ? theme.quoteBackground : undefined,
+                  borderRadius: row.mono ? 6 : undefined,
+                  paddingLeft: row.quote ? (theme.quoteBackground ? 25 : 16) : row.mono ? 16 : 0,
+                  paddingBottom: row.headingLevel === 1 ? row.fontSize * 0.3 : row.headingLevel === 2 ? row.fontSize * 0.25 : row.mono ? 16 : row.quote && theme.quoteBackground ? 15 : 0,
                   borderWidth: row.quote ? 0 : undefined,
-                  borderLeftWidth: row.quote ? 3 : undefined,
-                  borderColor: row.quote ? theme.quoteBar : undefined,
+                  borderLeftWidth: row.quote ? 4 : undefined,
+                  borderBottomWidth: row.headingLevel && row.headingLevel <= 2 ? 1 : undefined,
+                  borderColor: row.quote ? theme.quoteBar : theme.border,
                 },
               },
               () => lineChildren,
             ),
           )
         }
-        lastKind = row.kind
+        previous = row
       }
       return h("div", { ref: collectRootRef, style: rootStyle() }, () => [
         ...children,

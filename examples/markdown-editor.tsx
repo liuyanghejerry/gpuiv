@@ -15,10 +15,24 @@
 import { computed, defineComponent, ref } from "vue"
 import { createApp, MarkdownEditor } from "@gpuiv/vue"
 
+// ColaMD's Elegant palette. Songti SC is the first installed family in
+// its serif fallback stack on this Mac; native fonts take one family name.
+const PAPER_THEME = {
+  text: "#2c2c2c", muted: "#777777", accent: "#bc4424",
+  codeBackground: "#e8e4df", codeText: "#c44b2b", strongText: "#c44b2b",
+  codeBlockBackground: "#2c2c2c", codeBlockText: "#e0dcd7",
+  highlight: "#f0d9a8", quoteBar: "#c44b2b", quoteBackground: "#eae6e1",
+  border: "#dedad5", tableHeaderBackground: "#eae6e1",
+  menuBackground: "#f0edea",
+  fontFamily: "Songti SC", fontSize: 16, lineHeight: 1.9, monoFont: "Menlo",
+}
+
 const DOCUMENT = `# Markdown, edited natively
 
 Type and the *document model* updates: **bold**, *italic*, \`code\`,
 ~~strike~~ and ==highlight== all render as you type.
+
+中文与 English 混排，使用宋体呈现纸张般的阅读效果。**重点文字**和 \`行内代码\` 使用砖红色，==高亮内容== 使用暖金色。
 
 ## Blocks
 
@@ -86,7 +100,7 @@ const App = defineComponent({
     )
 
     return () => (
-      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", backgroundColor: "#0d0d0d" }}>
+      <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", backgroundColor: "#f0edea" }}>
         <div
           style={{
             display: "flex",
@@ -94,10 +108,11 @@ const App = defineComponent({
             gap: 8,
             paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12,
             borderBottomWidth: 1,
-            borderColor: "#2a2a2a",
+            borderColor: "#dedad5",
+            backgroundColor: "#e4e1de",
           }}
         >
-          <text style={{ fontSize: 13, fontWeight: 650, color: "#e8e8e8" }}>markdown-editor</text>
+          <text style={{ fontSize: 13, fontWeight: 650, color: "#2c2c2c" }}>markdown-editor</text>
           <div
             testId="mode-toggle"
             onClick={() => (mode.value = mode.value === "wysiwyg" ? "source" : "wysiwyg")}
@@ -105,8 +120,8 @@ const App = defineComponent({
               marginLeft: 12,
               paddingTop: 3, paddingBottom: 3, paddingLeft: 10, paddingRight: 10,
               borderRadius: 6,
-              backgroundColor: "#262626",
-              color: "#d0d0d0",
+              backgroundColor: "#eae6e1",
+              color: "#6c6c6c",
               fontSize: 12,
             }}
           >
@@ -116,7 +131,7 @@ const App = defineComponent({
             testId="search-input"
             value={query.value}
             placeholder="find…"
-            style={{ width: 160, fontSize: 12, color: "#e8e8e8" }}
+            style={{ width: 160, fontSize: 12, color: "#2c2c2c" }}
             onChange={(event: any) => {
               query.value = event.value ?? ""
               activeIndex.value = query.value ? 0 : -1
@@ -125,26 +140,29 @@ const App = defineComponent({
           <div
             testId="search-next"
             onClick={next}
-            style={{ paddingTop: 3, paddingBottom: 3, paddingLeft: 10, paddingRight: 10, borderRadius: 6, backgroundColor: "#262626", color: "#d0d0d0", fontSize: 12 }}
+            style={{ paddingTop: 3, paddingBottom: 3, paddingLeft: 10, paddingRight: 10, borderRadius: 6, backgroundColor: "#eae6e1", color: "#6c6c6c", fontSize: 12 }}
           >
             next
           </div>
-          <text style={{ fontSize: 11, color: "#8a8a8a" }}>{status.value}</text>
+          <text style={{ fontSize: 11, color: "#777777" }}>{status.value}</text>
         </div>
         <div style={{ display: "flex", flexDirection: "row", flexGrow: 1, minHeight: 0 }}>
-          <div testId="editor-column" style={{ width: 640, height: "100%", minHeight: 0, overflow: "scroll", paddingTop: 16, paddingBottom: 16, paddingLeft: 24, paddingRight: 24 }}>
-            <MarkdownEditor
-              ref={(el: any) => (editor.value = el)}
-              source={DOCUMENT}
-              mode={mode.value}
-              searchQuery={query.value}
-              searchActiveIndex={activeIndex.value}
-              onSearchMatches={(count: number) => (matchCount.value = count)}
-              onChange={(md: string) => (markdown.value = md)}
-            />
+          <div testId="editor-column" style={{ flexGrow: 1, minWidth: 0, height: "100%", minHeight: 0, overflow: "scroll", padding: 40, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <div style={{ width: "100%", maxWidth: 780, minHeight: "100%", flexShrink: 0, display: "flex", flexDirection: "column" }}>
+              <MarkdownEditor
+                ref={(el: any) => (editor.value = el)}
+                source={DOCUMENT}
+                theme={PAPER_THEME}
+                mode={mode.value}
+                searchQuery={query.value}
+                searchActiveIndex={activeIndex.value}
+                onSearchMatches={(count: number) => (matchCount.value = count)}
+                onChange={(md: string) => (markdown.value = md)}
+              />
+            </div>
           </div>
-          <div style={{ width: 260, paddingTop: 16, paddingBottom: 16, paddingLeft: 12, paddingRight: 12, borderLeftWidth: 1, borderColor: "#2a2a2a" }}>
-            <text style={{ fontSize: 11, color: "#8a8a8a" }}>OUTLINE</text>
+          <div style={{ width: 220, flexShrink: 0, paddingTop: 16, paddingBottom: 16, paddingLeft: 12, paddingRight: 12, borderLeftWidth: 1, borderColor: "#dedad5" }}>
+            <text style={{ fontSize: 11, color: "#777777" }}>OUTLINE</text>
             {headings.value.map((heading) => (
               <div
                 key={heading.text}
@@ -155,7 +173,7 @@ const App = defineComponent({
                   paddingTop: 4,
                   paddingBottom: 4,
                   fontSize: 12 + Math.max(0, 3 - heading.level),
-                  color: heading.level <= 2 ? "#cfcfcf" : "#9a9a9a",
+                  color: heading.level <= 2 ? "#2c2c2c" : "#777777",
                 }}
               >
                 {heading.text}

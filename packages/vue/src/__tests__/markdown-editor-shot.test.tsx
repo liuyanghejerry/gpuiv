@@ -5,8 +5,12 @@
 // @ts-nocheck
 
 import { fileURLToPath } from "node:url"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
+
+// The example normally loads dist. Use the same source module as the test
+// renderer so Vue's renderer injection key is shared for focus/scroll APIs.
+vi.mock("@gpuiv/vue", () => import("../index.js"))
 
 const exampleUrl = new URL("../../../../examples/markdown-editor.tsx", import.meta.url)
 const { App } = await import(fileURLToPath(exampleUrl))
@@ -28,9 +32,17 @@ describeNative("markdown-editor example screenshot", () => {
     const offset = app.renderer.getScrollOffset(column.id)
     expect(offset).toBeTruthy()
     // Scroll offsets are negative pixel values (down = more negative y).
+    // Visit intermediate sections too: typography and window width determine
+    // which blocks fit in any one viewport.
+    for (let y = 400; y <= 2400; y += 400) {
+      app.renderer.scrollTo(column.id, 0, -y)
+      await app.settle()
+      for (const text of app.renderer.getPaintedText()) painted.add(text)
+    }
     app.renderer.scrollTo(column.id, 0, -1e9)
     await app.settle()
     const bottomOffset = app.renderer.getScrollOffset(column.id)
+    app.renderer.captureScreenshot(fileURLToPath(new URL("../../screenshots/markdown-editor-bottom.png", import.meta.url)))
     expect(Math.abs(bottomOffset[1])).toBeGreaterThan(Math.abs(offset[1]))
     for (const text of app.renderer.getPaintedText()) painted.add(text)
     const all = [...painted].join("\n")
@@ -57,6 +69,34 @@ describeNative("markdown-editor example screenshot", () => {
     const blocks = app.renderer.findByType("textarea")
     const highlighted = blocks.filter((block) => app.renderer.getInputDecorations(block.id).length > 0)
     expect(highlighted.length).toBeGreaterThanOrEqual(1)
+    app.unmount()
+  })
+
+  it("keeps source mode inside the same full-height reading column", async () => {
+    const app = createTestApp(App, { width: 940, height: 720 })
+    await app.settle()
+    const visual = app.renderer.getElementBounds(app.renderer.findByType("textarea")[0].id)!
+    const toggle = app.renderer.findByTestId("mode-toggle")!
+    const button = app.renderer.getElementBounds(toggle.id)!
+    app.renderer.nativeSimulateMouseDown(button.x + 4, button.y + 4, 0)
+    app.renderer.nativeSimulateMouseUp(button.x + 4, button.y + 4, 0)
+    await app.settle()
+    const source = app.renderer.findByType("textarea")[0]
+    app.renderer.focusElement(source.id)
+    app.renderer.nativeSimulateKeystrokes(source.id, "cmd-up")
+    await app.settle()
+    const column = app.renderer.findByTestId("editor-column")!
+    app.renderer.scrollTo(column.id, 0, 0)
+    await app.settle()
+    const bounds = app.renderer.getElementBounds(column.id)!
+    const text = app.renderer.getElementBounds(source.id)!
+    expect(text.height).toBeGreaterThanOrEqual(bounds.height - 80)
+    expect(text.x).toBeCloseTo(visual.x, 1)
+    expect(text.y).toBeCloseTo(visual.y, 1)
+    expect(text.width).toBeLessThanOrEqual(bounds.width - 80)
+    app.renderer.nativeSimulateKeystrokes(source.id, "cmd-down")
+    await app.settle()
+    expect(app.renderer.getScrollOffset(column.id)[1]).toBeLessThan(0)
     app.unmount()
   })
 })

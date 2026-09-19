@@ -104,6 +104,8 @@ describeNative("markdown-editor component", () => {
     expect(check.style.alignItems).toBe("center")
     expect(check.style.justifyContent).toBe("center")
     const checkmark = app.renderer.findByType("svg")[0]
+    const task = app.renderer.findByType("textarea")[0]
+    expect(app.renderer.getPaintedInputRuns(task.id).every((run) => run.strikethrough)).toBe(true)
     expect(checkmark.parentId).toBe(check.id)
     expect(checkmark.style).toMatchObject({ width: 12, height: 12 })
     const bounds = app.renderer.getElementBounds(check.id)!
@@ -112,6 +114,7 @@ describeNative("markdown-editor component", () => {
     await app.settle()
     expect(md()).toBe("- [ ] done\n- [ ] todo\n")
     expect(app.renderer.findByType("svg")).toHaveLength(0)
+    expect(app.renderer.getPaintedInputRuns(task.id).some((run) => run.strikethrough)).toBe(false)
     app.unmount()
   })
 
