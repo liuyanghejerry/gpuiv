@@ -5622,16 +5622,24 @@ impl gpui::Render for GpuixView {
                 .child(selection_frame_reset(
                     self.selection.clone(),
                     move |position, app| {
-                        drag_move_view
-                            .update(app, |view, cx| {
-                                view.on_selection_mouse_move(position, cx)
-                            })
-                            .ok();
+                        // AppKit (and a11y clicks) dispatch with GpuixView leased.
+                        // Defer until that lease returns or a nested update panics.
+                        let drag_move_view = drag_move_view.clone();
+                        app.defer(move |app| {
+                            drag_move_view
+                                .update(app, |view, cx| {
+                                    view.on_selection_mouse_move(position, cx)
+                                })
+                                .ok();
+                        });
                     },
                     move |app| {
-                        drag_end_view
-                            .update(app, |view, _cx| view.stop_selection_scroll())
-                            .ok();
+                        let drag_end_view = drag_end_view.clone();
+                        app.defer(move |app| {
+                            drag_end_view
+                                .update(app, |view, _cx| view.stop_selection_scroll())
+                                .ok();
+                        });
                     },
                 ))
                 .child(crate::automation::bounds_frame_reset())

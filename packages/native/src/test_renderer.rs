@@ -158,6 +158,26 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
     }
 }
 
+/// Dispatch input the way AppKit does: `WindowHandle<GpuixView>::update` leases
+/// the root view for the whole event. `AnyWindowHandle::update` does not, so a
+/// nested `GpuixView` update would pass here and abort a live window.
+fn simulate_event_with_view_lease(
+    cx: &mut gpui::VisualTestAppContext,
+    window: gpui::AnyWindowHandle,
+    event: impl gpui::InputEvent,
+) {
+    cx.update_window(window, |root_view, window, cx| {
+        let view = root_view
+            .downcast::<GpuixView>()
+            .expect("test window root is GpuixView");
+        view.update(cx, |_view, cx| {
+            window.dispatch_event(event.to_platform_input(), cx);
+        });
+    })
+    .ok();
+    cx.run_until_parked();
+}
+
 /// Same SVG the JS img tests write to disk. VisualTestAppContext starts with
 /// a 404 FakeHttpClient, and a real ReqwestClient would leave the GPUI
 /// test dispatcher parked while Tokio fetches. This answers every request
@@ -1123,11 +1143,32 @@ impl TestGpuixRenderer {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
             // Not `cx.simulate_click`: that helper hard-codes the left button,
-            // so a right click silently became a left click.
+            // so a right click silently became a left click. Lease GpuixView
+            // the same way AppKit does, or this path cannot catch a nested
+            // root-view update.
             let position = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
             let button = u32_to_mouse_button(button.unwrap_or(0));
-            cx.simulate_mouse_down(window, position, button, modifiers);
-            cx.simulate_mouse_up(window, position, button, modifiers);
+            simulate_event_with_view_lease(
+                cx,
+                window,
+                gpui::MouseDownEvent {
+                    position,
+                    button,
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                },
+            );
+            simulate_event_with_view_lease(
+                cx,
+                window,
+                gpui::MouseUpEvent {
+                    position,
+                    button,
+                    modifiers,
+                    click_count: 1,
+                },
+            );
             Ok(())
         })
     }
@@ -1216,11 +1257,14 @@ impl TestGpuixRenderer {
         with_test_state(|cx, window, _view| {
             let button: Option<gpui::MouseButton> = pressed_button.map(u32_to_mouse_button);
 
-            cx.simulate_mouse_move(
+            simulate_event_with_view_lease(
+                cx,
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                button,
-                modifiers,
+                gpui::MouseMoveEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    modifiers,
+                    pressed_button: button,
+                },
             );
 
             Ok(())
@@ -1262,11 +1306,16 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
-            cx.simulate_mouse_down(
+            simulate_event_with_view_lease(
+                cx,
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                u32_to_mouse_button(button.unwrap_or(0)),
-                modifiers,
+                gpui::MouseDownEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    modifiers,
+                    button: u32_to_mouse_button(button.unwrap_or(0)),
+                    click_count: 1,
+                    first_mouse: false,
+                },
             );
             Ok(())
         })
@@ -1284,11 +1333,15 @@ impl TestGpuixRenderer {
     ) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
         with_test_state(|cx, window, _view| {
-            cx.simulate_mouse_up(
+            simulate_event_with_view_lease(
+                cx,
                 window,
-                gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
-                u32_to_mouse_button(button.unwrap_or(0)),
-                modifiers,
+                gpui::MouseUpEvent {
+                    position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+                    modifiers,
+                    button: u32_to_mouse_button(button.unwrap_or(0)),
+                    click_count: 1,
+                },
             );
             Ok(())
         })

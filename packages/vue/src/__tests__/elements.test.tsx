@@ -138,6 +138,25 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("survives a click that leases the root view", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+            <text style={{ fontSize: 20 }}>just a click</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    // The test renderer leases GpuixView for the whole event, like AppKit. A
+    // tap must not abort with "cannot update GpuixView while it is already
+    // being updated" from the selection mouse-up listener.
+    app.renderer.nativeSimulateClick(40, 30)
+    expect(app.renderer.getSelectedText()).toBeNull()
+    app.unmount()
+  })
+
   it("paints no surface of its own and never paints the language header", () => {
     const App = defineComponent({
       setup() {
