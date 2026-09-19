@@ -237,6 +237,7 @@ pub struct TestGpuixRenderer {
     /// animation and does not implement minimize.
     fullscreen: RefCell<bool>,
     minimize_calls: RefCell<usize>,
+    zoom_calls: RefCell<usize>,
     /// The last URL handed to `openUrl`. The test platform records its own
     /// copy where the bridge cannot read it (`pub(crate)`), so tests assert
     /// here.
@@ -346,6 +347,7 @@ impl TestGpuixRenderer {
             canvas_surfaces,
             fullscreen: RefCell::new(false),
             minimize_calls: RefCell::new(0),
+            zoom_calls: RefCell::new(0),
             last_opened_url: RefCell::new(None),
             path_prompt_answers: RefCell::new(Default::default()),
             last_path_prompt_options: RefCell::new(None),
@@ -1007,6 +1009,17 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_minimize_calls(&self) -> u32 {
         *self.minimize_calls.borrow() as u32
+    }
+
+    /// Record zoom requests without resizing the offscreen test window.
+    #[napi]
+    pub fn zoom_window(&self) {
+        *self.zoom_calls.borrow_mut() += 1;
+    }
+
+    #[napi]
+    pub fn get_zoom_calls(&self) -> u32 {
+        *self.zoom_calls.borrow() as u32
     }
 
     /// Record the URL; the platform's own recorder is not reachable from

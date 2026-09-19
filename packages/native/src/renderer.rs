@@ -534,6 +534,7 @@ enum UiCommand {
     Blur,
     ToggleFullscreen,
     MinimizeWindow,
+    ZoomWindow,
     IsFullscreen {
         response: SyncSender<bool>,
     },
@@ -1006,6 +1007,9 @@ async fn run_ui_commands(
             }
             UiCommand::MinimizeWindow => {
                 window.update(cx, |_view, window, _cx| window.minimize_window())
+            }
+            UiCommand::ZoomWindow => {
+                window.update(cx, |_view, window, _cx| window.zoom_window())
             }
             UiCommand::IsFullscreen { response } => window.update(cx, move |_view, window, _cx| {
                 response.send(window.is_fullscreen());
@@ -2170,6 +2174,27 @@ impl GpuixRenderer {
         )))]
         Err(Error::from_reason(
             "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Toggle platform zoom (macOS) or maximize/restore (Windows/Linux).
+    /// This does not enter fullscreen.
+    #[napi]
+    pub fn zoom_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, _cx| window.zoom_window());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ZoomWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "Window zoom is not supported on this platform",
         ))
     }
 
@@ -6116,6 +6141,34 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
     event_callback: &Option<EventCallback>,
     force_pointer_capture: bool,
 ) -> E {
+    if element
+        .custom_props
+        .get("windowDragRegion")
+        .and_then(|value| value.as_bool())
+        == Some(true)
+    {
+        // Windows uses GPUI's native non-client hit test (HTCAPTION), including
+        // snapping and double-click maximize. macOS/Linux need the move call
+        // during the native press, not after a JS/FFI round trip: AppKit uses
+        // currentEvent and Wayland uses the seat's press serial. This is the
+        // same translation as gpui/examples/window_shadow.rs.
+        el = el.window_control_area(gpui::WindowControlArea::Drag);
+        #[cfg(not(target_os = "windows"))]
+        {
+            el = el.on_mouse_down(gpui::MouseButton::Left, |event, window, cx| {
+                if event.click_count == 2 {
+                    #[cfg(target_os = "macos")]
+                    window.titlebar_double_click();
+                    #[cfg(not(target_os = "macos"))]
+                    window.zoom_window();
+                } else {
+                    window.start_window_move();
+                }
+                cx.stop_propagation();
+            });
+        }
+    }
+
     // `stopWheelPropagation` is the DOM `preventDefault()` +
     // `stopPropagation()` pair for wheel zoom over a canvas: the FFI boundary
     // is async, so JS cannot cancel a wheel event synchronously the way a

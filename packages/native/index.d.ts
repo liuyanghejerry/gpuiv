@@ -184,6 +184,11 @@ export declare class GpuixRenderer {
   getWindowBounds(): WindowBounds
   /** Minimize the window to the platform's taskbar / Dock. */
   minimizeWindow(): void
+  /**
+   * Toggle platform zoom (macOS) or maximize/restore (Windows/Linux).
+   * This does not enter fullscreen.
+   */
+  zoomWindow(): void
   /** Hand a URL to the user's default browser / handler. */
   openUrl(url: string): void
   /**
@@ -579,6 +584,9 @@ export declare class TestGpuixRenderer {
   minimizeWindow(): void
   /** How many times `minimizeWindow` was called. */
   getMinimizeCalls(): number
+  /** Record zoom requests without resizing the offscreen test window. */
+  zoomWindow(): void
+  getZoomCalls(): number
   /**
    * Record the URL; the platform's own recorder is not reachable from
    * the bridge, so `getLastOpenedUrl` reads this instead.

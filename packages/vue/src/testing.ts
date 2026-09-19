@@ -791,6 +791,14 @@ export class TestRenderer implements NativeRenderer {
     return (this.native as { getMinimizeCalls?(): number }).getMinimizeCalls?.() ?? 0
   }
 
+  zoomWindow(): void {
+    this.native.zoomWindow?.()
+  }
+
+  getZoomCalls(): number {
+    return (this.native as { getZoomCalls?(): number }).getZoomCalls?.() ?? 0
+  }
+
   /** The test window's frame through the same `Window::bounds()` the
    *  production renderer reads. The visual test window opens offscreen at
    *  (-10000, -10000). */
