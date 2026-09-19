@@ -29,7 +29,20 @@ afterEach(async () => {
 async function options(): Promise<SingleInstanceOptions> {
   const directory = await mkdtemp(path.join(tmpdir(), "gpuiv-instance-"))
   directories.push(directory)
-  return { appId: "test.gpuiv.instance", directory, launch: { argv: [], cwd: directory } }
+  const opts: SingleInstanceOptions = { appId: "test.gpuiv.instance", directory, launch: { argv: [], cwd: directory } }
+  // The default election port is derived into 49152–65535, which can fall
+  // inside a Windows runner's excluded port ranges (WinNAT reservations move
+  // on every boot) and fail the bind with EACCES. Draw an OS-assigned port
+  // there; other platforms keep exercising the derived-port path.
+  if (process.platform === "win32") {
+    const probe = createServer()
+    probe.listen(0, "127.0.0.1")
+    await once(probe, "listening")
+    const port = (probe.address() as { port: number }).port
+    await new Promise<void>((resolve) => probe.close(() => resolve()))
+    return { ...opts, port }
+  }
+  return opts
 }
 async function primary(opts: SingleInstanceOptions): Promise<PrimaryInstance> {
   const result = await acquireSingleInstance(opts)
