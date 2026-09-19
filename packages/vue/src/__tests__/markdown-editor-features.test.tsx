@@ -213,6 +213,37 @@ describeNative("markdown-editor footnotes / search / source mode", () => {
     app.unmount()
   })
 
+  it("scrolls the outer source surface when cmd-down moves the caret to the end", async () => {
+    const sourceText = Array.from({ length: 40 }, (_, index) => `line ${index}`).join("\n")
+    const App = defineComponent({
+      setup() {
+        return () =>
+          h(
+            "div",
+            { testId: "source-host", style: { width: 600, height: 300, minHeight: 0, overflow: "scroll" } },
+            () => [h(MarkdownEditor, { source: sourceText, mode: "source" })],
+          )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const source = app.renderer.findByTestId("md-source")
+    const sourceHost = app.renderer.findByTestId("source-host")
+    app.renderer.focusElement(source.id)
+    app.renderer.nativeSimulateKeystrokes(source.id, "cmd-up")
+    await app.settle()
+    expect(app.renderer.getScrollOffset(sourceHost.id)?.[1]).toBe(0)
+    const viewport = app.renderer.getElementBounds(sourceHost.id)!
+
+    app.renderer.nativeSimulateKeystrokes(source.id, "cmd-down")
+    await app.settle()
+    expect(app.renderer.getScrollOffset(sourceHost.id)?.[1]).toBeLessThan(0)
+    const caret = app.renderer.getInputTextPosition(source.id, sourceText.length)
+    expect(caret[1]).toBeGreaterThanOrEqual(viewport.y)
+    expect(caret[1] + 21).toBeLessThanOrEqual(viewport.y + viewport.height + 0.5)
+    app.unmount()
+  })
+
   it("typing in the find box never steals focus to a search match", async () => {
     const state = ref({ query: "", active: -1 })
     const App = defineComponent({

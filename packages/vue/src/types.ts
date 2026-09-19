@@ -571,6 +571,8 @@ export interface NativeRenderer {
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
    *  x and y are negative pixel values (scroll down = more negative y). */
   scrollTo?(elementId: number, x: number, y: number): void
+  /** Reveal an input's current caret line through its nearest scroll ancestor. */
+  scrollInputCaretIntoView?(elementId: number): void
   /** Scroll a child into view by its index in the children list.
    *  `offsetInItem` is in pixels; a negative value anchors the viewport top
    *  above the item, resolved against measured row heights at layout time. */

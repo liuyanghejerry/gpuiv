@@ -260,7 +260,8 @@ strong/em/link/code 等标记降级成纯文本；无序/有序列表切换改�
 一次 `getInputTextHit(ids, x, y)` 原生命中查询把窗口坐标解析为目标块与 UTF-16 偏移，
 WYSIWYG 因而可连续拖选、复制和剪切跨块内容；caret 恢复 GPUI/Comet 的完整 shaped
 line box 高度；源码 textarea 移除默认 10 行上限，以 `min-height: 100%` 填满短文档，
-长文档按完整内容高度参与唯一的外层滚动面。
+长文档按完整内容高度参与唯一的外层滚动面；`scrollInputCaretIntoView` 根据实际 caret
+bounds 驱动最近滚动祖先，⌘↓/⌘↑ 等跨文档键盘导航会让外层视图同步跟随。
 
 ## 停止规则
 

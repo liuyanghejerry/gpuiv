@@ -296,6 +296,11 @@ export declare class GpuixRenderer {
    */
   scrollTo(elementId: number, x: number, y: number): void
   /**
+   * Minimally scroll the closest vertical scroll ancestor until the
+   * input's current caret line is visible.
+   */
+  scrollInputCaretIntoView(elementId: number): void
+  /**
    * Scroll a child into view by its index in the children list.
    *
    * For a `<virtual-list>` the scroll is queued and applied on the next
@@ -742,6 +747,11 @@ export declare class TestGpuixRenderer {
    * Call flush() after to apply the offset and re-render.
    */
   scrollTo(elementId: number, x: number, y: number): void
+  /**
+   * Scroll the nearest vertical scroll ancestor just enough to reveal the
+   * input's current caret line. Call flush() after to repaint at the offset.
+   */
+  scrollInputCaretIntoView(elementId: number): void
   /**
    * Scroll a child into view by its index in the children list.
    * Call flush() after to apply and re-render. For a `<virtual-list>` the

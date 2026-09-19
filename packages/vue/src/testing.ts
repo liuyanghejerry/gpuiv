@@ -107,6 +107,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateImeCommit(elementId: number, text: string): void
   simulateImeCancel(elementId: number): void
   scrollTo(elementId: number, x: number, y: number): void
+  scrollInputCaretIntoView(elementId: number): void
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
   getListScrollTop(elementId: number): number[] | null
@@ -692,6 +693,13 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.scrollTo(elementId, x, y)
     // Flush again to re-render with the new offset
+    this.native.flush()
+  }
+
+  /** Reveal an input's current caret line through its nearest scroll ancestor. */
+  scrollInputCaretIntoView(elementId: number): void {
+    this.native.flush()
+    this.native.scrollInputCaretIntoView(elementId)
     this.native.flush()
   }
 

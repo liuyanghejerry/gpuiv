@@ -1506,6 +1506,8 @@ export const MarkdownEditor = defineComponent({
             onSelectionChange: (event: { startIndex?: number; endIndex?: number }) => {
               const anchor = event.startIndex ?? 0
               sourceSelection = [anchor, event.endIndex ?? anchor]
+              const id = hostIds.get("md-source")
+              if (id !== undefined) getRenderer()?.scrollInputCaretIntoView?.(id)
             },
             onContextMenu: onSourceContextMenu,
             style: {

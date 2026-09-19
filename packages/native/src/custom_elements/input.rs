@@ -1352,6 +1352,21 @@ impl TextEditorState {
         ))
     }
 
+    /// Last-painted caret rectangle in window coordinates. The renderer uses
+    /// this to reveal a tall, content-sized textarea through its scrolling
+    /// ancestor; the textarea itself has no internal vertical scroll range.
+    pub(crate) fn window_caret_bounds(&self) -> Option<Bounds<Pixels>> {
+        let cursor = self.point_for_index(self.cursor_offset())?;
+        let bounds = self.last_bounds?;
+        Some(caret_rect(
+            point(
+                bounds.left() + cursor.x - px(self.scroll_left),
+                bounds.top() + cursor.y - px(self.scroll_top),
+            ),
+            self.line_height,
+        ))
+    }
+
     /// Hit-test a window-space point to the closest UTF-16 offset.
     pub(crate) fn utf16_index_for_window_point(&self, x: f32, y: f32) -> Option<usize> {
         let index = self.index_for_mouse_position(point(px(x), px(y)));

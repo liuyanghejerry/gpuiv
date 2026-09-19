@@ -1561,6 +1561,24 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Scroll the nearest vertical scroll ancestor just enough to reveal the
+    /// input's current caret line. Call flush() after to repaint at the offset.
+    #[napi]
+    pub fn scroll_input_caret_into_view(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, cx| {
+                    view.scroll_input_caret_into_view(id, cx);
+                    cx.notify();
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Scroll a child into view by its index in the children list.
     /// Call flush() after to apply and re-render. For a `<virtual-list>` the
     /// scroll is queued and applied on that flush, after the child splice.
