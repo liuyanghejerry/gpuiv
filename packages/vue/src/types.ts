@@ -728,8 +728,9 @@ export interface NativeRenderer {
   // ── Deep links ─────────────────────────────────────────────────
   /** Register the handler invoked when the platform asks the app to open
    *  one or more URLs — deep links and friends. Replaces any earlier
-   *  handler. The callback receives `(null, urls)`. */
-  onOpenUrls?(callback: (error: Error | null, urls: string[]) => void): void
+   *  handler and replays queued batches in order. Pass null to unregister;
+   *  deliveries queue until the next registration. Process-wide. */
+  onOpenUrls?(callback: ((error: Error | null, urls: string[]) => void) | null): void
   /** Register the app as the handler for a URL scheme (e.g. `"myapp"` for
    *  `myapp://` URLs). The callback receives `(null)` on success or the
    *  failure reason — macOS requires 12+, a bundle id, and an installed

@@ -893,7 +893,7 @@ export class TestRenderer implements NativeRenderer {
 
   /** Arm the deep link handler. The test bridge records it; drive URLs with
    *  `fireOpenUrls`. */
-  onOpenUrls(handler: (error: Error | null, urls: string[]) => void): void {
+  onOpenUrls(handler: ((error: Error | null, urls: string[]) => void) | null): void {
     this.native.onOpenUrls?.(handler)
   }
 
