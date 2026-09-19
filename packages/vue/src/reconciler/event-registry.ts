@@ -5,6 +5,7 @@ interface RendererState {
   container?: Container
   ids: ElementIdAllocator
   windowKeyEventId: number
+  windowSelectionEventId: number
 }
 
 // bun --hot preserves the native renderer (renderer.ts keeps it on a
@@ -25,7 +26,7 @@ const rendererStates = (() => {
 function stateFor(renderer: NativeRenderer): RendererState {
   let state = rendererStates.get(renderer)
   if (!state) {
-    state = { ids: { nextElementId: 0 }, windowKeyEventId: 0 }
+    state = { ids: { nextElementId: 0 }, windowKeyEventId: 0, windowSelectionEventId: 0 }
     rendererStates.set(renderer, state)
   }
   return state
@@ -40,6 +41,13 @@ export function nextWindowKeyEventId(renderer: NativeRenderer): number {
   const state = stateFor(renderer)
   state.windowKeyEventId += 1
   return state.windowKeyEventId
+}
+
+export function nextWindowSelectionEventId(renderer: NativeRenderer): number {
+  // Same generation rule as the window key events, on its own id.
+  const state = stateFor(renderer)
+  state.windowSelectionEventId += 1
+  return state.windowSelectionEventId
 }
 
 /** One renderer drives one window, one native root id, and one event map, so a
@@ -108,6 +116,18 @@ export function handleGpuixEvent(payload: EventPayload, renderer: NativeRenderer
       ...payload,
       elementId: 0,
       eventType: normalizedType,
+    })
+    onEvent?.(payload)
+    return true
+  }
+  if (payload.eventType === "windowSelectionChange") {
+    if (payload.elementId !== container.windowSelectionEventId) return false
+    const handler = container.windowKeyEventHandlers.onSelectionChange
+    if (!handler) return false
+    handler({
+      ...payload,
+      elementId: 0,
+      eventType: "selectionChange",
     })
     onEvent?.(payload)
     return true

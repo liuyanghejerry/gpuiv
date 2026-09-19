@@ -1736,12 +1736,23 @@ To opt *out* — toolbars, buttons, line-number gutters — set
 
 ![Text selected across markdown blocks](docs/images/selection.png)
 
-Read the selection from the renderer:
+Read the selection from the renderer, or react when it changes:
 
 ```tsx
+createApp(App, {
+  onSelectionChange(event) {
+    lastSelected.value = event.value ?? ''
+  },
+})
+
 renderer.getSelectedText?.()   // joined text, or null
 renderer.clearSelection?.()
 ```
+
+`onSelectionChange` is a **window-level** callback on `createApp()`, the same
+attachment as `onKeyDown`. Text selection is app-wide, not per element.
+It fires once when the selected ranges change, including a clear to empty
+(`value` is then omitted). An unchanged frame does not fire.
 
 Selection works because each painted text element registers itself into a
 per-frame registry in **paint order**, which is document order. A drag anchored
@@ -2193,6 +2204,7 @@ tracking.
 | Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
 | Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
 | Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+| Selection change | `onSelectionChange` | `value` (joined selected text) — window-level on `createApp()`, not an element prop |
 
 Keyboard and focus listeners create a persistent GPUI `FocusHandle`
 automatically. A listener alone does not put a `div` in the Tab order; add

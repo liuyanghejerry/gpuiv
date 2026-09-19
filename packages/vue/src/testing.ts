@@ -37,6 +37,7 @@ import {
   handleGpuixEvent,
   idAllocatorFor,
   nextWindowKeyEventId,
+  nextWindowSelectionEventId,
 } from "./reconciler/event-registry.js"
 import { GPUIV_CONTEXT } from "./hooks/use-gpuix.js"
 
@@ -94,6 +95,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusPreviousWithin(elementId: number): void
   setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   setWindowObservers(shouldClose: boolean, reopen: boolean, eventId: number): void
+  setWindowSelectionChange(enabled: boolean, eventId: number): void
   attemptWindowClose(): boolean
   simulateAppReopen(): void
   closeWindow(): void
@@ -284,6 +286,7 @@ export class TestRenderer implements NativeRenderer {
     reopen: boolean,
     eventId: number
   ) => void
+  readonly setWindowSelectionChange: (enabled: boolean, eventId: number) => void
 
   constructor(options: TestWindowOptions = {}) {
     if (!NativeTestRenderer) {
@@ -300,6 +303,7 @@ export class TestRenderer implements NativeRenderer {
     this.focusPreviousWithin = this.native.focusPreviousWithin.bind(this.native)
     this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
     this.setWindowObservers = this.native.setWindowObservers.bind(this.native)
+    this.setWindowSelectionChange = this.native.setWindowSelectionChange.bind(this.native)
   }
 
   // ── Window close / reopen (veto bridge) ──────────────────────────
@@ -1107,6 +1111,7 @@ export function createTestApp(
   // The allocator lives in the reload-proof registry state so a renderer
   // reused across createTestApp calls never restarts ids at 0.
   const windowKeyEventId = nextWindowKeyEventId(renderer)
+  const windowSelectionEventId = nextWindowSelectionEventId(renderer)
   const gpuivHost = createGpuivRendererHost(
     renderer,
     idAllocatorFor(renderer),
@@ -1115,8 +1120,10 @@ export function createTestApp(
       onKeyUp: options.onKeyUp,
       onWindowShouldClose: options.onWindowShouldClose,
       onReopen: options.onReopen,
+      onSelectionChange: options.onSelectionChange,
     },
-    windowKeyEventId
+    windowKeyEventId,
+    windowSelectionEventId
   )
   renderer.setWindowKeyEvents(
     Boolean(options.onKeyDown),
@@ -1127,6 +1134,10 @@ export function createTestApp(
     Boolean(options.onWindowShouldClose),
     Boolean(options.onReopen),
     windowKeyEventId
+  )
+  renderer.setWindowSelectionChange(
+    Boolean(options.onSelectionChange),
+    windowSelectionEventId
   )
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands — never the commit facade —

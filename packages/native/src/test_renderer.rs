@@ -724,6 +724,25 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Enable the window selectionChange event requested by the JS renderer.
+    #[napi]
+    pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.set_selection_change_listener(enabled, event_id);
+                    cx.notify();
+                });
+                window.refresh();
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     // ── File dialogs (canned) ────────────────────────────────────────
 
     /// Test stand-in for the production `promptForPaths`: records the options

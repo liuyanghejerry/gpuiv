@@ -157,6 +157,37 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("fires onSelectionChange once per real change, including clear", () => {
+    const values: Array<string | null> = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+            <text style={{ fontSize: 20 }}>hello world</text>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App, {
+      onSelectionChange: (event) => {
+        values.push(event.value ?? null)
+      },
+    })
+    expect(app.renderer.dragSelect(21, 30, 900, 30)).toBe("hello world")
+    app.renderer.dispatchNativeEvents()
+    expect(values).toEqual(["hello world"])
+
+    // An unchanged frame does not fire.
+    app.renderer.flush()
+    app.renderer.dispatchNativeEvents()
+    expect(values).toEqual(["hello world"])
+
+    app.renderer.clearSelection()
+    app.renderer.dispatchNativeEvents()
+    expect(values).toEqual(["hello world", null])
+    app.unmount()
+  })
+
   it("paints no surface of its own and never paints the language header", () => {
     const App = defineComponent({
       setup() {

@@ -462,6 +462,10 @@ enum UiCommand {
         reopen: bool,
         event_id: u64,
     },
+    SetWindowSelectionChange {
+        enabled: bool,
+        event_id: u64,
+    },
     CloseWindow,
     GetWindowSize {
         response: SyncSender<WindowSize>,
@@ -997,6 +1001,13 @@ async fn run_ui_commands(
                 cx.notify();
                 window.refresh();
             }),
+            UiCommand::SetWindowSelectionChange { enabled, event_id } => {
+                window.update(cx, move |view, window, cx| {
+                    view.set_selection_change_listener(enabled, event_id);
+                    cx.notify();
+                    window.refresh();
+                })
+            }
             UiCommand::CloseWindow => {
                 window.update(cx, |_view, window, _cx| window.remove_window())
             }
@@ -2947,6 +2958,29 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Enable the window selectionChange event requested by the JS renderer.
+    #[napi]
+    pub fn set_window_selection_change(&self, enabled: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, window, cx| {
+            view.set_selection_change_listener(enabled, event_id);
+            cx.notify();
+            window.refresh();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetWindowSelectionChange { enabled, event_id });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     // ── Selection API ────────────────────────────────────────────────
 
     /// The current text selection joined in document order, or null.
@@ -3934,6 +3968,19 @@ impl WebGpuixRenderer {
         })
     }
 
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = setWindowSelectionChange)]
+    pub fn set_window_selection_change(
+        &self,
+        enabled: bool,
+        event_id: f64,
+    ) -> Result<(), wasm_bindgen::JsValue> {
+        let event_id = web_element_id(event_id)?;
+        update_web_window(move |view, _window, cx| {
+            view.set_selection_change_listener(enabled, event_id);
+            cx.notify();
+        })
+    }
+
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getSelectedText)]
     pub fn get_selected_text(&self) -> wasm_bindgen::JsValue {
         self.selection
@@ -4407,6 +4454,11 @@ pub(crate) struct GpuixView {
     /// While `appReopen` is observed, a Dock-icon relaunch emits instead of
     /// doing nothing (a running bun process has no second instance to spawn).
     pub(crate) app_reopen: bool,
+    pub(crate) window_selection_change: bool,
+    pub(crate) window_selection_event_id: u64,
+    /// Last identity delivered through `selectionChange`. Only written once an
+    /// event is really queued, so adding the listener later still reports.
+    reported_selection: Option<u64>,
 }
 
 impl GpuixView {
@@ -4441,7 +4493,52 @@ impl GpuixView {
             window_key_event_id: 0,
             window_should_close: false,
             app_reopen: false,
+            window_selection_change: false,
+            window_selection_event_id: 0,
+            reported_selection: None,
         }
+    }
+
+    pub(crate) fn set_selection_change_listener(&mut self, enabled: bool, event_id: u64) {
+        self.window_selection_change = enabled;
+        self.window_selection_event_id = event_id;
+        self.reported_selection = None;
+    }
+
+    /// Emit `selectionChange` when the selected range set changed this frame.
+    ///
+    /// Reads the same `SelectionState` as `getSelectedText`. Keyed on identity
+    /// so an unchanged frame does not emit. Empty on mount is not a change.
+    /// `reported_selection` is written only when an event is queued, so adding
+    /// `onSelectionChange` later still reports a live selection.
+    fn emit_selection_change(&mut self, callback: &Option<EventCallback>) {
+        if !self.window_selection_change {
+            return;
+        }
+        let selection = self.selection.lock();
+        let identity = selection.identity();
+        if self.reported_selection == Some(identity) {
+            return;
+        }
+        if identity == 0 && self.reported_selection.is_none() {
+            return;
+        }
+        let value = selection.selected_text();
+        drop(selection);
+        self.reported_selection = Some(identity);
+        emit_event_full(
+            callback,
+            self.window_selection_event_id,
+            // `windowSelectionChange`, not upstream's `selectionChange`: our
+            // `<input>`/`<textarea>` push-selection model already emits a
+            // per-element `selectionChange`, and the JS registry dispatches on
+            // the event type first. The Vue side normalizes back to
+            // `selectionChange` before the app handler runs.
+            "windowSelectionChange",
+            |payload| {
+                payload.value = value;
+            },
+        );
     }
 
     fn build_virtual_child(
@@ -5591,6 +5688,7 @@ impl gpui::Render for GpuixView {
                 };
                 let built = build_element(root_id, &mut ctx, window, cx);
                 emit_highlight_events(&callback, &highlight_events);
+                self.emit_selection_change(&callback);
                 built
             }
             None => gpui::Empty.into_any_element(),
