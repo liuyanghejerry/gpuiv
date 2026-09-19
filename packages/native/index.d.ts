@@ -222,10 +222,11 @@ export declare class GpuixRenderer {
   /**
    * Register the handler invoked when the platform asks the app to open
    * one or more URLs — deep links, files dropped on the Dock icon, and
-   * friends. Replaces any earlier handler. URLs opened before the first
-   * registration are dropped.
+   * friends. Replaces any earlier handler and replays queued startup
+   * batches in order. Pass null to unregister; subsequent batches queue
+   * until the next registration. This is a process-wide subscription.
    */
-  onOpenUrls(callback: ((err: Error | null, arg: Array<string>) => any)): void
+  onOpenUrls(callback?: (((err: Error | null, arg: Array<string>) => any)) | undefined | null): void
   /**
    * Register the app as the handler for a URL scheme (e.g. `myapp` for
    * `myapp://` URLs). The callback receives `(null)` on success or the
@@ -537,7 +538,7 @@ export declare class TestGpuixRenderer {
   /** The tags `dismissSystemNotification` was called with, in order. */
   getDismissedSystemNotifications(): Array<string>
   /** Test stand-in for the production `onOpenUrls`. */
-  onOpenUrls(callback: ((err: Error | null, arg: Array<string>) => any)): void
+  onOpenUrls(callback?: (((err: Error | null, arg: Array<string>) => any)) | undefined | null): void
   /**
    * Deliver opened URLs to the armed `onOpenUrls` callback, the way the
    * OS would on a deep link.

@@ -164,14 +164,13 @@ const SELECTION_SCROLL_TICK_MS: u64 = 24;
 /// The JS handler for URLs the platform asks the app to open. gpui only
 /// takes URL-open observers on `Application` (pre-run), so init registers a
 /// Rust observer on every platform and this process-wide slot is what it
-/// fires; `onOpenUrls` arms it from JS at any time. URLs opened before the
-/// first arming are dropped, same as an unarmed `onReopen`.
-static OPEN_URLS_CALLBACK: Mutex<Option<ThreadsafeFunction<Vec<String>>>> = Mutex::new(None);
+/// fires; `onOpenUrls` arms it from JS at any time. Preserve startup batches
+/// until JS registers, including deliveries during `run_embedded`.
+static OPEN_URLS_CALLBACK: Mutex<crate::open_urls::OpenUrls> =
+    Mutex::new(crate::open_urls::OpenUrls::new());
 
 fn emit_open_urls(urls: Vec<String>) {
-    if let Some(callback) = OPEN_URLS_CALLBACK.lock().unwrap().as_ref() {
-        callback.call(Ok(urls), ThreadsafeFunctionCallMode::NonBlocking);
-    }
+    OPEN_URLS_CALLBACK.lock().unwrap().emit(urls);
 }
 
 /// The window's frame on screen as reported to JS: logical points, origin at
@@ -2383,11 +2382,12 @@ impl GpuixRenderer {
 
     /// Register the handler invoked when the platform asks the app to open
     /// one or more URLs — deep links, files dropped on the Dock icon, and
-    /// friends. Replaces any earlier handler. URLs opened before the first
-    /// registration are dropped.
+    /// friends. Replaces any earlier handler and replays queued startup
+    /// batches in order. Pass null to unregister; subsequent batches queue
+    /// until the next registration. This is a process-wide subscription.
     #[napi]
-    pub fn on_open_urls(&self, callback: ThreadsafeFunction<Vec<String>>) -> Result<()> {
-        *OPEN_URLS_CALLBACK.lock().unwrap() = Some(callback);
+    pub fn on_open_urls(&self, callback: Option<ThreadsafeFunction<Vec<String>>>) -> Result<()> {
+        OPEN_URLS_CALLBACK.lock().unwrap().register(callback);
         Ok(())
     }
 

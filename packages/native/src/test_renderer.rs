@@ -261,7 +261,7 @@ pub struct TestGpuixRenderer {
     dismissed_notifications: RefCell<Vec<String>>,
     notification_response_handler:
         RefCell<Option<ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>>>,
-    open_urls_handler: RefCell<Option<ThreadsafeFunction<Vec<String>>>>,
+    open_urls_handler: RefCell<crate::open_urls::OpenUrls>,
     last_url_scheme: RefCell<Option<String>>,
     url_scheme_errors: RefCell<VecDeque<Option<String>>>,
 }
@@ -361,7 +361,7 @@ impl TestGpuixRenderer {
             delivered_notifications: RefCell::new(Default::default()),
             dismissed_notifications: RefCell::new(Default::default()),
             notification_response_handler: RefCell::new(None),
-            open_urls_handler: RefCell::new(None),
+            open_urls_handler: RefCell::new(crate::open_urls::OpenUrls::new()),
             last_url_scheme: RefCell::new(None),
             url_scheme_errors: RefCell::new(Default::default()),
         })
@@ -879,8 +879,8 @@ impl TestGpuixRenderer {
 
     /// Test stand-in for the production `onOpenUrls`.
     #[napi]
-    pub fn on_open_urls(&self, callback: ThreadsafeFunction<Vec<String>>) -> Result<()> {
-        *self.open_urls_handler.borrow_mut() = Some(callback);
+    pub fn on_open_urls(&self, callback: Option<ThreadsafeFunction<Vec<String>>>) -> Result<()> {
+        self.open_urls_handler.borrow_mut().register(callback);
         Ok(())
     }
 
@@ -888,9 +888,7 @@ impl TestGpuixRenderer {
     /// OS would on a deep link.
     #[napi]
     pub fn fire_open_urls(&self, urls: Vec<String>) {
-        if let Some(handler) = self.open_urls_handler.borrow().as_ref() {
-            handler.call(Ok(urls), ThreadsafeFunctionCallMode::NonBlocking);
-        }
+        self.open_urls_handler.borrow_mut().emit(urls);
     }
 
     /// Test stand-in for the production `registerUrlScheme`: records the

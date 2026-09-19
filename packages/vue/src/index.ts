@@ -8,7 +8,8 @@ export {
   setAppIdentity,
   showSystemNotification,
 } from "./notifications.js"
-export { onOpenUrls, registerUrlScheme } from "./deep-links.js"
+export { onOpenUrls, onOpenRequests, parseOpenRequest, registerUrlScheme } from "./deep-links.js"
+export type { OpenRequest } from "./deep-links.js"
 export type {
   NewPathPromptOptions,
   NewPathPromptOutcome,

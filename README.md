@@ -30,8 +30,10 @@ cd examples && bun --hot chat.tsx
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **error-handling** | `bun --hot error-handling.tsx` | The runtime error story end to end: overlay + Reload, an `onErrorCaptured` boundary, and an `onRuntimeError` report log |
+| **open-files** | `bun --hot open-files.tsx` | Reusable file/deep-link delivery; `open-files.package.ts` declares Markdown document support for a macOS `.app` |
 
-All of them live in [`examples/`](./examples) and use hardcoded data.
+All of them live in [`examples/`](./examples). Most use hardcoded data;
+`open-files` receives requests from the operating system.
 
 Markdown, code and a virtualized diff in one frame:
 
@@ -2728,6 +2730,69 @@ The design record — including the Bun findings that constrain it (no
 universal macOS target, Windows metadata needs a Windows host, bytecode
 limitations) — is in [docs/packaging-plan.md](./docs/packaging-plan.md).
 
+### File opening and macOS document associations
+
+`onOpenRequests(renderer, handler)` delivers `{ paths, urls, errors }` in one
+callback, so file opening and deep links share ownership. Files become decoded
+absolute paths; other URLs keep their original spelling. Malformed file URLs
+appear in `errors` without discarding valid siblings. It does not read files or
+choose tabs, windows, extensions, save queues, or document state.
+
+```ts
+import { onOpenRequests } from '@gpuiv/vue'
+
+const dispose = onOpenRequests(app.renderer, ({ paths, urls, errors }) => {
+  for (const path of paths) openDocument(path)
+  for (const url of urls) handleDeepLink(url)
+  for (const { url, error } of errors) reportOpenError(url, error)
+})
+// Before application teardown (or onBeforeUnmount inside a component):
+// dispose()
+```
+
+Native deliveries received before registration queue and replay in batch order.
+`onOpenUrls` remains the raw URL API and now also returns a disposer. Both
+helpers replace the same process-wide handler; use one renderer and one of
+these helpers, and avoid mixing them with direct native registrations. Disposing
+an old subscription cannot clear its replacement. After disposal, new native
+deliveries queue for the next registration; callbacks already queued on Node
+are ignored if there is no active subscription. `parseOpenRequest(urls)` exposes
+the same decoding for an app's own URL inputs. CLI argument parsing and
+single-instance IPC remain app-owned; raw CLI paths are not file URLs.
+
+On macOS, GPUI forwards Finder/Dock document opens through its existing URL
+delegate. Declare supported document types in `gpuiv.package.ts`:
+
+```ts
+mac: {
+  documentTypes: [{
+    name: 'Markdown document',
+    contentTypes: ['net.daringfireball.markdown'],
+    role: 'Editor',       // default
+    rank: 'Alternate',    // default; eligibility does not force a default app
+  }],
+  typeDeclarations: [{
+    identifier: 'net.daringfireball.markdown',
+    conformsTo: ['public.plain-text'],
+    extensions: ['md', 'markdown'],
+    mimeTypes: ['text/markdown'],
+  }],
+}
+```
+
+`typeDeclarations` imports existing formats by default; set `exported: true`
+only for formats your app owns. System UTIs such as `public.plain-text` need no
+new declaration. `mac.plist` supports nested dictionaries/arrays for advanced
+keys (including `CFBundleURLTypes`) and overrides generated keys.
+
+Try `cd examples && bun run package --config ./open-files.package.ts`, then
+open Markdown files with the resulting `.app`. Windows/Linux association
+registration and cross-platform single-instance forwarding are still pending.
+The macOS acceptance script `bun scripts/test-file-associations.ts` builds an
+isolated app and checks real cold/warm Launch Services delivery in the
+background; it removes the test app afterward. See the
+[P1 capability ledger](./docs/p1-framework-capabilities.md).
+
 ### Auto-update (S3-backed)
 
 Products can update themselves from any S3-compatible bucket
@@ -2900,6 +2965,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Clipboard text (`writeClipboardText`, `readClipboardText`)
 - [x] Opening external URLs (`openUrl`)
 - [x] Deep links (`onOpenUrls`, `registerUrlScheme`)
+- [x] Startup-safe file/deep-link batches (`onOpenRequests`, `parseOpenRequest`, disposable subscriptions); macOS document/UTI declarations in the packager
 - [x] System notifications (`showSystemNotification`, `dismissSystemNotification`, `onSystemNotificationResponse`; `setAppIdentity` for toast attribution. macOS delivers only from a packaged `.app`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
