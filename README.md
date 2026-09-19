@@ -394,7 +394,7 @@ code that builds its own host with `createGpuivRendererHost()` can hit this.
 
 ## Window controls
 
-`toggleFullscreen()`, `isFullscreen()`, and `minimizeWindow()` drive the
+`toggleFullscreen()`, `isFullscreen()`, `minimizeWindow()`, and `zoomWindow()` drive the
 window at runtime — the same commands the traffic-light and taskbar chrome
 use. They are renderer commands (`useGpuixRequired()` reaches them):
 
@@ -404,7 +404,59 @@ const renderer = useGpuixRequired()
 ```
 
 `minimizeWindow()` complements the built-in `⌘M` menu item for custom
-chrome. Resizing by edge drag and window zoom are not exposed yet.
+chrome. `zoomWindow()` toggles macOS zoom or Windows/Linux maximize/restore;
+it is not fullscreen. Programmatic edge resizing is not exposed.
+
+Use `windowDragRegion` on a dedicated title/spacer `<div>` to hand dragging
+to the OS, without a JS mouse handler. Keep buttons and inputs **beside**
+that region, not inside it: this is not CSS `app-region` inheritance or a
+`no-drag` exclusion system. Use `userSelect: "none"` on the title surface.
+Windows uses GPUI's non-client hit testing (including native snapping);
+macOS/Linux call GPUI during the native press. Double-click uses the macOS
+titlebar preference or maximize/restore on Windows/Linux. Desktop only.
+
+```tsx
+<div style={{ display: 'flex', height: 40 }}>
+  <div windowDragRegion style={{ flexGrow: 1, userSelect: 'none' }}>
+    <text>My app</text>
+  </div>
+  <div onClick={() => renderer.zoomWindow?.()}>Zoom</div>
+</div>
+```
+
+See [`examples/window-shell.tsx`](examples/window-shell.tsx) for a complete
+shell with keyboard-accessible buttons and one scroll parent.
+The remaining ColaMD P1 gaps and acceptance criteria are tracked in
+[`docs/p1-framework-capabilities.md`](docs/p1-framework-capabilities.md).
+
+### Cancellable smooth scrolling
+
+`useScrollController()` is component-scoped; `createScrollController(renderer)`
+works outside Vue. Both expose `scrollTo(id, options)`, `cancel(id?)`, and
+`dispose()`. A new request replaces the old request for the same element;
+other elements remain independent. Unmount disposes the composable.
+
+```tsx
+const scrolling = useScrollController()
+// IDs and offsets refer to an already mounted/painted scroll container.
+const result = await scrolling.scrollTo(paneId, {
+  y: -900, behavior: 'smooth', duration: 240, signal: abortController.signal,
+})
+if (result.status === 'finished') flashTarget()
+// On the scroll owner: onScroll / onMouseDown => scrolling.cancel(paneId)
+```
+
+Offsets use GPUI coordinates (down/right = negative); omitted axes are
+preserved. Default behavior is `instant`; duration 0 supports app-owned
+reduced-motion preferences. Results are `finished`, `cancelled`,
+`unavailable` (missing capability/container), or `timeout`, plus the last
+observed native offset. Invalid values throw; renderer errors reject.
+Completion samples native offsets for three stable 16ms intervals after the
+final command, allowing GPUI to clamp at content boundaries, with a 1s
+settling limit. This is a programmatic completion heuristic, **not a native
+`scrollend` event or a paint fence**. Wheel/momentum scrolling is not observed
+automatically; wire cancellation on user input. Use `app.settle()` in GPU
+tests before pixel assertions. No additional/nested scroll container is added.
 
 ### Close interception
 
@@ -2814,6 +2866,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
 - [x] Accessibility: `role` + `aria-*` props onto the AccessKit tree (macOS AX / Windows UIA / Linux AT-SPI), with per-element default roles and `getA11yTree()` test dumps
 - [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `getScrollOffset`)
+- [x] Cancellable smooth-scroll controllers (`createScrollController`, `useScrollController`) with stable-offset completion
+- [x] Native titlebar drag regions (`windowDragRegion`) and zoom/maximize-restore (`zoomWindow`)
 - [x] Keyboard events (keyDown, keyUp) with focus management
 - [x] Focus/blur events with automatic FocusHandle creation
 - [x] GPU-backed test renderer with screenshot capture

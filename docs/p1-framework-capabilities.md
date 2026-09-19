@@ -1,0 +1,51 @@
+# P1 framework capabilities — ColaMD comparison
+
+Issue: [#101](https://github.com/liuyanghejerry/gpuiv/issues/101).
+Reviewed against local ColaMD on 2026-09-19. This is framework work, not a
+port of its Electron shell. ColaMD is a read-only reference; no source is copied.
+
+## First delivery
+
+- [x] `windowDragRegion`: native GPUI titlebar hit area on Windows;
+  press-time move on macOS/Linux. Buttons are siblings, not nested exclusions.
+- [x] `zoomWindow()`: native zoom/maximize-restore, separate from fullscreen.
+- [x] `createScrollController` / `useScrollController`: smooth scroll,
+  cancellation/replacement, AbortSignal, component cleanup, stable-offset
+  completion and timeout. No additional scroll parent and no editor dependency.
+- [x] `examples/window-shell.tsx`: reusable composition of these APIs.
+- [ ] OS drag/snap/double-click manual acceptance on macOS, Windows, Linux.
+- [ ] Native wheel/momentum `scrollend` event (the controller does not claim it).
+
+Reference: ColaMD `src/renderer/themes/base.css` uses drag/no-drag regions;
+`src/renderer/editor/editor.ts:flashHeadingOnArrival` waits for scrollend with a
+stable-position fallback before flashing a heading. We expose the underlying
+capability, not its DOM IDs, document state, or theme.
+
+## Remaining P1 queue and acceptance
+
+| Capability | Layer and next step | Acceptance |
+| --- | --- | --- |
+| HTML clipboard | GPUI first: current `ClipboardEntry` supports String/Image/ExternalPaths only. Add real HTML flavor beside plain text in GPUI platform backends, following `docs/agents/zed-workflow.md`; then napi + Vue. Never use String metadata as external HTML. | Native HTML/plain round-trip on macOS/Windows/Linux; external rich-text paste; plain fallback; then safe HTML→MD import and styled export in editor layer. |
+| Popup context menus | ColaMD main `tab-context-menu` / `entry-context-menu` use `Menu.popup`. GPUIV `setMenus` is a macOS menubar, not a popup. Audit native GPUI popup support before a framework API; any FloatingLayer alternative must be explicitly called an app-rendered menu. | Pointer and keyboard invocation, disabled items, separators, submenu focus, Escape/outside close, callback ownership and cleanup; platform scope documented. |
+| Multi-window | Renderer/window lifecycle and per-window state isolation first. Do not simply call singleton `createApp` twice. | Independent roots, input focus/IME, event maps, scroll/selection, close veto, and final-window exit; app owns save queues and tabs. |
+| File association / open-file | GPUI platform event + packaging declarations; single-instance dispatch must preserve startup arguments and later deliveries. | Cold/warm launch and multiple paths; Unicode/spaces, no lost startup events; no arbitrary command execution. Test packaged apps, not just Bun. |
+| PDF/printing | Decide vector document export vs platform printing; requires layout/font/image policy. A screenshot PDF is not text PDF. | Selectable/searchable Unicode text, page breaks, table splits, images and links; cancellable export and error reporting. |
+| Native scroll completion | Inspect GPUI wheel/touch-phase and frame lifecycle, rather than synthesizing a native event from timers. | Momentum/no-op/interruption/removed element; exactly-once completion; no unnecessary polling after teardown. |
+
+HTML clipboard requires an upstream GPUI change and PR before a submodule
+bump, not OS-specific clipboard calls hidden in `packages/native`. Multi-window
+and file association are coupled infrastructure, not MarkdownEditor props.
+Math/Mermaid remain P0 and are outside this P1 delivery.
+
+## Validation scope
+
+Automated tests cover scroll interpolation, real native clamping, cancellation,
+replacement, missing targets, timeout/errors, drag-prop mutation and sibling
+button routing, and zoom command recording. The offscreen test renderer records
+zoom instead of resizing; these tests do **not** prove OS snapping or live drag.
+
+Local verification (2026-09-19): release native build and `cargo test --lib`
+(311 passed); Vue suite with `--maxWorkers=2` (59 files, 966 passed, 141 skipped).
+The user's unrelated untracked `combobox-aschild-debug.test.tsx` is excluded.
+An initial unrestricted parallel run hit two subprocess timeouts; each passed
+in isolation and the complete bounded-concurrency rerun passed.

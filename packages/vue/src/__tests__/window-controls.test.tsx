@@ -25,4 +25,14 @@ describeNative("window controls", () => {
     renderer.minimizeWindow()
     expect(renderer.getMinimizeCalls()).toBe(2)
   })
+
+  it("records zoom requests independently of fullscreen", () => {
+    const renderer = new TestRenderer()
+    expect(renderer.getZoomCalls()).toBe(0)
+    renderer.zoomWindow()
+    renderer.zoomWindow()
+    expect(renderer.getZoomCalls()).toBe(2)
+    expect(renderer.isFullscreen()).toBe(false)
+    expect(renderer.getMinimizeCalls()).toBe(0)
+  })
 })

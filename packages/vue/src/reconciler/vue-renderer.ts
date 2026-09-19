@@ -102,6 +102,7 @@ const UNIVERSAL_PROPS = new Set([
   // Wheel zoom over a canvas: opt out of ancestor scrollers consuming the
   // same gesture. See the `scroll` wiring in wire_host_events.
   "stopWheelPropagation",
+  "windowDragRegion",
   // Accessibility: names match the DOM (`aria-label`, not `ariaLabel`).
   "role",
   "aria-label",

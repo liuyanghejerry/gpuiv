@@ -372,6 +372,9 @@ export interface HighlightSpec {
 export interface ElementProps {
   style?: StyleDesc | Record<string, unknown>
   children?: unknown
+  /** Native titlebar drag surface. Use a separate spacer/title element;
+   *  place buttons and inputs beside it, not inside it. No JS handler needed. */
+  windowDragRegion?: boolean
 
   // ── Mouse events ───────────────────────────────────────────────
   /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
@@ -659,6 +662,8 @@ export interface NativeRenderer {
   isFullscreen?(): boolean
   /** Minimize the window to the taskbar / Dock. */
   minimizeWindow?(): void
+  /** Toggle platform zoom / maximize-restore. Separate from fullscreen. */
+  zoomWindow?(): void
 
   /** Hand a URL to the user's default browser / handler. */
   openUrl?(url: string): void
