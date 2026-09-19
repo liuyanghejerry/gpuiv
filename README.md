@@ -1724,8 +1724,9 @@ Every text GPUIV paints is **selectable and copyable**, including text inside
 inside a fenced code block selects everything between; Cmd+C copies it joined in
 document order.
 
-There is nothing to opt into. To opt *out* — toolbars, buttons, line-number
-gutters — set `userSelect: "none"`, which inherits like the CSS property:
+There is nothing to opt into. A tap does not select. Only a drag does.
+To opt *out* — toolbars, buttons, line-number gutters — set
+`userSelect: "none"`, which inherits like the CSS property:
 
 ```tsx
 <div style={{ userSelect: 'none' }}>

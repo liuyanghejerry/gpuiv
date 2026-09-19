@@ -627,10 +627,15 @@ fn register_drag_listeners(
             return;
         }
         let mut selection = up_selection.lock();
+        let was_dragging = selection.is_dragging();
         selection.cancel_pending();
         selection.end_active_drag();
         drop(selection);
-        on_drag_end(cx);
+        // A tap never started a drag. Calling on_drag_end anyway nested-updates
+        // GpuixView while GPUI still holds the root lease for this mouse-up.
+        if was_dragging {
+            on_drag_end(cx);
+        }
     });
 }
 
