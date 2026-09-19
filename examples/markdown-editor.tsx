@@ -24,6 +24,7 @@ const PAPER_THEME = {
   highlight: "#f0d9a8", quoteBar: "#c44b2b", quoteBackground: "#eae6e1",
   border: "#dedad5", tableHeaderBackground: "#eae6e1",
   menuBackground: "#f0edea",
+  selectionColor: "rgba(196, 75, 43, 0.2)",
   fontFamily: "Songti SC", fontSize: 16, lineHeight: 1.9, monoFont: "Menlo",
 }
 

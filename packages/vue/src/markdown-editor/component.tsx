@@ -58,6 +58,7 @@ export interface MarkdownEditorTheme {
   codeBlockText?: string
   quoteBackground?: string
   menuBackground?: string
+  selectionColor?: string
 }
 
 const defaultTheme: MarkdownEditorTheme = {
@@ -647,7 +648,7 @@ export const MarkdownEditor = defineComponent({
             if (end > start) {
               row.decorations = [
                 ...(row.decorations ?? []),
-                { start, end, color: "rgba(124, 134, 255, 0.35)" },
+                { start, end, color: theme.selectionColor ?? "rgba(124, 134, 255, 0.35)" },
               ]
             }
           }
@@ -1550,6 +1551,7 @@ export const MarkdownEditor = defineComponent({
               flexGrow: 1,
               flexShrink: 0,
               fontFamily: theme.monoFont,
+              selectionColor: theme.selectionColor,
               fontSize: 14,
               // Native lineHeight is absolute pixels, not a font-size factor.
               lineHeight: 24,
@@ -1643,6 +1645,7 @@ export const MarkdownEditor = defineComponent({
                           width: "100%",
                           fontSize: theme.fontSize,
                           fontFamily: theme.fontFamily,
+                          selectionColor: theme.selectionColor,
                           textAlign: (cell.alignment || "left") as "left" | "center" | "right",
                           fontWeight: cell.header ? 600 : undefined,
                           color: theme.text,
@@ -1702,6 +1705,7 @@ export const MarkdownEditor = defineComponent({
               fontSize: row.fontSize,
               fontWeight: row.fontWeight,
               fontFamily: row.mono ? theme.monoFont : theme.fontFamily,
+              selectionColor: theme.selectionColor,
               textAlign: (row.align || "left") as "left" | "center" | "right",
               color: row.mono ? (theme.codeBlockText ?? theme.text) : row.quote ? theme.muted : theme.text,
               lineHeight: lineHeightPx,

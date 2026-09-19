@@ -369,6 +369,7 @@ impl CustomElement for TextEditorElement {
                     content_width: 0.0,
                     display_is_placeholder: false,
                     caret_color,
+                    selection_color: gpui::rgba(0x7c86ff59).into(),
                     blink_anchor: cx.background_executor().now(),
                     blink_task: None,
                     pending_values: VecDeque::new(),
@@ -398,6 +399,11 @@ impl CustomElement for TextEditorElement {
             state.emits_select_all = emits_select_all;
             state.emits_context_menu = emits_context_menu;
             state.emits_selection_drag = emits_selection_drag;
+            state.selection_color = ctx.style
+                .and_then(|style| style.selection_color.as_deref())
+                .and_then(crate::color::parse_color_rgba)
+                .map(Into::into)
+                .unwrap_or_else(|| gpui::rgba(0x7c86ff59).into());
             if state.emits_submit != emits_submit {
                 state.emits_submit = emits_submit;
                 cx.notify();
@@ -1210,6 +1216,7 @@ pub(crate) struct TextEditorState {
     content_width: f32,
     display_is_placeholder: bool,
     caret_color: gpui::Hsla,
+    selection_color: gpui::Hsla,
     blink_anchor: Instant,
     blink_task: Option<Task<()>>,
     pending_values: VecDeque<String>,
@@ -2792,7 +2799,7 @@ impl gpui::Element for EditorTextElement {
                 origin,
                 bounds,
                 input.line_height,
-                gpui::rgba(0x7c86ff59).into(),
+                input.selection_color,
             );
         }
         let mut decorations = Vec::new();
@@ -2847,12 +2854,6 @@ impl gpui::Element for EditorTextElement {
             }
         });
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            for quad in prepaint.selection.drain(..) {
-                window.paint_quad(quad);
-            }
-            for quad in prepaint.decorations.drain(..) {
-                window.paint_quad(quad);
-            }
             let (lines, line_height, scroll_top, scroll_left, display, paint_backgrounds, text_align) =
                 self.input.update(cx, |input, _| {
                     let display = if input.content.is_empty() {
@@ -2885,6 +2886,19 @@ impl gpui::Element for EditorTextElement {
                     )
                     .ok();
                 }
+                y += height;
+            }
+            // GPUI paints run backgrounds separately from glyphs. Put the
+            // selection above those backgrounds so inline code/highlights
+            // cannot hide the selected range, while glyphs remain on top.
+            for quad in prepaint.decorations.drain(..) {
+                window.paint_quad(quad);
+            }
+            for quad in prepaint.selection.drain(..) {
+                window.paint_quad(quad);
+            }
+            let mut y = bounds.top() - px(scroll_top);
+            for line in &lines {
                 line.paint(
                     point(bounds.left() - px(scroll_left), y),
                     line_height,
@@ -2894,7 +2908,7 @@ impl gpui::Element for EditorTextElement {
                     cx,
                 )
                 .ok();
-                y += height;
+                y += line.size(line_height).height;
             }
             self.input.update(cx, |input, _| input.last_lines = lines);
             let caret_shown = self

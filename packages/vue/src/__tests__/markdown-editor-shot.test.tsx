@@ -80,6 +80,9 @@ describeNative("markdown-editor example screenshot", () => {
     app.renderer.nativeSimulateKeystrokes(blocks[0].id, "cmd-a")
     await app.settle()
     expect(app.renderer.getInputDecorations(blocks[1].id).length).toBeGreaterThan(0)
+    const selection = app.renderer.getInputDecorations(blocks[1].id)[0]
+    expect(selection.color.toLowerCase()).toMatch(/^#c[34]4[bca]2[bca]33$/)
+    app.renderer.captureScreenshot(fileURLToPath(new URL("../../screenshots/markdown-editor-selection.png", import.meta.url)))
     app.renderer.nativeSimulateMouseDown(900, 600, 0)
     app.renderer.nativeSimulateMouseUp(900, 600, 0)
     await app.settle()

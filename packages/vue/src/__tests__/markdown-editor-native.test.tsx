@@ -6,12 +6,33 @@
 // @ts-nocheck
 
 import { defineComponent, ref } from "vue"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("editor spans / decorations / selection props", () => {
+  it("renders themed selection over inline code and highlight backgrounds", async () => {
+    const App = defineComponent({
+      setup: () => () => (
+        <div style={{ width: 600, height: 140, padding: 24, backgroundColor: "#f0edea" }}>
+          <textarea testId="themed-selection" value="plain code highlight" selection={[0, 20]}
+            spans={[{ start: 6, end: 10, background: "#e8e4df" }, { start: 11, end: 20, background: "#f0d9a8" }]}
+            style={{ width: "100%", fontSize: 20, lineHeight: 38, color: "#2c2c2c", selectionColor: "rgba(196, 75, 43, 0.2)" }} />
+        </div>
+      ),
+    })
+    const app = createTestApp(App, { width: 600, height: 140 })
+    await app.settle()
+    const input = app.renderer.findByTestId("themed-selection")!
+    app.renderer.focusElement(input.id)
+    await app.settle()
+    app.renderer.captureScreenshot(fileURLToPath(new URL("../../screenshots/markdown-selection-inline.png", import.meta.url)))
+    expect(app.renderer.getPaintedInputRuns(input.id).map((run) => run.text).join("")).toBe("plain code highlight")
+    app.unmount()
+  })
+
   it.each(["center", "right"])("aligns %s text hit testing and decoration rectangles", async (textAlign) => {
     const App = defineComponent({
       setup: () => () => <textarea testId="aligned" value="Status" minRows={1}
