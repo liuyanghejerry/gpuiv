@@ -321,6 +321,16 @@ export declare class GpuixRenderer {
   getScrollOffset(elementId: number): Array<number> | null
   getAutomationTree(): string
   getElementBounds(id: number): ElementBounds | null
+  /**
+   * The closest UTF-16 offset in an input/textarea for a window-space
+   * point. The point is clamped into the text; -1 means it has not laid out.
+   */
+  getInputTextOffset(elementId: number, x: number, y: number): number
+  /**
+   * Return `[elementId, utf16Offset]` for the input nearest a window-space
+   * point, or an empty array when none of the supplied inputs has painted.
+   */
+  getInputTextHit(elementIds: Array<number>, x: number, y: number): Array<number>
   getAllText(): Array<string>
   getPaintedText(): Array<string>
   /**
@@ -708,6 +718,11 @@ export declare class TestGpuixRenderer {
    */
   getInputTextOffset(elementId: number, x: number, y: number): number
   /**
+   * `[elementId, utf16Offset]` for the closest painted input among the
+   * supplied candidates, or an empty array when none has laid out.
+   */
+  getInputTextHit(elementIds: Array<number>, x: number, y: number): Array<number>
+  /**
    * Where the `decorations` prop of an editor landed on screen (pixel
    * rects), for asserting search-highlight geometry.
    */
@@ -854,9 +869,15 @@ export interface EventPayload {
    * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
    */
   eventType: string
-  /** Mouse X position in window coordinates (pixels). */
+  /**
+   * Mouse X position in window coordinates (pixels). Populated for mouse
+   * events and input `selectionDrag`.
+   */
   x?: number
-  /** Mouse Y position in window coordinates (pixels). */
+  /**
+   * Mouse Y position in window coordinates (pixels). Populated for mouse
+   * events and input `selectionDrag`.
+   */
   y?: number
   /**
    * Which mouse button: 0=left, 1=middle, 2=right.
@@ -931,16 +952,22 @@ export interface EventPayload {
    * Element-defined string payload.
    * Populated for: `<diff>` toggleFile (the file path), showMore (the
    * hidden line count), and lineClick (the line text); `<markdown>`
-   * linkClick (the URL).
+   * linkClick (the URL); input selectionDrag (`"end"` on release).
    */
   value?: string
   /** Line number on the pre-change side. Populated for: `<diff>` lineClick. */
   oldLine?: number
   /** Line number on the post-change side. Populated for: `<diff>` lineClick. */
   newLine?: number
-  /** First visible logical index. Populated for: `<virtual-list>` visibleRange. */
+  /**
+   * First visible logical index, or a text selection's UTF-16 anchor.
+   * Populated for: visibleRange, selectionChange, selectionDrag.
+   */
   startIndex?: number
-  /** Exclusive end of the visible logical range. Populated for: visibleRange. */
+  /**
+   * Exclusive visible index, or a text selection's UTF-16 head.
+   * Populated for: visibleRange, selectionChange, selectionDrag.
+   */
   endIndex?: number
   /**
    * Matches found by this element's `highlight` prop. Counted once per match

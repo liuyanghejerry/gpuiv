@@ -160,6 +160,19 @@ function ancestorOfKind($pos: { node: (d: number) => PMNode; depth: number }, ty
   return null
 }
 
+function nearestListAncestor($pos: {
+  node: (d: number) => PMNode
+  depth: number
+}): { depth: number; node: PMNode } | null {
+  for (let depth = $pos.depth; depth > 0; depth--) {
+    const node = $pos.node(depth)
+    if (node.type.name === "bullet_list" || node.type.name === "ordered_list") {
+      return { depth, node }
+    }
+  }
+  return null
+}
+
 export class MarkdownEditorCore {
   state: EditorState
   private markerStyle: MarkerStyle
@@ -229,14 +242,19 @@ export class MarkdownEditorCore {
     const type = editorSchema.marks.link
     const { from, to, empty } = this.state.selection
     const tr = this.state.tr
+    let hasInlineContent = false
     let allMatch = true
     if (!empty) {
       this.state.doc.nodesBetween(from, to, (node) => {
-        if (!node.marks.some((m) => m.type === type)) return
-        if (!node.marks.every((m) => m.type !== type || m.attrs.href === href)) allMatch = false
+        if (!node.isInline) return
+        hasInlineContent = true
+        const link = type.isInSet(node.marks)
+        if (!link || link.attrs.href !== href) allMatch = false
       })
     }
-    const active = !empty && this.state.doc.rangeHasMark(from, to, type) && allMatch
+    // A mixed linked/unlinked range is not active: applying the command must
+    // extend the link across the whole range, not remove the linked fragment.
+    const active = !empty && hasInlineContent && allMatch
     if (empty || !active) {
       if (empty) {
         tr.addStoredMark(type.create({ href }))
@@ -253,9 +271,21 @@ export class MarkdownEditorCore {
   toggleList(kind: "bullet" | "ordered"): void {
     const listName = kind === "bullet" ? "bullet_list" : "ordered_list"
     const { $from, $to } = this.state.selection
-    const depth = ancestorOfKind($from, listName)
     const tr = this.state.tr
-    if (depth === null) {
+    const currentList = nearestListAncestor($from)
+    const selectionStaysInCurrentList =
+      currentList !== null &&
+      $to.depth >= currentList.depth &&
+      $to.node(currentList.depth) === currentList.node
+
+    if (currentList && selectionStaysInCurrentList && currentList.node.type.name !== listName) {
+      // Switching list type changes the nearest list in place. Wrapping the
+      // current paragraph would create an ordered list inside one bullet item
+      // and leave the remaining siblings unchanged.
+      const tight = currentList.node.attrs.tight ?? true
+      const attrs = listName === "ordered_list" ? { order: 1, tight } : { tight }
+      tr.setNodeMarkup($from.before(currentList.depth), editorSchema.nodes[listName], attrs)
+    } else if (!currentList || !selectionStaysInCurrentList) {
       const range = $from.blockRange($to)
       if (!range) return
       const listType = editorSchema.nodes[listName]
@@ -287,9 +317,9 @@ export class MarkdownEditorCore {
         tr.wrap(range, wrapping)
       }
     } else {
-      const listPos = $from.before(depth)
-      const listEnd = $from.after(depth)
-      const list = $from.node(depth)
+      const listPos = $from.before(currentList.depth)
+      const listEnd = $from.after(currentList.depth)
+      const list = currentList.node
       const inner: PMNode[] = []
       list.forEach((item) => item.forEach((block) => inner.push(block)))
       tr.replaceWith(listPos, listEnd, Fragment.fromArray(inner))

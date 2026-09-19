@@ -123,6 +123,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getInputDecorations(elementId: number): InputDecorationInfo[]
   getInputTextPosition(elementId: number, offset: number): number[]
   getInputTextOffset(elementId: number, x: number, y: number): number
+  getInputTextHit(elementIds: number[], x: number, y: number): number[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -1005,6 +1006,10 @@ export class TestRenderer implements NativeRenderer {
   /** Closest UTF-16 offset for a window-space point, or -1. */
   getInputTextOffset(elementId: number, x: number, y: number): number {
     return this.native.getInputTextOffset(elementId, x, y)
+  }
+
+  getInputTextHit(elementIds: number[], x: number, y: number): number[] {
+    return this.native.getInputTextHit(elementIds, x, y)
   }
 
   /** Syntax-cache counters as `[hits, misses, documents]`. */

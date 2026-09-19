@@ -19,9 +19,11 @@ pub struct EventPayload {
     pub event_type: String,
 
     // ── Mouse position ───────────────────────────────────────────────
-    /// Mouse X position in window coordinates (pixels).
+    /// Mouse X position in window coordinates (pixels). Populated for mouse
+    /// events and input `selectionDrag`.
     pub x: Option<f64>,
-    /// Mouse Y position in window coordinates (pixels).
+    /// Mouse Y position in window coordinates (pixels). Populated for mouse
+    /// events and input `selectionDrag`.
     pub y: Option<f64>,
 
     // ── Mouse button ─────────────────────────────────────────────────
@@ -89,7 +91,7 @@ pub struct EventPayload {
     /// Element-defined string payload.
     /// Populated for: `<diff>` toggleFile (the file path), showMore (the
     /// hidden line count), and lineClick (the line text); `<markdown>`
-    /// linkClick (the URL).
+    /// linkClick (the URL); input selectionDrag (`"end"` on release).
     pub value: Option<String>,
 
     /// Line number on the pre-change side. Populated for: `<diff>` lineClick.
@@ -98,10 +100,12 @@ pub struct EventPayload {
     /// Line number on the post-change side. Populated for: `<diff>` lineClick.
     pub new_line: Option<f64>,
 
-    /// First visible logical index. Populated for: `<virtual-list>` visibleRange.
+    /// First visible logical index, or a text selection's UTF-16 anchor.
+    /// Populated for: visibleRange, selectionChange, selectionDrag.
     pub start_index: Option<f64>,
 
-    /// Exclusive end of the visible logical range. Populated for: visibleRange.
+    /// Exclusive visible index, or a text selection's UTF-16 head.
+    /// Populated for: visibleRange, selectionChange, selectionDrag.
     pub end_index: Option<f64>,
 
     /// Matches found by this element's `highlight` prop. Counted once per match

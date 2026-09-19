@@ -130,6 +130,13 @@ describe("editor core: format commands", () => {
       marked("see [gpuiv](https://gpuiv.dev) now", 5, 10, (c) => c.toggleLink("https://gpuiv.dev")),
     ).toBe("see gpuiv now\n")
   })
+
+  it("applies a link across mixed linked and unlinked text", () => {
+    const c = core("[one](https://gpuiv.dev) two")
+    c.setSelection(1, 8)
+    c.toggleLink("https://gpuiv.dev")
+    expect(c.getMarkdown()).toBe("[one two](https://gpuiv.dev)\n")
+  })
 })
 
 describe("editor core: list commands", () => {
@@ -147,6 +154,20 @@ describe("editor core: list commands", () => {
     c.setSelection(2)
     c.toggleList("ordered")
     expect(c.getMarkdown()).toBe("1. a\n")
+  })
+
+  it("converts the current list instead of nesting another list", () => {
+    const c = core("- one\n- two")
+    c.setSelection(3)
+    c.toggleList("ordered")
+    expect(c.getMarkdown()).toBe("1. one\n2. two\n")
+    expect(c.state.doc.child(0).type.name).toBe("ordered_list")
+    expect(c.state.doc.child(0).childCount).toBe(2)
+
+    c.toggleList("bullet")
+    expect(c.getMarkdown()).toBe("- one\n- two\n")
+    expect(c.state.doc.child(0).type.name).toBe("bullet_list")
+    c.state.doc.check()
   })
 
   it("wraps each selected paragraph in its own list item", () => {

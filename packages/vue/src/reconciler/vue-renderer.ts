@@ -79,6 +79,7 @@ const EVENT_TYPES = new Set([
   "compositionUpdate",
   "compositionEnd",
   "selectionChange",
+  "selectionDrag",
   "copy",
   "cut",
   "paste",

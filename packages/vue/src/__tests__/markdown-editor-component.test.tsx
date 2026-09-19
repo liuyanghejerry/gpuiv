@@ -101,11 +101,16 @@ describeNative("markdown-editor component", () => {
     expect(md()).toBe("- [x] done\n- [ ] todo\n")
     // First list_item sits at doc position 1.
     const check = app.renderer.findByTestId("md-check-1")
+    expect(check.style.alignItems).toBe("center")
+    expect(check.style.justifyContent).toBe("center")
+    const checkmark = app.renderer.findByText("✓")
+    expect(check.children).toContain(checkmark?.parentId)
     const bounds = app.renderer.getElementBounds(check.id)!
     app.renderer.nativeSimulateMouseDown(bounds.x + 8, bounds.y + 8, 0)
     app.renderer.nativeSimulateMouseUp(bounds.x + 8, bounds.y + 8, 0)
     await app.settle()
     expect(md()).toBe("- [ ] done\n- [ ] todo\n")
+    expect(app.renderer.findByText("✓")).toBeUndefined()
     app.unmount()
   })
 

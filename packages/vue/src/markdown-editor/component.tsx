@@ -65,12 +65,19 @@ const defaultTheme: MarkdownEditorTheme = {
 const HEADING_SCALE = [1.8, 1.45, 1.25, 1.1, 1.0, 1.0]
 const HEADING_WEIGHT = [700, 700, 650, 650, 600, 600]
 
-interface TextRow {
-  kind: "text"
+interface EditableRow {
   key: string
   pos: number
   text: string
   spans: MarkdownEditorSpan[]
+  /** Position of the enclosing list_item, task or not (⌘⇧9 target). */
+  itemPos?: number
+  checkbox?: { itemPos: number; checked: boolean }
+  decorations?: { start: number; end: number; color: string }[]
+}
+
+interface TextRow extends EditableRow {
+  kind: "text"
   fontSize: number
   fontWeight?: number
   mono?: boolean
@@ -78,11 +85,7 @@ interface TextRow {
   quote: boolean
   marker?: string
   markerWidth?: number
-  /** Position of the enclosing list_item, task or not (⌘⇧9 target). */
-  itemPos?: number
-  checkbox?: { itemPos: number; checked: boolean }
   align?: string
-  decorations?: { start: number; end: number; color: string }[]
 }
 
 interface SpacerRow {
@@ -95,7 +98,7 @@ interface SpacerRow {
   quote: boolean
 }
 
-interface TableCell {
+interface TableCell extends EditableRow {
   key: string
   pos: number
   text: string
@@ -111,6 +114,15 @@ interface TableRow {
 }
 
 type ViewRow = TextRow | SpacerRow | TableRow
+
+function editableRows(rows: readonly ViewRow[]): EditableRow[] {
+  const editable: EditableRow[] = []
+  for (const row of rows) {
+    if (row.kind === "text") editable.push(row)
+    else if (row.kind === "table") editable.push(...row.cells)
+  }
+  return editable
+}
 
 /**
  * Per-instance key allocation for block textareas.
@@ -482,16 +494,26 @@ export const MarkdownEditor = defineComponent({
     const revisions = new Map<string, number>()
     const selections = new Map<string, [number, number]>()
     const pendingSelectionProps = new Map<string, [number, number]>()
-    // Cross-block selection: the native caret IS the hit-test result — a
-    // shift-click moves it in the target block and selectionChange reports
-    // the offset, so no native position API is needed on the real renderer.
+    // Cross-block selection. `nativeKey` is the textarea that owns the real
+    // native range during a drag; its selection paint must not be duplicated
+    // by the document-level decorations.
     const docSelection = ref<
       | null
-      | { fromKey: string; fromPos: number; fromOffset: number; toKey: string; toPos: number; toOffset: number }
+      | {
+          fromKey: string
+          fromPos: number
+          fromOffset: number
+          toKey: string
+          toPos: number
+          toOffset: number
+          nativeKey?: string
+        }
     >(null)
     let pendingExtend: { key: string; offset: number } | null = null
     let focusedKey: string | null = null
     let prevFocusedKey: string | null = null
+    let suppressDragReleaseClick = false
+    let dragReleaseTimer: ReturnType<typeof setTimeout> | null = null
     const flashKey = ref<string | null>(null)
     let flashTimer: ReturnType<typeof setTimeout> | null = null
     const sourceText = ref(props.source)
@@ -523,6 +545,7 @@ export const MarkdownEditor = defineComponent({
     })
     onUnmounted(() => {
       if (flashTimer) clearTimeout(flashTimer)
+      if (dragReleaseTimer) clearTimeout(dragReleaseTimer)
     })
 
     /** Every case-insensitive match of searchQuery, in document order.
@@ -543,8 +566,7 @@ export const MarkdownEditor = defineComponent({
         out,
       )
       const matches: SearchMatch[] = []
-      for (const row of out) {
-        if (row.kind !== "text") continue
+      for (const row of editableRows(out)) {
         const lower = row.text.toLowerCase()
         let at = lower.indexOf(needle)
         while (at !== -1) {
@@ -575,11 +597,13 @@ export const MarkdownEditor = defineComponent({
       // One order list per render for the cross-block selection decoration,
       // not one re-walk per row.
       const sel = docSelection.value
-      const order = sel ? out.map((row) => row.key) : null
-      const fromIndex = sel && order ? order.indexOf(sel.fromKey) : -1
-      const toIndex = sel && order ? order.indexOf(sel.toKey) : -1
-      for (const row of out) {
-        if (row.kind !== "text") continue
+      const editable = editableRows(out)
+      const liveKeys = new Set(editable.map((row) => row.key))
+      const order = sel ? editable.map((row) => row.key) : null
+      const orderIndex = order ? new Map(order.map((key, index) => [key, index])) : null
+      const fromIndex = sel && orderIndex ? (orderIndex.get(sel.fromKey) ?? -1) : -1
+      const toIndex = sel && orderIndex ? (orderIndex.get(sel.toKey) ?? -1) : -1
+      for (const row of editable) {
         keyPositions.set(row.key, row.pos)
         blockTexts.set(row.key, row.text)
         const known = nativeTexts.get(row.key)
@@ -600,9 +624,9 @@ export const MarkdownEditor = defineComponent({
                 : "rgba(255, 214, 0, 0.35)",
           }))
         }
-        if (sel && order && fromIndex !== -1 && toIndex !== -1) {
-          const index = order.indexOf(row.key)
-          if (index >= fromIndex && index <= toIndex) {
+        if (sel && orderIndex && fromIndex !== -1 && toIndex !== -1) {
+          const index = orderIndex.get(row.key) ?? -1
+          if (index >= fromIndex && index <= toIndex && row.key !== sel.nativeKey) {
             const start = index === fromIndex ? sel.fromOffset : 0
             const end = index === toIndex ? sel.toOffset : row.text.length
             if (end > start) {
@@ -612,6 +636,14 @@ export const MarkdownEditor = defineComponent({
               ]
             }
           }
+        }
+      }
+      // Split/join-heavy sessions mint new identity keys. Keep the per-block
+      // mirrors bounded to the current document instead of retaining every
+      // deleted block for the lifetime of the component.
+      for (const map of [blockTexts, nativeTexts, revisions, selections, pendingSelectionProps]) {
+        for (const key of map.keys()) {
+          if (!liveKeys.has(key)) map.delete(key)
         }
       }
       return out
@@ -654,7 +686,7 @@ export const MarkdownEditor = defineComponent({
       focusBlock(key, caret)
     }
 
-    const onBlockChange = (row: TextRow) => (event: { value?: string | null }) => {
+    const onBlockChange = (row: EditableRow) => (event: { value?: string | null }) => {
       const prev = blockTexts.get(row.key) ?? row.text
       const next = event.value ?? ""
       blockTexts.set(row.key, next)
@@ -670,14 +702,16 @@ export const MarkdownEditor = defineComponent({
       if (newPos !== null) focusDocPosition(newPos + 1)
     }
 
-    const onBlockKeyDown = (row: TextRow) => (event: { key?: string; modifiers?: Record<string, boolean> }) => {
+    const onBlockKeyDown =
+      (row: EditableRow, allowBlockCommands = true) =>
+      (event: { key?: string; modifiers?: Record<string, boolean> }) => {
       const key = event.key ?? ""
       const mods = event.modifiers ?? {}
       const selection = selections.get(row.key) ?? [row.text.length, row.text.length]
       const [anchor, head] = selection
       const contentStart = row.pos + 1
       if (mods.cmd || mods.ctrl) {
-        if (key === "enter") {
+        if (allowBlockCommands && key === "enter") {
           if (row.checkbox) {
             core.toggleTaskItemAt(row.checkbox.itemPos)
             touch()
@@ -686,7 +720,7 @@ export const MarkdownEditor = defineComponent({
         }
         // milkdown list keys: cmd-shift-7 ordered, cmd-shift-8 bullet,
         // cmd-shift-9 task (plain items become checked tasks).
-        if (mods.shift && (key === "7" || key === "8" || key === "9")) {
+        if (allowBlockCommands && mods.shift && (key === "7" || key === "8" || key === "9")) {
           if (anchor === head) core.setSelection(contentStart + head)
           else core.setSelection(contentStart + anchor, contentStart + head)
           if (key === "8") core.toggleList("bullet")
@@ -744,7 +778,7 @@ export const MarkdownEditor = defineComponent({
     }
 
     const onBlockSelectionChange =
-      (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+      (row: EditableRow) => (event: { startIndex?: number; endIndex?: number }) => {
         const anchor = event.startIndex ?? 0
         const head = event.endIndex ?? anchor
         selections.set(row.key, [anchor, head])
@@ -763,6 +797,7 @@ export const MarkdownEditor = defineComponent({
     const setDocSelection = (
       from: { key: string; offset: number },
       to: { key: string; offset: number },
+      nativeKey?: string,
     ) => {
       const order = rowOrder()
       const fromIndex = order.indexOf(from.key)
@@ -785,21 +820,103 @@ export const MarkdownEditor = defineComponent({
         toKey: end.key,
         toPos: end.pos,
         toOffset: end.offset,
+        nativeKey,
       }
       version.value++
     }
 
-    const rowOrder = (): string[] => lastRows.map((row) => row.key)
+    const rowOrder = (): string[] => editableRows(lastRows).map((row) => row.key)
 
     const rowPosOf = (key: string): number => keyPositions.get(key) ?? 0
 
     const caretOf = (key: string): number => selections.get(key)?.[1] ?? blockTexts.get(key)?.length ?? 0
 
+    /** Resolve a window-space drag point to the nearest live editor and its
+     *  exact native UTF-16 offset. Nearest-rect behavior bridges the gaps
+     *  between Markdown blocks and disambiguates table cells by x. */
+    const editableAtPoint = (
+      x: number,
+      y: number,
+    ): { key: string; offset: number } | null => {
+      const renderer = getRenderer()
+      if (!renderer) return null
+      const candidates = editableRows(lastRows).flatMap((row) => {
+        const id = hostIds.get(row.key)
+        return id === undefined ? [] : [{ key: row.key, id }]
+      })
+      if (renderer.getInputTextHit) {
+        const [hitId, offset] = renderer.getInputTextHit(
+          candidates.map((candidate) => candidate.id),
+          x,
+          y,
+        )
+        const hit = candidates.find((candidate) => candidate.id === hitId)
+        return hit && offset >= 0 ? { key: hit.key, offset } : null
+      }
+      // Compatibility fallback for custom renderers that implement the two
+      // older measurement calls but not the batched native hit-test.
+      if (!renderer.getElementBounds || !renderer.getInputTextOffset) return null
+      let best: { key: string; id: number; score: number } | null = null
+      for (const candidate of candidates) {
+        const { id, key } = candidate
+        const bounds = renderer.getElementBounds(id)
+        if (!bounds) continue
+        const dx =
+          x < bounds.x
+            ? bounds.x - x
+            : x > bounds.x + bounds.width
+              ? x - bounds.x - bounds.width
+              : 0
+        const dy =
+          y < bounds.y
+            ? bounds.y - y
+            : y > bounds.y + bounds.height
+              ? y - bounds.y - bounds.height
+              : 0
+        const score = dx * dx + dy * dy
+        if (!best || score < best.score) best = { key, id, score }
+      }
+      if (!best) return null
+      const offset = renderer.getInputTextOffset(best.id, x, y)
+      return offset >= 0 ? { key: best.key, offset } : null
+    }
+
+    const onBlockSelectionDrag =
+      (row: EditableRow) =>
+      (event: { x?: number; y?: number; value?: string; startIndex?: number; endIndex?: number }) => {
+        if (event.value === "end") {
+          suppressDragReleaseClick = docSelection.value?.nativeKey === row.key
+          if (dragReleaseTimer) clearTimeout(dragReleaseTimer)
+          dragReleaseTimer = setTimeout(() => {
+            suppressDragReleaseClick = false
+            dragReleaseTimer = null
+          }, 0)
+          return
+        }
+        if (event.x === undefined || event.y === undefined) return
+        const hit = editableAtPoint(event.x, event.y)
+        if (!hit) return
+        if (hit.key === row.key) {
+          if (docSelection.value) {
+            docSelection.value = null
+            version.value++
+          }
+          return
+        }
+        const anchor = event.startIndex ?? selections.get(row.key)?.[0] ?? 0
+        setDocSelection({ key: row.key, offset: anchor }, hit, row.key)
+      }
+
     // Editor mouse events do not bubble past the native element, but `click`
     // carries modifiers — shift-click on another block extends the selection
-    // from the previously focused block's caret. (True drag-extension would
-    // need native mouse-move emission during a captured press.)
+    // from the previously focused block's caret.
     const onBlockClick = (row: TextRow) => (event: { modifiers?: Record<string, boolean> }) => {
+      if (suppressDragReleaseClick) {
+        suppressDragReleaseClick = false
+        if (dragReleaseTimer) clearTimeout(dragReleaseTimer)
+        dragReleaseTimer = null
+        return
+      }
       const mods = event.modifiers ?? {}
       const anchorKey = focusedKey !== row.key ? focusedKey : prevFocusedKey
       if (mods.shift && anchorKey && anchorKey !== row.key) {
@@ -824,6 +941,26 @@ export const MarkdownEditor = defineComponent({
       const slice = core.state.doc.slice(from, to)
       const wrapped = editorSchema.topNodeType.createAndFill(null, slice.content)
       return wrapped ? serializeMarkdown(wrapped, core.getMarkerStyle()) : null
+    }
+
+    /** Serialize a native selection from one editable block. The native
+     *  textarea only knows its flattened text, so copying it directly would
+     *  silently turn `**bold**`, links, and inline code into plain text. */
+    const serializeBlockSelection = (row: EditableRow, start: number, end: number): string | null => {
+      if (end <= start) return null
+      const node = core.state.doc.nodeAt(row.pos)
+      if (!node?.isTextblock) return null
+      const from = Math.max(0, Math.min(start, node.content.size))
+      const to = Math.max(from, Math.min(end, node.content.size))
+      if (to <= from) return null
+      const selected = node.cut(from, to)
+      // Table cells are textblocks but not top-level `block` nodes. Copy their
+      // inline content through a paragraph while retaining every mark.
+      const block = selected.type.isInGroup("block")
+        ? selected
+        : editorSchema.nodes.paragraph.create(null, selected.content)
+      const doc = editorSchema.topNodeType.create(null, block)
+      return serializeMarkdown(doc, core.getMarkerStyle()).replace(/\n$/, "")
     }
 
     /** Delete the cross-block selection through the model. Returns the doc
@@ -859,7 +996,7 @@ export const MarkdownEditor = defineComponent({
     }
 
     const copyBlockSelection = (
-      row: TextRow,
+      row: EditableRow,
       event?: { startIndex?: number; endIndex?: number },
     ): void => {
       const renderer = getRenderer()
@@ -871,12 +1008,15 @@ export const MarkdownEditor = defineComponent({
       }
       const [start, end] = selectionRangeOf(row.key, event)
       if (end > start) {
-        renderer.writeClipboardText((blockTexts.get(row.key) ?? row.text).slice(start, end))
+        const markdown = serializeBlockSelection(row, start, end)
+        renderer.writeClipboardText(
+          markdown ?? (blockTexts.get(row.key) ?? row.text).slice(start, end),
+        )
       }
     }
 
     const cutBlockSelection = (
-      row: TextRow,
+      row: EditableRow,
       event?: { startIndex?: number; endIndex?: number },
     ): void => {
       const renderer = getRenderer()
@@ -892,7 +1032,7 @@ export const MarkdownEditor = defineComponent({
       const [start, end] = selectionRangeOf(row.key, event)
       if (end <= start) return
       const text = blockTexts.get(row.key) ?? row.text
-      renderer.writeClipboardText(text.slice(start, end))
+      renderer.writeClipboardText(serializeBlockSelection(row, start, end) ?? text.slice(start, end))
       // Native does not delete under interceptClipboard — the component owns it.
       core.editBlock(row.pos, text, text.slice(0, start) + text.slice(end))
       selections.set(row.key, [start, start])
@@ -900,15 +1040,15 @@ export const MarkdownEditor = defineComponent({
       touch()
     }
 
-    const onBlockCopy = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+    const onBlockCopy = (row: EditableRow) => (event: { startIndex?: number; endIndex?: number }) => {
       copyBlockSelection(row, event)
     }
 
-    const onBlockCut = (row: TextRow) => (event: { startIndex?: number; endIndex?: number }) => {
+    const onBlockCut = (row: EditableRow) => (event: { startIndex?: number; endIndex?: number }) => {
       cutBlockSelection(row, event)
     }
 
-    const onBlockPaste = (row: TextRow, inTable = false) => (event: { value?: string | null }) => {
+    const onBlockPaste = (row: EditableRow, inTable = false) => (event: { value?: string | null }) => {
       const text = event.value ?? ""
       if (!text) return
       let prev = blockTexts.get(row.key) ?? row.text
@@ -1017,7 +1157,7 @@ export const MarkdownEditor = defineComponent({
       return pending ?? undefined
     }
 
-    const onBlockContextMenu = (row: TextRow) => (event: { x?: number; y?: number }) => {
+    const onBlockContextMenu = (row: EditableRow) => (event: { x?: number; y?: number }) => {
       // Opening the menu must not clear an active docSelection: the native
       // right-button press only moved the element caret, and the menu's
       // Copy/Cut read the cross-block selection first.
@@ -1028,11 +1168,14 @@ export const MarkdownEditor = defineComponent({
       contextMenu.value = { x: event.x ?? 0, y: event.y ?? 0, key: null }
     }
 
-    /** The current TextRow for a key — rows from the render where the menu
+    /** The current editable row for a key — rows from the render where the menu
      *  opened can be stale by the time an action runs. */
-    const rowForKey = (key: string): TextRow | null => {
-      const row = lastRows.find((candidate) => candidate.kind === "text" && candidate.key === key)
-      return row && row.kind === "text" ? row : null
+    const rowForKey = (key: string): EditableRow | null =>
+      editableRows(lastRows).find((row) => row.key === key) ?? null
+
+    const orderedSourceSelection = (): [number, number] => {
+      const [anchor, head] = sourceSelection
+      return [Math.min(anchor, head), Math.max(anchor, head)]
     }
 
     type MenuTarget = { x: number; y: number; key: string | null }
@@ -1040,7 +1183,7 @@ export const MarkdownEditor = defineComponent({
     const menuCopy = (menu: MenuTarget) => {
       const renderer = getRenderer()
       if (menu.key === null) {
-        const [start, end] = sourceSelection
+        const [start, end] = orderedSourceSelection()
         const text = sourceText.value
         if (end > start) renderer?.writeClipboardText?.(text.slice(start, end))
         return
@@ -1052,7 +1195,7 @@ export const MarkdownEditor = defineComponent({
     const menuCut = (menu: MenuTarget) => {
       const renderer = getRenderer()
       if (menu.key === null) {
-        const [start, end] = sourceSelection
+        const [start, end] = orderedSourceSelection()
         const text = sourceText.value
         if (end <= start) return
         renderer?.writeClipboardText?.(text.slice(start, end))
@@ -1071,7 +1214,7 @@ export const MarkdownEditor = defineComponent({
       const text = renderer?.readClipboardText?.()
       if (!text) return
       if (menu.key === null) {
-        const [start, end] = sourceSelection
+        const [start, end] = orderedSourceSelection()
         const prev = sourceText.value
         sourceText.value = prev.slice(0, start) + text + prev.slice(end)
         const after = start + text.length
@@ -1193,12 +1336,16 @@ export const MarkdownEditor = defineComponent({
       },
     )
 
-    watch(searchMatches, (matches) => {
-      if (matches.length !== lastMatchCount) {
-        lastMatchCount = matches.length
-        emit("searchMatches", matches.length)
-      }
-    })
+    watch(
+      searchMatches,
+      (matches) => {
+        if (matches.length !== lastMatchCount) {
+          lastMatchCount = matches.length
+          emit("searchMatches", matches.length)
+        }
+      },
+      { immediate: true },
+    )
 
     const jumpToHeading = (text: string): boolean => {
       let foundPos: number | null = null
@@ -1240,11 +1387,12 @@ export const MarkdownEditor = defineComponent({
 
     // Source mode fills the visible column: a full-height flex column root
     // with the textarea growing into it, so a short document no longer
-    // leaves a small strip. The viewportHeight path is unchanged — the root
-    // stays a fixed-height scroll container.
+    // leaves a small strip and a long document scrolls as one surface.
     const sourceRootStyle = () => ({
       width: "100%",
-      height: props.viewportHeight > 0 ? props.viewportHeight : "100%",
+      height: props.viewportHeight > 0 ? props.viewportHeight : undefined,
+      minHeight: props.viewportHeight > 0 ? 0 : "100%",
+      flexGrow: 1,
       overflow: props.viewportHeight > 0 ? ("scroll" as const) : undefined,
       display: "flex",
       flexDirection: "column" as const,
@@ -1257,12 +1405,7 @@ export const MarkdownEditor = defineComponent({
      *  scroll offset, which is negative when scrolled down. */
     const menuPosition = (x: number, y: number): { left: number; top: number } => {
       const renderer = getRenderer()
-      // getElementBounds is not part of the NativeRenderer interface (the
-      // production napi renderer and the test renderer both implement it).
-      const querier = renderer as unknown as {
-        getElementBounds?: (id: number) => { x: number; y: number } | null
-      } | null
-      const bounds = rootId.value != null ? querier?.getElementBounds?.(rootId.value) : null
+      const bounds = rootId.value != null ? renderer?.getElementBounds?.(rootId.value) : null
       if (!bounds) return { left: x, top: y }
       let top = y - bounds.y
       const id = rootId.value
@@ -1349,6 +1492,10 @@ export const MarkdownEditor = defineComponent({
             testId: "md-source",
             value: sourceText.value,
             minRows: 4,
+            // Disable the native textarea's default 10-row clamp. The source
+            // editor grows to its complete wrapped content; the one outer
+            // scroll container owns scrolling for the whole document.
+            maxRows: Math.max(4, sourceText.value.length + 1),
             selection: consumeSourceSelection(),
             onChange: (event: { value?: string | null }) => {
               sourceText.value = event.value ?? ""
@@ -1364,6 +1511,7 @@ export const MarkdownEditor = defineComponent({
               // Grow into the full-height column; long content keeps its
               // measured height and overflows into the outer scroller.
               flexGrow: 1,
+              flexShrink: 0,
               fontFamily: theme.monoFont,
               fontSize: 13,
               // Native lineHeight is absolute pixels, not a font-size factor.
@@ -1440,6 +1588,8 @@ export const MarkdownEditor = defineComponent({
                         value: cell.text,
                         valueRevision: revisions.get(cell.key) ?? 0,
                         spans: cell.spans,
+                        decorations: cell.decorations,
+                        selection: consumePendingSelection(cell.key),
                         minRows: 1,
                         style: {
                           width: "100%",
@@ -1451,8 +1601,17 @@ export const MarkdownEditor = defineComponent({
                           // font-size factor — same treatment as text rows.
                           lineHeight: Math.round(theme.fontSize * 1.7),
                         },
-                        onChange: onBlockChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: theme.fontSize, indent: 0, quote: false, align: cell.alignment || "left" }),
-                        onSelectionChange: onBlockSelectionChange({ kind: "text", key: cell.key, pos: cell.pos, text: cell.text, spans: cell.spans, fontSize: theme.fontSize, indent: 0, quote: false }),
+                        onChange: onBlockChange(cell),
+                        onKeyDown: onBlockKeyDown(cell, false),
+                        onSelectionChange: onBlockSelectionChange(cell),
+                        onSelectionDrag: onBlockSelectionDrag(cell),
+                        interceptClipboard: true,
+                        onCopy: onBlockCopy(cell),
+                        onCut: onBlockCut(cell),
+                        onPaste: onBlockPaste(cell, true),
+                        onUndo: onBlockUndo,
+                        onRedo: onBlockRedo,
+                        onContextMenu: onBlockContextMenu(cell),
                       }),
                     ],
                   ),
@@ -1476,6 +1635,7 @@ export const MarkdownEditor = defineComponent({
             onChange: onBlockChange(row),
             onKeyDown: onBlockKeyDown(row),
             onSelectionChange: onBlockSelectionChange(row),
+            onSelectionDrag: onBlockSelectionDrag(row),
             onBackspaceStart: onBlockBackspaceStart(row),
             interceptClipboard: true,
             onClick: onBlockClick(row),
@@ -1500,21 +1660,43 @@ export const MarkdownEditor = defineComponent({
           const lineChildren: ReturnType<typeof h>[] = []
           if (row.checkbox) {
             lineChildren.push(
-              h("div", {
-                key: `${row.key}-check`,
-                testId: `md-check-${row.checkbox.itemPos}`,
-                onClick: () => toggleTask(row.checkbox!.itemPos),
-                style: {
-                  width: 16,
-                  height: 16,
-                  marginTop: 4,
-                  marginRight: 6,
-                  borderWidth: 1,
-                  borderColor: row.checkbox.checked ? theme.accent : "#777",
-                  backgroundColor: row.checkbox.checked ? theme.accent : undefined,
-                  borderRadius: 3,
+              h(
+                "div",
+                {
+                  key: `${row.key}-check`,
+                  testId: `md-check-${row.checkbox.itemPos}`,
+                  onClick: () => toggleTask(row.checkbox!.itemPos),
+                  style: {
+                    width: 16,
+                    height: 16,
+                    marginTop: 4,
+                    marginRight: 6,
+                    borderWidth: 1,
+                    borderColor: row.checkbox.checked ? theme.accent : "#777",
+                    backgroundColor: row.checkbox.checked ? theme.accent : undefined,
+                    borderRadius: 3,
+                    alignItems: "center",
+                    justifyContent: "center",
+                  },
                 },
-              }),
+                row.checkbox.checked
+                  ? () => [
+                      h(
+                        "text",
+                        {
+                          key: `${row.key}-checkmark`,
+                          style: {
+                            color: "#ffffff",
+                            fontSize: 11,
+                            fontWeight: 700,
+                            lineHeight: 12,
+                          },
+                        },
+                        () => ["✓"],
+                      ),
+                    ]
+                  : undefined,
+              ),
             )
           } else if (row.marker) {
             lineChildren.push(

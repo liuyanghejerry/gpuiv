@@ -60,7 +60,7 @@ bun scripts/dev.ts --shots                 # 有截图项时
 
 ### M1 — 编辑核心（PM state/commands，纯 JS，`packages/vue/src/markdown-editor/state.ts`）
 
-> 已完成。验证：`src/__tests__/markdown-editor-state.test.ts`（59 项）。实现记录：
+> 已完成。验证：`src/__tests__/markdown-editor-state.test.ts`（61 项）。实现记录：
 > `MarkdownEditorCore` 是 headless 控制器（无 prosemirror-view）；input rule 处理函数
 > 按 prosemirror-inputrules 的规范坐标顺序写（wrap 类规则**先 delete 再在 `tr.doc`
 > 里 resolve blockRange**，`findWrapping` 不传第 4 参——list_item 由内部推导）；
@@ -111,13 +111,12 @@ bun scripts/dev.ts --shots                 # 有截图项时
 - [x] M2.2 候选窗跟随光标（`bounds_for_range` 走 point_for_index，多 run 下不变；
       由 preedit 渲染测试与几何路径不变性覆盖，OS 候选窗本身无法自动化断言）
 - [x] M2.3 文本测量 + 命中测试 napi API（`getInputTextPosition`/`getInputTextOffset`
-      test renderer napi；跨块选区最终经"原生 caret 即命中结果"路线无需真实渲染器
-      版本，测量 API 供测试与覆盖层对齐用）
+      test renderer napi；production/test/web 共享 `getInputTextHit(ids, x, y)` 批量命中，
+      一次 UI 线程往返返回最近输入块与 UTF-16 偏移）
 - [x] M2.4 装饰下发通道（`decorations` prop → 分行 quad）
-- [x] M2.5 跨块选区（shift-点击扩展：原生 caret 即命中测试结果——selectionChange
-      上报新块内偏移，无需在真实渲染器上暴露测量 API；选区按块渲染 selection 色
-      decorations。**降级项**：拖拽跨块扩展需原生在被捕获按压期间外发 mouse-move，
-      记为后续原生增强；块内拖拽选择原生可用）
+- [x] M2.5 跨块选区（shift-点击扩展 + 原生 `selectionDrag` 连续拖选；按压输入框保留
+      native selection，中间与目标块用 selection 色 decorations；复制/剪切统一序列化
+      PM slice，保留 Markdown 结构）
 - [x]（M2 附注，2026-09-18 review 查明根因）曾记录为"测量元素在 flex 行内高度
       塌陷（gpuiv/Taffy 交互）且连带点击 hit-test 失效，根因留给原生布局层"——
       真因是组件把 CSS 乘数 lineHeight（1.45/1.7）传给像素契约的原生 API
@@ -225,7 +224,7 @@ split/join/insertMarkdownAt/toggleTaskItemAt）补齐直接单测。
 
 遗留限制（记录在案）：居中/右对齐单元格内 caret 与点击命中仍按未对齐坐标计算
 （GPUI 仅绘制期对齐，命中侧镜像需自实现 `aligned_origin_x`）；`toggleList` 解包
-丢弃任务 checked 态；拖拽跨块选区仍需原生捕获按压期外发 mouse-move（M2.5 降级项）。
+丢弃任务 checked 态。
 
 ## 验收修正轮（2026-09-18，手工验收 → 修复）
 
@@ -239,15 +238,29 @@ split/join/insertMarkdownAt/toggleTaskItemAt）补齐直接单测。
 3. **搜索框输入第一个字符焦点即被正文抢走**：`(searchQuery, searchActiveIndex)`
    watch 改为只在「query 不变、activeIndex 变化」（纯 next/prev 导航）时聚焦。
 4. **源码模式高度不填满**：源码分支根改为全高 flex 列 + textarea `flexGrow: 1`
-   （短文档填满可视列，长文档维持 maxRows 钳制 + 内部滚动）。
+   （短文档填满可视列，长文档交给外层文档滚动面）。
 5. **⌘A 无法全选文档、无右键菜单**：原生新增 `selectAll` 事件（宿主注册即接管，
    跳过原生块内全选）与 `contextMenu` 事件（右击释放时发，带窗口坐标；右击按下
    即聚焦、空选区落 caret、有选区则保留）。组件侧 ⌘A = 全文 docSelection（单块
    文档退化为块内全选，单元格与源码 textarea 保持原生语义）；内建右键菜单
    Copy/Cut/Paste/Select All，WYSIWYG 走 PM 管线、源码模式走 sourceText 剪贴。
 
-遗留限制不变（居中/右对齐格内 caret 命中仍按未对齐坐标；toggleList 解包丢任务态；
-拖拽跨块选区待原生增强）。
+遗留限制不变（居中/右对齐格内 caret 命中仍按未对齐坐标；toggleList 解包丢任务态）。
+
+## 能力复审与优化（2026-09-19）
+
+针对完整交互链路补做复审并修复：单块 Copy/Cut 现在从 PM slice 序列化，不再把
+strong/em/link/code 等标记降级成纯文本；无序/有序列表切换改为原地转换最近列表，
+不再把新列表嵌进当前一项；表格单元格纳入 valueRevision、搜索装饰、PM 全局撤销、
+格式快捷键与 Markdown 剪贴板管线；源码模式右键菜单统一规范化反向选区。跨块选区
+装饰的逐行 `indexOf` 改为一次索引表（O(n²) → O(n)），并在每次渲染清理已删除块的
+镜像状态，避免长编辑会话持续累积。
+
+同日手工复验继续修复三项：原生 textarea 在按压拖动期间外发 `selectionDrag`，并用
+一次 `getInputTextHit(ids, x, y)` 原生命中查询把窗口坐标解析为目标块与 UTF-16 偏移，
+WYSIWYG 因而可连续拖选、复制和剪切跨块内容；caret 恢复 GPUI/Comet 的完整 shaped
+line box 高度；源码 textarea 移除默认 10 行上限，以 `min-height: 100%` 填满短文档，
+长文档按完整内容高度参与唯一的外层滚动面。
 
 ## 停止规则
 

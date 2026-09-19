@@ -228,9 +228,9 @@ pub trait CustomElement: 'static {
     /// Immutable event capability declaration for this adapter.
     fn supported_events(&self) -> &'static [&'static str];
 
-    /// The text-editor entity backing this element, when it is one. The
-    /// automation bridge drives IME composition through it; production
-    /// rendering never calls this.
+    /// The text-editor entity backing this element, when it is one. Automation
+    /// drives IME through it; the production renderer uses it for batched text
+    /// hit-testing during cross-block selection.
     fn editor_entity(
         &mut self,
     ) -> Option<gpui::Entity<crate::custom_elements::input::TextEditorState>> {

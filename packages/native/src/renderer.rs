@@ -503,6 +503,18 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<crate::automation::ElementBounds>>,
     },
+    GetInputTextOffset {
+        id: u64,
+        x: f32,
+        y: f32,
+        response: SyncSender<std::result::Result<Option<usize>, String>>,
+    },
+    GetInputTextHit {
+        ids: Vec<u64>,
+        x: f32,
+        y: f32,
+        response: SyncSender<Option<(u64, usize)>>,
+    },
     FocusElement(u64),
     SetPointerCapture(u64),
     ReleasePointerCapture,
@@ -782,6 +794,24 @@ async fn run_ui_commands(
                     });
                 })
             }
+            UiCommand::GetInputTextOffset { id, x, y, response } => {
+                window.update(cx, move |view, _window, cx| {
+                    let result = view
+                        .custom_registry
+                        .editor_entity(id)
+                        .ok_or_else(|| format!("element {id} is not a text editor"))
+                        .map(|entity| entity.read(cx).utf16_index_for_window_point(x, y));
+                    response.send(result).ok();
+                })
+            }
+            UiCommand::GetInputTextHit {
+                ids,
+                x,
+                y,
+                response,
+            } => window.update(cx, move |view, _window, cx| {
+                response.send(view.input_text_hit(&ids, x, y, cx)).ok();
+            }),
             UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
                 view.request_focus(id, window, cx);
                 window.refresh();
@@ -1179,6 +1209,64 @@ impl GpuixRenderer {
         )))]
         {
             let _ = id;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    fn input_text_offset(&self, id: u64, x: f32, y: f32) -> Result<Option<usize>> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| {
+            let entity = view
+                .custom_registry
+                .editor_entity(id)
+                .ok_or_else(|| Error::from_reason(format!("element {id} is not a text editor")))?;
+            Ok(entity.read(cx).utf16_index_for_window_point(x, y))
+        })?;
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetInputTextOffset { id, x, y, response })?;
+            return recv_ui_response(receiver, "the input text offset query")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (id, x, y);
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    fn input_text_hit(&self, ids: Vec<u64>, x: f32, y: f32) -> Result<Option<(u64, usize)>> {
+        #[cfg(target_os = "macos")]
+        return update_window(move |view, _window, cx| view.input_text_hit(&ids, x, y, cx));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetInputTextHit {
+                ids,
+                x,
+                y,
+                response,
+            })?;
+            return recv_ui_response(receiver, "the input text hit query");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (ids, x, y);
             Err(Error::from_reason("Unsupported operating system"))
         }
     }
@@ -3036,6 +3124,31 @@ impl GpuixRenderer {
         Ok(self.element_bounds(id)?.map(ElementBounds::from_painted))
     }
 
+    /// The closest UTF-16 offset in an input/textarea for a window-space
+    /// point. The point is clamped into the text; -1 means it has not laid out.
+    #[napi]
+    pub fn get_input_text_offset(&self, element_id: f64, x: f64, y: f64) -> Result<f64> {
+        let id = to_element_id(element_id)?;
+        Ok(self
+            .input_text_offset(id, x as f32, y as f32)?
+            .map(|index| f64::from(index as u32))
+            .unwrap_or(-1.0))
+    }
+
+    /// Return `[elementId, utf16Offset]` for the input nearest a window-space
+    /// point, or an empty array when none of the supplied inputs has painted.
+    #[napi]
+    pub fn get_input_text_hit(&self, element_ids: Vec<f64>, x: f64, y: f64) -> Result<Vec<f64>> {
+        let ids = element_ids
+            .into_iter()
+            .map(to_element_id)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(self
+            .input_text_hit(ids, x as f32, y as f32)?
+            .map(|(id, offset)| vec![id as f64, f64::from(offset as u32)])
+            .unwrap_or_default())
+    }
+
     #[napi]
     pub fn get_all_text(&self) -> Vec<String> {
         let tree = self.tree.lock().unwrap();
@@ -3902,6 +4015,47 @@ impl WebGpuixRenderer {
             return Ok(wasm_bindgen::JsValue::NULL);
         };
         element_bounds_js(bounds)
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getInputTextOffset)]
+    pub fn get_input_text_offset(
+        &self,
+        element_id: f64,
+        x: f64,
+        y: f64,
+    ) -> Result<f64, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let index = update_web_window(move |view, _window, cx| {
+            let entity = view.custom_registry.editor_entity(id).ok_or_else(|| {
+                wasm_bindgen::JsValue::from_str(&format!("element {id} is not a text editor"))
+            })?;
+            Ok::<_, wasm_bindgen::JsValue>(
+                entity
+                    .read(cx)
+                    .utf16_index_for_window_point(x as f32, y as f32),
+            )
+        })??;
+        Ok(index.map(|index| f64::from(index as u32)).unwrap_or(-1.0))
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getInputTextHit)]
+    pub fn get_input_text_hit(
+        &self,
+        element_ids: Vec<f64>,
+        x: f64,
+        y: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let ids = element_ids
+            .into_iter()
+            .map(web_element_id)
+            .collect::<Result<Vec<_>, _>>()?;
+        let hit = update_web_window(move |view, _window, cx| {
+            view.input_text_hit(&ids, x as f32, y as f32, cx)
+        })?;
+        Ok(match hit {
+            Some((id, offset)) => web_number_array([id as f64, f64::from(offset as u32)]),
+            None => web_number_array([]),
+        })
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getAllText)]
@@ -4949,6 +5103,35 @@ impl GpuixView {
         self.focus_handles.iter().find_map(|(id, handle)| {
             handle.is_focused(window).then_some(*id)
         })
+    }
+
+    /// Hit-test a window point against an ordered set of native inputs in one
+    /// UI-thread visit. The nearest painted rectangle wins, so gaps between
+    /// Markdown blocks extend naturally to their closest text row.
+    pub(crate) fn input_text_hit(
+        &mut self,
+        ids: &[u64],
+        x: f32,
+        y: f32,
+        cx: &gpui::App,
+    ) -> Option<(u64, usize)> {
+        let mut best: Option<(u64, usize, f32)> = None;
+        for id in ids {
+            let Some(entity) = self.custom_registry.editor_entity(*id) else {
+                continue;
+            };
+            let input = entity.read(cx);
+            let Some(score) = input.window_distance_squared(x, y) else {
+                continue;
+            };
+            let Some(offset) = input.utf16_index_for_window_point(x, y) else {
+                continue;
+            };
+            if best.is_none_or(|(_, _, best_score)| score < best_score) {
+                best = Some((*id, offset, score));
+            }
+        }
+        best.map(|(id, offset, _)| (id, offset))
     }
 
     fn descendant_ids(&self, ancestor: u64) -> HashSet<u64> {

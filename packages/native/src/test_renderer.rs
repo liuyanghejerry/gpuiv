@@ -1465,6 +1465,25 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// `[elementId, utf16Offset]` for the closest painted input among the
+    /// supplied candidates, or an empty array when none has laid out.
+    #[napi]
+    pub fn get_input_text_hit(&self, element_ids: Vec<f64>, x: f64, y: f64) -> Result<Vec<f64>> {
+        let ids = element_ids
+            .into_iter()
+            .map(to_element_id)
+            .collect::<Result<Vec<_>>>()?;
+        self.flush()?;
+        with_test_state(|cx, _window, view| {
+            let hit = view.update(cx, |view, cx| {
+                view.input_text_hit(&ids, x as f32, y as f32, cx)
+            });
+            Ok(hit
+                .map(|(id, offset)| vec![id as f64, f64::from(offset as u32)])
+                .unwrap_or_default())
+        })
+    }
+
     /// Where the `decorations` prop of an editor landed on screen (pixel
     /// rects), for asserting search-highlight geometry.
     #[napi]

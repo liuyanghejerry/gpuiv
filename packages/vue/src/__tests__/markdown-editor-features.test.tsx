@@ -73,6 +73,25 @@ describeNative("markdown-editor footnotes / search / source mode", () => {
     app.unmount()
   })
 
+  it("reports an initial query and finds matches inside table cells", async () => {
+    const { app, matches } = editorApp({
+      source: "| Name | Value |\n| --- | --- |\n| needle | haystack |\n",
+      query: "needle",
+    })
+    await app.settle()
+    expect(matches.value).toBe(1)
+    const cell = app.renderer
+      .findByType("textarea")
+      .find(
+        (element) =>
+          element.testId?.startsWith("md-cell-") &&
+          app.renderer.getPaintedInputRuns(element.id).some((run) => run.text.includes("needle")),
+      )
+    expect(cell).toBeTruthy()
+    expect(app.renderer.getInputDecorations(cell!.id)).toHaveLength(1)
+    app.unmount()
+  })
+
   it("focuses the active match block and selects it", async () => {
     const { app, state } = editorApp({ source: "hello world\n\nsay hello again\n" })
     await app.settle()
@@ -167,6 +186,30 @@ describeNative("markdown-editor footnotes / search / source mode", () => {
     // The column's visible height is 500 - 2*8 padding = 484. A minRows-only
     // strip would be 4 * 21 = 84.
     expect(bounds.height).toBeGreaterThanOrEqual(480)
+    app.unmount()
+  })
+
+  it("source mode gives long documents a full-height outer scroll surface", async () => {
+    const sourceText = Array.from({ length: 40 }, (_, index) => `line ${index}`).join("\n")
+    const App = defineComponent({
+      setup() {
+        return () =>
+          h(
+            "div",
+            { testId: "source-host", style: { width: 600, height: 500, minHeight: 0, overflow: "scroll" } },
+            () => [h(MarkdownEditor, { source: sourceText, mode: "source" })],
+          )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    const source = app.renderer.findByTestId("md-source")
+    const bounds = app.renderer.getElementBounds(source.id)!
+    expect(bounds.height).toBeGreaterThanOrEqual(40 * 21)
+
+    const sourceHost = app.renderer.findByTestId("source-host")
+    app.renderer.scrollTo(sourceHost.id, 0, -1e9)
+    expect(app.renderer.getScrollOffset(sourceHost.id)?.[1]).toBeLessThan(0)
     app.unmount()
   })
 
@@ -325,6 +368,34 @@ describeNative("markdown-editor cross-block selection / clipboard / anchors", ()
     app.unmount()
   })
 
+  it("drag-selects continuously across Markdown blocks", async () => {
+    const { app } = selApp("first block\n\nsecond block\n\nthird block\n")
+    await app.settle()
+    const blocks = app.renderer.findByType("textarea")
+    const [fromX, fromY] = app.renderer.getInputTextPosition(blocks[0].id, 2)
+    const [toX, toY] = app.renderer.getInputTextPosition(blocks[2].id, 4)
+
+    app.renderer.nativeSimulateMouseDown(fromX, fromY + 2, 0)
+    app.renderer.nativeSimulateMouseMove(toX, toY + 2, 0)
+    await app.settle()
+    app.renderer.nativeSimulateMouseUp(toX, toY + 2, 0)
+    await app.settle()
+    await app.settle()
+
+    const middle = app.renderer.getInputDecorations(blocks[1].id)
+    const target = app.renderer.getInputDecorations(blocks[2].id)
+    expect(middle.some((range) => range.start === 0 && range.end === "second block".length)).toBe(true)
+    expect(target.some((range) => range.start === 0 && range.end === 4)).toBe(true)
+
+    app.renderer.writeClipboardText("")
+    app.renderer.nativeSimulateKeystrokes(blocks[0].id, "cmd-c")
+    await app.settle()
+    expect(app.renderer.readClipboardText()).toContain("rst block")
+    expect(app.renderer.readClipboardText()).toContain("second block")
+    expect(app.renderer.readClipboardText()).toContain("thir")
+    app.unmount()
+  })
+
   it("cmd-c serializes a cross-block selection as markdown", async () => {
     const { app } = selApp("first block\n\nsecond *block*\n")
     await app.settle()
@@ -344,6 +415,60 @@ describeNative("markdown-editor cross-block selection / clipboard / anchors", ()
     const copied = app.renderer.readClipboardText()
     expect(copied).toContain("first block")
     expect(copied).toContain("second *block*")
+    app.unmount()
+  })
+
+  it("cmd-c preserves markdown marks in a single block", async () => {
+    const { app } = selApp("**bold**\n")
+    await app.settle()
+    const block = app.renderer.findByTestId("md-b0")
+    app.renderer.nativeSimulateKeystrokes(block.id, "cmd-a")
+    await app.settle()
+    app.renderer.writeClipboardText("")
+    app.renderer.nativeSimulateKeystrokes(block.id, "cmd-c")
+    await app.settle()
+    expect(app.renderer.readClipboardText()).toBe("**bold**")
+    app.unmount()
+  })
+
+  it("table cells use the document-wide undo history", async () => {
+    const { app, editor } = selApp("| A | B |\n| --- | --- |\n| cell | value |\n\nend\n")
+    await app.settle()
+    const cells = app.renderer
+      .findByType("textarea")
+      .filter((element) => element.testId?.startsWith("md-cell-"))
+    const paragraph = app.renderer
+      .findByType("textarea")
+      .find((element) => !element.testId?.startsWith("md-cell-"))!
+
+    app.renderer.nativeSimulateKeystrokes(cells[2].id, "end x")
+    await app.settle()
+    app.renderer.nativeSimulateKeystrokes(paragraph.id, "end y")
+    await app.settle()
+    expect(editor.getMarkdown()).toContain("cellx")
+    expect(editor.getMarkdown()).toContain("endy")
+
+    // Undo is global: even when invoked from the cell, the latest paragraph
+    // edit is reverted before the older cell edit.
+    app.renderer.nativeSimulateKeystrokes(cells[2].id, "cmd-z")
+    await app.settle()
+    expect(editor.getMarkdown()).toContain("cellx")
+    expect(editor.getMarkdown()).not.toContain("endy")
+    app.unmount()
+  })
+
+  it("cmd-c preserves inline markdown selected in a table cell", async () => {
+    const { app } = selApp("| **bold** |\n| --- |\n| value |\n")
+    await app.settle()
+    const cell = app.renderer
+      .findByType("textarea")
+      .find((element) => element.testId?.startsWith("md-cell-"))!
+    app.renderer.nativeSimulateKeystrokes(cell.id, "cmd-a")
+    await app.settle()
+    app.renderer.writeClipboardText("")
+    app.renderer.nativeSimulateKeystrokes(cell.id, "cmd-c")
+    await app.settle()
+    expect(app.renderer.readClipboardText()).toBe("**bold**")
     app.unmount()
   })
 
@@ -622,6 +747,26 @@ describeNative("markdown-editor cross-block selection / clipboard / anchors", ()
     app.renderer.nativeSimulateKeystrokes(source.id, "x")
     await app.settle()
     expect(md()).toBe("x")
+    app.unmount()
+  })
+
+  it("source context-menu Copy handles a backwards selection", async () => {
+    const { app } = editorApp({ source: "hello world", mode: "source" })
+    await app.settle()
+    const source = app.renderer.findByTestId("md-source")
+    app.renderer.nativeSimulateKeystrokes(source.id, "home right right right right right shift-home")
+    await app.settle()
+    const [x, y] = app.renderer.getInputTextPosition(source.id, 2)
+    app.renderer.nativeSimulateMouseDown(x, y, 2)
+    app.renderer.nativeSimulateMouseUp(x, y, 2)
+    await app.settle()
+    const copy = app.renderer.findByTestId("md-menu-copy")!
+    const bounds = app.renderer.getElementBounds(copy.id)!
+    app.renderer.writeClipboardText("")
+    app.renderer.nativeSimulateMouseDown(bounds.x + 4, bounds.y + 4, 0)
+    app.renderer.nativeSimulateMouseUp(bounds.x + 4, bounds.y + 4, 0)
+    await app.settle()
+    expect(app.renderer.readClipboardText()).toBe("hello")
     app.unmount()
   })
 })

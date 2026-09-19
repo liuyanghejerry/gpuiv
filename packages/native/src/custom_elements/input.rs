@@ -71,7 +71,6 @@ const TEXTAREA_KEY_CONTEXT: &str = "GpuixTextarea";
 const TEXTAREA_SUBMIT_KEY_CONTEXT: &str = "GpuixTextareaSubmit";
 const CARET_BLINK_MS: u64 = 500;
 const CARET_WIDTH: Pixels = px(2.0);
-const CARET_HEIGHT_RATIO: f32 = 0.75;
 const DRAG_SCROLL_FRAME_MS: u64 = 16;
 const UNDO_COALESCE: Duration = Duration::from_millis(700);
 const UNDO_LIMIT: usize = 200;
@@ -80,16 +79,11 @@ fn caret_visible(ms_since_activity: u64) -> bool {
     (ms_since_activity / CARET_BLINK_MS) % 2 == 0
 }
 
-// Size the bar to cap height, not the line box. Default leading is phi, so a
-// full-height caret sticks out above and below the glyphs. Cap height is about
-// 0.75em; the em square itself still looks taller than the letters.
-fn caret_rect(origin: Point<Pixels>, line_height: Pixels, font_size: Pixels) -> Bounds<Pixels> {
-    let height = (font_size * CARET_HEIGHT_RATIO).min(line_height);
-    let y_offset = (line_height - height) / 2.;
-    Bounds::new(
-        point(origin.x, origin.y + y_offset),
-        size(CARET_WIDTH, height),
-    )
+// Match GPUI's input example and the Comet source this editor follows: the
+// caret occupies the shaped line box. A cap-height bar looked detached from
+// tall glyphs and was especially short in Markdown's generous line spacing.
+fn caret_rect(origin: Point<Pixels>, line_height: Pixels) -> Bounds<Pixels> {
+    Bounds::new(origin, size(CARET_WIDTH, line_height))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -319,6 +313,7 @@ impl CustomElement for TextEditorElement {
         let emits_redo = ctx.events.contains("redo");
         let emits_select_all = ctx.events.contains("selectAll");
         let emits_context_menu = ctx.events.contains("contextMenu");
+        let emits_selection_drag = ctx.events.contains("selectionDrag");
         let callback = ctx.event_callback.clone();
 
         let state = self
@@ -346,6 +341,7 @@ impl CustomElement for TextEditorElement {
                     emits_redo,
                     emits_select_all,
                     emits_context_menu,
+                    emits_selection_drag,
                     focus_handle: state_focus_handle,
                     content: value,
                     placeholder: placeholder.into(),
@@ -401,6 +397,7 @@ impl CustomElement for TextEditorElement {
             state.emits_redo = emits_redo;
             state.emits_select_all = emits_select_all;
             state.emits_context_menu = emits_context_menu;
+            state.emits_selection_drag = emits_selection_drag;
             if state.emits_submit != emits_submit {
                 state.emits_submit = emits_submit;
                 cx.notify();
@@ -589,7 +586,7 @@ impl CustomElement for TextEditorElement {
             "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
             "compositionStart", "compositionUpdate", "compositionEnd", "selectionChange",
             "copy", "cut", "paste", "backspaceStart", "undo", "redo", "selectAll",
-            "contextMenu",
+            "contextMenu", "selectionDrag",
         ]
     }
 
@@ -1185,6 +1182,7 @@ pub(crate) struct TextEditorState {
     emits_redo: bool,
     emits_select_all: bool,
     emits_context_menu: bool,
+    emits_selection_drag: bool,
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
@@ -1358,6 +1356,32 @@ impl TextEditorState {
     pub(crate) fn utf16_index_for_window_point(&self, x: f32, y: f32) -> Option<usize> {
         let index = self.index_for_mouse_position(point(px(x), px(y)));
         Some(self.offset_to_utf16(index))
+    }
+
+    /// Squared distance from a window-space point to the editor's painted
+    /// rectangle. Zero means the point is inside; callers use this to bridge
+    /// the visual gaps between adjacent Markdown blocks in one native query.
+    pub(crate) fn window_distance_squared(&self, x: f32, y: f32) -> Option<f32> {
+        let bounds = self.last_bounds?;
+        let left = f32::from(bounds.left());
+        let top = f32::from(bounds.top());
+        let right = f32::from(bounds.right());
+        let bottom = f32::from(bounds.bottom());
+        let dx = if x < left {
+            left - x
+        } else if x > right {
+            x - right
+        } else {
+            0.0
+        };
+        let dy = if y < top {
+            top - y
+        } else if y > bottom {
+            y - bottom
+        } else {
+            0.0
+        };
+        Some(dx * dx + dy * dy)
     }
 
     /// Push-selection model: emit `selectionChange` (UTF-16 anchor/head)
@@ -1925,7 +1949,20 @@ impl TextEditorState {
         }
     }
 
-    fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) {
+        if self.is_selecting && self.emits_selection_drag {
+            emit_event_full(
+                &self.callback,
+                self.element_id,
+                "selectionDrag",
+                |payload| {
+                    let (x, y) = crate::renderer::point_to_xy(event.position);
+                    payload.x = Some(x);
+                    payload.y = Some(y);
+                    payload.value = Some("end".to_string());
+                },
+            );
+        }
         self.is_selecting = false;
         self.drag_position = None;
         self.drag_generation = self.drag_generation.wrapping_add(1);
@@ -1968,6 +2005,26 @@ impl TextEditorState {
             self.drag_position = Some(event.position);
             let position = self.drag_selection_position(event.position);
             self.select_to(self.index_for_mouse_position(position), cx);
+            if self.emits_selection_drag {
+                let selection_utf16 = self.range_to_utf16(&self.selected_range);
+                let (anchor, head) = if self.selection_reversed {
+                    (selection_utf16.end, selection_utf16.start)
+                } else {
+                    (selection_utf16.start, selection_utf16.end)
+                };
+                emit_event_full(
+                    &self.callback,
+                    self.element_id,
+                    "selectionDrag",
+                    |payload| {
+                        let (x, y) = crate::renderer::point_to_xy(event.position);
+                        payload.x = Some(x);
+                        payload.y = Some(y);
+                        payload.start_index = Some(anchor as f64);
+                        payload.end_index = Some(head as f64);
+                    },
+                );
+            }
             if self.multiline
                 && self.drag_scroll_delta(event.position) != 0.0
                 && !self.drag_autoscroll_active
@@ -2422,7 +2479,6 @@ impl EntityInputHandler for TextEditorState {
                 bounds.top() + start.y - px(self.scroll_top),
             ),
             self.line_height,
-            self.font_size,
         ))
     }
 
@@ -2670,7 +2726,6 @@ impl gpui::Element for EditorTextElement {
                 caret_rect(
                     point(origin.x + caret_point.x, origin.y + caret_point.y),
                     input.line_height,
-                    input.font_size,
                 ),
                 input.caret_color,
             ));
@@ -2838,16 +2893,10 @@ mod tests {
     }
 
     #[test]
-    fn caret_matches_the_font_size_inside_the_line() {
-        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0), px(16.0));
-        assert_eq!(bounds.origin, point(px(10.0), px(8.0)));
-        assert_eq!(bounds.size, size(px(2.0), px(12.0)));
-        assert_eq!(
-            caret_rect(point(px(0.0), px(0.0)), px(20.0), px(40.0))
-                .size
-                .height,
-            px(20.0)
-        );
+    fn caret_fills_the_shaped_line_box() {
+        let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0));
+        assert_eq!(bounds.origin, point(px(10.0), px(4.0)));
+        assert_eq!(bounds.size, size(px(2.0), px(20.0)));
     }
 
     fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {
