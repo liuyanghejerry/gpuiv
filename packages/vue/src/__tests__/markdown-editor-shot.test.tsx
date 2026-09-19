@@ -5,12 +5,8 @@
 // @ts-nocheck
 
 import { fileURLToPath } from "node:url"
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
-
-// The example normally loads dist. Use the same source module as the test
-// renderer so Vue's renderer injection key is shared for focus/scroll APIs.
-vi.mock("@gpuiv/vue", () => import("../index.js"))
 
 const exampleUrl = new URL("../../../../examples/markdown-editor.tsx", import.meta.url)
 const { App } = await import(fileURLToPath(exampleUrl))
