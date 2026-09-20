@@ -79,6 +79,11 @@ Full diagrams and explanation: [README Architecture](./README.md#architecture),
   now): `bun run package` → macOS `.app` + Windows portable exe, plus the
   publish/promote auto-update feed. Design: `docs/packaging-plan.md`,
   `docs/auto-update-plan.md`
+- `packages/beautiful-ui` — `@gpuiv/beautiful-ui` (private, not published):
+  beautiful-ui primitives ported to GPUIV (issue #110). `tokens.ts`/`colors.ts`/
+  `theme.ts` are the design-token layer (`provideTheme`/`useTheme`, oklch
+  light/dark maps, `mix`/`withAlpha` for `color-mix`), `atoms/` the shared
+  building blocks, `primitives/` the components. Gallery: `examples/beautiful-ui.tsx`
 - `examples/` — chat.tsx (the flagship) and its tests; `scripts/` — dev.ts,
   screenshots.ts; `docs/` — design plans, agents/ deep-dives, upstream/ ledger;
   `zed/` — pinned GPUI fork submodule
