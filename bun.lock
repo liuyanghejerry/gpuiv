@@ -33,9 +33,27 @@
         "vitest": "^4.0.18",
       },
     },
+    "packages/beautiful-ui": {
+      "name": "@gpuiv/beautiful-ui",
+      "version": "0.1.0",
+      "dependencies": {
+        "@gpuiv/native": "workspace:^",
+        "@gpuiv/vue": "workspace:^",
+        "vue": "^3.5.13",
+      },
+      "devDependencies": {
+        "@types/node": "^25",
+        "typescript": "^5.3",
+        "vitest": "^4",
+        "vue": "^3.5",
+      },
+      "peerDependencies": {
+        "vue": "^3.4.0",
+      },
+    },
     "packages/native": {
       "name": "@gpuiv/native",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "devDependencies": {
         "@napi-rs/cli": "^3.1.3",
       },
@@ -57,7 +75,7 @@
     },
     "packages/vue": {
       "name": "@gpuiv/vue",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "dependencies": {
         "@gpuiv/native": "workspace:^",
         "@vue/reactivity": "^3.5.13",
@@ -173,6 +191,8 @@
     "@esbuild/win32-ia32": ["@esbuild/win32-ia32@0.27.2", "https://registry.npmmirror.com/@esbuild/win32-ia32/-/win32-ia32-0.27.2.tgz", { "os": "win32", "cpu": "ia32" }, "sha512-Iuws0kxo4yusk7sw70Xa2E2imZU5HoixzxfGCdxwBdhiDgt9vX9VUCBhqcwY7/uh//78A1hMkkROMJq9l27oLQ=="],
 
     "@esbuild/win32-x64": ["@esbuild/win32-x64@0.27.2", "https://registry.npmmirror.com/@esbuild/win32-x64/-/win32-x64-0.27.2.tgz", { "os": "win32", "cpu": "x64" }, "sha512-sRdU18mcKf7F+YgheI/zGf5alZatMUTKj/jNS6l744f9u3WFu4v7twcUI9vu4mknF4Y9aDlblIie0IM+5xxaqQ=="],
+
+    "@gpuiv/beautiful-ui": ["@gpuiv/beautiful-ui@workspace:packages/beautiful-ui"],
 
     "@gpuiv/examples": ["@gpuiv/examples@workspace:examples"],
 
