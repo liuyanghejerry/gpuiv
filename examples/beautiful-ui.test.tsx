@@ -28,6 +28,8 @@ describeNative("beautiful-ui gallery", () => {
       "CodeBlock — code",
       "CodeBlock — diff",
       "LoadingState",
+      "ThinkingState (Phase 2: AnimateHeight)",
+      "GlideMenu (Phase 2: bounds-driven highlight)",
     ]) {
       expect(text).toContain(section)
     }

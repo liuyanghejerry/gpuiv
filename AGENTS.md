@@ -73,8 +73,9 @@ Full diagrams and explanation: [README Architecture](./README.md#architecture),
   `motion.rs`, `automation.rs`, `test_renderer.rs`, `text/`, `syntax/`,
   `markdown/`, `diff/`, `custom_elements/`
 - `packages/vue` — `@gpuiv/vue`, Vue 3 custom renderer: `reconciler/` (host
-  config, batching, event registry), `components/` (motion, VirtualList, Select,
-  FloatingLayer), `automation/`, `packaged.ts`, `testing.ts`, `__tests__/`
+  config, batching, event registry), `components/` (motion, AnimateHeight,
+  VirtualList, Select, FloatingLayer), `automation/`, `packaged.ts`,
+  `testing.ts`, `__tests__/`
 - `packages/packager` — `@gpuiv/packager`, app packaging (workspace-only for
   now): `bun run package` → macOS `.app` + Windows portable exe, plus the
   publish/promote auto-update feed. Design: `docs/packaging-plan.md`,

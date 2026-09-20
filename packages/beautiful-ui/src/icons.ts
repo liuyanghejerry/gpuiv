@@ -34,6 +34,13 @@ export const icons = {
   ),
   send: strokeIcon('<path d="m22 2-7 20-4-9-9-4Z" /><path d="M22 2 11 13" />'),
   sparkles: strokeIcon('<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z" />'),
+  /** Filled four-point star — the ThinkingState header glyph. */
+  sparkle: strokeIcon(
+    '<g fill="black" stroke="none"><path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" /></g>',
+  ),
+  /** Wireframe globe — the ThinkingState Search source dot. */
+  globe: strokeIcon('<circle cx="12" cy="12" r="9" /><path d="M3.5 12h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />', 2.5),
+  chevronUp: strokeIcon('<path d="m18 15-6-6-6 6" />'),
   filter: strokeIcon('<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />'),
 } as const
 
