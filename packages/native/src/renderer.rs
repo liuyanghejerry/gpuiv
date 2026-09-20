@@ -579,6 +579,10 @@ enum UiCommand {
     GetWindowBounds {
         response: SyncSender<WindowBounds>,
     },
+    AddFonts {
+        fonts: Vec<std::borrow::Cow<'static, [u8]>>,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1115,6 +1119,15 @@ async fn run_ui_commands(
                 window.update(cx, move |_view, window, _cx| {
                     response.send(window_bounds_js(window.bounds()));
                 })
+            }
+            UiCommand::AddFonts { fonts, response } => {
+                let added = cx.update(|cx| {
+                    cx.text_system()
+                        .add_fonts(fonts)
+                        .map_err(|error| format!("{error:#}"))
+                });
+                response.send(added).ok();
+                refresh_ui_window(window, cx)
             }
         };
         if let Err(error) = result {
@@ -1709,6 +1722,71 @@ impl GpuixRenderer {
         self.canvas_surfaces.remove_destroyed(&destroyed);
         self.request_invalidate()?;
         Ok(destroyed)
+    }
+
+    // ── Fonts ────────────────────────────────────────────────────────
+
+    /// Register raw font bytes with GPUI's text system on the thread that
+    /// owns the App, then repaint so later frames can use the new family.
+    ///
+    /// Load fonts right after `init()`, before any batch paints text in the
+    /// family: GPUI caches a failed family lookup, so text that already fell
+    /// back to a system font keeps the fallback even after the font arrives.
+    fn add_fonts(&self, fonts: Vec<std::borrow::Cow<'static, [u8]>>) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        {
+            GPUI_APP.with(|app| {
+                let app = app.borrow();
+                let app = app
+                    .as_ref()
+                    .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+                app.update(|cx| {
+                    cx.text_system()
+                        .add_fonts(fonts)
+                        .map_err(|error| Error::from_reason(format!("{error:#}")))
+                })
+            })?;
+            return self.request_invalidate();
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::AddFonts { fonts, response })?;
+            return recv_ui_response(receiver, "the font loading command")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = fonts;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Register a `.ttf`/`.otf` font file so `fontFamily` can reference the
+    /// family name it declares. Call right after `init()`, before text in
+    /// that family is first painted (see `add_fonts`).
+    #[napi]
+    pub fn load_font(&self, path: String) -> Result<()> {
+        let bytes = std::fs::read(&path).map_err(|error| {
+            Error::from_reason(format!("Failed to read font file {path:?}: {error}"))
+        })?;
+        self.add_fonts(vec![std::borrow::Cow::Owned(bytes)])
+    }
+
+    /// Register a font from raw `.ttf`/`.otf` bytes, like `loadFont` but for
+    /// fonts bundled into the JS bundle or fetched over the network.
+    #[napi]
+    pub fn load_font_bytes(&self, data: Buffer) -> Result<()> {
+        self.add_fonts(vec![std::borrow::Cow::Owned(data.to_vec())])
     }
 
     // ── <canvas> pixel bridge ─────────────────────────────────────────

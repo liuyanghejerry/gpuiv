@@ -16,10 +16,13 @@ import {
   ContextCards,
   EntityChip,
   FilterTable,
+  GlideMenuItem,
+  GlideMenuRoot,
   LoadingState,
   RecommendationCard,
   SearchList,
   Shimmer,
+  ThinkingState,
   ValuePill,
   provideTheme,
   useTheme,
@@ -76,6 +79,33 @@ const AtomsRow = defineComponent({
         </div>
       )
     }
+  },
+})
+
+const MenuRow = defineComponent({
+  name: "MenuRow",
+  props: {
+    label: { type: String, required: true },
+  },
+  setup(props) {
+    const theme = useTheme()
+    return () => (
+      <div
+        style={{
+          paddingTop: 6,
+          paddingBottom: 6,
+          paddingLeft: 10,
+          paddingRight: 10,
+          fontSize: 13,
+          fontWeight: 500,
+          color: theme.tokens.value.ink,
+          borderRadius: 6,
+          cursor: "pointer",
+        }}
+      >
+        {props.label}
+      </div>
+    )
   },
 })
 
@@ -160,6 +190,29 @@ export const App = defineComponent({
                   <LoadingState variant="Dots" />
                   <LoadingState variant="Orbit" />
                 </div>
+              </Section>
+              <Section title="ThinkingState (Phase 2: AnimateHeight)">
+                <ThinkingState />
+              </Section>
+              <Section title="GlideMenu (Phase 2: bounds-driven highlight)">
+                <GlideMenuRoot
+                  style={{
+                    width: 240,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 2,
+                    backgroundColor: t.surface,
+                    borderRadius: 10,
+                    padding: 4,
+                    borderWidth: 1,
+                    borderColor: t.line,
+                  }}
+                >
+                  <GlideMenuItem><MenuRow label="Overview" /></GlideMenuItem>
+                  <GlideMenuItem><MenuRow label="Analytics" /></GlideMenuItem>
+                  <GlideMenuItem><MenuRow label="Restock rules" /></GlideMenuItem>
+                  <GlideMenuItem disabled><MenuRow label="Archived" /></GlideMenuItem>
+                </GlideMenuRoot>
               </Section>
             </div>
           </div>

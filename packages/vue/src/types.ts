@@ -691,6 +691,14 @@ export interface NativeRenderer {
    *  no text. */
   readClipboardText?(): string | null
 
+  // ── Fonts ──────────────────────────────────────────────────────
+  /** Register a `.ttf`/`.otf` file with the text system. Call early — a
+   *  family already typeset with fallback fonts stays cached. */
+  loadFont?(path: string): void
+  /** Register a font from raw `.ttf`/`.otf` bytes, like `loadFont` but for
+   *  bundled or downloaded fonts. */
+  loadFontBytes?(data: Uint8Array): void
+
   // ── File dialogs ───────────────────────────────────────────────
   /** Open the platform file-selection dialog. The callback receives
    *  `(error, outcome)`; `outcome.paths` is null when the user cancelled. */
