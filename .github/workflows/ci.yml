@@ -165,6 +165,13 @@ jobs:
         run: bun run build
         working-directory: packages/vue
 
+      # examples/beautiful-ui.test.tsx imports @gpuiv/beautiful-ui, whose
+      # exports point at dist/ (gitignored) — build it after @gpuiv/vue,
+      # whose dist/ carries the types tsc compiles against.
+      - name: Build beautiful-ui package
+        run: bun run build
+        working-directory: packages/beautiful-ui
+
       - name: Run example tests
         run: bun run test
         working-directory: examples
@@ -210,6 +217,13 @@ jobs:
       - name: Build Vue package
         run: bun run build
         working-directory: packages/vue
+
+      # examples/beautiful-ui.test.tsx imports @gpuiv/beautiful-ui, whose
+      # exports point at dist/ (gitignored) — build it after @gpuiv/vue,
+      # whose dist/ carries the types tsc compiles against.
+      - name: Build beautiful-ui package
+        run: bun run build
+        working-directory: packages/beautiful-ui
 
       - name: Run example tests
         run: bun run test
