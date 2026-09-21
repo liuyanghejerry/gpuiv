@@ -19,6 +19,7 @@
     "ime-composition": "bun --hot ime-composition.tsx",
     "streaming-code": "bun --hot streaming-code.tsx",
     "spinner": "bun --hot spinner.tsx",
+    "beautiful-ui": "bun --hot beautiful-ui.tsx",
     "canvas-blends": "bun --hot canvas-blends.tsx",
     "icons": "bun icons.ts",
     "package": "gpuiv-packager build",
@@ -28,6 +29,7 @@
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
+    "@gpuiv/beautiful-ui": "workspace:*",
     "@gpuiv/native": "workspace:*",
     "@gpuiv/packager": "workspace:*",
     "@gpuiv/vue": "workspace:*",
