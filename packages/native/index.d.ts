@@ -102,6 +102,17 @@ export declare class GpuixRenderer {
    */
   applyBatch(json: string): Array<number>
   /**
+   * Register a `.ttf`/`.otf` font file so `fontFamily` can reference the
+   * family name it declares. Call right after `init()`, before text in
+   * that family is first painted (see `add_fonts`).
+   */
+  loadFont(path: string): void
+  /**
+   * Register a font from raw `.ttf`/`.otf` bytes, like `loadFont` but for
+   * fonts bundled into the JS bundle or fetched over the network.
+   */
+  loadFontBytes(data: Buffer): void
+  /**
    * Upload a full RGBA pixel buffer for a `<canvas>` element and repaint.
    *
    * Deliberately outside `applyBatch`: a canvas repaint moves megabytes of

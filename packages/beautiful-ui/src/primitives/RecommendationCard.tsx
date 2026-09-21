@@ -23,6 +23,13 @@
  *    CSS variables and dark mode swaps token values, so it is a token name
  *    (`RecommendationTone`) resolved against the live theme at render time.
  *  - The original's unused `variant?: string` prop is dropped.
+ *  - The footer drops its `bg-surface` (identical to the card's fill): GPUI's
+ *    `overflow_hidden` content mask is a plain rect, it does not follow the
+ *    card's corner radii, so a filled child hugging the bottom edge paints
+ *    into the rounded corner crescents. With no fill of its own the footer
+ *    leaves the corners to the card, and the drawer supplies the surface
+ *    fill while open. Rule of thumb: never give a bottom-flush child its own
+ *    background inside a rounded `overflow: "hidden"` card.
  */
 
 import { computed, defineComponent, ref, type PropType } from "vue"
@@ -283,7 +290,9 @@ export const RecommendationCard = defineComponent({
             </div>
           </motion.div>
 
-          {/* footer */}
+          {/* footer — no background of its own: GPUI's overflow clip is a
+              rect, so a fill here would bleed into the card's rounded
+              corners (see the header note). The card already paints surface. */}
           <div
             style={{
               display: "flex",
@@ -291,7 +300,6 @@ export const RecommendationCard = defineComponent({
               justifyContent: "space-between",
               gap: 12,
               padding: 10,
-              backgroundColor: t.surface,
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

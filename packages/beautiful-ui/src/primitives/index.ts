@@ -5,3 +5,4 @@ export { RecommendationCard, type RecommendationOption, type RecommendationLabel
 export { ChatComposer, type ChatMessage, type ChatComposerLabels } from "./ChatComposer.js"
 export { CodeBlock, type CodeBlockProps, type CodePiece, type DiffRow, type CodeBlockLabels, type CodeBlockVariant } from "./CodeBlock.js"
 export { LoadingState, type LoadingStateVariant, type LoadingStateProps } from "./LoadingState.js"
+export { ThinkingState, type ThinkingStateVariant, type ThinkingRow } from "./ThinkingState.js"

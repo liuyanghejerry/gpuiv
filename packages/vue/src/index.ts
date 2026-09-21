@@ -46,6 +46,8 @@ export type {
 } from "./updater.js"
 export { GPUIV_CONTEXT, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
 export { useWindowSize, useWindowInsets } from "./hooks/use-window-size.js"
+export { useElementBounds } from "./hooks/use-element-bounds.js"
+export type { ElementBounds, ElementBoundsOptions, ElementBoundsHandle } from "./hooks/use-element-bounds.js"
 export { createScrollController, useScrollController } from "./scroll-controller.js"
 export type { ScrollToOptions, ScrollResult } from "./scroll-controller.js"
 export type { WindowSize, WindowSizeOptions, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"
@@ -55,6 +57,7 @@ export type { HighlightSpec } from "./types.js"
 
 // Components
 export { motion } from "./components/motion.js"
+export { AnimateHeight } from "./components/animate-height.js"
 export { MarkdownEditor } from "./markdown-editor/component.js"
 export type {
   MarkdownEditorSpan,

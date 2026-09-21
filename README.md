@@ -895,6 +895,26 @@ const SidebarFrame = defineComponent({
 The **chat example** uses this pattern. The sidebar remains mounted while its
 outer width moves between `253` and `0` pixels.
 
+### Animate to a natural height
+
+`<AnimateHeight height={open ? 'auto' : 0}>` is the drawer/accordion
+primitive — the answer to the web's `grid-template-rows: 0fr → 1fr` trick.
+The content always lays out at its natural height; the component reads that
+height back through `useElementBounds` and tweens the outer box between `0`
+and the measured value. Content that grows while open is followed
+automatically, since measurement polls continuously.
+
+```tsx
+import { AnimateHeight } from '@gpuiv/vue'
+
+<AnimateHeight height={open ? 'auto' : 0} duration={0.3}>
+  <DrawerBody />
+</AnimateHeight>
+```
+
+For direct access, `useElementBounds(ref)` polls an element's last painted
+window-space bounds (`renderer.getElementBounds` underneath).
+
 ### Capture exact frames
 
 The [automation API](#automation) can freeze the native motion clock and render
@@ -2988,6 +3008,9 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Streaming diff parsing (hunk-level checkpoints; completed files are never re-parsed)
 - [x] IME composition events (`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd`)
 - [x] Spinner loading primitive (`Spinner`, dots and pulse variants)
+- [x] Element bounds queries (`getElementBounds`, `useElementBounds`)
+- [x] Auto-height transitions (`<AnimateHeight>`)
+- [x] Custom font loading (`loadFont`, `loadFontBytes`)
 - [x] Cross-element text selection
 - [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
 - [x] Native `hover` and `active` styles
