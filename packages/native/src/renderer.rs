@@ -6293,8 +6293,13 @@ pub(crate) fn build_host_container(
         ctx.pointer_capture_target == Some(element.id),
     );
 
-    // Text content — selectable, same as a <text> leaf.
-    if let Some(ref content) = element.content {
+    // Text content — selectable, same as a <text> leaf. An empty string is
+    // not painted text: Vue compiles `{items.map(…)}` sitting among JSX
+    // siblings into a Fragment wrapped in empty text anchors, and shaping ""
+    // would still occupy a full line height (26px at the default font), so
+    // the anchor gets no child and collapses to zero size like a DOM empty
+    // text node.
+    if let Some(content) = element.content.as_deref().filter(|c| !c.is_empty()) {
         el = el.child(text_content(element.id, content, ctx));
     }
 
