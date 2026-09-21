@@ -22,7 +22,10 @@ import {
   RecommendationCard,
   SearchList,
   Shimmer,
+  StreamingText,
+  TaskRows,
   ThinkingState,
+  ToolChips,
   ValuePill,
   provideTheme,
   useTheme,
@@ -213,6 +216,15 @@ export const App = defineComponent({
                   <GlideMenuItem><MenuRow label="Restock rules" /></GlideMenuItem>
                   <GlideMenuItem disabled><MenuRow label="Archived" /></GlideMenuItem>
                 </GlideMenuRoot>
+              </Section>
+              <Section title="TaskRows (Phase 3)">
+                <TaskRows />
+              </Section>
+              <Section title="ToolChips (Phase 3)">
+                <ToolChips />
+              </Section>
+              <Section title="StreamingText (Phase 3)">
+                <StreamingText />
               </Section>
             </div>
           </div>

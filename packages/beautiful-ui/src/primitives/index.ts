@@ -6,3 +6,6 @@ export { ChatComposer, type ChatMessage, type ChatComposerLabels } from "./ChatC
 export { CodeBlock, type CodeBlockProps, type CodePiece, type DiffRow, type CodeBlockLabels, type CodeBlockVariant } from "./CodeBlock.js"
 export { LoadingState, type LoadingStateVariant, type LoadingStateProps } from "./LoadingState.js"
 export { ThinkingState, type ThinkingStateVariant, type ThinkingRow } from "./ThinkingState.js"
+export { TaskRows, type TaskRow, type TaskDetail, type TaskRowsLabels } from "./TaskRows.js"
+export { ToolChips, type ToolStep, type ToolDetailLine, type ToolDiff, type ToolDiffLine, type ToolChipsLabels } from "./ToolChips.js"
+export { StreamingText, type StreamingToken, type StreamingSource, type StreamingLabels } from "./StreamingText.js"

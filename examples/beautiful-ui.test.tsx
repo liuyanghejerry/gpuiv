@@ -30,6 +30,9 @@ describeNative("beautiful-ui gallery", () => {
       "LoadingState",
       "ThinkingState (Phase 2: AnimateHeight)",
       "GlideMenu (Phase 2: bounds-driven highlight)",
+      "TaskRows (Phase 3)",
+      "ToolChips (Phase 3)",
+      "StreamingText (Phase 3)",
     ]) {
       expect(text).toContain(section)
     }

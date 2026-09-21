@@ -42,6 +42,35 @@ export const icons = {
   globe: strokeIcon('<circle cx="12" cy="12" r="9" /><path d="M3.5 12h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />', 2.5),
   chevronUp: strokeIcon('<path d="m18 15-6-6-6 6" />'),
   filter: strokeIcon('<polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />'),
+  /** Partial ring arc (28% sweep, round caps) — the TaskRows active spinner
+   *  overlay. Static: GPUIV has no rotate, so the arc does not orbit. */
+  ringArc: strokeIcon('<circle cx="12" cy="12" r="11" stroke-dasharray="19.35 49.76" />', 2),
+  /** Circular arrow — the TaskRows failed pill's retry glyph. */
+  retry: strokeIcon('<path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />', 3),
+  /** Heavier check (3.5px stroke) — the TaskRows done badge glyph. */
+  checkBold: strokeIcon('<path d="M20 6 9 17l-5-5" />', 3.5),
+  /** Heavier X (3.5px stroke) — the TaskRows failed badge glyph. */
+  xBold: strokeIcon('<path d="M18 6 6 18M6 6l12 12" />', 3.5),
+  /** Pencil — the ToolChips Write glyph. */
+  pencil: strokeIcon('<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />'),
+  /** Terminal prompt — the ToolChips Run glyph. */
+  terminal: strokeIcon('<path d="M4 17l6-5-6-5M12 19h8" />'),
+  /** Document with a folded corner — the ToolChips Read glyph. */
+  file: strokeIcon('<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />'),
+  /** Softer circular arrow (1.8px stroke) — the StreamingText action-row
+   *  retry glyph; the TaskRows `retry` above is the 3px bold variant. */
+  retrySoft: strokeIcon('<path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" />', 1.8),
+  /** StreamingText feedback actions (1.8px stroke, like the source). */
+  thumbsUp: strokeIcon(
+    '<path d="M7 10v12M15 5.88L14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88z" />',
+    1.8,
+  ),
+  thumbsDown: strokeIcon(
+    '<path d="M17 14V2M9 18.12L10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88z" />',
+    1.8,
+  ),
+  /** Turn-in arrow — the StreamingText follow-up prompt glyph. */
+  cornerDownLeft: strokeIcon('<path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" />'),
 } as const
 
 export type IconName = keyof typeof icons
