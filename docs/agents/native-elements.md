@@ -119,6 +119,22 @@ measuring, so `DiffElement` re-runs `reset_with_uniform_height` whenever
 content.
 
 
+## `overflow: "hidden"` clips to the rect, not the rounded corner path
+
+GPUI's `overflow_mask` (`zed/crates/gpui/src/style.rs`) builds a
+`ContentMask` from bounds only — a plain rectangle with no corner radii. A
+child that fills its parent's bottom edge therefore paints square corners
+*through* a rounded `overflow: "hidden"` card, leaving visible wedges in the
+corner crescents. (CSS behaves the same with `overflow: visible`; only
+`hidden` is supposed to follow the radius, and GPUI's does not.)
+
+Until GPUI grows rounded content masks, the rule is: **never give a
+flush-to-the-edge child its own fill inside a rounded clipped card.** Drop
+the redundant fill (the card already paints it), or give the child matching
+`borderBottomLeftRadius` / `borderBottomRightRadius`. The wedges are easy to
+miss in the component's own colors — white on white — so check corners with a
+contrasting fill.
+
 ## A macOS menu item owns its shortcut, so the window never sees it
 
 `crate::app_menu` installs the App and Window menus during renderer init. GPUI

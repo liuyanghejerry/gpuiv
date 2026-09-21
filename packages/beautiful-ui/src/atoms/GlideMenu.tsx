@@ -199,6 +199,13 @@ export const GlideMenuItem = defineComponent({
         {...attrs}
         ref={nodeRef}
         aria-disabled={props.disabled || undefined}
+        style={{
+          // Disabled rows keep their content but never pull the highlight;
+          // dim them so the state is visible (the web original has no
+          // disabled concept — this is a GPUIV addition).
+          ...(props.disabled ? { opacity: 0.4 } : {}),
+          ...(attrs.style as StyleDesc | undefined),
+        }}
         onMouseEnter={(event: EventPayload) => {
           ;(attrs.onMouseEnter as ((event: EventPayload) => void) | undefined)?.(event)
           if (!props.disabled) context.activate(registration)
