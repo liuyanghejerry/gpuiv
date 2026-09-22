@@ -9,7 +9,7 @@
  *
  *  ```ts
  *  // App root
- *  const theme = provideTheme()           // or provideTheme({ dark: true })
+ *  const theme = provideTheme()           // or provideTheme(createTheme({ dark: true }))
  *
  *  // Any descendant component
  *  const theme = useTheme()

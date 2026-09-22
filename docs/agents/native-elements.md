@@ -135,6 +135,14 @@ the redundant fill (the card already paints it), or give the child matching
 miss in the component's own colors — white on white — so check corners with a
 contrasting fill.
 
+## A lone `{cond && <el/>}` paints the literal text "false"
+
+Vue normalizes a component's *array* children to comment vnodes for booleans,
+but a *single* non-array child goes through `String(child)` — so
+`<div>{cond && <Icon/>}</div>` compiles to `children: false` and GPUIV paints
+a visible `false` text node. Always use `{cond ? <Icon/> : null}` when the
+expression is the element's only child.
+
 ## A macOS menu item owns its shortcut, so the window never sees it
 
 `crate::app_menu` installs the App and Window menus during renderer init. GPUI

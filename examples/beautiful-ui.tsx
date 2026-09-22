@@ -15,7 +15,10 @@ import {
   CodeBlock,
   ContextCards,
   EntityChip,
+  ApprovalCard,
+  DiffTable,
   FilterTable,
+  FineTuneCard,
   GlideMenuItem,
   GlideMenuRoot,
   LoadingState,
@@ -225,6 +228,15 @@ export const App = defineComponent({
               </Section>
               <Section title="StreamingText (Phase 3)">
                 <StreamingText />
+              </Section>
+              <Section title="DiffTable (Phase 3)">
+                <DiffTable />
+              </Section>
+              <Section title="FineTuneCard (Phase 3)">
+                <FineTuneCard />
+              </Section>
+              <Section title="ApprovalCard (Phase 3)">
+                <ApprovalCard />
               </Section>
             </div>
           </div>

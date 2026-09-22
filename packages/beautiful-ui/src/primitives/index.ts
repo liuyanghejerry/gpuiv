@@ -9,3 +9,6 @@ export { ThinkingState, type ThinkingStateVariant, type ThinkingRow } from "./Th
 export { TaskRows, type TaskRow, type TaskDetail, type TaskRowsLabels } from "./TaskRows.js"
 export { ToolChips, type ToolStep, type ToolDetailLine, type ToolDiff, type ToolDiffLine, type ToolChipsLabels } from "./ToolChips.js"
 export { StreamingText, type StreamingToken, type StreamingSource, type StreamingLabels } from "./StreamingText.js"
+export { DiffTable, type DiffTableRow, type DiffAddedRow, type DiffTableLabels } from "./DiffTable.js"
+export { FineTuneCard, type FineTuneField, type FineTuneCardLabels, type FineTuneState } from "./FineTuneCard.js"
+export { ApprovalCard, type ApprovalQuestion, type ApprovalLabels } from "./ApprovalCard.js"
