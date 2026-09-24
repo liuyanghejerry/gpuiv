@@ -36,6 +36,8 @@ describeNative("beautiful-ui gallery", () => {
       "DiffTable (Phase 3)",
       "FineTuneCard (Phase 3)",
       "ApprovalCard (Phase 3)",
+      "SidebarNav (Phase 3)",
+      "SelectionActions (Phase 3)",
     ]) {
       expect(text).toContain(section)
     }

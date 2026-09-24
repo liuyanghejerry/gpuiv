@@ -24,7 +24,9 @@ import {
   LoadingState,
   RecommendationCard,
   SearchList,
+  SelectionActions,
   Shimmer,
+  SidebarNav,
   StreamingText,
   TaskRows,
   ThinkingState,
@@ -237,6 +239,12 @@ export const App = defineComponent({
               </Section>
               <Section title="ApprovalCard (Phase 3)">
                 <ApprovalCard />
+              </Section>
+              <Section title="SidebarNav (Phase 3)">
+                <SidebarNav />
+              </Section>
+              <Section title="SelectionActions (Phase 3)">
+                <SelectionActions />
               </Section>
             </div>
           </div>

@@ -20,6 +20,7 @@ export const icons = {
   search: strokeIcon('<circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />'),
   chevronDown: strokeIcon('<path d="m6 9 6 6 6-6" />'),
   chevronRight: strokeIcon('<path d="m9 18 6-6-6-6" />'),
+  chevronLeft: strokeIcon('<path d="m15 18-6-6 6-6" />'),
   check: strokeIcon('<path d="M20 6 9 17l-5-5" />', 2.5),
   x: strokeIcon('<path d="M18 6 6 18M6 6l12 12" />'),
   copy: strokeIcon('<rect width="14" height="14" x="8" y="8" rx="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />'),
@@ -71,6 +72,45 @@ export const icons = {
   ),
   /** Turn-in arrow — the StreamingText follow-up prompt glyph. */
   cornerDownLeft: strokeIcon('<path d="M9 10l-5 5 5 5" /><path d="M20 4v7a4 4 0 0 1-4 4H4" />'),
+  /** House — the SidebarNav Home rail glyph. */
+  home: strokeIcon('<path d="M3 11 12 3l9 8" /><path d="M5 10v11h14V10" /><path d="M9.5 21v-6h5v6" />'),
+  /** Gear as a hub with eight spokes — the SidebarNav settings glyph. */
+  gear: strokeIcon(
+    '<circle cx="12" cy="12" r="3.5" /><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1" />',
+  ),
+  /** Person with a plus — the SidebarNav Invite users rail glyph. */
+  userAdd: strokeIcon(
+    '<circle cx="9" cy="7" r="4" /><path d="M3 21v-1a6 6 0 0 1 12 0v1" /><path d="M19 8v6M16 11h6" />',
+  ),
+  /** Panel with a left-pointing arrow — the SidebarNav collapse glyph. */
+  sidebarCollapse: strokeIcon(
+    '<rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9.5 4v16" /><path d="m16.5 9.5-2.5 2.5 2.5 2.5" />',
+  ),
+  /** Panel with a right-pointing arrow — the SidebarNav expand glyph. */
+  sidebarExpand: strokeIcon(
+    '<rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M9.5 4v16" /><path d="m13.5 9.5 2.5 2.5-2.5 2.5" />',
+  ),
+  /** Ice pop on a stick — the SidebarNav workspace logo glyph. */
+  popsicle: strokeIcon('<rect x="7" y="2.5" width="10" height="13" rx="5" /><path d="M12 15.5V21" />'),
+  /** Door with an outbound arrow — the SidebarNav sign-out glyph. */
+  signOut: strokeIcon('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" />'),
+  /** Chat bubble with a question mark — the SelectionActions Explain glyph (1.8px stroke, like the source). */
+  chatBubbleQuestion: strokeIcon(
+    '<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" /><path d="M12 17h.01" />',
+    1.8,
+  ),
+  /** Scissors — the SelectionActions Shorten glyph. */
+  scissor: strokeIcon(
+    '<circle cx="6" cy="6" r="3" /><path d="M8.12 8.12 12 12" /><path d="M20 4 8.12 15.88" /><circle cx="6" cy="18" r="3" /><path d="M14.8 14.8 20 20" />',
+    1.8,
+  ),
+  /** Smiling face — the SelectionActions Tone glyph. */
+  smile: strokeIcon(
+    '<circle cx="12" cy="12" r="10" /><path d="M8 14s1.5 2 4 2 4-2 4-2" /><path d="M9 9h.01" /><path d="M15 9h.01" />',
+    1.8,
+  ),
+  /** Boxed T — the SelectionActions Grammar glyph. */
+  textBox: strokeIcon('<rect x="3" y="3" width="18" height="18" rx="4" /><path d="M7 8h10" /><path d="M12 8v8" />', 1.8),
 } as const
 
 export type IconName = keyof typeof icons

@@ -12,3 +12,5 @@ export { StreamingText, type StreamingToken, type StreamingSource, type Streamin
 export { DiffTable, type DiffTableRow, type DiffAddedRow, type DiffTableLabels } from "./DiffTable.js"
 export { FineTuneCard, type FineTuneField, type FineTuneCardLabels, type FineTuneState } from "./FineTuneCard.js"
 export { ApprovalCard, type ApprovalQuestion, type ApprovalLabels } from "./ApprovalCard.js"
+export { SidebarNav, type SidebarRecent, type SidebarNavItem } from "./SidebarNav.js"
+export { SelectionActions, type SelectionText, type SelectionAction, type SelectionActionSet, type SelectionActionsLabels } from "./SelectionActions.js"
