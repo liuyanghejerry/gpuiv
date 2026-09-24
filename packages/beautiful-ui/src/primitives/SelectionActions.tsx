@@ -29,8 +29,8 @@
  *    (rounded 3) — `box-decoration-clone` per-line rounding is impossible.
  *    The light-mode tint is `accent` at 14% alpha (composited over the
  *    canvas it equals the original's `color-mix(in srgb, accent 14%,
- *    surface)`; `mix()` in colors.ts walks the wrong hue direction when one
- *    side is achromatic, so it is not used here).
+ *    surface)`; alpha compositing also stays correct where the chips
+ *    overlap the card fill).
  *  - The bar's `translate3d(anchor) translateX(-50%)` with a 320ms
  *    cubic-bezier(0.77,0,0.175,1) transform transition becomes `motion`
  *    `left`/`top` tweens at the same timing; the -50% centering uses the

@@ -21,7 +21,10 @@ import {
   FineTuneCard,
   GlideMenuItem,
   GlideMenuRoot,
+  InsightCards,
   LoadingState,
+  PromptBar,
+  RecordsTable,
   RecommendationCard,
   SearchList,
   SelectionActions,
@@ -245,6 +248,15 @@ export const App = defineComponent({
               </Section>
               <Section title="SelectionActions (Phase 3)">
                 <SelectionActions />
+              </Section>
+              <Section title="InsightCards (Phase 3)">
+                <InsightCards />
+              </Section>
+              <Section title="PromptBar (Phase 3)">
+                <PromptBar />
+              </Section>
+              <Section title="RecordsTable (Phase 3)">
+                <RecordsTable />
               </Section>
             </div>
           </div>

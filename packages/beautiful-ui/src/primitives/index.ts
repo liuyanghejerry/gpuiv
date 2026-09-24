@@ -14,3 +14,6 @@ export { FineTuneCard, type FineTuneField, type FineTuneCardLabels, type FineTun
 export { ApprovalCard, type ApprovalQuestion, type ApprovalLabels } from "./ApprovalCard.js"
 export { SidebarNav, type SidebarRecent, type SidebarNavItem } from "./SidebarNav.js"
 export { SelectionActions, type SelectionText, type SelectionAction, type SelectionActionSet, type SelectionActionsLabels } from "./SelectionActions.js"
+export { InsightCards, type CompareSeries, type AnomalyData, type AllocationSegment, type InsightPage, type InsightProseSegment } from "./InsightCards.js"
+export { PromptBar, type PromptBarBrand, type PromptBarSource, type PromptBarCommand, type PromptBarModel } from "./PromptBar.js"
+export { RecordsTable, type RecordRow, type RecordStrength } from "./RecordsTable.js"

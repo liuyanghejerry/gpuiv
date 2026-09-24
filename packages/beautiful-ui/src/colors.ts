@@ -86,14 +86,20 @@ export function mix(a: string, b: string, p: number): string {
   const ca = parseColor(a)
   const cb = parseColor(b)
   const t = p / 100
+  /* Achromatic endpoints have a powerless hue (CSS Color 5): their parsed
+   * hue (0 for white/black literals) would otherwise pull the shortest arc
+   * the wrong way round the circle — blue + white read as pink. Carry the
+   * chromatic side's hue instead. */
+  const ha = ca.c === 0 ? cb.h : ca.h
+  const hb = cb.c === 0 ? ha : cb.h
   // Shortest arc around the hue circle.
-  let dh = cb.h - ca.h
+  let dh = hb - ha
   if (dh > 180) dh -= 360
   if (dh < -180) dh += 360
   return format({
     l: ca.l + (cb.l - ca.l) * t,
     c: ca.c + (cb.c - ca.c) * t,
-    h: (ca.h + dh * t + 360) % 360,
+    h: (ha + dh * t + 360) % 360,
     a: ca.a + (cb.a - ca.a) * t,
   })
 }
