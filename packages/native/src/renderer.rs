@@ -93,6 +93,17 @@ pub(crate) type EventCallback = Rc<dyn Fn(EventPayload)>;
 
 /// Validate and convert a JS number (f64) to a u64 element ID.
 /// JS numbers are f64 — lossless for integers up to 2^53.
+fn raw_dimension_u32(value: f64, label: &str) -> std::result::Result<u32, String> {
+    if !value.is_finite() || value <= 0.0 || value.fract() != 0.0 || value > u32::MAX as f64 {
+        return Err(format!("Image {label} must be a positive integer, got {value}"));
+    }
+    Ok(value as u32)
+}
+
+pub(crate) fn dimension_u32(value: f64, label: &str) -> Result<u32> {
+    raw_dimension_u32(value, label).map_err(Error::from_reason)
+}
+
 fn raw_element_id(id: f64) -> std::result::Result<u64, String> {
     if !id.is_finite() || id < 0.0 || id.fract() != 0.0 || id > 9_007_199_254_740_991.0 {
         return Err(format!("Invalid element id: {id}"));
@@ -498,6 +509,21 @@ enum UiCommand {
         x: f32,
         y: f32,
     },
+    ScrollIntoView {
+        id: u64,
+    },
+    SetImagePixels {
+        id: u64,
+        width: u32,
+        height: u32,
+        bytes: Vec<u8>,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    SetImage {
+        id: u64,
+        bytes: Vec<u8>,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
     ScrollToItem {
         id: u64,
         index: usize,
@@ -757,6 +783,30 @@ async fn run_ui_commands(
                     });
                 }
                 refresh_ui_window(window, cx)
+            }
+            UiCommand::ScrollIntoView { id } => window.update(cx, |view, window, cx| {
+                if view.scroll_element_into_view(id) {
+                    cx.notify();
+                    window.refresh();
+                }
+            }),
+            UiCommand::SetImagePixels {
+                id,
+                width,
+                height,
+                bytes,
+                response,
+            } => window.update(cx, move |view, window, cx| {
+                response
+                    .send(view.set_image_pixels(id, width, height, bytes, window, cx))
+                    .ok();
+            }),
+            UiCommand::SetImage { id, bytes, response } => {
+                window.update(cx, move |view, window, cx| {
+                    response
+                        .send(view.set_encoded_image(id, bytes, window, cx))
+                        .ok();
+                })
             }
             UiCommand::GetScrollOffset { id, response } => {
                 let offset = VIRTUAL_LIST_STATES
@@ -3162,6 +3212,108 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Scroll this element's nearest scroll parent until the element is visible.
+    #[napi]
+    pub fn scroll_into_view(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        {
+            update_window(move |view, window, cx| {
+                if view.scroll_element_into_view(id) {
+                    cx.notify();
+                    window.refresh();
+                }
+            })?;
+            return Ok(());
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ScrollIntoView { id });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Paint packed RGBA pixels onto an `<img>` host node.
+    #[napi]
+    pub fn set_image_pixels(
+        &self,
+        element_id: f64,
+        width: f64,
+        height: f64,
+        pixels: Buffer,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let width = dimension_u32(width, "width")?;
+        let height = dimension_u32(height, "height")?;
+        let bytes = pixels.to_vec();
+        #[cfg(target_os = "macos")]
+        {
+            return update_window(move |view, window, cx| {
+                view.set_image_pixels(id, width, height, bytes, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::SetImagePixels {
+                id,
+                width,
+                height,
+                bytes,
+                response,
+            })?;
+            return recv_ui_response(receiver, "the image pixel upload")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Decode PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or Netpbm bytes onto
+    /// an `<img>` host node. Prefer `setImagePixels` for live waveforms.
+    #[napi]
+    pub fn set_image(&self, element_id: f64, bytes: Buffer) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let bytes = bytes.to_vec();
+        #[cfg(target_os = "macos")]
+        {
+            return update_window(move |view, window, cx| {
+                view.set_encoded_image(id, bytes, window, cx)
+            })?
+            .map_err(Error::from_reason);
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::SetImage { id, bytes, response })?;
+            return recv_ui_response(receiver, "the encoded image upload")?
+                .map_err(Error::from_reason);
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Scroll a child into view by its index in the children list.
     ///
     /// For a `<virtual-list>` the scroll is queued and applied on the next
@@ -4604,6 +4756,92 @@ impl GpuixView {
         self.reported_selection = None;
     }
 
+    pub(crate) fn set_live_image(
+        &mut self,
+        id: u64,
+        image: std::sync::Arc<gpui::RenderImage>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> std::result::Result<(), String> {
+        {
+            let tree = self.tree.lock().unwrap();
+            let element = tree
+                .elements
+                .get(&id)
+                .ok_or_else(|| format!("Unknown element id {id}"))?;
+            if element.element_type != "img" {
+                return Err(format!(
+                    "setImage is only valid on <img>, got <{}>",
+                    element.element_type
+                ));
+            }
+        }
+        let previous = self.custom_registry.set_live_image(id, image)?;
+        if let Some(previous) = previous {
+            window.drop_image(previous).ok();
+        }
+        cx.notify();
+        window.refresh();
+        Ok(())
+    }
+
+    pub(crate) fn set_image_pixels(
+        &mut self,
+        id: u64,
+        width: u32,
+        height: u32,
+        bytes: Vec<u8>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> std::result::Result<(), String> {
+        let image = crate::custom_elements::img::render_image_from_rgba(width, height, bytes)?;
+        self.set_live_image(id, image, window, cx)
+    }
+
+    pub(crate) fn set_encoded_image(
+        &mut self,
+        id: u64,
+        bytes: Vec<u8>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> std::result::Result<(), String> {
+        let image =
+            crate::custom_elements::img::render_image_from_encoded(bytes, cx.svg_renderer())?;
+        self.set_live_image(id, image, window, cx)
+    }
+
+    pub(crate) fn scroll_element_into_view(&self, id: u64) -> bool {
+        let Some((scroller_id, child_index)) = self.scroll_target(id) else {
+            return false;
+        };
+        if self.scroll_virtual_list_to_item(scroller_id, child_index, 0.0) {
+            return true;
+        }
+        if let Some(handle) = self.scroll_handles.get(&scroller_id) {
+            handle.scroll_to_item(child_index);
+            return true;
+        }
+        false
+    }
+
+    fn scroll_target(&self, id: u64) -> Option<(u64, usize)> {
+        let tree = self.tree.lock().unwrap();
+        let mut current = id;
+        loop {
+            let element = tree.elements.get(&current)?;
+            let parent_id = element.parent?;
+            let parent = tree.elements.get(&parent_id)?;
+            let index = parent.children.iter().position(|child| *child == current)?;
+            if let Some(entry) = self.virtual_lists.get(&parent_id) {
+                return Some((parent_id, entry.logical_index_of(current)?));
+            }
+            if self.scroll_handles.contains_key(&parent_id) {
+                return Some((parent_id, index));
+            }
+            current = parent_id;
+        }
+    }
+
     /// Emit `selectionChange` when the selected range set changed this frame.
     ///
     /// Reads the same `SelectionState` as `getSelectedText`. Keyed on identity
@@ -4816,12 +5054,13 @@ impl GpuixView {
             else {
                 break None;
             };
-            if self.virtual_lists.contains_key(&parent_id) {
-                let index = tree
-                    .elements
-                    .get(&parent_id)
-                    .and_then(|parent| parent.children.iter().position(|child| *child == current));
-                break index.map(|index| (parent_id, index));
+            // The virtual list stores only the windowed slice of children, so
+            // the child position must be converted to the logical item index —
+            // a windowStart of 50 plus child 5 is item 55.
+            if let Some(entry) = self.virtual_lists.get(&parent_id) {
+                break entry
+                    .logical_index_of(current)
+                    .map(|index| (parent_id, index));
             }
             current = parent_id;
         };
@@ -5748,7 +5987,7 @@ impl gpui::Render for GpuixView {
 
         // Ensure custom element instances are destroyed when their IDs disappear.
         self.custom_registry
-            .prune_missing(|id| tree.elements.contains_key(&id));
+            .prune_missing(|id| tree.elements.contains_key(&id), window);
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed

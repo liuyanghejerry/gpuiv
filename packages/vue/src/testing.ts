@@ -81,6 +81,14 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAutomationTree(): string
   getElementBounds(elementId: number): ElementBounds | null
   getRetainedElementCount(): number
+  scrollIntoView(elementId: number): void
+  setImage(elementId: number, bytes: Uint8Array): void
+  setImagePixels(
+    elementId: number,
+    width: number,
+    height: number,
+    pixels: Uint8Array
+  ): void
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -307,6 +315,33 @@ export class TestRenderer implements NativeRenderer {
   }
 
   // ── Window close / reopen (veto bridge) ──────────────────────────
+
+  /** Reveal an element in its nearest overflow parent or `<virtual-list>`.
+   *  Flushes first so the element exists in Rust when the scroll resolves. */
+  scrollIntoView(elementId: number): void {
+    this.flush()
+    this.native.scrollIntoView(elementId)
+  }
+
+  /** Push encoded image bytes onto an `<img>` node. Flushes around the call
+   *  so the node exists in Rust and the frame paints the new bitmap. */
+  setImage(elementId: number, bytes: Uint8Array): void {
+    this.flush()
+    this.native.setImage(elementId, bytes)
+    this.flush()
+  }
+
+  /** Push packed RGBA pixels onto an `<img>` node, flushing around it. */
+  setImagePixels(
+    elementId: number,
+    width: number,
+    height: number,
+    pixels: Uint8Array
+  ): void {
+    this.flush()
+    this.native.setImagePixels(elementId, width, height, pixels)
+    this.flush()
+  }
 
   /** Simulate an OS close attempt. False means the attempt was vetoed and
    *  `onWindowShouldClose` fired; true means the window would have closed. */
