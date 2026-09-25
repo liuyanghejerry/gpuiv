@@ -13,12 +13,12 @@ use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardItem,
-    Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity, EntityInputHandler,
-    Font, FocusHandle, FontStyle, FontWeight, GlobalElementId, KeyBinding, LayoutId, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point, ScrollWheelEvent,
-    SharedString, StrikethroughStyle, Style, Task, TextRun, TextStyle, UTF16Selection,
-    UnderlineStyle, Window, WrappedLine,
+    actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardEntry,
+    ClipboardItem, Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity,
+    EntityInputHandler, Font, FocusHandle, FontStyle, FontWeight, GlobalElementId, KeyBinding,
+    LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
+    ScrollWheelEvent, SharedString, StrikethroughStyle, Style, Task, TextRun, TextStyle,
+    UTF16Selection, UnderlineStyle, Window, WrappedLine,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -84,6 +84,17 @@ fn caret_visible(ms_since_activity: u64) -> bool {
 // tall glyphs and was especially short in Markdown's generous line spacing.
 fn caret_rect(origin: Point<Pixels>, line_height: Pixels) -> Bounds<Pixels> {
     Bounds::new(origin, size(CARET_WIDTH, line_height))
+}
+
+fn clipboard_text(item: ClipboardItem) -> Option<String> {
+    if item
+        .entries
+        .iter()
+        .any(|entry| matches!(entry, ClipboardEntry::ExternalPaths(_)))
+    {
+        return None;
+    }
+    item.text()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1821,17 +1832,23 @@ impl TextEditorState {
 
     fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<Self>) {
         if self.read_only {
+            cx.propagate();
             return;
         }
-        if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
-            if self.intercept_clipboard {
-                emit_event_full(&self.callback, self.element_id, "paste", |payload| {
-                    payload.value = Some(text);
-                });
-                return;
-            }
-            self.replace_text_in_range(None, &text, window, cx);
+        // No text (empty clipboard, image-only, Finder-copied files): let the
+        // key event continue so a host `onKeyDown` can handle it. Mixed
+        // text-plus-image clipboards still paste their text.
+        let Some(text) = cx.read_from_clipboard().and_then(clipboard_text) else {
+            cx.propagate();
+            return;
+        };
+        if self.intercept_clipboard {
+            emit_event_full(&self.callback, self.element_id, "paste", |payload| {
+                payload.value = Some(text);
+            });
+            return;
         }
+        self.replace_text_in_range(None, &text, window, cx);
     }
 
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) {
@@ -2964,6 +2981,32 @@ mod tests {
         let bounds = caret_rect(point(px(10.0), px(4.0)), px(20.0));
         assert_eq!(bounds.origin, point(px(10.0), px(4.0)));
         assert_eq!(bounds.size, size(px(2.0), px(20.0)));
+    }
+
+    #[test]
+    fn external_paths_are_not_text_editor_paste() {
+        let item = ClipboardItem {
+            entries: vec![
+                ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                    [std::path::PathBuf::from("/tmp/image.png")]
+                        .into_iter()
+                        .collect(),
+                )),
+                ClipboardEntry::String(gpui::ClipboardString::new("/tmp/image.png".to_string())),
+            ],
+        };
+        assert_eq!(clipboard_text(item), None);
+    }
+
+    #[test]
+    fn text_still_pastes_when_the_clipboard_also_has_an_image() {
+        let item = ClipboardItem {
+            entries: vec![
+                ClipboardEntry::String(gpui::ClipboardString::new("caption".to_string())),
+                ClipboardEntry::Image(gpui::Image::empty()),
+            ],
+        };
+        assert_eq!(clipboard_text(item), Some("caption".to_string()));
     }
 
     fn has_binding(bindings: &[KeyBinding], keystroke: &str, action: &dyn gpui::Action) -> bool {
