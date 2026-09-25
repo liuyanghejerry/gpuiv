@@ -1663,6 +1663,14 @@ Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
 color, or a solid hover color. A `#00000000` child on a blurred window punches
 through Metal to the desktop.
 
+`FloatingLayer` copies uniform and per-corner border radii to its anchored
+surface, so rounded Select, Combobox, and Tooltip content does not show square
+corners behind it. It also puts `visibility` and `opacity` on that outer surface
+so the fallback fill follows them without multiplying nested opacity.
+`pointerEvents: "none"` disables the anchored occluder. Backgrounds, borders,
+shadows, overflow, and layout remain on the inner content to avoid double paint
+or changed popup geometry.
+
 A filled in-flow `div` blocks clicks and hovers behind it. The parent
 scroller still gets the wheel. `position: "absolute"` / `"fixed"` or
 `pointerEvents: "auto"` also steals the wheel. Set `pointerEvents: "none"`
