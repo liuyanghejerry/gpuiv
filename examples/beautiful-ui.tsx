@@ -6,8 +6,8 @@
  * light/dark toggle that flips the whole token map live.
  */
 
-import { defineComponent } from "vue"
-import { createApp } from "@gpuiv/vue"
+import { defineComponent, inject, provide, ref, watch, type InjectionKey } from "vue"
+import { createApp, useElementBounds, type HostNode, type ShallowRef, type ElementBounds } from "@gpuiv/vue"
 import {
   Button,
   ChatComposer,
@@ -25,6 +25,7 @@ import {
   LoadingState,
   PromptBar,
   RecordsTable,
+  INITIAL_ROWS,
   RecommendationCard,
   SearchList,
   SelectionActions,
@@ -39,6 +40,13 @@ import {
   useTheme,
 } from "@gpuiv/beautiful-ui"
 
+/* Section bodies mount only near the viewport. GPUI is immediate-mode:
+ * every animation tick or scroll frame rebuilds every MOUNTED element, so a
+ * gallery that keeps all 21 sections alive costs ~13ms/frame and pins a
+ * core. Each section keeps its title mounted (scroll anchors) and reserves
+ * its last measured height while unmounted, so scroll geometry is stable. */
+const ViewportKey: InjectionKey<{ bounds: ShallowRef<ElementBounds | null> }> = Symbol("gallery-viewport")
+
 const Section = defineComponent({
   name: "GallerySection",
   props: {
@@ -46,12 +54,32 @@ const Section = defineComponent({
   },
   setup(props, { slots }) {
     const theme = useTheme()
+    const viewport = inject(ViewportKey, null)
+    const host = ref<HostNode | null>(null)
+    const { bounds } = useElementBounds(host)
+    const mounted = ref(true)
+    const reserve = ref(0)
+    watch(() => bounds.value, (body) => {
+      if (body === null) return
+      if (body.height > 0) reserve.value = body.height
+      const vp = viewport?.bounds.value
+      if (vp === null || vp === undefined) return
+      const margin = vp.height * 2
+      const near = body.y + body.height >= vp.y - margin && body.y <= vp.y + vp.height + margin
+      if (near !== mounted.value) mounted.value = near
+    })
     return () => (
       <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: theme.tokens.value.ink3, paddingLeft: 2 }}>
           {props.title}
         </div>
-        {slots.default?.()}
+        <div ref={host} style={{ width: "100%" }}>
+          {mounted.value ? (
+            slots.default?.()
+          ) : (
+            <div style={{ width: "100%", height: reserve.value > 0 ? reserve.value : 120 }} />
+          )}
+        </div>
       </div>
     )
   },
@@ -124,6 +152,9 @@ export const App = defineComponent({
   name: "BeautifulUiGallery",
   setup() {
     const theme = provideTheme()
+    const scrollHost = ref<HostNode | null>(null)
+    const viewport = useElementBounds(scrollHost, { intervalMs: 250 })
+    provide(ViewportKey, { bounds: viewport.bounds })
     return () => {
       const t = theme.tokens.value
       return (
@@ -161,7 +192,7 @@ export const App = defineComponent({
           </div>
 
           {/* gallery body */}
-          <div style={{ flexGrow: 1, minHeight: 0, overflowY: "scroll" }}>
+          <div ref={scrollHost} style={{ flexGrow: 1, minHeight: 0, overflowY: "scroll" }}>
             <div
               style={{
                 display: "flex",
@@ -256,7 +287,11 @@ export const App = defineComponent({
                 <PromptBar />
               </Section>
               <Section title="RecordsTable (Phase 3)">
-                <RecordsTable />
+                {/* 18 of the 60 demo rows — the full set lives in the
+                    component's default; the gallery keeps its idle frame
+                    cost down (each mutation flush rebuilds every mounted
+                    element). */}
+                <RecordsTable rows={INITIAL_ROWS.slice(0, 18)} />
               </Section>
             </div>
           </div>
@@ -278,5 +313,8 @@ if (isEntryPoint) {
     height: 760,
     // Agent checks need real GPU paint, not control of the user's keyboard.
     focus: process.env.GPUIX_BACKGROUND !== "1",
+    ...(process.env.GPUIV_FRAME_OVERLAY
+      ? { debugFrameOverlay: process.env.GPUIV_FRAME_OVERLAY as never }
+      : {}),
   })
 }

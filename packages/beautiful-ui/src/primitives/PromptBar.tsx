@@ -281,9 +281,14 @@ export const PromptBar = defineComponent({
 
     /* Wrap detection: the original reads the hidden span's offsetWidth
      * synchronously; here it arrives through the bounds poll (≤100ms). */
+    /* Width-only view of the composer bounds: a scroll translates x/y but
+     * not width, so re-renders (and the canvas-free layout math) stay still
+     * while the page scrolls. */
+    const composerWidth = computed(() => anchor.bounds.value?.width ?? null)
+    const modelWidth = computed(() => modelBtn.bounds.value?.width ?? null)
     const inlineInputWidth = computed(() => {
-      const composerW = anchor.bounds.value?.width
-      const modelW = modelBtn.bounds.value?.width
+      const composerW = composerWidth.value
+      const modelW = modelWidth.value
       if (composerW == null || modelW == null || composerW <= 0 || modelW <= 0) return null
       // 2×1px border + 2×6px padding; the original's fixed controls (28×3 +
       // model button) and four 4px gaps.
@@ -447,7 +452,7 @@ export const PromptBar = defineComponent({
       const shadows = theme.shadows.value
       const isPill = pill.value
       const wide = expanded.value || props.tall
-      const composerW = anchor.bounds.value?.width ?? null
+      const composerW = composerWidth.value
       const m = menu.value
       const menuRows = rows.value
       const modelIndex = MODELS.findIndex((mo) => mo.key === model.value.key)

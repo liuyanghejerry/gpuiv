@@ -278,6 +278,9 @@ export const FineTuneCard = defineComponent({
      * into equal segments; the thumb tweens `left`/`width` between them. */
     const trackRef = ref<HostNode | null>(null)
     const track = useElementBounds(trackRef)
+    /* Width-only, so page scrolling (a pure translation) does not re-render
+     * the card on every bounds poll tick. */
+    const trackWidthRef = computed(() => track.bounds.value?.width ?? null)
 
     /* The selected menu row keeps its `field` background until the pointer
      * enters the menu — the original's `group-hover/glide-menu:bg-transparent`. */
@@ -327,7 +330,7 @@ export const FineTuneCard = defineComponent({
     return () => {
       const t = theme.tokens.value
       const shadows = theme.shadows.value
-      const trackWidth = track.bounds.value?.width ?? null
+      const trackWidth = trackWidthRef.value
       const thumbWidth = trackWidth !== null ? (trackWidth - 4) / SEGMENTS.length : 0
       const menuHeight = 8 + props.options.length * MENU_ROW_HEIGHT + Math.max(props.options.length - 1, 0)
 

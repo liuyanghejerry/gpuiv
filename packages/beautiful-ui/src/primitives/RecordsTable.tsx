@@ -157,8 +157,7 @@ export type RecordRow = {
   website?: string
 }
 
-const INITIAL_ROWS: RecordRow[] = [
-  { id: "aurora", name: "Aurora Scoops — Reykjavík", tags: ["Gelato", "Seasonal"], last: "9 days ago", strength: "strong", website: "aurora-scoops.example.com" },
+export const INITIAL_ROWS: RecordRow[] = [  { id: "aurora", name: "Aurora Scoops — Reykjavík", tags: ["Gelato", "Seasonal"], last: "9 days ago", strength: "strong", website: "aurora-scoops.example.com" },
   { id: "kumo", name: "Kumo Creamery — Tokyo", tags: ["B2C", "Cafe", "Vegan"], last: "3 weeks ago", strength: "strong", website: "kumo-creamery.example.com" },
   { id: "sol-nieve", name: "Sol y Nieve — Buenos Aires", tags: ["Gelato", "Local"], last: "2 months ago", strength: "weak", website: "sol-y-nieve.example.com" },
   { id: "maple-orbit", name: "Maple Orbit — Montréal", tags: ["B2B", "Wholesale", "Seasonal"], last: "15 days ago", strength: "weak", website: "maple-orbit.example.com" },
@@ -722,6 +721,11 @@ export const RecordsTable = defineComponent({
       }, 320)
     }
 
+    /* Width-only view of the shell bounds: a scroll translates x/y but not
+     * width, so the table does not re-render on every bounds poll tick
+     * while the page scrolls. */
+    const shellWidth = computed(() => shell.bounds.value?.width ?? null)
+
     return () => {
       const t = theme.tokens.value
       const shadows = theme.shadows.value
@@ -731,7 +735,7 @@ export const RecordsTable = defineComponent({
       const bases = columnWidths.value
       const baseTotal =
         bases.company + bases.categories + bases.last + bases.strength + bases.links + (aiShown ? bases.ai : 0) + ACTION_WIDTH
-      const contentWidth = Math.max((shell.bounds.value?.width ?? baseTotal) - (props.fill ? 0 : 2), 1)
+      const contentWidth = Math.max((shellWidth.value ?? baseTotal) - (props.fill ? 0 : 2), 1)
       const colWidth = (base: number) => (base / baseTotal) * contentWidth
       const wCompany = colWidth(bases.company)
       const wCategories = colWidth(bases.categories)

@@ -353,6 +353,59 @@ export const SelectionActions = defineComponent({
       clearStream()
     })
 
+    /* All geometry below lives in `computed`s keyed on host-RELATIVE
+     * differences: a scroll or window move translates every bounds reading
+     * equally, so the computed outputs do not change and the component does
+     * not re-render while the user scrolls the page. Computing these inline
+     * in the render function re-rendered on every bounds poll tick during
+     * scroll, and the bar's own tween re-arming on each new reading kept the
+     * frame loop hot even at rest. */
+    const anchored = computed(() => {
+      const user = userAnchor.value
+      if (user !== null) return user
+      const box = host.bounds.value
+      const paragraph = passageBox.bounds.value
+      if (box === null || paragraph === null) return null
+      return {
+        x: Math.round(paragraph.x - box.x + paragraph.width / 2),
+        y: Math.round(paragraph.y - box.y + paragraph.height + 8),
+      }
+    })
+    const barPosition = computed(() => {
+      const a = anchored.value
+      let left = 0
+      let top = 0
+      if (a !== null) {
+        top = a.y
+        const pillWidth = bar.bounds.value?.width
+        let x = a.x - (pillWidth ?? 0) / 2
+        const box = host.bounds.value
+        if (box !== null) {
+          const maxLeft = Math.max(box.width - (pillWidth ?? 0) - 4, 4)
+          x = Math.min(Math.max(x, 4), maxLeft)
+        }
+        left = Math.round(x)
+      }
+      return { left, top }
+    })
+    const regionTargets = computed(() => {
+      const primaryW = primaryRow.bounds.value?.width
+      const moreW = moreRow.bounds.value?.width
+      const primaryWidth = primaryW != null && primaryW > 0 ? primaryW : PRIMARY_FALLBACK_W
+      const moreWidth = moreW != null && moreW > 0 ? moreW : MORE_FALLBACK_W
+      /* Region targets composed from the measured rows: dividers (1px +
+       * margins), the 2px row gaps, and the 28px chevron — P + 50 collapsed,
+       * P + M + 41 expanded (the leading divider hides when expanded). */
+      const isExpanded = expanded.value
+      const hasPrompt = prompt.value.trim().length > 0
+      const typing = typingWidth.value
+      return {
+        actions: hasPrompt ? 0 : isExpanded ? primaryWidth + moreWidth + 41 : primaryWidth + 50,
+        input: isExpanded ? 0 : hasPrompt && typing !== null ? Math.max(typing - 40, 60) : INPUT_W,
+        more: moreWidth,
+      }
+    })
+
     return () => {
       const t = theme.tokens.value
       const shadows = theme.shadows.value
@@ -361,47 +414,14 @@ export const SelectionActions = defineComponent({
 
       const busy = mode.value === "thinking" || mode.value === "streaming"
       const hasPrompt = prompt.value.trim().length > 0
+      const visible = shown.value && anchored.value !== null
+      const { left: barLeft, top: barTop } = barPosition.value
+      const { actions: actionsTarget, input: inputTarget } = regionTargets.value
       const busyLabelMap: Record<string, string> = {}
       for (const item of [...props.actions.primary, ...props.actions.more]) {
         if (item.action !== undefined && item.busyLabel !== undefined) busyLabelMap[item.action] = item.busyLabel
       }
       const busyLabel = busyLabelMap[action.value] ?? "Editing"
-
-      /* Anchor: the user's pointer position once a selection anchored the
-       * bar, else under the measured passage block (the demo placement). */
-      const box = host.bounds.value
-      const paragraph = passageBox.bounds.value
-      const anchored =
-        userAnchor.value ??
-        (box !== null && paragraph !== null
-          ? {
-              x: Math.round(paragraph.x - box.x + paragraph.width / 2),
-              y: Math.round(paragraph.y - box.y + paragraph.height + 8),
-            }
-          : null)
-      const visible = shown.value && anchored !== null
-      const pillWidth = bar.bounds.value?.width
-      let barLeft = 0
-      let barTop = 0
-      if (anchored !== null) {
-        barTop = anchored.y
-        let x = anchored.x - (pillWidth ?? 0) / 2
-        if (box !== null) {
-          const maxLeft = Math.max(box.width - (pillWidth ?? 0) - 4, 4)
-          x = Math.min(Math.max(x, 4), maxLeft)
-        }
-        barLeft = Math.round(x)
-      }
-
-      const primaryW = primaryRow.bounds.value?.width
-      const moreW = moreRow.bounds.value?.width
-      const primaryWidth = primaryW != null && primaryW > 0 ? primaryW : PRIMARY_FALLBACK_W
-      const moreWidth = moreW != null && moreW > 0 ? moreW : MORE_FALLBACK_W
-      /* Region targets composed from the measured rows: dividers (1px +
-       * margins), the 2px row gaps, and the 28px chevron — P + 50 collapsed,
-       * P + M + 41 expanded (the leading divider hides when expanded). */
-      const actionsTarget = hasPrompt ? 0 : expanded.value ? primaryWidth + moreWidth + 41 : primaryWidth + 50
-      const inputTarget = expanded.value ? 0 : hasPrompt && typingWidth.value !== null ? Math.max(typingWidth.value - 40, 60) : INPUT_W
 
       const shownSelectionWords =
         mode.value === "idle" || mode.value === "thinking"
@@ -612,7 +632,7 @@ export const SelectionActions = defineComponent({
                             </div>
                             <div testId="sa-clip-more" style={{ flexShrink: 0, marginLeft: expanded.value ? 2 : 0 }}>
                               <motion.div
-                                animate={{ width: expanded.value ? moreWidth : 0, opacity: expanded.value ? 1 : 0 }}
+                                animate={{ width: expanded.value ? regionTargets.value.more : 0, opacity: expanded.value ? 1 : 0 }}
                                 transition={REGION_TRANSITION}
                                 style={{ overflow: "hidden" }}
                               >

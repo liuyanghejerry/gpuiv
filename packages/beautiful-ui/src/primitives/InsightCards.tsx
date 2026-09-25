@@ -300,7 +300,14 @@ const ChartStage = defineComponent({
       if (redrawTimer !== undefined) clearTimeout(redrawTimer)
     })
 
-    watch([() => bounds.value, () => props.series, () => theme.tokens.value], scheduleDraw, { immediate: true })
+    /* Redraw on size or data change only — a scroll translates the canvas
+     * without resizing it, and re-uploading pixels every bounds poll made
+     * scrolling expensive. */
+    watch(
+      [() => [bounds.value?.width, bounds.value?.height], () => props.series, () => theme.tokens.value],
+      scheduleDraw,
+      { immediate: true },
+    )
 
     const pointCount = computed(() => props.series[0]?.values.length ?? 0)
 

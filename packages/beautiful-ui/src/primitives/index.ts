@@ -16,4 +16,4 @@ export { SidebarNav, type SidebarRecent, type SidebarNavItem } from "./SidebarNa
 export { SelectionActions, type SelectionText, type SelectionAction, type SelectionActionSet, type SelectionActionsLabels } from "./SelectionActions.js"
 export { InsightCards, type CompareSeries, type AnomalyData, type AllocationSegment, type InsightPage, type InsightProseSegment } from "./InsightCards.js"
 export { PromptBar, type PromptBarBrand, type PromptBarSource, type PromptBarCommand, type PromptBarModel } from "./PromptBar.js"
-export { RecordsTable, type RecordRow, type RecordStrength } from "./RecordsTable.js"
+export { RecordsTable, type RecordRow, type RecordStrength, INITIAL_ROWS } from "./RecordsTable.js"
