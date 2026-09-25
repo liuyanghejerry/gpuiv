@@ -369,7 +369,7 @@ user-facing APIs belong there. This list is only the remaining engineering work.
       Windows signing hook, dmg/installer, S3-backed auto-update feed +
       pure-TS updater (`docs/auto-update-plan.md`), Linux AppImage,
       universal-macOS `lipo` spike. See `docs/packaging-plan.md` phasing
-- [ ] **Window controls** - resize, minimize (title already works)
+- [ ] **Window resize** - expose GPUI's runtime resize API (minimize / zoom / fullscreen shipped in PR #84)
 - [ ] **Multiple windows** - Support multiple GPUI windows
 - [ ] **Native hot reload** - cannot unload a `.node`. `bun run dev` rebuilds and restarts
 
