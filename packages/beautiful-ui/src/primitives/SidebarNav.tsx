@@ -15,7 +15,9 @@
  *    (180ms, same link curve), and hidden controls get `pointerEvents:
  *    "none"`. GPUIV's `pointerEvents: "none"` is not inherited by children,
  *    so every interactive descendant that the original disabled through the
- *    `.sidebar-copy` cascade carries the flag itself.
+ *    `.sidebar-copy` cascade carries the flag itself. The footer button
+ *    paints its own fill, so it keeps a hitbox regardless — its click also
+ *    guards on the collapsed state.
  *  - Copy fade combines `opacity` with `translateX(-8px)`; there is no
  *    transform in GPUIV, so the fade is opacity-only. The workspace menu's
  *    `pop-in` scale and every `active:scale-[0.98]` press feedback are

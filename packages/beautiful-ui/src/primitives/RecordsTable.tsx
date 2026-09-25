@@ -29,7 +29,10 @@
  *    `fixed` divs at measured header rects. The document-level `pointerdown`
  *    outside-close becomes `onMouseDownOutside` on each menu body with a
  *    one-tick dismiss guard so a press on the same trigger closes instead of
- *    reopening (the Select dismiss pattern).
+ *    reopening (the Select dismiss pattern). The original's scroll listener
+ *    closes popovers on body scroll; that is dropped — there is no vertical
+ *    scroll inside the simplified table, and the popovers anchor to the fixed
+ *    header, so they can't drift.
  *  - The type/tool/inputs flyout submenus (`absolute left-full ml-5`) stay
  *    absolute children of their config row inside the popover. mouseDownOutside
  *    is hitbox-rect based, so the listener sits on a transparent wrapper that
@@ -765,7 +768,6 @@ export const RecordsTable = defineComponent({
       const colselBar = (sel: boolean): VNode | null =>
         sel ? (
           <div
-            aria-hidden="true"
             style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, backgroundColor: t.accent, pointerEvents: "none" }}
           />
         ) : null
@@ -1848,7 +1850,6 @@ export const RecordsTable = defineComponent({
         const tintOverlay = (color: string | undefined): VNode | null =>
           color ? (
             <div
-              aria-hidden="true"
               style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: color, pointerEvents: "none" }}
             />
           ) : null

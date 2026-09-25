@@ -157,8 +157,6 @@ const DEFAULT_DIFF_LINES: Record<string, ToolDiffLine[]> = {
 /** Milliseconds between row reveals — the original's `STEP_MS`, unchanged. */
 const STEP_MS = 700
 
-/** CSS `ease-out` — the "+2 more" fade-in (the other fades use ease.outStrong). */
-const EASE_OUT = [0, 0, 0.58, 1] as [number, number, number, number]
 
 const STEP_ICONS: Record<string, IconName> = {
   think: "sparkle",
@@ -383,6 +381,7 @@ export const ToolChips = defineComponent({
                     >
                       <div
                         role="button"
+                        testId={`toolchips-row-${row.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                         aria-expanded={rowOpen}
                         onClick={() => toggleRow(row.label)}
                         onMouseEnter={() => rowEnter(row.label)}
@@ -583,7 +582,7 @@ export const ToolChips = defineComponent({
                   <motion.div
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
-                    transition={{ duration: 0.3, delay: props.diffs.length * 0.08, ease: EASE_OUT }}
+                    transition={{ duration: 0.3, delay: props.diffs.length * 0.08, ease: ease.out }}
                     style={{
                       display: "flex",
                       alignItems: "center",

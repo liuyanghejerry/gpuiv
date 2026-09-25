@@ -165,8 +165,6 @@ const REGION_TRANSITION = { duration: 0.4, ease: ease.outStrong }
 const ANCHOR_TRANSITION = { duration: 0.32, ease: ease.inOutStrong }
 /** Mode-block entry + the merged pop-in/visibility fade. */
 const FADE_TRANSITION = { duration: 0.22, ease: ease.outStrong }
-/** CSS `ease-out` — the caret fade. */
-const EASE_OUT = [0, 0, 0.58, 1] as [number, number, number, number]
 
 export const SelectionActions = defineComponent({
   name: "BuiSelectionActions",
@@ -495,7 +493,7 @@ export const SelectionActions = defineComponent({
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ duration: 0.15, ease: EASE_OUT }}
+                  transition={{ duration: 0.15, ease: ease.out }}
                   style={{ width: 2, height: 12, borderRadius: 1, backgroundColor: t.ink }}
                 />
               )}
@@ -724,7 +722,6 @@ export const SelectionActions = defineComponent({
                             opacity: 0,
                             pointerEvents: "none",
                           }}
-                          aria-hidden="true"
                         >
                           <div ref={primaryRowRef} style={{ display: "flex", alignItems: "center", gap: 2 }}>
                             {props.actions.primary.map((item) => actionButton(item, "sam", true))}

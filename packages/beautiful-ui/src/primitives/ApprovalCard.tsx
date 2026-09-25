@@ -273,6 +273,7 @@ const QuestionSlide = defineComponent({
                 <GlideMenuItem key={option}>
                   <div
                     role="button"
+                    testId={`approval-option-${i}`}
                     onClick={() => {
                       if (props.active) props.onToggle(i)
                     }}
@@ -318,6 +319,7 @@ const QuestionSlide = defineComponent({
             {/* custom answer — the original's <label data-menu-row> row */}
             <GlideMenuItem>
               <div
+                testId="approval-custom"
                 onClick={() => {
                   if (props.active) focusInput()
                 }}
@@ -474,6 +476,7 @@ export const ApprovalCard = defineComponent({
         return (
           <div
             role="button"
+            testId="approval-reopen"
             onClick={() => {
               open.value = true
             }}
@@ -541,6 +544,7 @@ export const ApprovalCard = defineComponent({
             {props.resettable ? (
               <div
                 role="button"
+                testId="approval-restart"
                 onClick={reset}
                 style={{ fontSize: 12, fontWeight: 500, color: t.ink3, cursor: "pointer", hover: { color: t.ink } }}
               >
@@ -619,6 +623,7 @@ export const ApprovalCard = defineComponent({
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                 <div
                   role="button"
+                  testId="approval-prev"
                   aria-label="Previous question"
                   aria-disabled={qi.value <= 0 || undefined}
                   onClick={qi.value <= 0 ? undefined : () => goTo(qi.value - 1)}
@@ -638,6 +643,7 @@ export const ApprovalCard = defineComponent({
                 <RollingDigits value={`${qi.value + 1} / ${props.questions.length}`} />
                 <div
                   role="button"
+                  testId="approval-next"
                   aria-label="Next question"
                   aria-disabled={last.value || undefined}
                   onClick={last.value ? undefined : () => goTo(qi.value + 1)}
@@ -660,6 +666,7 @@ export const ApprovalCard = defineComponent({
                 <Button
                   variant="ghost"
                   size="sm"
+                  testId="approval-skip"
                   onClick={() => {
                     if (last.value) open.value = false
                     else goTo(qi.value + 1)
@@ -667,7 +674,7 @@ export const ApprovalCard = defineComponent({
                 >
                   {copy.value.skip}
                 </Button>
-                <Button variant="accent" size="sm" disabled={!hasAnswer.value} onClick={advance}>
+                <Button variant="accent" size="sm" testId="approval-advance" disabled={!hasAnswer.value} onClick={advance}>
                   {last.value ? copy.value.send : copy.value.continue}
                 </Button>
               </div>
@@ -677,6 +684,7 @@ export const ApprovalCard = defineComponent({
              *  (the original's `z-10`). */}
             <div
               role="button"
+              testId="approval-dismiss"
               aria-label="Dismiss"
               onClick={() => {
                 open.value = false

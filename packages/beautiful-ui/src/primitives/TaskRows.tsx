@@ -126,8 +126,6 @@ const TASK_ROWS: TaskRow[] = [
   },
 ]
 
-/** CSS `ease-out` — the status pill's fade-in curve. */
-const EASE_OUT = [0, 0, 0.58, 1] as [number, number, number, number]
 
 export const TaskRows = defineComponent({
   name: "BuiTaskRows",
@@ -269,7 +267,7 @@ export const TaskRows = defineComponent({
           pointerEvents: "none" as const,
         } as const
         return fade ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease: EASE_OUT }} style={style}>
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease: ease.out }} style={style}>
             {body}
           </motion.div>
         ) : (
@@ -327,6 +325,7 @@ export const TaskRows = defineComponent({
                   {/* row header */}
                   <div
                     role="button"
+                    testId={`taskrows-row-${row.key}`}
                     aria-expanded={open}
                     onClick={() => {
                       manualOpen.value = { ...manualOpen.value, [row.key]: !open }
@@ -371,7 +370,6 @@ export const TaskRows = defineComponent({
                     <div style={{ flexShrink: 0, fontSize: 12.5, color: t.ink2 }}>{row.amount}</div>
                     {pillFor(row)}
                     <div
-                      aria-hidden="true"
                       style={{
                         display: "flex",
                         width: 28,
@@ -395,7 +393,7 @@ export const TaskRows = defineComponent({
                       transition={{ duration: 0.3, ease: ease.outStrong }}
                     >
                       <div style={{ display: "flex", gap: 10, paddingLeft: 10, paddingRight: 10, marginBottom: 10 }}>
-                        <div aria-hidden="true" style={{ width: 24, flexShrink: 0, alignSelf: "stretch", display: "flex", flexDirection: "column", alignItems: "center" }}>
+                        <div style={{ width: 24, flexShrink: 0, alignSelf: "stretch", display: "flex", flexDirection: "column", alignItems: "center" }}>
                           <div style={{ width: 1, flexGrow: 1, backgroundColor: t.line }} />
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", gap: 6, flexGrow: 1, minWidth: 0 }}>

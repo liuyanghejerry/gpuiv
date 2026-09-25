@@ -211,7 +211,6 @@ export const DiffTable = defineComponent({
       /** The original's IncludedMark — scale transition dropped. */
       const includedMark = (included: boolean, tone: "red" | "green") => (
         <div
-          aria-hidden="true"
           style={{
             display: "flex",
             width: 18,
@@ -237,7 +236,6 @@ export const DiffTable = defineComponent({
             {truncText(opts.email, { fontSize: opts.fontSize, lineHeight: 18, color: opts.color })}
             {opts.out && (
               <div
-                aria-hidden="true"
                 style={{ position: "absolute", left: 0, right: 0, top: 9, height: 1, backgroundColor: withAlpha(t.red, 0.5) }}
               />
             )}
@@ -297,6 +295,7 @@ export const DiffTable = defineComponent({
               return (
                 <div
                   key={row.key}
+                  testId={`diff-row-${row.key}`}
                   role={row.removed ? "checkbox" : undefined}
                   aria-selected={row.removed ? included : undefined}
                   onClick={interactive ? () => toggleEdit(row.key) : undefined}
@@ -321,6 +320,7 @@ export const DiffTable = defineComponent({
             <AnimateHeight height={settled ? "auto" : 0} duration={0.2} ease={ease.outStrong}>
               <motion.div initial={false} animate={{ opacity: settled ? 1 : 0 }} transition={{ duration: 0.2, ease: ease.outStrong }}>
                 <div
+                  testId="diff-added-row"
                   role="checkbox"
                   aria-checked={addedIncluded}
                   aria-label={`Include adding ${props.addedRow.id}`}
@@ -404,6 +404,7 @@ export const DiffTable = defineComponent({
                     <Button
                       variant="accent"
                       size="sm"
+                      testId="diff-apply"
                       style={{ fontSize: 12 }}
                       disabled={removals.value + additions.value === 0}
                       onClick={() => {

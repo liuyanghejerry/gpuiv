@@ -132,8 +132,6 @@ const AVATAR_RING = {
   dark: "oklch(1 0 0 / 0.08)",
 }
 
-/** CSS `ease-out` — the caret fade-in curve (the fade-ups use `ease.outStrong`). */
-const EASE_OUT = [0, 0, 0.58, 1] as [number, number, number, number]
 
 export const StreamingText = defineComponent({
   name: "BuiStreamingText",
@@ -264,7 +262,7 @@ export const StreamingText = defineComponent({
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.15, ease: EASE_OUT }}
+                transition={{ duration: 0.15, ease: ease.out }}
                 style={{ width: 2, height: 12, borderRadius: 1, backgroundColor: t.ink }}
               />
             )}
@@ -303,6 +301,7 @@ export const StreamingText = defineComponent({
             ))}
             <div
               role="button"
+              testId="streaming-sources"
               aria-expanded={sourcesOpen.value}
               onClick={
                 isDone
@@ -396,6 +395,7 @@ export const StreamingText = defineComponent({
                 >
                   <div
                     role="button"
+                    testId={`streaming-followup-${i}`}
                     onClick={isDone ? () => emit("followUp", text, i) : undefined}
                     style={{
                       marginLeft: -6,
