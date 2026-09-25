@@ -1028,6 +1028,11 @@ export interface EventPayload {
    */
   matchCount?: number
   /**
+   * Logical native motion target that reached completion.
+   * Populated for: motionComplete.
+   */
+  motionGeneration?: number
+  /**
    * Absolute filesystem paths from a Finder / OS file drop.
    * Populated for: fileDrop.
    */

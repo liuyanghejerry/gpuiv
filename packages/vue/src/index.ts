@@ -57,6 +57,18 @@ export type { HighlightSpec } from "./types.js"
 
 // Components
 export { motion } from "./components/motion.js"
+export {
+  AnimatePresence,
+  useIsPresent,
+  usePresence,
+} from "./components/animate-presence.js"
+export type {
+  AnimatePresenceProps,
+  ComponentKey,
+  Presence,
+  PresenceContextValue,
+  SafeToRemove,
+} from "./components/animate-presence.js"
 export { AnimateHeight } from "./components/animate-height.js"
 export { MarkdownEditor } from "./markdown-editor/component.js"
 export type {

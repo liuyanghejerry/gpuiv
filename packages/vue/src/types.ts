@@ -33,6 +33,8 @@ export interface MotionTransition {
 export interface MotionProps {
   initial?: MotionStyle | false
   animate: MotionStyle
+  /** Target applied while this node is leaving `AnimatePresence`. */
+  exit?: MotionStyle
   transition?: MotionTransition
 }
 
@@ -407,6 +409,9 @@ export interface ElementProps {
   highlight?: HighlightSpec | null
   /** Fires after the build that resolved `highlight`, with `matchCount`. */
   onHighlight?: (event: EventPayload) => void
+  /** A native `motion` track reached its current target. The payload's
+   *  `motionGeneration` identifies the logical target that settled. */
+  onMotionComplete?: (event: EventPayload) => void
 
   // ── Keyboard events (need focus: autoFocus, or a click on the element) ──
   onKeyDown?: (event: EventPayload) => void

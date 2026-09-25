@@ -55,6 +55,7 @@ const EVENT_TYPES = new Set([
   "click",
   "auxClick",
   "highlight",
+  "motionComplete",
   "mouseDown",
   "mouseUp",
   "mouseEnter",
