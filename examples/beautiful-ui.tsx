@@ -92,17 +92,18 @@ const Section = defineComponent({
           vp0 = { y: vp.y - offset[1], h: vp.height }
         }
         if (contentY === null || !offset || !vp0) return
-        /* Mount half a viewport out (still offscreen, so the mount batch
-         * lands out of sight) and unmount a full viewport out; the hysteresis
-         * keeps a jittering scroll from flapping a section across the
-         * boundary. Every mounted element is rebuilt on every frame — GPUI is
-         * immediate-mode — and each scroll event draws synchronously, so the
-         * mounted set is the scroll path's per-frame cost. */
+        /* Wide hysteresis: mount 1.5 viewports out and unmount only past 3.
+         * A mount is one big batch (hundreds of createElement ops plus a
+         * full relayout) that lands as a slow frame — the visible stutter
+         * when scrolling gesture by gesture. A wide band means a section is
+         * mounted once and stays put through back-and-forth scrolling, so
+         * the batches mostly happen while the user is far away; the cost is
+         * a larger mounted set, i.e. a slightly more expensive frame. */
         const windowY = contentY + offset[1]
         const bottom = windowY + reserve.value
         const hi = vp0.y + vp0.h
         const within = (m: number) => bottom >= vp0.y - m && windowY <= hi + m
-        const near = mounted.value ? within(vp0.h) : within(vp0.h * 0.5)
+        const near = mounted.value ? within(vp0.h * 3) : within(vp0.h * 1.5)
         if (near === mounted.value) return
         if (!near && viewport.scrolling.value) return // defer unmounts to scroll idle
         mounted.value = near
