@@ -104,9 +104,11 @@ export function createNativeRenderer(): GpuixRenderer {
 
 const automationBackends = new WeakMap<NativeRenderer, InProcessBackend>()
 
-/** ~125fps. Above any common display refresh rate, so frames are never the
- *  bottleneck, while still leaving the Node event loop almost entirely idle. */
-const DEFAULT_FRAME_MS = 8
+/** ~60fps. The tick loop also performs the coalesced repaint for everything
+ *  the last batch of mutations marked dirty (macOS), so this doubles as the
+ *  paint rate cap: an 8ms tick drew at ~125fps, which multiplied the frame
+ *  cost of a large mounted tree into a pinned core while scrolling. */
+const DEFAULT_FRAME_MS = 16
 
 export interface FrameLoop {
   stop: () => void

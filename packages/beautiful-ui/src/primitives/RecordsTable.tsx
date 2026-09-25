@@ -78,8 +78,8 @@
  *    (110ms per row) and its disabled-while-running state are kept.
  */
 
-import { computed, defineComponent, h, onBeforeUnmount, ref, type PropType, type VNode } from "vue"
-import { motion, useElementBounds, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, type PropType, type VNode } from "vue"
+import { motion, useElementBounds, useGpuix, type HostNode, type StyleDesc } from "@gpuiv/vue"
 
 import { ease, radius, type Tokens } from "../tokens.js"
 import { useTheme } from "../theme.js"
@@ -282,6 +282,10 @@ const MENU_FADE = { duration: 0.16, ease: ease.outStrong }
 const PULSE_TRANSITION = { duration: 0.5, ease: ease.inOutStrong }
 
 const ROW_HEIGHT = 35
+/** The scroll area's height cap when not filling the parent (the source's 438px). */
+const ROW_VIEWPORT_H = 438
+/** Rows kept mounted beyond the visible window, top and bottom. */
+const ROW_OVERSCAN = 4
 const CELL_LINE = 18
 /** One calc row resolves per beat (the original's 110ms). */
 const CALC_STEP_MS = 110
@@ -513,6 +517,7 @@ export const RecordsTable = defineComponent({
   },
   setup(props) {
     const theme = useTheme()
+    const { renderer } = useGpuix()
 
     const selected = ref(new Set<string>())
     const sort = ref<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 })
@@ -548,15 +553,46 @@ export const RecordsTable = defineComponent({
     const shellRef = ref<HostNode | null>(null)
     const shell = useElementBounds(shellRef)
 
+    /* ── Row virtualization ─────────────────────────────────
+     * Every mounted element costs build time on every frame (GPUI is
+     * immediate-mode), and a 60-row table is ~1200 elements ≈ 11ms/frame —
+     * over budget while the page scrolls. Rows have a fixed height, so only
+     * the rows intersecting the table's own scroller (plus an overscan
+     * fringe) are rendered, with spacers preserving the scroll geometry.
+     * The scroll offset is polled at 120ms and only triggers a re-render
+     * when the first visible row changes. */
+    const rowsScrollRef = ref<HostNode | null>(null)
+    const rowsScrollBounds = useElementBounds(rowsScrollRef, { intervalMs: 250 })
+    const rowsScrollTop = ref(0)
+    let rowsScrollTimer: ReturnType<typeof setInterval> | undefined
+
     let calcTimer: ReturnType<typeof setTimeout> | undefined
     let pulseTimer: ReturnType<typeof setInterval> | undefined
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let pendingTimer: ReturnType<typeof setTimeout> | undefined
+    onMounted(() => {
+      rowsScrollTimer = setInterval(() => {
+        const id = rowsScrollRef.value?.id
+        if (id == null) return
+        if (visibleRows.value.length * ROW_HEIGHT <= ROW_VIEWPORT_H) return
+        try {
+          const offset = renderer?.getScrollOffset?.(id)
+          if (!offset || offset.length < 2) return
+          const next = Math.max(0, -offset[1])
+          if (Math.floor(next / ROW_HEIGHT) !== Math.floor(rowsScrollTop.value / ROW_HEIGHT)) {
+            rowsScrollTop.value = next
+          }
+        } catch {
+          /* renderer not ready */
+        }
+      }, 120)
+    })
     onBeforeUnmount(() => {
       if (calcTimer !== undefined) clearTimeout(calcTimer)
       if (pulseTimer !== undefined) clearInterval(pulseTimer)
       if (revealTimer !== undefined) clearTimeout(revealTimer)
       if (pendingTimer !== undefined) clearTimeout(pendingTimer)
+      if (rowsScrollTimer !== undefined) clearInterval(rowsScrollTimer)
     })
 
     /* Dismiss guard (the Select pattern): a press that closed a menu from
@@ -1836,7 +1872,20 @@ export const RecordsTable = defineComponent({
         return <div style={{ fontSize: 13, fontWeight: 500, lineHeight: CELL_LINE, color: t.ink3 }}>—</div>
       }
 
-      const rowNodes = visibleRows.value.map((row, index) => {
+      /* Virtualized slice: only rows intersecting the table's own scroller
+       * (plus overscan) render; spacers keep the scroll geometry. Indices
+       * stay real (row numbers, calc progress and the competitor pairs are
+       * all index-derived). */
+      const totalRows = visibleRows.value.length
+      const viewportH = props.fill ? rowsScrollBounds.bounds.value?.height ?? ROW_VIEWPORT_H : ROW_VIEWPORT_H
+      let firstRow = 0
+      let lastRow = totalRows
+      if (totalRows * ROW_HEIGHT > viewportH + ROW_HEIGHT) {
+        firstRow = Math.max(0, Math.floor(rowsScrollTop.value / ROW_HEIGHT) - ROW_OVERSCAN)
+        lastRow = Math.min(totalRows, Math.ceil((rowsScrollTop.value + viewportH) / ROW_HEIGHT) + ROW_OVERSCAN)
+      }
+      const rowNodes = visibleRows.value.slice(firstRow, lastRow).map((row, i) => {
+        const index = firstRow + i
         const rowSel = selected.value.has(row.id)
         const hovered = hoveredRow.value === row.id
         const strength = STRENGTH[row.strength]!
@@ -2181,13 +2230,16 @@ export const RecordsTable = defineComponent({
           </div>
 
           <div
+            ref={rowsScrollRef}
             aria-label="Companies table. Scroll vertically to view all records."
             style={{
               overflowY: "scroll",
-              ...(props.fill ? { flexGrow: 1, minHeight: 0 } : { maxHeight: 438 }),
+              ...(props.fill ? { flexGrow: 1, minHeight: 0 } : { maxHeight: ROW_VIEWPORT_H }),
             }}
           >
+            {firstRow > 0 ? <div style={{ width: "100%", height: firstRow * ROW_HEIGHT, flexShrink: 0 }} /> : null}
             {rowNodes}
+            {lastRow < totalRows ? <div style={{ width: "100%", height: (totalRows - lastRow) * ROW_HEIGHT, flexShrink: 0 }} /> : null}
           </div>
 
           {footerRow}

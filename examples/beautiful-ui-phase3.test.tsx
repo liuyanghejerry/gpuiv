@@ -2,7 +2,7 @@ import { defineComponent, h } from "vue"
 import { describe, expect, test } from "vitest"
 import { connectTest } from "@gpuiv/vue/automation"
 import { createTestApp } from "@gpuiv/vue/testing"
-import { provideTheme, ApprovalCard, DiffTable, TaskRows, ToolChips, StreamingText } from "@gpuiv/beautiful-ui"
+import { provideTheme, ApprovalCard, DiffTable, RecordsTable, TaskRows, ToolChips, StreamingText } from "@gpuiv/beautiful-ui"
 
 const host = (Comp: unknown) =>
   defineComponent({
@@ -39,6 +39,20 @@ describe("review follow-ups", () => {
     expect(ids).toContain("approval-custom")
     expect(ids).toContain("approval-advance")
     expect(ids).toContain("approval-dismiss")
+    app.unmount()
+  })
+
+  test("RecordsTable virtualizes rows beyond its own scroller", async () => {
+    const app = createTestApp(host(RecordsTable))
+    await app.settle()
+    await new Promise((r) => setTimeout(r, 800))
+    const rows = app.renderer
+      .findByType("div")
+      .map((el) => (el as { testId?: string }).testId)
+      .filter((id): id is string => typeof id === "string" && id.startsWith("records-row-"))
+    // 60 demo rows, only the visible slice (+overscan) is mounted
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.length).toBeLessThan(20)
     app.unmount()
   })
 
