@@ -6,8 +6,8 @@
  * light/dark toggle that flips the whole token map live.
  */
 
-import { defineComponent, inject, provide, ref, watch, type InjectionKey } from "vue"
-import { createApp, useElementBounds, type HostNode, type ShallowRef, type ElementBounds } from "@gpuiv/vue"
+import { defineComponent, inject, onBeforeUnmount, onMounted, provide, ref, watch, type InjectionKey, type Ref } from "vue"
+import { createApp, useElementBounds, useGpuix, type HostNode, type ShallowRef, type ElementBounds } from "@gpuiv/vue"
 import {
   Button,
   ChatComposer,
@@ -44,8 +44,21 @@ import {
  * every animation tick or scroll frame rebuilds every MOUNTED element, so a
  * gallery that keeps all 21 sections alive costs ~13ms/frame and pins a
  * core. Each section keeps its title mounted (scroll anchors) and reserves
- * its last measured height while unmounted, so scroll geometry is stable. */
-const ViewportKey: InjectionKey<{ bounds: ShallowRef<ElementBounds | null> }> = Symbol("gallery-viewport")
+ * its last measured height while unmounted, so scroll geometry is stable.
+ *
+ * Painted bounds of elements inside a scroll container go STALE once the
+ * container scrolls (the tracker records at paint time and these wrappers
+ * do not re-record), so windowing cannot watch them. Instead each section
+ * captures its content-space offset once from its first bounds reading
+ * (window y minus the live scroll offset at that moment) and re-evaluates
+ * visibility from the LIVE scroll offset, which `getScrollOffset` reports
+ * correctly at any time. */
+interface GalleryViewport {
+  bounds: ShallowRef<ElementBounds | null>
+  /** Live scroll offset of the gallery body: [x, y], y negative scrolled down (GPUI convention). */
+  offset: Ref<[number, number] | null>
+}
+const ViewportKey: InjectionKey<GalleryViewport> = Symbol("gallery-viewport")
 
 const Section = defineComponent({
   name: "GallerySection",
@@ -56,24 +69,39 @@ const Section = defineComponent({
     const theme = useTheme()
     const viewport = inject(ViewportKey, null)
     const host = ref<HostNode | null>(null)
-    const { bounds } = useElementBounds(host)
+    const { bounds } = useElementBounds(host, { intervalMs: 400 })
     const mounted = ref(true)
     const reserve = ref(0)
-    watch(() => bounds.value, (body) => {
-      if (body === null) return
-      if (body.height > 0) reserve.value = body.height
-      const vp = viewport?.bounds.value
-      if (vp === null || vp === undefined) return
-      const margin = vp.height * 2
-      const near = body.y + body.height >= vp.y - margin && body.y <= vp.y + vp.height + margin
-      if (near !== mounted.value) mounted.value = near
-    })
+    /* Content-space y captured from the first reading; null until then.
+     * The scroll container's own painted bounds ALSO slide with its content
+     * (its tracker records the scrolled box), so the viewport's window
+     * position is captured once — vp.y at first reading minus the live
+     * offset at that moment — and stays constant after that. */
+    let contentY: number | null = null
+    let vp0: { y: number; h: number } | null = null
+    watch(
+      () => [bounds.value, viewport?.offset.value, viewport?.bounds.value] as const,
+      ([body, offset, vp]) => {
+        if (body !== null) {
+          if (body.height > 0) reserve.value = body.height
+          if (contentY === null) contentY = body.y - (offset?.[1] ?? 0)
+        }
+        if (vp !== null && vp !== undefined && vp0 === null && offset) {
+          vp0 = { y: vp.y - offset[1], h: vp.height }
+        }
+        if (contentY === null || !offset || !vp0) return
+        const margin = vp0.h * 2
+        const windowY = contentY + offset[1]
+        const near = windowY + reserve.value >= vp0.y - margin && windowY <= vp0.y + vp0.h + margin
+        if (near !== mounted.value) mounted.value = near
+      },
+    )
     return () => (
       <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: theme.tokens.value.ink3, paddingLeft: 2 }}>
           {props.title}
         </div>
-        <div ref={host} style={{ width: "100%" }}>
+        <div ref={host} testId={`section-body-${props.title.replace(/[^a-zA-Z]/g, "")}`} style={{ width: "100%", position: "relative" }}>
           {mounted.value ? (
             slots.default?.()
           ) : (
@@ -152,9 +180,29 @@ export const App = defineComponent({
   name: "BeautifulUiGallery",
   setup() {
     const theme = provideTheme()
+    const { renderer } = useGpuix()
     const scrollHost = ref<HostNode | null>(null)
     const viewport = useElementBounds(scrollHost, { intervalMs: 250 })
-    provide(ViewportKey, { bounds: viewport.bounds })
+    /* The live scroll offset — the one scroll signal that stays correct
+     * after the container scrolls. Polled lightly; sections react to it. */
+    const offset = ref<[number, number] | null>(null)
+    let offsetTimer: ReturnType<typeof setInterval> | undefined
+    onMounted(() => {
+      offsetTimer = setInterval(() => {
+        const id = scrollHost.value?.id
+        if (id == null) return
+        try {
+          const value = renderer?.getScrollOffset?.(id)
+          if (value && value.length >= 2) offset.value = [value[0], value[1]]
+        } catch {
+          /* renderer not ready yet */
+        }
+      }, 120)
+    })
+    onBeforeUnmount(() => {
+      if (offsetTimer !== undefined) clearInterval(offsetTimer)
+    })
+    provide(ViewportKey, { bounds: viewport.bounds, offset })
     return () => {
       const t = theme.tokens.value
       return (
@@ -192,7 +240,7 @@ export const App = defineComponent({
           </div>
 
           {/* gallery body */}
-          <div ref={scrollHost} style={{ flexGrow: 1, minHeight: 0, overflowY: "scroll" }}>
+          <div ref={scrollHost} testId="gallery-scroll" style={{ flexGrow: 1, minHeight: 0, overflowY: "scroll" }}>
             <div
               style={{
                 display: "flex",
