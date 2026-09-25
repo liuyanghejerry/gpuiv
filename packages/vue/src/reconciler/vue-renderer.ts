@@ -20,6 +20,7 @@ import type {
   Container,
   ElementProps,
   HostNode,
+  ImgHostNode,
   MutationRenderer,
   NativeRenderer,
   WindowKeyEventHandlers,
@@ -269,7 +270,23 @@ export function createGpuivRendererHost(
 
   const nodeOps: RendererOptions<HostNode, HostNode> = {
     createElement(type: string): HostNode {
-      return createHostNode(type, ++ids.nextElementId, "")
+      const node = createHostNode(type, ++ids.nextElementId, "")
+      // Every element ref can reveal itself in its nearest scroller; an
+      // `<img>` ref can push bitmaps without a src or a JSON mutation. The
+      // methods capture `inner`, so they work on the raw renderer only.
+      node.scrollIntoView = () => {
+        if (node.id != null) inner.scrollIntoView?.(node.id)
+      }
+      if (type === "img") {
+        const img = node as ImgHostNode
+        img.setImage = (bytes: Uint8Array) => {
+          if (img.id != null) inner.setImage?.(img.id, bytes)
+        }
+        img.setImagePixels = (width: number, height: number, pixels: Uint8Array) => {
+          if (img.id != null) inner.setImagePixels?.(img.id, width, height, pixels)
+        }
+      }
+      return node
     },
 
     createText(text: string): HostNode {

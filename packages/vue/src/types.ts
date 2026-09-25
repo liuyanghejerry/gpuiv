@@ -534,6 +534,22 @@ export interface HostNode {
    *  `parentComponent` patchProp receives. Kept so the deferred materialize()
    *  can still wrap handlers with the owning instance. */
   eventOwner?: ComponentInternalInstance | null
+  /** Scroll this node's nearest overflow parent or `<virtual-list>` until it
+   *  is visible. Present on element nodes; comment/container nodes lack it. */
+  scrollIntoView?(): void
+}
+
+/** An `<img>` host ref. Live uploads bypass `src` and the JSON mutation
+ *  protocol: bytes/pixels go straight to the GPU image. */
+export interface ImgHostNode extends HostNode {
+  type: "img"
+  /** Decode encoded bytes (PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or
+   *  Netpbm) onto this node. */
+  setImage?(bytes: Uint8Array): void
+  /** Paint packed straight-alpha RGBA pixels onto this node. `width`/`height`
+   *  are bitmap pixels, not the layout box — upload a 2x bitmap into a 1x box
+   *  on retina. There is no density argument. */
+  setImagePixels?(width: number, height: number, pixels: Uint8Array): void
 }
 
 /// Native renderer transport. The Vue host config sends one atomic batch per
@@ -651,6 +667,20 @@ export interface NativeRenderer {
   getWindowBounds?(): { x: number; y: number; width: number; height: number }
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
+  /** Scroll an element's nearest overflow parent or `<virtual-list>` until the
+   *  element is visible. */
+  scrollIntoView?(elementId: number): void
+  /** Push encoded image bytes (PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or
+   *  Netpbm) onto an `<img>` host node. */
+  setImage?(elementId: number, bytes: Uint8Array): void
+  /** Push packed straight-alpha RGBA pixels onto an `<img>` host node.
+   *  `width`/`height` are bitmap pixels; the layout box comes from style. */
+  setImagePixels?(
+    elementId: number,
+    width: number,
+    height: number,
+    pixels: Uint8Array
+  ): void
   /** Bring the window forward and focus it. Reveals a `show: false` window. */
   activateWindow?(): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string

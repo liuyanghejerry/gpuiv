@@ -237,6 +237,25 @@ pub trait CustomElement: 'static {
         None
     }
 
+    /// Current live GPU image on `<img>`, if any.
+    fn live_image(&self) -> Option<std::sync::Arc<gpui::RenderImage>> {
+        None
+    }
+
+    /// Replace the live GPU image on `<img>`. Returns the previous image when
+    /// this adapter already had one, so the renderer can upload in place.
+    fn replace_live_image(
+        &mut self,
+        _image: std::sync::Arc<gpui::RenderImage>,
+    ) -> Option<std::sync::Arc<gpui::RenderImage>> {
+        None
+    }
+
+    /// A live image that `src` replaced, waiting for `drop_image`.
+    fn take_dropped_image(&mut self) -> Option<std::sync::Arc<gpui::RenderImage>> {
+        None
+    }
+
     /// Clean up resources (GPUI entities, subscriptions, etc.)
     fn destroy(&mut self);
 }
@@ -381,6 +400,18 @@ impl CustomElementRegistry {
         entry.element.render(ctx, window, cx)
     }
 
+    /// Store a decoded image on an `<img>` host node, creating the adapter if needed.
+    pub fn set_live_image(
+        &mut self,
+        id: u64,
+        image: std::sync::Arc<gpui::RenderImage>,
+    ) -> std::result::Result<Option<std::sync::Arc<gpui::RenderImage>>, String> {
+        let entry = self
+            .get_or_create(id, "img")
+            .ok_or_else(|| "img factory is not registered".to_string())?;
+        Ok(entry.element.replace_live_image(image))
+    }
+
     /// Called when React destroys an element.
     pub fn destroy(&mut self, id: u64) {
         if let Some(mut entry) = self.instances.remove(&id) {
@@ -413,7 +444,9 @@ impl CustomElementRegistry {
     }
 
     /// Remove and destroy instances whose IDs no longer exist in the tree.
-    pub fn prune_missing<F>(&mut self, mut is_live: F)
+    /// A destroyed `<img>` can still own a GPU image; `window.drop_image`
+    /// releases it.
+    pub fn prune_missing<F>(&mut self, mut is_live: F, window: &mut gpui::Window)
     where
         F: FnMut(u64) -> bool,
     {
@@ -425,7 +458,20 @@ impl CustomElementRegistry {
             .collect();
 
         for id in stale_ids {
-            self.destroy(id);
+            self.destroy_live_image(id, window);
+        }
+    }
+
+    fn destroy_live_image(&mut self, id: u64, window: &mut gpui::Window) {
+        if let Some(mut entry) = self.instances.remove(&id) {
+            if let Some(image) = entry
+                .element
+                .live_image()
+                .or_else(|| entry.element.take_dropped_image())
+            {
+                window.drop_image(image).ok();
+            }
+            entry.element.destroy();
         }
     }
 }

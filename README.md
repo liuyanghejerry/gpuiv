@@ -996,27 +996,26 @@ const ScrollableList = defineComponent({
 
 Per-axis scrolling: use `overflowX: "scroll"` or `overflowY: "scroll"`.
 
-For programmatic scroll control, capture an element's numeric ID with a Vue
-ref, then call the renderer's scroll methods:
+For programmatic scroll, prefer the host ref: `scrollIntoView()` walks to the
+element's nearest scroll parent (an `overflow: "scroll"` div or a
+`<virtual-list>`) and scrolls until the element is visible. The renderer's
+`scrollTo` and `scrollToItem` still exist when you already have an id:
 
 ```tsx
 const ProgrammaticScroll = defineComponent({
   setup() {
-    const { renderer } = useGpuix()
-    const listRef = ref<{ id: number } | null>(null)
-
-    const jumpToBottom = () => {
-      if (listRef.value) {
-        renderer?.scrollTo?.(listRef.value.id, 0, -999)
-      }
-    }
+    const lastItem = ref<{ scrollIntoView(): void } | null>(null)
 
     return () => (
       <>
-        <div ref={listRef} style={{ height: 200, overflow: 'scroll' }}>
-          {items.map((item, i) => <div key={i}>{item}</div>)}
+        <div style={{ height: 200, overflow: 'scroll' }}>
+          {items.map((item, i) => (
+            <div key={i} ref={i === items.length - 1 ? lastItem : undefined}>
+              {item}
+            </div>
+          ))}
         </div>
-        <div onClick={jumpToBottom}>Jump to bottom</div>
+        <div onClick={() => lastItem.value?.scrollIntoView()}>Jump to last</div>
       </>
     )
   },
@@ -1024,7 +1023,8 @@ const ProgrammaticScroll = defineComponent({
 ```
 
 A `ref` on a host element (`div`, `virtual-list`) receives the host node itself,
-whose `id` is the element ID. Plain components are not ref-forwarded to host ids;
+whose `id` is the element ID and whose `scrollIntoView()` reveals it in the
+nearest scroller. Plain components are not ref-forwarded to host ids;
 `<VirtualList>` is the exception — it exposes its element `id` plus scroll
 methods through its ref (see [Programmatic scrolling](#programmatic-scrolling)).
 
@@ -1032,6 +1032,7 @@ methods through its ref (see [Programmatic scrolling](#programmatic-scrolling)).
 // Available scroll methods on the renderer:
 renderer.scrollTo?(elementId, x, y)                          // set offset directly
 renderer.scrollToItem?(elementId, index, offsetInItem?)      // scroll child into view; px offset, may be negative on a virtual list
+renderer.scrollIntoView?(elementId)                          // nearest scroll parent
 renderer.getScrollOffset?(elementId)                         // returns [x, y] or null
 renderer.getListScrollTop?(elementId)                        // virtual-list logical anchor [itemIndex, offsetInItemPx, viewportHeightPx] or null
 ```
@@ -2009,6 +2010,62 @@ not written to a temp file.
 `"scaleDown"`, or `"none"`. An empty `src` or a failed load shows a fallback
 placeholder instead of crashing. A URL that is still loading paints an empty
 box of the declared size.
+
+### Live images from a buffer
+
+A data URL still works, but it base64-encodes the bytes into the mutation JSON.
+For a waveform, a canvas dump, or any frame you already have in memory, push
+**raw bytes** through the `<img>` ref. That call skips JSON.
+
+`setImage` takes encoded **PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or
+Netpbm**. `setImagePixels` takes packed **RGBA**. Prefer pixels for a live
+waveform. There is no PNG encode, and no JSON.
+
+Call either from `onMounted` / `watchEffect` after mount. A later `src` change
+overwrites the pixels.
+
+There is **no density argument**. `width` and `height` on `setImagePixels` are
+bitmap pixels. `style.width` and `style.height` are the layout box. On a retina
+display, upload **2x** (or `devicePixelRatio`) the box size so GPUI does not
+stretch one logical pixel into four screen pixels.
+
+```tsx
+import { createCanvas } from 'canvas'
+
+const Waveform = defineComponent({
+  props: { samples: { type: Array as PropType<Float32Array>, required: true } },
+  setup(props) {
+    const img = ref<ImgHostNode | null>(null)
+
+    watchEffect(() => {
+      const canvas = createCanvas(800, 80)
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#1a1a2e'
+      ctx.fillRect(0, 0, 800, 80)
+      ctx.strokeStyle = '#5ca9ff'
+      ctx.beginPath()
+      for (let x = 0; x < props.samples.length; x++) {
+        const y = 40 - props.samples[x]! * 36
+        if (x === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.stroke()
+      img.value?.setImage?.(canvas.toBuffer('image/png'))
+    })
+
+    return () => <img ref={img} objectFit="fill" style={{ width: 800, height: 80 }} />
+  },
+})
+```
+
+A live waveform that already has RGBA should skip PNG:
+
+```tsx
+img.value?.setImagePixels?.(1600, 160, rgbaBytes)
+```
+
+That buffer is **1600x160**. The layout box stays `800x80`. Alpha is straight,
+not premultiplied.
 
 ### `<svg>`
 
@@ -3004,7 +3061,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Scroll wheel events with delta and touch phase
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
 - [x] Accessibility: `role` + `aria-*` props onto the AccessKit tree (macOS AX / Windows UIA / Linux AT-SPI), with per-element default roles and `getA11yTree()` test dumps
-- [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `getScrollOffset`)
+- [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `scrollIntoView`, `getScrollOffset`)
 - [x] Cancellable smooth-scroll controllers (`createScrollController`, `useScrollController`) with stable-offset completion
 - [x] Native titlebar drag regions (`windowDragRegion`) and zoom/maximize-restore (`zoomWindow`)
 - [x] Keyboard events (keyDown, keyUp) with focus management
@@ -3013,7 +3070,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Standalone build (pinned GPUI platform dependencies)
 - [x] Native text input and multiline textarea
 - [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block drag selection with markdown copy/paste, ⌘F search decorations, full-height source mode, anchor jumps; heading-specific spacing and rules, padded code blocks, single-width table borders, and muted completed tasks. The partial `theme` prop includes `border`, `codeBlockBackground`, and `tableHeaderBackground` colors; styled spans / decorations / programmatic selection / `selectionChange` / `selectionDrag` / clipboard interception props on `<input>`/`<textarea>`
-- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`)
+- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` on `<img>` refs
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images)
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)

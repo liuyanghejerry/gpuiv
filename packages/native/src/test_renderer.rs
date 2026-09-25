@@ -1694,6 +1694,65 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Scroll this element's nearest scroll parent until the element is visible.
+    #[napi]
+    pub fn scroll_into_view(&self, element_id: f64) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    if view.scroll_element_into_view(id) {
+                        cx.notify();
+                        window.refresh();
+                    }
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Packed RGBA pixels onto an `<img>` host node.
+    #[napi]
+    pub fn set_image_pixels(
+        &self,
+        element_id: f64,
+        width: f64,
+        height: f64,
+        pixels: Buffer,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let width = crate::renderer::dimension_u32(width, "width")?;
+        let height = crate::renderer::dimension_u32(height, "height")?;
+        let bytes = pixels.to_vec();
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.set_image_pixels(id, width, height, bytes, window, cx)
+                })
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?
+            .map_err(Error::from_reason)
+        })
+    }
+
+    /// Encoded image bytes onto an `<img>` host node.
+    #[napi]
+    pub fn set_image(&self, element_id: f64, bytes: Buffer) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let bytes = bytes.to_vec();
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| view.set_encoded_image(id, bytes, window, cx))
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?
+            .map_err(Error::from_reason)
+        })
+    }
+
     /// The logical scroll anchor of a `<virtual-list>`:
     /// `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
     /// else. `itemIndex == item count` is gpui's at-end sentinel.
