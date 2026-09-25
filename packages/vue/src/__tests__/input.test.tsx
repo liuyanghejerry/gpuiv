@@ -262,6 +262,39 @@ describeNative("native text editors (vue)", () => {
     expect(app.renderer.getAllText().join("")).toContain("down:b")
   })
 
+  it("propagates paste when the clipboard has no text", async () => {
+    // Empty test-renderer clipboard: cmd-v must reach both the element and
+    // window keyDown handlers instead of vanishing inside the editor binding.
+    const elementKeys: string[] = []
+    const windowKeys: string[] = []
+
+    for (const readOnly of [false, true]) {
+      const PasteCatcher = defineComponent({
+        setup() {
+          return () => (
+            <input
+              autoFocus
+              readOnly={readOnly}
+              value=""
+              style={{ width: 300, height: 40 }}
+              onKeyDown={(e: EventPayload) => elementKeys.push(e.key ?? "")}
+            />
+          )
+        },
+      })
+      app = createTestApp(PasteCatcher, {
+        onKeyDown: (event: EventPayload) => windowKeys.push(event.key ?? ""),
+      })
+      const input = app.renderer.findByType("input")[0]
+      app.renderer.nativeSimulateKeyDown(input.id, "cmd-v")
+      await app.settle()
+      app.unmount()
+    }
+
+    expect(elementKeys).toEqual(["v", "v"])
+    expect(windowKeys).toEqual(["v", "v"])
+  })
+
   it("undoes a contiguous typing run as one edit", async () => {
     const TextInput = defineComponent({
       setup() {

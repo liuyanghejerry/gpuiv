@@ -1317,6 +1317,12 @@ inactive. Override its colour through the shared native theme:
 <input theme={{ caret: '#22c55e' }} />
 ```
 
+When the clipboard has no text, `Cmd+V` or `Ctrl+V` continues to `onKeyDown`
+instead of disappearing inside the editor. Applications can then handle an
+image-only or file-only clipboard themselves. Copied files also propagate even
+when the operating system includes their paths as fallback text. Mixed text and
+image clipboard content still pastes its text.
+
 ### Input in a search pill
 
 `<input>` has **no default inner padding** and paints text at the top of its
