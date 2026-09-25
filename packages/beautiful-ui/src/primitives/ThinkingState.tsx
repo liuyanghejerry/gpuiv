@@ -124,8 +124,6 @@ const VARIANTS: Record<ThinkingStateVariant, ThinkingVariantContent> = {
   },
 }
 
-/** CSS `ease-out` — the fade-in curve (the fade-ups use `ease.outStrong`). */
-const EASE_OUT = [0, 0, 0.58, 1] as [number, number, number, number]
 
 /** Search source dots cycle accent → orange → green (`TONES` in the source). */
 function searchTones(theme: Theme): string[] {
@@ -339,7 +337,7 @@ export const ThinkingState = defineComponent({
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ duration: 0.35, ease: EASE_OUT }}
+                transition={{ duration: 0.35, ease: ease.out }}
               >
                 <div role="status" style={{ fontSize: 13, fontWeight: 500, whiteSpace: "nowrap", color: t.ink2 }}>
                   {v.done}
@@ -429,7 +427,7 @@ export const ThinkingState = defineComponent({
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
-                        transition={{ duration: 0.3, ease: EASE_OUT }}
+                        transition={{ duration: 0.3, ease: ease.out }}
                       >
                         <div style={{ fontSize: 12, color: t.ink3 }}>+7 more</div>
                       </motion.div>

@@ -377,11 +377,23 @@ fn update_window_without_view<R>(
 
 #[cfg(target_os = "macos")]
 fn invalidate_window() -> Result<()> {
-    update_window(|_view, window, cx| {
-        cx.notify();
-        window.refresh();
-    })
+    /* Mark the tree dirty; the frame loop's `tick()` draws once per tick.
+     * Drawing synchronously here meant one full build+layout+paint per
+     * `applyBatch` — with live components flushing ~130 batches/s (spinners,
+     * bounds polls, streamed text) that saturates the main thread, and while
+     * scrolling (largest mounted tree) it drops frames. `cx.notify()` alone
+     * is not enough: gpui flushes that as an effect and draws inside the
+     * same `finish_update` call. Windows/Linux already send an async
+     * `UiCommand::Invalidate`; this brings macOS in line. Paths needing
+     * same-frame feedback (selection drag, IME) still call
+     * `window.refresh()` themselves. */
+    REPAINT_DIRTY.store(true, std::sync::atomic::Ordering::Release);
+    Ok(())
 }
+
+/// Set by [`invalidate_window`], consumed by `GpuixRenderer::tick`.
+#[cfg(target_os = "macos")]
+static REPAINT_DIRTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum MouseInput {
@@ -1930,6 +1942,15 @@ impl GpuixRenderer {
 
         #[cfg(target_os = "macos")]
         {
+            /* One coalesced draw per tick for everything `applyBatch` marked
+             * dirty since the last one — the frame loop caps the rate, so a
+             * burst of batches costs one frame, not one frame each. */
+            if REPAINT_DIRTY.swap(false, std::sync::atomic::Ordering::AcqRel) {
+                let _ = update_window(|_view, window, cx| {
+                    cx.notify();
+                    window.refresh();
+                });
+            }
             let running = MAC_PLATFORM.with(|p| {
                 p.borrow()
                     .as_ref()

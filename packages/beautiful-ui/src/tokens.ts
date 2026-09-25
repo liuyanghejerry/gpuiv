@@ -228,6 +228,8 @@ export const ease = {
   outStrong: [0.23, 1, 0.32, 1] as [number, number, number, number],
   inOutStrong: [0.77, 0, 0.175, 1] as [number, number, number, number],
   link: [0.16, 1, 0.3, 1] as [number, number, number, number],
+  /** CSS `ease-out`. */
+  out: [0, 0, 0.58, 1] as [number, number, number, number],
 } as const
 
 export const duration = {

@@ -3,6 +3,10 @@
 //! A node reaches AccessKit only with both an `.id(...)` and a `.role(...)`.
 //! GPUIV already sets the id. This module sets the role and ARIA fields.
 //! Prop names match the DOM: `aria-label`, not `ariaLabel`.
+//!
+//! `aria-hidden` is deliberately not read: a roless element already produces
+//! no node, so the attribute would only add a prop that never arrives — the
+//! Vue side drops it for built-in elements (not in `UNIVERSAL_PROPS`).
 
 use std::collections::HashMap;
 
