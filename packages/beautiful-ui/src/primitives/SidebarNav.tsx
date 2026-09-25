@@ -19,7 +19,9 @@
  *  - Copy fade combines `opacity` with `translateX(-8px)`; there is no
  *    transform in GPUIV, so the fade is opacity-only. The workspace menu's
  *    `pop-in` scale and every `active:scale-[0.98]` press feedback are
- *    dropped for the same reason — hover/active colour swaps remain.
+ *    dropped for the same reason — background colour swaps remain (the
+ *    controls whose `hover:text-ink` text swap has no background partner
+ *    keep their icons at `ink3`).
  *  - The glide row highlight reuses the repo's `GlideMenuRoot`/`GlideMenuItem`
  *    atoms, whose highlight is `radius.chip` (6px) on the `hover` token; the
  *    original's `sidebar-glide-highlight` was 7px on `hover2`. The shrink to
@@ -234,10 +236,15 @@ export const SidebarNav = defineComponent({
     const selectedTitle = computed(() => (props.activeTitle === undefined ? demoActiveTitle.value : props.activeTitle))
 
     const workspaceOpen = ref(false)
-    /* One-tick guard: a press that closed the menu from outside must not be
-     * re-consumed by the trigger's own click (the Select dismiss pattern). */
-    let dismissedThisTick = false
-    let dismissTimer: ReturnType<typeof setTimeout> | undefined
+    /* The Select trigger pattern, verbatim: a press that closed the menu from
+     * outside (including on the trigger itself, which is outside the panel)
+     * sets this flag; the click that follows consumes it and leaves the menu
+     * closed. It is cleared on a microtask, and mouseDown/outside/click are
+     * delivered in one event batch, so the click still sees it. A press on
+     * the trigger while open is also recorded at mouseDown as a fallback for
+     * event paths where the outside handler does not fire. */
+    let dismissedByOutsidePress = false
+    let triggerPressedWhileOpen = false
 
     const searchOpen = ref(false)
     const query = ref("")
@@ -250,7 +257,6 @@ export const SidebarNav = defineComponent({
 
     let focusTimer: ReturnType<typeof setTimeout> | undefined
     onBeforeUnmount(() => {
-      if (dismissTimer !== undefined) clearTimeout(dismissTimer)
       if (focusTimer !== undefined) clearTimeout(focusTimer)
     })
 
@@ -260,21 +266,24 @@ export const SidebarNav = defineComponent({
     }
 
     const toggleWorkspace = () => {
-      if (dismissedThisTick) {
-        dismissedThisTick = false
+      if (dismissedByOutsidePress) {
+        dismissedByOutsidePress = false
+        return
+      }
+      if (triggerPressedWhileOpen) {
+        triggerPressedWhileOpen = false
+        workspaceOpen.value = false
         return
       }
       workspaceOpen.value = !workspaceOpen.value
     }
 
     const closeWorkspaceFromOutside = () => {
-      dismissedThisTick = true
+      dismissedByOutsidePress = true
+      queueMicrotask(() => {
+        dismissedByOutsidePress = false
+      })
       workspaceOpen.value = false
-      if (dismissTimer !== undefined) clearTimeout(dismissTimer)
-      dismissTimer = setTimeout(() => {
-        dismissTimer = undefined
-        dismissedThisTick = false
-      }, 0)
     }
 
     const closeSearch = () => {
@@ -511,6 +520,9 @@ export const SidebarNav = defineComponent({
                   aria-label="Workspace"
                   aria-expanded={workspaceOpen.value}
                   testId="sidebar-workspace-trigger"
+                  onMouseDown={() => {
+                    if (!isCollapsed) triggerPressedWhileOpen = workspaceOpen.value
+                  }}
                   onClick={() => {
                     if (!isCollapsed) toggleWorkspace()
                   }}
@@ -883,6 +895,7 @@ export const SidebarNav = defineComponent({
                 role="button"
                 testId="sidebar-footer"
                 onClick={() => {
+                  if (isCollapsed) return
                   ;(props.onFooterClick ?? props.onNewChat)?.()
                 }}
                 style={{
@@ -897,9 +910,7 @@ export const SidebarNav = defineComponent({
                   fontSize: 12.5,
                   fontWeight: 500,
                   color: t.ink,
-                  cursor: "pointer",
-                  ...(isCollapsed ? { pointerEvents: "none" as const } : {}),
-                  hover: { backgroundColor: t.lineStrong },
+                  ...(isCollapsed ? {} : { cursor: "pointer" as const, hover: { backgroundColor: t.lineStrong } }),
                 }}
               >
                 {props.footerIcon}

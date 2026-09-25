@@ -157,7 +157,8 @@ export type RecordRow = {
   website?: string
 }
 
-export const INITIAL_ROWS: RecordRow[] = [  { id: "aurora", name: "Aurora Scoops — Reykjavík", tags: ["Gelato", "Seasonal"], last: "9 days ago", strength: "strong", website: "aurora-scoops.example.com" },
+export const INITIAL_ROWS: RecordRow[] = [
+  { id: "aurora", name: "Aurora Scoops — Reykjavík", tags: ["Gelato", "Seasonal"], last: "9 days ago", strength: "strong", website: "aurora-scoops.example.com" },
   { id: "kumo", name: "Kumo Creamery — Tokyo", tags: ["B2C", "Cafe", "Vegan"], last: "3 weeks ago", strength: "strong", website: "kumo-creamery.example.com" },
   { id: "sol-nieve", name: "Sol y Nieve — Buenos Aires", tags: ["Gelato", "Local"], last: "2 months ago", strength: "weak", website: "sol-y-nieve.example.com" },
   { id: "maple-orbit", name: "Maple Orbit — Montréal", tags: ["B2B", "Wholesale", "Seasonal"], last: "15 days ago", strength: "weak", website: "maple-orbit.example.com" },
@@ -548,45 +549,41 @@ export const RecordsTable = defineComponent({
     let pulseTimer: ReturnType<typeof setInterval> | undefined
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let pendingTimer: ReturnType<typeof setTimeout> | undefined
-    let dismissTimer: ReturnType<typeof setTimeout> | undefined
-    let suppressTimer: ReturnType<typeof setTimeout> | undefined
     onBeforeUnmount(() => {
       if (calcTimer !== undefined) clearTimeout(calcTimer)
       if (pulseTimer !== undefined) clearInterval(pulseTimer)
       if (revealTimer !== undefined) clearTimeout(revealTimer)
       if (pendingTimer !== undefined) clearTimeout(pendingTimer)
-      if (dismissTimer !== undefined) clearTimeout(dismissTimer)
-      if (suppressTimer !== undefined) clearTimeout(suppressTimer)
     })
 
-    /* One-tick guard: a press that closed a menu from outside must not be
-     * re-consumed by its own trigger's click (the Select dismiss pattern). */
-    let dismissedThisTick: string | null = null
+    /* Dismiss guard (the Select pattern): a press that closed a menu from
+     * outside sets this flag, and the trigger click that follows in the same
+     * event batch consumes it instead of reopening. Cleared on a microtask —
+     * a 0ms timeout runs between mouseDown and the click on the real event
+     * loop and would let the menu reopen. */
+    let dismissedKind: string | null = null
     const armDismissGuard = (kind: string) => {
-      dismissedThisTick = kind
-      if (dismissTimer !== undefined) clearTimeout(dismissTimer)
-      dismissTimer = setTimeout(() => {
-        dismissTimer = undefined
-        dismissedThisTick = null
-      }, 0)
+      dismissedKind = kind
+      queueMicrotask(() => {
+        dismissedKind = null
+      })
     }
     const guard = (kind: string) => {
-      if (dismissedThisTick === kind) {
-        dismissedThisTick = null
+      if (dismissedKind === kind) {
+        dismissedKind = null
         return true
       }
       return false
     }
 
-    /* One-tick suppress for nested header controls (see openProp). */
+    /* One-tick suppress for nested header controls (see openProp), cleared on
+     * a microtask like the dismiss guard. */
     let suppressHeaderClick = false
     const armSuppress = () => {
       suppressHeaderClick = true
-      if (suppressTimer !== undefined) clearTimeout(suppressTimer)
-      suppressTimer = setTimeout(() => {
-        suppressTimer = undefined
+      queueMicrotask(() => {
         suppressHeaderClick = false
-      }, 0)
+      })
     }
 
     const closeMenus = () => {
@@ -704,6 +701,12 @@ export const RecordsTable = defineComponent({
       closeMenus()
       aiDone.value = false
       aiState.value = "on"
+      /* A pending "removing" collapse would otherwise fire 320ms after this
+       * add and flip the fresh column back off. */
+      if (revealTimer !== undefined) {
+        clearTimeout(revealTimer)
+        revealTimer = undefined
+      }
       if (pendingTimer !== undefined) clearTimeout(pendingTimer)
       pendingTimer = setTimeout(() => {
         pendingTimer = undefined

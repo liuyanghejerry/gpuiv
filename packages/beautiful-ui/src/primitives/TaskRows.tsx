@@ -36,6 +36,12 @@
  *    transitions outside motion).
  *  - `tabular-nums` on amounts/metas/step numerals is dropped (no
  *    font-feature-settings); the meta column uses the mono family.
+ *  - The original's whole row is one clickable `<button>`. In GPUIV a
+ *    FILLED child (the status pill, the badge, the spinner ring layers)
+ *    inserts its own BlockMouseExceptScroll hitbox, which both hides the
+ *    row from hover and swallows clicks over it — so those pure-visual
+ *    layers carry `pointerEvents: "none"` and the row stays fully
+ *    clickable/hoverable, as in the source.
  *  - The `<button>` becomes a div with `role="button"` + `aria-expanded`
  *    passthrough — there is no DOM accessibility tree in GPUIV.
  *  - `onToggleRow` stays a callback prop (the codebase's `onSend`/`onCopy`
@@ -169,7 +175,7 @@ export const TaskRows = defineComponent({
       /** Track ring + (static) sweep arc + step numeral — the original's
        *  SpinnerRing, minus the orbit. */
       const spinnerRing = (step: number | undefined, active: boolean) => (
-        <div style={{ position: "relative", width: 24, height: 24, flexShrink: 0 }}>
+        <div style={{ position: "relative", width: 24, height: 24, flexShrink: 0, pointerEvents: "none" as const }}>
           <div
             style={{
               position: "absolute",
@@ -180,10 +186,11 @@ export const TaskRows = defineComponent({
               borderRadius: 12,
               borderWidth: 2,
               borderColor: t.line,
+              pointerEvents: "none" as const,
             }}
           />
           {active && (
-            <div style={{ position: "absolute", top: 0, left: 0, width: 24, height: 24 }}>
+            <div style={{ position: "absolute", top: 0, left: 0, width: 24, height: 24, pointerEvents: "none" as const }}>
               <Icon name="ringArc" size={24} color={t.ink3} />
             </div>
           )}
@@ -200,6 +207,7 @@ export const TaskRows = defineComponent({
               fontSize: 10.5,
               fontWeight: 600,
               color: t.ink,
+              pointerEvents: "none" as const,
             }}
           >
             {step}
@@ -222,6 +230,7 @@ export const TaskRows = defineComponent({
             justifyContent: "center",
             borderRadius: 11,
             backgroundColor: tone === "red" ? t.red : t.green,
+            pointerEvents: "none" as const,
           }}
         >
           <Icon name={tone === "red" ? "xBold" : "checkBold"} size={tone === "red" ? 12 : 13} color="#ffffff" />
@@ -257,6 +266,7 @@ export const TaskRows = defineComponent({
           fontSize: 11.5,
           fontWeight: 500,
           color,
+          pointerEvents: "none" as const,
         } as const
         return fade ? (
           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease: EASE_OUT }} style={style}>
@@ -305,7 +315,7 @@ export const TaskRows = defineComponent({
               >
                 <motion.div
                   animate={{ borderRadius: list ? 0 : open ? 14 : 22 }}
-                  transition={{ duration: 0.3, ease: ease.outStrong }}
+                  transition={{ duration: 0.3, ease: "ease" }}
                   style={{
                     overflow: "hidden",
                     ...(list
@@ -392,7 +402,7 @@ export const TaskRows = defineComponent({
                           {row.details.map((d, j) => (
                             <motion.div
                               key={`${d.label}-${open ? "open" : "closed"}`}
-                              initial={open ? { opacity: 0, top: 4 } : false}
+                              initial={open ? { opacity: 0, top: 8 } : false}
                               animate={{ opacity: 1, top: 0 }}
                               transition={{ duration: 0.3, delay: 0.12 + j * 0.1, ease: ease.outStrong }}
                               style={{

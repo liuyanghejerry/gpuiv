@@ -11,7 +11,7 @@
  *  - The `glimm` WebGL rainbow sweep is cut entirely (issue #110): selecting
  *    the flagship model plays a one-shot accent-tinted band — a
  *    linear-gradient `motion.div` whose `left` tweens across the measured
- *    composer width (570ms + 80ms outro → one 0.65s outStrong pass), then
+ *    composer width (one 0.72s outStrong pass), then
  *    unmounts. No swell/wave; `prefers-reduced-motion` is not readable.
  *  - Both menus move from CSS absolutes above the composer to raw
  *    `<anchored deferred side="top">` layers (the repo's overlay rule): the
@@ -160,7 +160,7 @@ const MENU_REVEAL = { duration: 0.18, ease: ease.outStrong }
 /** Dictation transcript delay, and the eq-bounce flip cadence. */
 const DICTATION_MS = 2200
 const EQ_STEP_MS = 450
-/** The sweep band and its total run (570ms sweep + 80ms outro). */
+/** The sweep band and its single outStrong pass across the composer. */
 const SWEEP_BAND_WIDTH = 72
 const SWEEP_MS = 720
 
@@ -554,12 +554,17 @@ export const PromptBar = defineComponent({
           onClick={() => {
             stopAuto()
             plusOpen.value = false
+            /* Mutual exclusion both ways: an open @/ token menu must close
+             * when this one opens (the token menu's anchored layer sits
+             * before this one, so both rendered would mis-anchor it). */
+            dismissed.value = true
             modelOpen.value = !modelOpen.value
           }}
           onKeyDown={(event: EventPayload) => {
             if (event.key === "enter" || event.key === "space") {
               stopAuto()
               plusOpen.value = false
+              dismissed.value = true
               modelOpen.value = !modelOpen.value
             }
           }}

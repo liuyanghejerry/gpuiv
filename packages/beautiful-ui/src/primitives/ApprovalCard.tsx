@@ -460,7 +460,10 @@ export const ApprovalCard = defineComponent({
       custom.value = {}
       sent.value = false
       open.value = true
-      heights.value = {}
+      /* Measured heights are kept: the questions are the same after a reset,
+       * so dropping them would blank the viewport for a poll tick and run
+       * the 360ms height tween again — the original only clears `measured`
+       * on its own remount path and keeps the stack steady here. */
     }
 
     return () => {

@@ -1,5 +1,5 @@
 /**
- * beautiful-ui gallery — the Phase 1 primitives ported from
+ * beautiful-ui gallery — the Phase 1–3 primitives ported from
  * https://github.com/slev12397/beautiful-ui, rendered natively by GPUIV.
  *
  * One self-contained section per primitive, plus an atoms row and a
@@ -232,7 +232,7 @@ export const App = defineComponent({
             }}
           >
             <div style={{ fontSize: 15, fontWeight: 700, color: t.ink }}>beautiful-ui × GPUIV</div>
-            <div style={{ fontSize: 12, color: t.ink3 }}>Phase 1 gallery</div>
+            <div style={{ fontSize: 12, color: t.ink3 }}>Phase 1–3 gallery</div>
             <div style={{ flexGrow: 1 }} />
             <Button variant="secondary" size="xs" testId="theme-toggle" onClick={() => theme.toggle()}>
               {theme.isDark.value ? "Switch to light" : "Switch to dark"}

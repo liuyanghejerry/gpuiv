@@ -449,13 +449,18 @@ export const SelectionActions = defineComponent({
       }
       const wordStyle = { fontSize: 13, lineHeight: 21, color: t.ink }
 
-      const actionButton = (item: SelectionAction, prefix = "sa") => (
+      /** A pill button. `measurer` clones live in the invisible measurement
+       *  stack: they must carry NO interactivity — an element with a click
+       *  listener keeps a live hitbox in GPUIV regardless of the wrapper's
+       *  `pointerEvents: "none"`, and the stack sits over the pill's own
+       *  controls (clicks would double-fire `run`). */
+      const actionButton = (item: SelectionAction, prefix = "sa", measurer = false) => (
         <Button
           key={item.id}
           variant="quiet"
           size="xs"
-          testId={`${prefix}-action-${item.id}`}
-          onClick={item.action !== undefined ? () => run(item.action!) : undefined}
+          testId={measurer ? undefined : `${prefix}-action-${item.id}`}
+          onClick={!measurer && item.action !== undefined ? () => run(item.action!) : undefined}
           style={{ fontWeight: 400, flexShrink: 0 }}
         >
           <Icon name={item.icon} size={14} color={t.ink} />
@@ -722,10 +727,10 @@ export const SelectionActions = defineComponent({
                           aria-hidden="true"
                         >
                           <div ref={primaryRowRef} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                            {props.actions.primary.map((item) => actionButton(item, "sam"))}
+                            {props.actions.primary.map((item) => actionButton(item, "sam", true))}
                           </div>
                           <div ref={moreRowRef} style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                            {props.actions.more.map((item) => actionButton(item, "sam"))}
+                            {props.actions.more.map((item) => actionButton(item, "sam", true))}
                           </div>
                         </div>
                       </motion.div>

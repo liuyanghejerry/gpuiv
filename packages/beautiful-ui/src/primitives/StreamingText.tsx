@@ -18,8 +18,11 @@
  *    baseline nudges become flexbox `alignItems: "center"` — there is no
  *    baseline alignment across flex items.
  *  - The action row and the follow-ups block fade in via `motion.div`
- *    opacity tweens (0.4s, the source's `transition-opacity duration-400`),
- *    and keep the source's `pointerEvents` gate while streaming.
+ *    opacity tweens (0.4s, the source's `transition-opacity duration-400`).
+ *    The source's `pointerEvents` gate is re-expressed per interactive
+ *    child — GPUIV does not inherit `pointerEvents`, and an element with a
+ *    listener keeps a clickable hitbox regardless of the wrapper's gate —
+ *    by dropping each handler/cursor/hover while streaming.
  *  - Follow-up rows ran a `fade-up` keyframe (350ms, 90ms stagger,
  *    ease-out-strong) when `done` flipped, and snapped to `opacity: 0` while
  *    streaming. Here each row is a `motion.div` retargeted between
@@ -292,8 +295,7 @@ export const StreamingText = defineComponent({
                   width: 24,
                   height: 24,
                   borderRadius: 6,
-                  cursor: "pointer",
-                  hover: { backgroundColor: t.hover2 },
+                  ...(isDone ? { cursor: "pointer" as const, hover: { backgroundColor: t.hover2 } } : {}),
                 }}
               >
                 <Icon name={action.name} size={15} color={t.ink3} />
@@ -302,9 +304,13 @@ export const StreamingText = defineComponent({
             <div
               role="button"
               aria-expanded={sourcesOpen.value}
-              onClick={() => {
-                sourcesOpen.value = !sourcesOpen.value
-              }}
+              onClick={
+                isDone
+                  ? () => {
+                      sourcesOpen.value = !sourcesOpen.value
+                    }
+                  : undefined
+              }
               style={{
                 marginLeft: 6,
                 display: "flex",
@@ -315,8 +321,7 @@ export const StreamingText = defineComponent({
                 paddingRight: 4,
                 paddingTop: 2,
                 paddingBottom: 2,
-                cursor: "pointer",
-                hover: { backgroundColor: t.hover },
+                ...(isDone ? { cursor: "pointer" as const, hover: { backgroundColor: t.hover } } : {}),
               }}
             >
               <div style={{ display: "flex", alignItems: "center" }}>
@@ -391,7 +396,7 @@ export const StreamingText = defineComponent({
                 >
                   <div
                     role="button"
-                    onClick={() => emit("followUp", text, i)}
+                    onClick={isDone ? () => emit("followUp", text, i) : undefined}
                     style={{
                       marginLeft: -6,
                       marginRight: -6,
@@ -407,8 +412,7 @@ export const StreamingText = defineComponent({
                       paddingBottom: 6,
                       fontSize: 12.5,
                       color: t.ink,
-                      cursor: "pointer",
-                      hover: { backgroundColor: t.hover2 },
+                      ...(isDone ? { cursor: "pointer" as const, hover: { backgroundColor: t.hover2 } } : {}),
                     }}
                   >
                     <Icon name="cornerDownLeft" size={11} color={t.ink3} />

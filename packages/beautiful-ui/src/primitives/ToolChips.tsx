@@ -191,7 +191,9 @@ export const ToolChips = defineComponent({
      *  hitbox behind it as hovered, so the row's own mouseEnter/Leave never
      *  fire while the pointer is over the chip. Enter/leave are counted on
      *  BOTH the row and the chip instead — order-independent when moving
-     *  between them (chip enter can land before row leave). */
+     *  between them (chip enter can land before row leave). The same
+     *  blocking halves CLICKS, so the chip carries its own onClick —
+     *  the original chip sits inside the row `<button>`. */
     const hoveredRow = ref<string | null>(null)
     const hoverCounts = new Map<string, number>()
     const rowEnter = (label: string) => {
@@ -249,7 +251,6 @@ export const ToolChips = defineComponent({
             align="start"
             gap={6}
             fit="switch"
-            snapMargin={12}
             motion={{
               initial: { opacity: 0 },
               animate: { opacity: 1 },
@@ -425,6 +426,7 @@ export const ToolChips = defineComponent({
                           {row.label}
                         </div>
                         <div
+                          onClick={() => toggleRow(row.label)}
                           onMouseEnter={() => rowEnter(row.label)}
                           onMouseLeave={() => rowLeave(row.label)}
                           style={{
