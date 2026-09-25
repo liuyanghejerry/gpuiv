@@ -851,8 +851,8 @@ The **transition** uses seconds, like Motion for Vue:
 | `delay` | `0` | Non-negative seconds |
 | `ease` | `"easeOut"` | `"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`, or `[x1, y1, x2, y2]` |
 
-Springs, keyframes, variants, exit transitions, and shared layout animations
-are not available yet.
+Springs, keyframes, variants, and shared layout animations are not available
+yet. **Exit** uses `AnimatePresence`, like Motion for React.
 
 ### Animate a sidebar
 
@@ -894,6 +894,48 @@ const SidebarFrame = defineComponent({
 
 The **chat example** uses this pattern. The sidebar remains mounted while its
 outer width moves between `253` and `0` pixels.
+
+### Animate unmount
+
+A `motion.div` with **`exit`** only leaves after that target finishes, and only
+when it is a child of **`AnimatePresence`**. Without `AnimatePresence`, Vue
+destroys the node on the same flush.
+
+```tsx
+import { AnimatePresence, motion } from '@gpuiv/vue'
+
+const Toast = defineComponent({
+  props: { show: { type: Boolean, required: true } },
+  setup(props) {
+    return () => (
+      <AnimatePresence>
+        {props.show ? (
+          <motion.div
+            key="toast"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            <text>Saved</text>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    )
+  },
+})
+```
+
+Give every child a **unique `key`** when more than one child can leave. Set
+**`initial={false}`** on `AnimatePresence` to skip enter on the first paint.
+A child with no `exit` is removed without a tween.
+
+`motion.div` also takes **`onMotionComplete`**, and the payload's
+**`motionGeneration`** names the logical target that settled — a completion
+queued for a previous target never unmounts a node that retargeted. Custom
+components join the same contract through **`usePresence()`** (call the
+returned `safeToRemove` when your exit work is done) or read state without
+participating via **`useIsPresent()`**.
 
 ### Animate to a natural height
 
@@ -3115,6 +3157,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Vue DevTools (`connectVueDevtools()` + the standalone devtools server: component tree and `setup()` state)
 - [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
 - [x] Native `motion.div` transitions with deterministic frame capture
+- [x] `AnimatePresence` exit animations (`exit`, `onMotionComplete`, `usePresence`)
 
 ## Documentation
 
