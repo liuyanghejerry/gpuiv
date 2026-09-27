@@ -101,6 +101,8 @@ const UNIVERSAL_PROPS = new Set([
   // plain `div`. Without it here, custom props are dropped for built-ins and
   // the prop silently never arrives in Rust.
   "highlight",
+  // `<text runs={…}>` inline styling: a custom prop on a built-in element.
+  "runs",
   // Wheel zoom over a canvas: opt out of ancestor scrollers consuming the
   // same gesture. See the `scroll` wiring in wire_host_events.
   "stopWheelPropagation",

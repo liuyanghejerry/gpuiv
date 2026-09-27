@@ -43,6 +43,31 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("renders styled inline runs on a <text> element", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <text
+              style={{ color: "#c0c0c0" }}
+              runs={[
+                { text: "plain " },
+                { text: "bold", fontWeight: 700 },
+                { text: " and ", color: "#808080" },
+                { text: "italic", fontStyle: "italic" },
+              ]}
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    // The runs concatenate into one painted string; selection and copy key
+    // off that same string.
+    expect(app.renderer.getPaintedText().join("\n")).toContain("plain bold and italic")
+    app.unmount()
+  })
+
   it("renders standalone markdown images as blocks", () => {
     // A 1x1 transparent PNG data URL: a real image element, not text.
     const png =

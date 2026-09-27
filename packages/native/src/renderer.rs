@@ -6591,7 +6591,12 @@ pub(crate) fn build_host_container(
     let default_role = is_text_host.then_some(gpui::Role::Label);
     el = apply_accessibility(el, &element.custom_props, default_role);
     if is_text_host && element.custom_props.get("aria-valuetext").is_none() {
-        if let Some(content) = joined_text_content(ctx.tree, element) {
+        let content = element
+            .custom_props
+            .get("runs")
+            .and_then(crate::text::runs::host_runs_text)
+            .or_else(|| joined_text_content(ctx.tree, element));
+        if let Some(content) = content {
             el = el.aria_value(content);
         }
     }
@@ -6611,7 +6616,31 @@ pub(crate) fn build_host_container(
     // would still occupy a full line height (26px at the default font), so
     // the anchor gets no child and collapses to zero size like a DOM empty
     // text node.
-    if let Some(content) = element.content.as_deref().filter(|c| !c.is_empty()) {
+    //
+    // A `runs` prop replaces the plain string with styled segments; the
+    // element's own font family/weight/colour resolve the unset attributes.
+    // The base style is only computed when the prop is present, so plain
+    // text pays nothing for it.
+    let host_runs = element.custom_props.get("runs").and_then(|value| {
+        let theme = Theme::dark();
+        let mut font = theme.sans_font();
+        let mut color = theme.text;
+        if let Some(style) = style {
+            if let Some(family) = &style.font_family {
+                font.family = family.clone().into();
+            }
+            if let Some(weight) = &style.font_weight {
+                font.weight = parse_font_weight(weight);
+            }
+            if let Some(parsed) = style.color.as_deref().and_then(crate::color::parse_color_rgba) {
+                color = parsed.into();
+            }
+        }
+        crate::text::runs::parse_host_runs(value, font, color)
+    });
+    if let Some(runs) = host_runs {
+        el = el.child(text_runs_element(element.id, &runs, ctx));
+    } else if let Some(content) = element.content.as_deref().filter(|c| !c.is_empty()) {
         el = el.child(text_content(element.id, content, ctx));
     }
 
@@ -6978,6 +7007,38 @@ fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElem
             0,
             gpui::SharedString::from(content.to_string()),
             None,
+            ctx.selection.clone(),
+            ctx.inherited.selection_wash,
+        )
+    })
+}
+
+/// Styled segments of a host `<text runs={…}>`. The runs already carry their
+/// own font/colour, so nothing is inherited from ancestor text styles —
+/// `parse_host_runs` resolved the unset attributes against the element's
+/// own style up front. Selection, search and copy keep working because
+/// they key off the concatenated string.
+fn text_runs_element(
+    element_id: u64,
+    host_runs: &crate::text::runs::HostTextRuns,
+    ctx: &BuildCtx,
+) -> gpui::AnyElement {
+    let text = gpui::SharedString::from(host_runs.text.clone());
+    let runs = host_runs.runs.clone();
+    if !ctx.inherited.selectable {
+        return crate::text::chrome_text(text, Some(runs));
+    }
+    selectable_text(crate::text::SelectableText {
+        highlight: ctx
+            .inherited
+            .highlight
+            .clone()
+            .map(crate::text::HighlightSource::Resolved),
+        ..crate::text::SelectableText::new(
+            element_id,
+            0,
+            text,
+            Some(runs),
             ctx.selection.clone(),
             ctx.inherited.selection_wash,
         )
