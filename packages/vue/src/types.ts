@@ -46,6 +46,14 @@ export interface BoxShadow {
   color: string
 }
 
+/** CSS `outline`: a line outside the border box that takes no layout space. */
+export interface Outline {
+  width: number
+  color: string
+  /** Gap between the border box and the line. Negative draws it inside. */
+  offset?: number
+}
+
 export interface LinearGradientStop {
   color: string
   /** Position along the gradient from 0 to 1. */
@@ -164,6 +172,7 @@ export interface StyleDesc {
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
   boxShadow?: BoxShadow
+  outline?: Outline
 
   fontSize?: number
   fontFamily?: string
@@ -617,6 +626,12 @@ export interface NativeRenderer {
    *  `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
    *  else. `itemIndex == item count` is gpui's at-end sentinel. */
   getListScrollTop?(elementId: number): Array<number> | null
+  /** Sticky-header geometry for one item of a `<virtual-list>`:
+   *  `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]`,
+   *  plus `[itemX, itemY, itemW, itemH]` (window pixels) when the item is at
+   *  or below the scroll anchor and measured. Null when the element is not a
+   *  mounted virtual list. */
+  getVirtualListGeometry?(elementId: number, index: number): Array<number> | null
 
   // ── Selection API ──────────────────────────────────────────────
   /** The current text selection joined in document order, or null. */

@@ -537,6 +537,11 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<[f64; 3]>>,
     },
+    GetVirtualListGeometry {
+        id: u64,
+        index: usize,
+        response: SyncSender<Option<Vec<f64>>>,
+    },
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
     },
@@ -845,6 +850,32 @@ async fn run_ui_commands(
                     })
                 });
                 response.send(top).ok();
+                Ok(())
+            }
+            UiCommand::GetVirtualListGeometry { id, index, response } => {
+                let geometry = VIRTUAL_LIST_STATES.with(|cell| {
+                    let cell = cell.borrow();
+                    let state = cell.get(&id)?;
+                    let anchor = state.logical_scroll_top();
+                    let viewport = state.viewport_bounds();
+                    let mut out = vec![
+                        anchor.item_ix as f64,
+                        f64::from(f32::from(viewport.origin.x)),
+                        f64::from(f32::from(viewport.origin.y)),
+                        f64::from(f32::from(viewport.size.width)),
+                        f64::from(f32::from(viewport.size.height)),
+                    ];
+                    if let Some(bounds) = state.bounds_for_item(index) {
+                        out.extend([
+                            f64::from(f32::from(bounds.origin.x)),
+                            f64::from(f32::from(bounds.origin.y)),
+                            f64::from(f32::from(bounds.size.width)),
+                            f64::from(f32::from(bounds.size.height)),
+                        ]);
+                    }
+                    Some(out)
+                });
+                response.send(geometry).ok();
                 Ok(())
             }
             UiCommand::GetAutomationBounds { response } => {
@@ -3403,6 +3434,62 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Sticky-header geometry of a `<virtual-list>` item:
+    /// `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]`,
+    /// plus `[itemX, itemY, itemW, itemH]` when the item is at or below the
+    /// scroll anchor and measured (window pixels). An item above the anchor
+    /// has no pixel bounds — compare its index against `anchorIndex` instead.
+    /// Null when `elementId` is not a mounted virtual list.
+    #[napi]
+    pub fn get_virtual_list_geometry(
+        &self,
+        element_id: f64,
+        index: f64,
+    ) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        let index = index as usize;
+        #[cfg(target_os = "macos")]
+        return Ok(VIRTUAL_LIST_STATES.with(|cell| {
+            let cell = cell.borrow();
+            let state = cell.get(&id)?;
+            let anchor = state.logical_scroll_top();
+            let viewport = state.viewport_bounds();
+            let mut out = vec![
+                anchor.item_ix as f64,
+                f64::from(f32::from(viewport.origin.x)),
+                f64::from(f32::from(viewport.origin.y)),
+                f64::from(f32::from(viewport.size.width)),
+                f64::from(f32::from(viewport.size.height)),
+            ];
+            if let Some(bounds) = state.bounds_for_item(index) {
+                out.extend([
+                    f64::from(f32::from(bounds.origin.x)),
+                    f64::from(f32::from(bounds.origin.y)),
+                    f64::from(f32::from(bounds.size.width)),
+                    f64::from(f32::from(bounds.size.height)),
+                ]);
+            }
+            Some(out)
+        }));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetVirtualListGeometry { id, index, response })?;
+            return Ok(
+                recv_ui_response(receiver, "the GPUI list geometry query")?.map(|g| g.to_vec())
+            );
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Get the current scroll offset of a scrollable element.
     /// Returns [x, y] or null if the element has no scroll handle.
     #[napi]
@@ -5021,6 +5108,33 @@ impl GpuixView {
         ])
     }
 
+    /// Geometry for sticky-header decisions: `[anchorIndex, viewportX, Y, W,
+    /// H]`, plus `[itemX, itemY, itemW, itemH]` when the item is at or below
+    /// the scroll anchor and measured. An item above the anchor (or not yet
+    /// measured) has no pixel bounds — `anchorIndex` still answers "has this
+    /// header scrolled past the top".
+    pub(crate) fn virtual_list_geometry(&self, id: u64, index: usize) -> Option<Vec<f64>> {
+        let state = &self.virtual_lists.get(&id)?.state;
+        let anchor = state.logical_scroll_top();
+        let viewport = state.viewport_bounds();
+        let mut out = vec![
+            anchor.item_ix as f64,
+            f64::from(f32::from(viewport.origin.x)),
+            f64::from(f32::from(viewport.origin.y)),
+            f64::from(f32::from(viewport.size.width)),
+            f64::from(f32::from(viewport.size.height)),
+        ];
+        if let Some(bounds) = state.bounds_for_item(index) {
+            out.extend([
+                f64::from(f32::from(bounds.origin.x)),
+                f64::from(f32::from(bounds.origin.y)),
+                f64::from(f32::from(bounds.size.width)),
+                f64::from(f32::from(bounds.size.height)),
+            ]);
+        }
+        Some(out)
+    }
+
     pub(crate) fn set_virtual_list_offset(&self, id: u64, x: f32, y: f32) -> bool {
         let Some(entry) = self.virtual_lists.get(&id) else {
             return false;
@@ -5290,6 +5404,9 @@ pub(crate) struct BuildCtx<'a> {
 pub(crate) struct Inherited {
     /// False once an ancestor sets `userSelect: "none"`.
     pub selectable: bool,
+    /// A visual-only overlay suppresses host hitboxes and listeners throughout
+    /// its subtree; `pointerEvents: "none"` alone does not inherit in GPUIV.
+    pub pass_through: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
     /// The nearest ancestor's `highlight`, resolved. `None` in every app that
@@ -5306,6 +5423,7 @@ impl Inherited {
         wash.a = 0.35;
         Self {
             selectable: true,
+            pass_through: false,
             selection_wash: wash,
             highlight: None,
         }
@@ -6034,10 +6152,9 @@ impl gpui::Render for GpuixView {
             self.pending_focus_element = Some(id);
         }
 
-        // Free atlas tiles replaced or orphaned by canvas flushes. They are
-        // unreferenced by the tree being built below, so removing them
-        // before painting is safe; without this the atlas would grow by one
-        // tile per dirty flush.
+        // Free atlas tiles orphaned by canvas resizes or element
+        // destruction. Content flushes rewrite tiles in place (stable
+        // `RenderImage` ids), so they no longer pass through here.
         let surfaces = self.canvas_surfaces.clone();
         surfaces.drain_retired(|image| {
             let _ = window.drop_image(image);
@@ -6214,6 +6331,14 @@ pub(crate) fn build_element(
     // elements see the same cascade.
     let parent_inherited = ctx.inherited.clone();
     ctx.inherited = parent_inherited.clone().descend(style);
+    if element
+        .custom_props
+        .get("__gpuivPassThrough")
+        .and_then(|value| value.as_bool())
+        == Some(true)
+    {
+        ctx.inherited.pass_through = true;
+    }
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -6487,10 +6612,25 @@ pub(crate) fn build_host_container(
     // use `ElementId::Name`, which is a different variant and cannot collide.
     let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
 
+    let pass_through = ctx.inherited.pass_through;
+    let visual_style = if pass_through {
+        style.cloned().map(|mut style| {
+            // Hover, active, and cursor styles cause GPUI to insert a hitbox
+            // even without listeners. The overlay keeps only its base paint.
+            style.hover = None;
+            style.active = None;
+            style.cursor = None;
+            style
+        })
+    } else {
+        None
+    };
+    let style = visual_style.as_ref().or(style);
+
     if let Some(style) = style {
         el = apply_interactive_styles(el, style);
 
-        if crate::style::should_occlude(style) {
+        if !pass_through && crate::style::should_occlude(style) {
             // BlockMouse (occlude) stops the hit test. The parent scroller
             // then never sees the wheel. In-flow fills must use
             // BlockMouseExceptScroll. Keep occlude for overlays that steal
@@ -6522,8 +6662,10 @@ pub(crate) fn build_host_container(
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
 
-        let needs_scroll_x = resolved_x == Some("scroll");
-        let needs_scroll_y = resolved_y == Some("scroll");
+        // A pinned visual header never owns a wheel target, even if its
+        // rendered content declares overflow scrolling.
+        let needs_scroll_x = !pass_through && resolved_x == Some("scroll");
+        let needs_scroll_y = !pass_through && resolved_y == Some("scroll");
 
         if needs_scroll_x && needs_scroll_y {
             el = el.overflow_scroll();
@@ -6571,16 +6713,18 @@ pub(crate) fn build_host_container(
             .unwrap_or_default(),
     ));
 
-    if let Some(handle) = ctx.focus_handles.get(&element.id) {
-        el = el.track_focus(handle);
-    }
-    if let Some(tab_index) = element
-        .custom_props
-        .get("tabIndex")
-        .and_then(|value| value.as_i64())
-        .and_then(|index| isize::try_from(index).ok())
-    {
-        el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
+    if !pass_through {
+        if let Some(handle) = ctx.focus_handles.get(&element.id) {
+            el = el.track_focus(handle);
+        }
+        if let Some(tab_index) = element
+            .custom_props
+            .get("tabIndex")
+            .and_then(|value| value.as_i64())
+            .and_then(|index| isize::try_from(index).ok())
+        {
+            el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
+        }
     }
 
     // Vue text instances (`createText`) are also type `text` and hold
@@ -6598,12 +6742,14 @@ pub(crate) fn build_host_container(
 
     // Wire up events. The wiring is shared with `<canvas>`: every stateful
     // root gets the same event surface via wire_host_events.
-    el = wire_host_events(
-        el,
-        element,
-        ctx.event_callback,
-        ctx.pointer_capture_target == Some(element.id),
-    );
+    if !pass_through {
+        el = wire_host_events(
+            el,
+            element,
+            ctx.event_callback,
+            ctx.pointer_capture_target == Some(element.id),
+        );
+    }
 
     // Text content — selectable, same as a <text> leaf. An empty string is
     // not painted text: Vue compiles `{items.map(…)}` sitting among JSX
@@ -7307,6 +7453,16 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
             .blur_radius(gpui::px(shadow.blur_radius.max(0.0) as f32))
             .spread_radius(gpui::px(shadow.spread_radius as f32));
             el = el.shadow(vec![shadow]);
+        }
+    }
+    if let Some(ref outline) = style.outline {
+        if let Some(color) = crate::color::parse_color_rgba(&outline.color) {
+            let outline = gpui::Outline {
+                width: gpui::px(outline.width.max(0.0) as f32),
+                color: color.into(),
+                offset: gpui::px(outline.offset as f32),
+            };
+            el = el.outline(outline);
         }
     }
     if style.visibility.as_deref() == Some("hidden") {

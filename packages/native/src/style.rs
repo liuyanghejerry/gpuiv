@@ -19,6 +19,17 @@ pub struct BoxShadowValue {
     pub color: String,
 }
 
+/// CSS `outline`: a line outside the border box that takes no layout space.
+/// `offset` may be negative to draw the line inside the box.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutlineValue {
+    pub width: f64,
+    pub color: String,
+    #[serde(default)]
+    pub offset: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LinearGradientStopValue {
@@ -198,6 +209,7 @@ pub struct StyleDesc {
     pub border_bottom_left_radius: Option<f64>,
     pub border_bottom_right_radius: Option<f64>,
     pub box_shadow: Option<BoxShadowValue>,
+    pub outline: Option<OutlineValue>,
 
     // Text
     pub font_size: Option<f64>,
@@ -441,6 +453,23 @@ mod tests {
     fn transparent_function_does_not_occlude() {
         assert!(!should_occlude(&with_fill("transparent")));
         assert!(!should_occlude(&with_fill("oklch(50% 0.2 30 / 0%)")));
+    }
+
+    #[test]
+    fn outline_parses_width_color_and_offset() {
+        let style: StyleDesc =
+            serde_json::from_str(r##"{"outline":{"width":2,"color":"#00ff00"}}"##).unwrap();
+        assert_eq!(
+            style.outline,
+            Some(OutlineValue { width: 2.0, color: "#00ff00".to_owned(), offset: 0.0 })
+        );
+
+        let style: StyleDesc =
+            serde_json::from_str(r#"{"outline":{"width":1,"color":"red","offset":-2}}"#).unwrap();
+        assert_eq!(
+            style.outline,
+            Some(OutlineValue { width: 1.0, color: "red".to_owned(), offset: -2.0 })
+        );
     }
 
     #[test]

@@ -348,6 +348,15 @@ export declare class GpuixRenderer {
    */
   getListScrollTop(elementId: number): Array<number> | null
   /**
+   * Sticky-header geometry of a `<virtual-list>` item:
+   * `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]`,
+   * plus `[itemX, itemY, itemW, itemH]` when the item is at or below the
+   * scroll anchor and measured (window pixels). An item above the anchor
+   * has no pixel bounds — compare its index against `anchorIndex` instead.
+   * Null when `elementId` is not a mounted virtual list.
+   */
+  getVirtualListGeometry(elementId: number, index: number): Array<number> | null
+  /**
    * Get the current scroll offset of a scrollable element.
    * Returns [x, y] or null if the element has no scroll handle.
    */
@@ -805,6 +814,13 @@ export declare class TestGpuixRenderer {
    * else. `itemIndex == item count` is gpui's at-end sentinel.
    */
   getListScrollTop(elementId: number): Array<number> | null
+  /**
+   * Sticky-header geometry of a `<virtual-list>` item:
+   * `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]`,
+   * plus `[itemX, itemY, itemW, itemH]` when the item is at or below the
+   * scroll anchor and measured. Null when not a mounted virtual list.
+   */
+  getVirtualListGeometry(elementId: number, index: number): Array<number> | null
   /** `"hidden"` | `"minimal"` | `"full"`. */
   setDebugFrameOverlay(mode: string): string
   /** Hidden → minimal → full → hidden. */
