@@ -473,27 +473,35 @@ describeNative("events (vue)", () => {
         return () => (
           <div style={{ display: "flex", width: "100%", height: "100%", padding: 30 }}>
             <div
+              testId="first"
               style={{ width: 200, height: 40, backgroundColor: "#333" }}
               tabIndex={0}
-              onFocus={() => focusLog.value.push("focus")}
-              onBlur={() => focusLog.value.push("blur")}
+              onFocus={() => focusLog.value.push("first focus")}
+              onBlur={() => focusLog.value.push("first blur")}
             >
               <text>focusable</text>
             </div>
+            <div
+              testId="second"
+              tabIndex={0}
+              onFocus={() => focusLog.value.push("second focus")}
+            />
             <text>{focusLog.value.join(",")}</text>
           </div>
         )
       },
     })
     const app = createTestApp(App)
-    const el = app.renderer
-      .findByType("div")
-      .find((d) => d.events.has("focus") && d.events.has("blur"))!
+    const first = app.renderer.findByTestId("first")!
+    const second = app.renderer.findByTestId("second")!
 
-    app.renderer.nativeSimulateMouseDown(10, 10)
+    app.renderer.focusElement(first.id)
     await app.settle()
-    const all = app.renderer.getAllText().join("")
-    expect(all).toContain("focus")
+    expect(focusLog.value).toEqual(["first focus"])
+
+    app.renderer.focusElement(second.id)
+    await app.settle()
+    expect(focusLog.value).toEqual(["first focus", "first blur", "second focus"])
     app.unmount()
   })
 
