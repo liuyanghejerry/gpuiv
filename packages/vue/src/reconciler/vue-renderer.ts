@@ -93,6 +93,9 @@ const EVENT_TYPES = new Set([
 
 /// Props that reach Rust on EVERY element type, including div and text.
 const UNIVERSAL_PROPS = new Set([
+  // Internal marker for a visual-only overlay subtree (VirtualList sticky
+  // headers). A style on the wrapper cannot suppress descendants' hitboxes.
+  "__gpuivPassThrough",
   "autoFocus",
   "tabIndex",
   "motion",

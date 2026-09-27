@@ -11,12 +11,15 @@
 /// atlas scale with the dirty area, not the canvas size. A flush with no
 /// pending region uploads nothing at all.
 ///
-/// The sprite atlas is keyed by `RenderImage::id`, and gpui offers no way
-/// to update a sub-rect of an existing tile — every changed image is a new
-/// allocation plus a full upload of its own bytes. Splitting the canvas
-/// into tiles keeps each of those uploads bounded by the tile size, and
-/// replaced tiles are released through `Window::drop_image` on the next
-/// render so the atlas does not grow while a stroke repaints.
+/// Each tile carries a stable `RenderImage::id` for its lifetime, so a
+/// dirty flush rewrites the tile's existing atlas allocation in place
+/// (`Window::update_image` — a sub-rect `replace_region` on Metal,
+/// `write_texture` on wgpu/DirectX) instead of allocating a new atlas tile
+/// per flush. The rewritten image is queued per tile and applied at that
+/// tile's next paint, which keeps unpainted (offscreen) canvases from
+/// seeding atlas allocations nothing references. Tiles are only re-allocated
+/// when the canvas is resized; replaced tiles are then released through
+/// `Window::drop_image` on the next render so the atlas does not grow.
 ///
 /// Tile images carry a 1px duplicated border: the atlas is sampled with a
 /// linear filter, so a tile's outer texels would otherwise blend with
@@ -92,9 +95,17 @@ struct CanvasSurface {
     mirror: Vec<u8>,
     tile_cols: usize,
     tile_rows: usize,
-    /// One `RenderImage` per tile, indexed `row * tile_cols + col`.
+    /// One `RenderImage` per tile, indexed `row * tile_cols + col`. Each
+    /// tile's `RenderImage::id` is stable until the canvas resizes, so
+    /// flushes rewrite the same atlas allocation.
     tiles: Vec<Option<Arc<gpui::RenderImage>>>,
-    /// Images replaced by newer flushes, awaiting `Window::drop_image`.
+    /// Tiles whose bytes changed since their last paint, queued for
+    /// `Window::update_image`. Keyed by tile index; a newer flush replaces
+    /// the queued image. Shared with the per-frame snapshot so a tile
+    /// applies its own update at paint time, on the UI thread.
+    pending: Arc<Mutex<HashMap<usize, Arc<gpui::RenderImage>>>>,
+    /// Images orphaned by a resize or element destruction, awaiting
+    /// `Window::drop_image`.
     retired: Vec<Arc<gpui::RenderImage>>,
 }
 
@@ -110,15 +121,20 @@ impl CanvasSurface {
             tile_cols,
             tile_rows,
             tiles: vec![None; tile_cols * tile_rows],
+            pending: Arc::new(Mutex::new(HashMap::new())),
             retired: Vec::new(),
         }
     }
 
     /// A size change invalidates everything: fresh mirror, all tiles
-    /// retired, like a DOM canvas `width` assignment.
+    /// retired, like a DOM canvas `width` assignment. Queued in-place
+    /// updates die with the old tile ids; the retirement list itself
+    /// survives so `drain_retired` still frees the old tiles.
     fn reinit(&mut self, width: u32, height: u32) {
         self.retired.extend(self.tiles.drain(..).flatten());
+        let retired = std::mem::take(&mut self.retired);
         *self = CanvasSurface::new(width, height);
+        self.retired = retired;
     }
 
     /// Splice `rgba` (a full straight-alpha RGBA buffer, row stride
@@ -137,7 +153,10 @@ impl CanvasSurface {
         }
     }
 
-    /// Rebuild every tile intersecting `rect` from the mirror.
+    /// Rebuild every tile intersecting `rect` from the mirror. A rebuilt
+    /// tile keeps its stable `RenderImage::id` (inheriting the atlas
+    /// allocation) and queues the new bytes for `Window::update_image` at
+    /// its next paint; only a tile that never existed gets a fresh id.
     fn rebuild_tiles(&mut self, rect: Rect, stats: &CanvasStats) {
         if self.width == 0 || self.height == 0 || rect.is_empty() {
             return;
@@ -146,19 +165,27 @@ impl CanvasSurface {
         let c1 = (rect.x1 as usize).div_ceil(CANVAS_TILE);
         let r0 = rect.y0 as usize / CANVAS_TILE;
         let r1 = (rect.y1 as usize).div_ceil(CANVAS_TILE);
+        let mut pending = self.pending.lock().unwrap();
         for row in r0..r1.min(self.tile_rows) {
             for col in c0..c1.min(self.tile_cols) {
                 let index = row * self.tile_cols + col;
-                if let Some(old) = self.tiles[index].take() {
-                    self.retired.push(old);
-                }
                 let x0 = col * CANVAS_TILE;
                 let y0 = row * CANVAS_TILE;
                 let x1 = (x0 + CANVAS_TILE).min(self.width as usize);
                 let y1 = (y0 + CANVAS_TILE).min(self.height as usize);
                 stats.record((x1 - x0 + 2) * (y1 - y0 + 2) * 4);
-                self.tiles[index] =
-                    Some(build_tile(&self.mirror, self.width as usize, self.height as usize, x0, y0, x1, y1));
+                let mut image =
+                    build_tile(&self.mirror, self.width as usize, self.height as usize, x0, y0, x1, y1);
+                let image = match self.tiles[index].take() {
+                    Some(previous) => {
+                        image.id = previous.id;
+                        let image = Arc::new(image);
+                        pending.insert(index, image.clone());
+                        image
+                    }
+                    None => Arc::new(image),
+                };
+                self.tiles[index] = Some(image);
             }
         }
     }
@@ -174,7 +201,7 @@ fn build_tile(
     y0: usize,
     x1: usize,
     y1: usize,
-) -> Arc<gpui::RenderImage> {
+) -> gpui::RenderImage {
     let tile_w = x1 - x0;
     let tile_h = y1 - y0;
     let stride = (tile_w + 2) * 4;
@@ -193,9 +220,7 @@ fn build_tile(
     }
     let buffer = image::ImageBuffer::from_raw((tile_w + 2) as u32, (tile_h + 2) as u32, buffer)
         .expect("tile buffer dimensions match its allocation");
-    Arc::new(gpui::RenderImage::new(smallvec::smallvec![image::Frame::new(
-        buffer
-    )]))
+    gpui::RenderImage::new(smallvec::smallvec![image::Frame::new(buffer)])
 }
 
 /// A cheap copy of a surface's tile grid, taken under the store lock for
@@ -205,6 +230,9 @@ pub(crate) struct CanvasSnapshot {
     pub(crate) height: u32,
     cols: usize,
     tiles: Vec<Option<Arc<gpui::RenderImage>>>,
+    /// The surface's pending in-place updates, applied by the owning tile
+    /// at paint time.
+    pending: Option<Arc<Mutex<HashMap<usize, Arc<gpui::RenderImage>>>>>,
 }
 
 impl CanvasSnapshot {
@@ -337,6 +365,7 @@ impl CanvasStore {
             height: surface.height,
             cols: surface.tile_cols,
             tiles: surface.tiles.clone(),
+            pending: Some(surface.pending.clone()),
         })
     }
 
@@ -411,6 +440,10 @@ struct CanvasTile {
     cell: [f32; 4],
     /// The tile's inner region as fractions of the canvas buffer.
     inner: [f32; 4],
+    /// This tile's index in the owning surface, and the surface's pending
+    /// in-place updates. Set when the tile belongs to an uploaded surface.
+    index: usize,
+    pending: Option<Arc<Mutex<HashMap<usize, Arc<gpui::RenderImage>>>>>,
 }
 
 impl gpui::Element for CanvasTile {
@@ -512,6 +545,16 @@ impl gpui::Element for CanvasTile {
                 gpui::px(f32::from(inner.size.height) + 2.0 * unit_y),
             ),
         };
+        // Apply this tile's queued in-place update before painting: the
+        // bytes are rewritten into the tile's existing atlas allocation
+        // (stable id), so `paint_image` below only re-references the tile.
+        // Offscreen tiles skip this — their update stays queued, which
+        // keeps the atlas free of allocations nothing references.
+        if let Some(pending) = &self.pending {
+            if let Some(updated) = pending.lock().unwrap().remove(&self.index) {
+                let _ = window.update_image(updated);
+            }
+        }
         let _ = window.paint_image(
             visible,
             image_bounds,
@@ -608,6 +651,8 @@ pub(crate) fn build_canvas(
             canvas_height: snapshot.height,
             cell: [x0 / width, y0 / height, (x1 - x0) / width, (y1 - y0) / height],
             inner: [x0 / width, y0 / height, (x1 - x0) / width, (y1 - y0) / height],
+            index: row * snapshot.cols + col,
+            pending: snapshot.pending.clone(),
         });
     }
     let grid = crate::renderer::wire_host_events(grid, element, event_callback, arm_pointer_capture);
@@ -774,17 +819,53 @@ mod tests {
     }
 
     #[test]
-    fn replaced_tiles_are_retired_then_dropped() {
+    fn dirty_flushes_keep_stable_tile_ids_and_queue_updates() {
         let store = CanvasStore::default();
         let full = vec![9u8; 8 * 8 * 4];
         store.upload_region(7, 8, 8, &full, None).unwrap();
-        let snapshot = store.snapshot(7).unwrap();
-        let first: Vec<_> = snapshot.iter().map(|(_, _, image)| image.id).collect();
+        let first: Vec<_> = {
+            let surfaces = store.surfaces.lock().unwrap();
+            surfaces.get(&7).unwrap().tiles.iter().map(|tile| tile.as_ref().map(|image| image.id)).collect()
+        };
 
-        // A new flush retires the old tile image…
+        // A dirty flush keeps the tile's id (the atlas allocation) and
+        // queues the new bytes for an in-place update at paint time.
         store
             .upload_region(7, 8, 8, &vec![1u8; 8 * 8 * 4], Some((0, 0, 4, 4)))
             .unwrap();
+        {
+            let surfaces = store.surfaces.lock().unwrap();
+            let surface = surfaces.get(&7).unwrap();
+            let after: Vec<_> =
+                surface.tiles.iter().map(|tile| tile.as_ref().map(|image| image.id)).collect();
+            assert_eq!(after, first);
+            let pending = surface.pending.lock().unwrap();
+            let queued = pending.get(&0).expect("dirty tile queued for update");
+            assert_eq!(queued.id, first[0].unwrap());
+        }
+
+        // A second flush replaces the queued image instead of stacking.
+        store
+            .upload_region(7, 8, 8, &vec![2u8; 8 * 8 * 4], Some((0, 0, 4, 4)))
+            .unwrap();
+        {
+            let surfaces = store.surfaces.lock().unwrap();
+            let surface = surfaces.get(&7).unwrap();
+            assert_eq!(surface.pending.lock().unwrap().len(), 1);
+            assert!(surface.retired.is_empty());
+        }
+
+        // Content flushes never retire tiles — only a resize does.
+        store.drain_retired(|_| panic!("a content flush must not retire tiles"));
+    }
+
+    #[test]
+    fn resize_retires_the_previous_tiles() {
+        let store = CanvasStore::default();
+        store.upload_region(7, 8, 8, &vec![9u8; 8 * 8 * 4], None).unwrap();
+        let first: Vec<_> = store.snapshot(7).unwrap().iter().map(|(_, _, image)| image.id).collect();
+
+        store.upload_region(7, 4, 4, &vec![9u8; 4 * 4 * 4], None).unwrap();
         let retired: Vec<_> = {
             let mut ids = Vec::new();
             store.drain_retired(|image| ids.push(image.id));
