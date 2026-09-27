@@ -14,6 +14,7 @@
     "infinite-chat": "bun --hot infinite-chat.tsx",
     "clipboard": "bun --hot clipboard.tsx",
     "markdown-images": "bun --hot markdown-images.tsx",
+    "math": "bun --hot math.tsx",
     "runtime-menus": "bun --hot runtime-menus.tsx",
     "window-close": "bun --hot window-close.tsx",
     "ime-composition": "bun --hot ime-composition.tsx",

@@ -8,6 +8,7 @@
 //! exactly `lines × line_height`, and syntax highlighting arrives as recoloured
 //! `TextRun`s on the identical font, so layout never changes.
 
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -16,7 +17,7 @@ use gpui::{
     UnderlineStyle, Window,
 };
 
-use super::parser::{Block, BlockTree, InlineRun, TableAlign};
+use super::parser::{Block, BlockTree, InlineRun, InlineStyle, TableAlign};
 use crate::syntax::cache::highlight_cached;
 use crate::text::{range_rects, runs::runs_for_spans, SharedSelection};
 use crate::theme::{Metrics, Theme, ThemeFonts};
@@ -78,7 +79,16 @@ pub struct FlatText {
 }
 
 /// Flatten inline runs into shaped-text inputs. Pure given a theme.
-pub fn flatten_runs(runs: &[InlineRun], theme: &Theme, base_weight: FontWeight) -> FlatText {
+///
+/// `footnotes` maps a footnote label to its document-order number (0-based);
+/// a label missing from the map (a dangling reference in a partial tree)
+/// falls back to the raw label so the marker stays readable.
+pub fn flatten_runs(
+    runs: &[InlineRun],
+    theme: &Theme,
+    base_weight: FontWeight,
+    footnotes: &HashMap<String, usize>,
+) -> FlatText {
     let mut text = String::new();
     let mut out: Vec<TextRun> = Vec::with_capacity(runs.len());
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
@@ -89,9 +99,32 @@ pub fn flatten_runs(runs: &[InlineRun], theme: &Theme, base_weight: FontWeight) 
             continue;
         }
         let start = text.len();
+
+        if let Some(label) = &run.style.footnote {
+            // The run text is the label carrier; the painted marker is the
+            // number, accent-tinted and clickable like a link.
+            let marker = match footnotes.get(label) {
+                Some(number) => format!("[{}]", number + 1),
+                None => format!("[{label}]"),
+            };
+            text.push_str(&marker);
+            links.push((start..text.len(), format!("footnote:{label}")));
+            let mut f = theme.sans_font();
+            f.weight = base_weight;
+            out.push(TextRun {
+                len: marker.len(),
+                font: f,
+                color: theme.accent,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            continue;
+        }
+
         text.push_str(&run.text);
 
-        let mut f = if run.style.code {
+        let mut f = if run.style.code || run.style.math.is_some() {
             theme.mono_font()
         } else {
             theme.sans_font()
@@ -128,8 +161,11 @@ pub fn flatten_runs(runs: &[InlineRun], theme: &Theme, base_weight: FontWeight) 
             font: f,
             // Inline code reads violet; links stay the monochrome foreground
             // with an underline, because accent is reserved for actions.
+            // Unmapped math keeps its TeX source visible in accent mono.
             color: if run.style.code {
                 theme.code_text
+            } else if run.style.math.is_some() {
+                theme.accent
             } else {
                 theme.text
             },
@@ -156,6 +192,48 @@ pub fn flatten_runs(runs: &[InlineRun], theme: &Theme, base_weight: FontWeight) 
 
 // ── Render context ───────────────────────────────────────────────────
 
+/// One pre-rendered formula from the element's `math` map (JS renders TeX →
+/// a self-contained, px-sized SVG; see `packages/vue/src/math`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct MathSpec {
+    /// `data:image/svg+xml;base64,…`
+    pub src: String,
+    /// Layout size in px.
+    pub width: f32,
+    pub height: f32,
+    /// Baseline depth in px (unused by the centered block layout; kept so
+    /// an inline-baseline layout can consume it later).
+    pub depth: f32,
+}
+
+impl MathSpec {
+    pub(crate) fn from_prop(value: &serde_json::Value) -> Option<Self> {
+        let src = value.get("src")?.as_str()?.to_string();
+        if src.is_empty() {
+            return None;
+        }
+        Some(MathSpec {
+            src,
+            width: value.get("width")?.as_f64()? as f32,
+            height: value.get("height")?.as_f64()? as f32,
+            depth: value.get("depth").and_then(serde_json::Value::as_f64).unwrap_or(0.0) as f32,
+        })
+    }
+}
+
+/// Parse the `math` prop: `{ "<tex>": { src, width, height, depth } }`.
+pub(crate) fn math_map_from_prop(value: &serde_json::Value) -> HashMap<String, MathSpec> {
+    let mut map = HashMap::new();
+    if let Some(entries) = value.as_object() {
+        for (tex, spec) in entries {
+            if let Some(spec) = MathSpec::from_prop(spec) {
+                map.insert(tex.clone(), spec);
+            }
+        }
+    }
+    map
+}
+
 /// Everything block rendering needs. Carries a mutable counter so each painted
 /// text run gets a distinct, document-ordered selection sub-key.
 pub struct MdContext {
@@ -173,6 +251,11 @@ pub struct MdContext {
     /// Called with the URL of the link under a click. Hit testing happens per
     /// byte range inside the painted text, not per block.
     pub on_link: Option<Arc<dyn Fn(&str)>>,
+    /// Footnote label → document-order number, from the tree's label order.
+    /// `render_tree` fills it before the first block renders.
+    pub footnote_numbers: HashMap<String, usize>,
+    /// Pre-rendered display formulas keyed by TeX source.
+    pub math: HashMap<String, MathSpec>,
 }
 
 impl MdContext {
@@ -184,6 +267,7 @@ impl MdContext {
         theme: Theme,
         on_link: Option<Arc<dyn Fn(&str)>>,
         highlight_set: Option<Arc<crate::text::HighlightContext>>,
+        math: HashMap<String, MathSpec>,
     ) -> Self {
         Self {
             element_id,
@@ -194,6 +278,8 @@ impl MdContext {
             highlight_set,
             next_sub: 0,
             on_link,
+            footnote_numbers: HashMap::new(),
+            math,
         }
     }
 
@@ -213,6 +299,12 @@ impl MdContext {
 pub fn render_tree(tree: &BlockTree, ctx: &mut MdContext, window: &Window) -> AnyElement {
     use gpui::prelude::*;
 
+    ctx.footnote_numbers = tree
+        .footnote_labels
+        .iter()
+        .enumerate()
+        .map(|(ix, label)| (label.clone(), ix))
+        .collect();
     let block_gap = ctx.theme.metrics.md_block_gap;
     div()
         .flex()
@@ -246,6 +338,7 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
         }
         Block::CodeBlock { language, code } => render_code_block(language.as_deref(), code, ctx),
         Block::Image { url, alt } => render_image(url, alt, ctx),
+        Block::Math { tex } => render_math(tex, ctx),
         Block::BlockQuote { children } => div()
             // Accent-tinted quote: an indigo rail with a whisper of the same
             // hue behind it.
@@ -328,6 +421,53 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
             rows,
             align,
         } => render_table(header, rows, align, ctx, window),
+        Block::FootnoteDefinition { label, children } => {
+            // The definition renders in place, GitHub-style: the shared
+            // number marker leads the first paragraph (or its own line when
+            // the definition starts with another block kind), continuation
+            // blocks follow at normal block styling.
+            let marker_runs = vec![
+                InlineRun {
+                    text: label.clone(),
+                    style: InlineStyle {
+                        footnote: Some(label.clone()),
+                        ..Default::default()
+                    },
+                },
+                InlineRun { text: " ".into(), style: InlineStyle::default() },
+            ];
+            let mut stack = div().flex().flex_col().gap(px(4.0));
+            let mut rest = children.iter();
+            match rest.next() {
+                Some(Block::Paragraph { runs }) => {
+                    let mut marked = marker_runs;
+                    marked.extend(runs.iter().cloned());
+                    stack = stack.child(text_element(
+                        &marked,
+                        m.md_text_size,
+                        m.md_line_height,
+                        FontWeight::NORMAL,
+                        ctx,
+                    ));
+                }
+                first => {
+                    stack = stack.child(text_element(
+                        &marker_runs,
+                        m.md_text_size,
+                        m.md_line_height,
+                        FontWeight::NORMAL,
+                        ctx,
+                    ));
+                    if let Some(first) = first {
+                        stack = stack.child(render_block(first, ctx, window));
+                    }
+                }
+            }
+            for child in rest {
+                stack = stack.child(render_block(child, ctx, window));
+            }
+            stack.into_any_element()
+        }
         Block::Rule => div()
             .h(px(1.0))
             .w_full()
@@ -345,7 +485,7 @@ fn text_element(
 ) -> AnyElement {
     use gpui::prelude::*;
 
-    let flat = flatten_runs(runs, &ctx.theme, weight);
+    let flat = flatten_runs(runs, &ctx.theme, weight, &ctx.footnote_numbers);
     let inner = flat_text_element(&flat, ctx);
     div()
         .w_full()
@@ -353,6 +493,47 @@ fn text_element(
         .text_size(px(size))
         .line_height(px(line_height))
         .child(inner)
+        .into_any_element()
+}
+
+/// A display formula. A mapped TeX → SVG render paints as a centered image
+/// at its layout size (the SVG itself is baked at 2×, so the GPU downscale
+/// stays crisp); an unmapped formula falls back to the literal TeX in a
+/// muted card, never to nothing.
+fn render_math(tex: &str, ctx: &mut MdContext) -> AnyElement {
+    use gpui::prelude::*;
+
+    let theme = ctx.theme.clone();
+    let m = &theme.metrics;
+    // The map is keyed by the trimmed formula (renderMathMap trims); trim on
+    // lookup so multiline `$$\n  x+1\n$$` sources hit their rendered entry.
+    if let Some(spec) = ctx.math.get(tex.trim()).cloned() {
+        let sub = ctx.take_sub();
+        let id = SharedString::from(format!("__gpuix_md_math_{}_{}", ctx.element_id, sub));
+        if let Some(image) = crate::custom_elements::img::standalone_img(&spec.src, id) {
+            return div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .justify_center()
+                .child(image.w(px(spec.width)).h(px(spec.height)))
+                .into_any_element();
+        }
+    }
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .justify_center()
+        .px(px(10.0))
+        .py(px(6.0))
+        .rounded(px(m.md_image_radius))
+        .bg(opacity(theme.text, 0.06))
+        .text_color(theme.text_muted)
+        .child(crate::text::chrome_text(
+            SharedString::from(tex.to_string()),
+            None,
+        ))
         .into_any_element()
 }
 
@@ -582,6 +763,10 @@ fn render_table(
 
     // Flatten every cell once and take per-column max-content widths.
     let text_system = window.text_system();
+    // Table cells share the document's footnote numbering — an empty map here
+    // would paint raw labels in cells (and measure the wrong max-content
+    // width) while the definitions below show numbers.
+    let footnote_numbers = ctx.footnote_numbers.clone();
     let mut flats: Vec<Vec<Option<FlatText>>> = Vec::with_capacity(all.len());
     let mut content = vec![0.0f32; cols];
     for (row_ix, row) in all.iter().enumerate() {
@@ -596,7 +781,7 @@ fn render_table(
                 out.push(None);
                 continue;
             };
-            let flat = flatten_runs(runs, &theme, weight);
+            let flat = flatten_runs(runs, &theme, weight, &footnote_numbers);
             if !flat.text.is_empty() {
                 // Cells are single-line; guard anyway, and keep the byte count
                 // identical so the runs still cover the text exactly.
@@ -721,6 +906,7 @@ mod tests {
             ],
             &theme,
             FontWeight::NORMAL,
+            &HashMap::new(),
         );
         assert_eq!(flat.text, "go here now");
         assert_eq!(
@@ -756,11 +942,53 @@ mod tests {
             ],
             &theme,
             FontWeight::NORMAL,
+            &HashMap::new(),
         );
         assert_eq!(flat.code_ranges, vec![4..9, 14..17]);
         assert_eq!(flat.runs[1].color, theme.code_text);
         // The pill is a rounded canvas quad, so the run carries no background.
         assert_eq!(flat.runs[1].background_color, None);
+    }
+
+    #[test]
+    fn footnote_runs_render_as_numbered_accent_markers() {
+        let theme = Theme::dark();
+        let footnotes: HashMap<String, usize> =
+            [("beta".to_string(), 1usize)].into_iter().collect();
+        let flat = flatten_runs(
+            &[
+                run("see ", InlineStyle::default()),
+                run(
+                    "beta",
+                    InlineStyle {
+                        footnote: Some("beta".into()),
+                        ..Default::default()
+                    },
+                ),
+                run(
+                    "alpha",
+                    InlineStyle {
+                        footnote: Some("alpha".into()),
+                        ..Default::default()
+                    },
+                ),
+            ],
+            &theme,
+            FontWeight::NORMAL,
+            &footnotes,
+        );
+        // Numbered when known, raw label when dangling.
+        assert_eq!(flat.text, "see [2][alpha]");
+        assert_eq!(
+            flat.links,
+            vec![(4..7, "footnote:beta".to_string()), (7..14, "footnote:alpha".to_string())]
+        );
+        assert_eq!(flat.runs[1].color, theme.accent);
+        assert_eq!(flat.runs[1].underline, None);
+        assert_eq!(
+            flat.runs.iter().map(|r| r.len).sum::<usize>(),
+            flat.text.len()
+        );
     }
 
     #[test]
@@ -783,6 +1011,7 @@ mod tests {
             ],
             &Theme::dark(),
             FontWeight::NORMAL,
+            &HashMap::new(),
         );
         assert_eq!(flat.runs.len(), 1);
     }

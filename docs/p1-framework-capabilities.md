@@ -133,6 +133,25 @@ a platform API, since the checked-out GPUI Platform/Window interface has no
 OS popup-menu command. Multi-window and single-instance routing need a separate
 lifecycle design. PDF layout/export remains independent of these shell APIs.
 
+## Third delivery: markdown math (display formulas)
+
+Issue #101 P0-2, display half. Inline baseline-aligned formulas remain open.
+
+- [x] `renderMathMap(source, options?)` in `@gpuiv/vue/math`: scans for
+  `$$…$$` / `$…$` (code spans skipped), renders via MathJax v3 headless
+  (`liteAdaptor`, no jsdom; glyph outlines baked into `<defs><path>` per
+  formula, cached per (tex, display, options)). SVG post-processing for
+  gpui's usvg/resvg rasterizer: ex→px at 2× bake, root `fill` injected
+  (usvg has no CSS colour context), `vertical-align` lifted out as `depth`.
+- [x] `<markdown math={map}>`: mapped `$$…$$` blocks paint as centered
+  images at layout size; unmapped formulas and `$inline$` fall back to the
+  literal TeX (accent mono run inline, muted card for blocks).
+- [x] Streaming parity: math parses through the incremental path like any
+  other block (no distance effects); corpus covers it.
+- [ ] Inline math as baseline-aligned SVG runs inside a paragraph — needs
+  image runs in the text layout pipeline (`SelectableText` lays out one
+  `StyledText`); the map already carries `depth` px for that layout.
+
 ## Validation scope
 
 Automated tests cover scroll interpolation, real native clamping, cancellation,

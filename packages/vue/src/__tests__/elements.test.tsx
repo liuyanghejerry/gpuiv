@@ -43,6 +43,54 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("renders markdown footnotes as numbered markers and definitions", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown
+              source={
+                "A claim[^first] and another[^second].\n\n[^first]: The first note.\n[^second]: The second note."
+              }
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    // References and definitions share the document-order number; the
+    // raw labels never paint.
+    expect(painted).toContain("A claim[1] and another[2].")
+    expect(painted).toContain("[1] The first note.")
+    expect(painted).toContain("[2] The second note.")
+    expect(painted).not.toContain("first]")
+    app.unmount()
+  })
+
+  it("numbers footnote references inside markdown tables", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown
+              source={
+                "Start[^a].\n\n| Header |\n| --- |\n| Cell[^b] |\n\n[^a]: First\n[^b]: Second"
+              }
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    // The table cell shares the document numbering: [^a] is 1, [^b] is 2.
+    expect(painted).toContain("Start[1].")
+    expect(painted).toContain("Cell[2]")
+    expect(painted).toContain("[2] Second")
+    app.unmount()
+  })
+
   it("renders styled inline runs on a <text> element", () => {
     const App = defineComponent({
       setup() {

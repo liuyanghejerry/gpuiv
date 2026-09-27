@@ -8,6 +8,7 @@
 //! selection registry in document order, so a drag can start in a heading and
 //! end inside a fenced code block, and Cmd+C copies the whole span.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui::SharedString;
@@ -34,6 +35,10 @@ impl CustomElementFactory for MarkdownFactory {
 pub struct MarkdownElement {
     source: String,
     theme: Theme,
+    /// Pre-rendered display formulas (TeX → px-sized SVG), keyed by TeX.
+    /// Populated from the `math` prop; `renderMathMap` in `@gpuiv/vue/math`
+    /// is the producer.
+    math: HashMap<String, crate::markdown::render::MathSpec>,
     /// Streaming parse state: an append to `source` reparses only from the
     /// last stable top-level block boundary, so a token-by-token feed costs
     /// O(tail), not O(document). Sources that stop being a prefix extension
@@ -61,6 +66,7 @@ impl CustomElement for MarkdownElement {
         use gpui::prelude::*;
 
         let theme = self.theme.clone();
+        let math = self.math.clone();
         let tree = self.tree();
 
         // Link clicks are hit-tested per byte range inside the painted text, so
@@ -87,6 +93,7 @@ impl CustomElement for MarkdownElement {
             theme.clone(),
             on_link,
             ctx.highlight_set.clone(),
+            math,
         );
         let body = render_tree(tree, &mut md, window);
 
@@ -110,12 +117,13 @@ impl CustomElement for MarkdownElement {
         match key {
             "source" => self.source = value.as_str().unwrap_or("").to_string(),
             "theme" => self.theme = Theme::from_prop(Some(&value)),
+            "math" => self.math = crate::markdown::render::math_map_from_prop(&value),
             _ => {}
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["source", "theme"]
+        &["source", "theme", "math"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
