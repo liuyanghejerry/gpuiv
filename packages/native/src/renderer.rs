@@ -6034,10 +6034,9 @@ impl gpui::Render for GpuixView {
             self.pending_focus_element = Some(id);
         }
 
-        // Free atlas tiles replaced or orphaned by canvas flushes. They are
-        // unreferenced by the tree being built below, so removing them
-        // before painting is safe; without this the atlas would grow by one
-        // tile per dirty flush.
+        // Free atlas tiles orphaned by canvas resizes or element
+        // destruction. Content flushes rewrite tiles in place (stable
+        // `RenderImage` ids), so they no longer pass through here.
         let surfaces = self.canvas_surfaces.clone();
         surfaces.drain_retired(|image| {
             let _ = window.drop_image(image);
