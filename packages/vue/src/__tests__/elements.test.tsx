@@ -1,7 +1,7 @@
 /// GPU-backed assertions for the native text elements (Vue): markdown
 /// typography, code line numbers and syntax tokens, diff headers.
 
-import { defineComponent } from "vue"
+import { defineComponent, ref } from "vue"
 import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 
@@ -40,6 +40,49 @@ describeNative("native text elements (vue)", () => {
     expect(painted).toContain("bold")
     expect(painted).toContain("link")
     expect(painted).toContain("code")
+    app.unmount()
+  })
+
+  it("renders styled inline runs on a <text> element", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <text
+              style={{ color: "#c0c0c0" }}
+              runs={[
+                { text: "plain " },
+                { text: "bold", fontWeight: 700 },
+                { text: " and ", color: "#808080" },
+                { text: "italic", fontStyle: "italic" },
+              ]}
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    // The runs concatenate into one painted string; selection and copy key
+    // off that same string.
+    expect(app.renderer.getPaintedText().join("\n")).toContain("plain bold and italic")
+    app.unmount()
+  })
+
+  it("replaces string children with runs, including an empty run list", async () => {
+    const runs = ref([{ text: "replacement", fontWeight: 700 }])
+    const App = defineComponent({
+      setup() {
+        return () => <text runs={runs.value}>original</text>
+      },
+    })
+    const app = createTestApp(App)
+    expect(app.renderer.getPaintedText()).toContain("replacement")
+    expect(app.renderer.getPaintedText()).not.toContain("original")
+
+    runs.value = []
+    await app.settle()
+    expect(app.renderer.getPaintedText()).not.toContain("original")
+    expect(app.renderer.getPaintedText()).not.toContain("replacement")
     app.unmount()
   })
 
