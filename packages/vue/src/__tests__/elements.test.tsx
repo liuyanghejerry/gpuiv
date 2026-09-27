@@ -68,6 +68,29 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("numbers footnote references inside markdown tables", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown
+              source={
+                "Start[^a].\n\n| Header |\n| --- |\n| Cell[^b] |\n\n[^a]: First\n[^b]: Second"
+              }
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    // The table cell shares the document numbering: [^a] is 1, [^b] is 2.
+    expect(painted).toContain("Start[1].")
+    expect(painted).toContain("Cell[2]")
+    expect(painted).toContain("[2] Second")
+    app.unmount()
+  })
+
   it("renders standalone markdown images as blocks", () => {
     // A 1x1 transparent PNG data URL: a real image element, not text.
     const png =

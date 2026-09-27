@@ -1,7 +1,7 @@
 import { defineComponent, h, ref } from "vue"
 import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
-import { renderMathMap } from "../math/index.js"
+import { renderMath, renderMathMap } from "../math/index.js"
 
 const describeNative = describe.skipIf(!hasNativeTestRenderer)
 
@@ -41,6 +41,29 @@ describeNative("markdown math", () => {
     expect(painted).toContain("E = mc^2")
     expect(painted).toContain("After.")
     app.unmount()
+  })
+
+  it("matches multiline formulas through trimmed map keys", async () => {
+    const source = "$$\n  x+1\n$$"
+    const math = await renderMathMap(source)
+    const App = defineComponent({
+      setup() {
+        return () => h("markdown", { source, math })
+      },
+    })
+    const app = createTestApp(App)
+    // The mapped block paints as an image — the raw TeX never paints.
+    expect(app.renderer.getPaintedText().join("\n")).not.toContain("x+1")
+    app.unmount()
+  })
+
+  it("bakes the requested colour over currentColor", async () => {
+    const { src } = await renderMath("x^2", true, { color: "#ff0000" })
+    const svg = Buffer.from(src.split(",")[1] ?? "", "base64").toString("utf8")
+    // MathJax wraps glyphs in fill="currentColor"; usvg would raster that
+    // black. Every occurrence must carry the requested colour instead.
+    expect(svg).not.toContain("currentColor")
+    expect(svg).toContain('fill="#ff0000"')
   })
 })
 

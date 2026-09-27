@@ -129,7 +129,10 @@ export async function renderMath(
   if (heightMatch) {
     svg = svg.replace(heightMatch[0], `height="${height * scale}px"`)
   }
-  // usvg has no CSS colour context: unfilled paths raster black.
+  // usvg has no CSS colour context and resolves `currentColor` to black —
+  // MathJax wraps its glyph groups in fill="currentColor", so the root fill
+  // below is not enough. Rewrite every occurrence to the requested colour.
+  svg = svg.split("currentColor").join(color)
   svg = svg.replace(/^<svg/, `<svg fill="${color}"`)
   // The layout layer owns baseline placement; usvg ignores this anyway.
   svg = svg.replace(/ vertical-align:\s*-?[\d.]+ex;?/, "")

@@ -505,7 +505,9 @@ fn render_math(tex: &str, ctx: &mut MdContext) -> AnyElement {
 
     let theme = ctx.theme.clone();
     let m = &theme.metrics;
-    if let Some(spec) = ctx.math.get(tex).cloned() {
+    // The map is keyed by the trimmed formula (renderMathMap trims); trim on
+    // lookup so multiline `$$\n  x+1\n$$` sources hit their rendered entry.
+    if let Some(spec) = ctx.math.get(tex.trim()).cloned() {
         let sub = ctx.take_sub();
         let id = SharedString::from(format!("__gpuix_md_math_{}_{}", ctx.element_id, sub));
         if let Some(image) = crate::custom_elements::img::standalone_img(&spec.src, id) {
@@ -761,6 +763,10 @@ fn render_table(
 
     // Flatten every cell once and take per-column max-content widths.
     let text_system = window.text_system();
+    // Table cells share the document's footnote numbering — an empty map here
+    // would paint raw labels in cells (and measure the wrong max-content
+    // width) while the definitions below show numbers.
+    let footnote_numbers = ctx.footnote_numbers.clone();
     let mut flats: Vec<Vec<Option<FlatText>>> = Vec::with_capacity(all.len());
     let mut content = vec![0.0f32; cols];
     for (row_ix, row) in all.iter().enumerate() {
@@ -775,7 +781,7 @@ fn render_table(
                 out.push(None);
                 continue;
             };
-            let flat = flatten_runs(runs, &theme, weight, &HashMap::new());
+            let flat = flatten_runs(runs, &theme, weight, &footnote_numbers);
             if !flat.text.is_empty() {
                 // Cells are single-line; guard anyway, and keep the byte count
                 // identical so the runs still cover the text exactly.
