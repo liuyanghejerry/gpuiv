@@ -487,3 +487,122 @@ describeNative("virtual-list selection autoscroll", () => {
   })
 })
 
+
+/// The pinned header is an overlay sibling: painted after the list (gpui
+/// draws later overlapping bounds on top), `pointerEvents: "none"` so wheel
+/// and selection pass through. Switching is driven by the renderer's
+/// geometry query, so the assertions go through real painted output.
+describeNative("virtual-list sticky section headers", () => {
+  const stickyList = () => {
+    const list = ref<{ scrollToItem: (index: number) => void } | null>(null)
+    const App = defineComponent({
+      setup: () => () =>
+        h(VirtualList, {
+          ref: list,
+          itemCount: 30,
+          estimatedItemHeight: 40,
+          overdraw: 0,
+          style: { width: 400, height: 160 },
+          stickyIndices: [0, 10, 20],
+          renderItem: (index: number) =>
+            h(
+              "div",
+              { key: index, style: { display: "flex", height: 40, flexShrink: 0 } },
+              index % 10 === 0 ? `head-${index}` : `row-${index}`,
+            ),
+          renderStickyHeader: (index: number) =>
+            h(
+              "div",
+              { style: { height: 28, backgroundColor: "#111318" } },
+              `pinned-${index}`,
+            ),
+        })
+    })
+    return { list, App }
+  }
+
+  it("pins the section header that scrolled past the top", async () => {
+    const { list, App } = stickyList()
+    const app = createTestApp(App)
+    await app.settle()
+
+    // At the top the header row sits in flow — no overlay.
+    expect(app.renderer.getPaintedText()).toContain("head-0")
+    expect(app.renderer.getPaintedText()).not.toContain("pinned-")
+
+    list.value?.scrollToItem(12)
+    await app.settle()
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain("pinned-10")
+    expect(app.renderer.getPaintedText()).not.toContain("pinned-0")
+
+    list.value?.scrollToItem(22)
+    await app.settle()
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain("pinned-20")
+
+    list.value?.scrollToItem(0)
+    await app.settle()
+    await app.settle()
+    expect(app.renderer.getPaintedText()).not.toContain("pinned-")
+    expect(app.renderer.getPaintedText()).toContain("head-0")
+    app.unmount()
+  })
+
+  it("passes clicks through solid nested header content", async () => {
+    const clicks: number[] = []
+    const list = ref<VirtualListInstance | null>(null)
+    const Header = defineComponent({
+      setup: () => () =>
+        h(
+          "div",
+          {
+            style: { height: 28, backgroundColor: "#111318" },
+            onClick: () => clicks.push(-1),
+          },
+          [
+            h(
+              "div",
+              {
+                style: { height: 28, backgroundColor: "#242832" },
+                onClick: () => clicks.push(-2),
+              },
+              "pinned",
+            ),
+          ],
+        ),
+    })
+    const App = defineComponent({
+      setup: () => () =>
+        h(VirtualList, {
+          ref: list,
+          itemCount: 30,
+          estimatedItemHeight: 40,
+          overdraw: 0,
+          style: { width: 400, height: 160 },
+          stickyIndices: [0, 10, 20],
+          renderItem: (index: number) =>
+            h(
+              "div",
+              {
+                key: index,
+                style: { height: 40, flexShrink: 0, backgroundColor: "#383c44" },
+                onClick: () => clicks.push(index),
+              },
+              `row-${index}`,
+            ),
+          renderStickyHeader: () => h(Header),
+        }),
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    list.value?.scrollToItem(12)
+    await app.settle()
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain("pinned")
+
+    app.renderer.nativeSimulateClick(20, 10)
+    expect(clicks).toEqual([12])
+    app.unmount()
+  })
+})

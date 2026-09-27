@@ -1772,6 +1772,29 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Sticky-header geometry of a `<virtual-list>` item:
+    /// `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]`,
+    /// plus `[itemX, itemY, itemW, itemH]` when the item is at or below the
+    /// scroll anchor and measured. Null when not a mounted virtual list.
+    #[napi]
+    pub fn get_virtual_list_geometry(
+        &self,
+        element_id: f64,
+        index: f64,
+    ) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        let index = index as usize;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, _window, app| {
+                    view.update(app, |view, _cx| view.virtual_list_geometry(id, index))
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(result)
+        })
+    }
+
     /// `"hidden"` | `"minimal"` | `"full"`.
     #[napi]
     pub fn set_debug_frame_overlay(&self, mode: String) -> Result<String> {
