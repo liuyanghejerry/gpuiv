@@ -696,9 +696,8 @@ export declare class TestGpuixRenderer {
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
    * Focus an element by its numeric ID.
-   * The element must have a FocusHandle (created by sync_focus_handles when
-   * the element has keyDown, keyUp, focus, or blur listeners).
-   * Call flush() before this so the element tree and focus handles exist.
+   * If its FocusHandle is not painted yet, the request stays pending until
+   * a later frame creates it, unless another focus move happens first.
    */
   focusElement(id: number): void
   /**
