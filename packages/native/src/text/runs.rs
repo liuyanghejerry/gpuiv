@@ -153,8 +153,8 @@ pub fn host_runs_text(value: &serde_json::Value) -> Option<String> {
 ///
 /// `underline` / `strikethrough` accept `true` (the run's own colour, 1px)
 /// or `{ color?, thickness?, wavy? }`. A non-array value, or an array whose
-/// segments are all empty, yields `None` so the caller falls back to the
-/// plain `content` path.
+/// segments are all empty, yields `None`; the host builder decides whether
+/// plain text should paint based on the presence of a valid `runs` array.
 pub fn parse_host_runs(value: &serde_json::Value, base_font: Font, base_color: Hsla) -> Option<HostTextRuns> {
     let items = value.as_array()?;
     let mut text = String::new();

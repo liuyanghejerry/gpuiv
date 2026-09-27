@@ -6588,14 +6588,19 @@ pub(crate) fn build_host_container(
     // Label. The inner nodes stay out of the AX tree so VoiceOver does not
     // hear the same string twice.
     let is_text_host = element.element_type == "text" && element.content.is_none();
+    let runs_prop = if is_text_host {
+        element.custom_props.get("runs").filter(|value| value.is_array())
+    } else {
+        None
+    };
     let default_role = is_text_host.then_some(gpui::Role::Label);
     el = apply_accessibility(el, &element.custom_props, default_role);
     if is_text_host && element.custom_props.get("aria-valuetext").is_none() {
-        let content = element
-            .custom_props
-            .get("runs")
-            .and_then(crate::text::runs::host_runs_text)
-            .or_else(|| joined_text_content(ctx.tree, element));
+        let content = if let Some(runs) = runs_prop {
+            Some(crate::text::runs::host_runs_text(runs).unwrap_or_default())
+        } else {
+            joined_text_content(ctx.tree, element)
+        };
         if let Some(content) = content {
             el = el.aria_value(content);
         }
@@ -6621,7 +6626,7 @@ pub(crate) fn build_host_container(
     // element's own font family/weight/colour resolve the unset attributes.
     // The base style is only computed when the prop is present, so plain
     // text pays nothing for it.
-    let host_runs = element.custom_props.get("runs").and_then(|value| {
+    let host_runs = runs_prop.and_then(|value| {
         let theme = Theme::dark();
         let mut font = theme.sans_font();
         let mut color = theme.text;
@@ -6647,6 +6652,15 @@ pub(crate) fn build_host_container(
     // Children
     let child_ids: Vec<u64> = element.children.clone();
     for child_id in child_ids {
+        if runs_prop.is_some()
+            && ctx.tree.elements.get(&child_id).is_some_and(|child| {
+                child.element_type == "text" && child.content.is_some()
+            })
+        {
+            // Vue keeps the original text instance in the retained tree; the
+            // runs replace its paint and accessibility text while present.
+            continue;
+        }
         let child = build_element(child_id, ctx, window, cx);
         el = if overflow_x_only {
             el.child(gpui::div().flex_none().child(child))
