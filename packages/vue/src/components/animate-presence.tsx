@@ -13,6 +13,7 @@ import {
   computed,
   defineComponent,
   getCurrentInstance,
+  h,
   inject,
   onMounted,
   onUnmounted,
@@ -28,7 +29,7 @@ import {
 } from "vue"
 import { cloneVNode, Comment, isVNode, Text } from "vue"
 
-export type ComponentKey = string | number
+export type ComponentKey = PropertyKey
 
 export interface PresenceContextValue {
   isPresent: boolean
@@ -110,7 +111,7 @@ const PresenceChild = defineComponent({
     /** `initial === false` on the first render: children skip their enter. */
     skipEnter: { type: Boolean, default: false },
     /** AnimatePresence's per-child callback; null while the child is present. */
-    onExit: { type: Function as PropType<(() => void) | null>, default: null },
+    onExit: { type: Function as unknown as PropType<(() => void) | null>, default: null },
   },
   setup(props, { slots }) {
     // childId → its completion reporter, null while still pending.
@@ -228,14 +229,7 @@ export const AnimatePresence = defineComponent({
               emit("exitComplete")
             }
         children.push(
-          <PresenceChild
-            key={key}
-            isPresent={isPresent}
-            skipEnter={skipEnter}
-            onExit={onExit}
-          >
-            {child}
-          </PresenceChild>
+          h(PresenceChild, { key, isPresent, skipEnter, onExit }, { default: () => child }),
         )
       }
       return children
