@@ -4751,7 +4751,7 @@ pub(crate) struct GpuixView {
     pub(crate) focus_handles: HashMap<u64, gpui::FocusHandle>,
     /// Latest focus request that arrived before its element had a focus
     /// handle. Consumed in sync_focus_handles once the handle exists.
-    pending_focus_element: Option<u64>,
+    pending_focus_element: Option<PendingFocus>,
     /// Active focus/blur subscriptions keyed by element and event type.
     pub(crate) focus_subscriptions: HashMap<(u64, String), gpui::Subscription>,
     /// Registry for custom element types (input, editor, diff, etc.).
@@ -5782,7 +5782,7 @@ impl GpuixView {
             self.pending_focus_element = None;
             handle.focus(window, cx);
         } else {
-            self.pending_focus_element = Some(id);
+            self.pending_focus_element = Some(PendingFocus::new(id, window, cx));
         }
         cx.notify();
     }
@@ -6053,6 +6053,14 @@ impl GpuixView {
         window: &mut gpui::Window,
         cx: &mut gpui::Context<Self>,
     ) {
+        // A click or Tab after the request wins, even if the target's focus
+        // handle appears later. Check before autoFocus in this frame so an
+        // explicit request still beats autoFocus on a newly mounted element.
+        if self.pending_focus_element.is_some_and(|pending| {
+            window.focused(cx).map(|handle| handle.id()) != pending.focused_at_request
+        }) {
+            self.pending_focus_element = None;
+        }
         let tab_index = |element: &crate::retained_tree::RetainedElement| {
             element
                 .custom_props
@@ -6095,10 +6103,14 @@ impl GpuixView {
             }
         }
 
-        if let Some(id) = self.pending_focus_element.take() {
-            if let Some(handle) = self.focus_handles.get(&id) {
-                handle.focus(window, cx);
-            }
+        // A render may happen before the mutation batch creates the target.
+        // Keep the request until its focus handle actually exists.
+        if let Some(handle) = self
+            .pending_focus_element
+            .and_then(|pending| self.focus_handles.get(&pending.id).cloned())
+        {
+            handle.focus(window, cx);
+            self.pending_focus_element = None;
         }
 
         self.focus_subscriptions.retain(|(id, event), _| {
@@ -6137,6 +6149,23 @@ impl GpuixView {
     }
 }
 
+/// A focus request waiting for a focus handle. A later user focus move
+/// invalidates it so the late element cannot steal focus.
+#[derive(Clone, Copy)]
+struct PendingFocus {
+    id: u64,
+    focused_at_request: Option<gpui::FocusId>,
+}
+
+impl PendingFocus {
+    fn new(id: u64, window: &gpui::Window, cx: &gpui::App) -> Self {
+        Self {
+            id,
+            focused_at_request: window.focused(cx).map(|handle| handle.id()),
+        }
+    }
+}
+
 impl gpui::Render for GpuixView {
     fn render(
         &mut self,
@@ -6149,7 +6178,7 @@ impl gpui::Render for GpuixView {
 
         #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
         if let Some(id) = PENDING_FOCUS_ELEMENT.with(|pending| pending.borrow_mut().take()) {
-            self.pending_focus_element = Some(id);
+            self.pending_focus_element = Some(PendingFocus::new(id, window, cx));
         }
 
         // Free atlas tiles orphaned by canvas resizes or element

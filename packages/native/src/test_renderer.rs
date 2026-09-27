@@ -1294,9 +1294,8 @@ impl TestGpuixRenderer {
     }
 
     /// Focus an element by its numeric ID.
-    /// The element must have a FocusHandle (created by sync_focus_handles when
-    /// the element has keyDown, keyUp, focus, or blur listeners).
-    /// Call flush() before this so the element tree and focus handles exist.
+    /// If its FocusHandle is not painted yet, the request stays pending until
+    /// a later frame creates it, unless another focus move happens first.
     #[napi]
     pub fn focus_element(&self, id: f64) -> Result<()> {
         let id = to_element_id(id)?;
