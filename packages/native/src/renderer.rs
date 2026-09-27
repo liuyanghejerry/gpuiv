@@ -537,6 +537,11 @@ enum UiCommand {
         id: u64,
         response: SyncSender<Option<[f64; 3]>>,
     },
+    GetVirtualListGeometry {
+        id: u64,
+        index: usize,
+        response: SyncSender<Option<Vec<f64>>>,
+    },
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
     },
@@ -845,6 +850,32 @@ async fn run_ui_commands(
                     })
                 });
                 response.send(top).ok();
+                Ok(())
+            }
+            UiCommand::GetVirtualListGeometry { id, index, response } => {
+                let geometry = VIRTUAL_LIST_STATES.with(|cell| {
+                    let cell = cell.borrow();
+                    let state = cell.get(&id)?;
+                    let anchor = state.logical_scroll_top();
+                    let viewport = state.viewport_bounds();
+                    let mut out = vec![
+                        anchor.item_ix as f64,
+                        f64::from(f32::from(viewport.origin.x)),
+                        f64::from(f32::from(viewport.origin.y)),
+                        f64::from(f32::from(viewport.size.width)),
+                        f64::from(f32::from(viewport.size.height)),
+                    ];
+                    if let Some(bounds) = state.bounds_for_item(index) {
+                        out.extend([
+                            f64::from(f32::from(bounds.origin.x)),
+                            f64::from(f32::from(bounds.origin.y)),
+                            f64::from(f32::from(bounds.size.width)),
+                            f64::from(f32::from(bounds.size.height)),
+                        ]);
+                    }
+                    Some(out)
+                });
+                response.send(geometry).ok();
                 Ok(())
             }
             UiCommand::GetAutomationBounds { response } => {
@@ -3403,6 +3434,62 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Sticky-header geometry of a `<virtual-list>` item:
+    /// `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]`,
+    /// plus `[itemX, itemY, itemW, itemH]` when the item is at or below the
+    /// scroll anchor and measured (window pixels). An item above the anchor
+    /// has no pixel bounds — compare its index against `anchorIndex` instead.
+    /// Null when `elementId` is not a mounted virtual list.
+    #[napi]
+    pub fn get_virtual_list_geometry(
+        &self,
+        element_id: f64,
+        index: f64,
+    ) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        let index = index as usize;
+        #[cfg(target_os = "macos")]
+        return Ok(VIRTUAL_LIST_STATES.with(|cell| {
+            let cell = cell.borrow();
+            let state = cell.get(&id)?;
+            let anchor = state.logical_scroll_top();
+            let viewport = state.viewport_bounds();
+            let mut out = vec![
+                anchor.item_ix as f64,
+                f64::from(f32::from(viewport.origin.x)),
+                f64::from(f32::from(viewport.origin.y)),
+                f64::from(f32::from(viewport.size.width)),
+                f64::from(f32::from(viewport.size.height)),
+            ];
+            if let Some(bounds) = state.bounds_for_item(index) {
+                out.extend([
+                    f64::from(f32::from(bounds.origin.x)),
+                    f64::from(f32::from(bounds.origin.y)),
+                    f64::from(f32::from(bounds.size.width)),
+                    f64::from(f32::from(bounds.size.height)),
+                ]);
+            }
+            Some(out)
+        }));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetVirtualListGeometry { id, index, response })?;
+            return Ok(
+                recv_ui_response(receiver, "the GPUI list geometry query")?.map(|g| g.to_vec())
+            );
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Get the current scroll offset of a scrollable element.
     /// Returns [x, y] or null if the element has no scroll handle.
     #[napi]
@@ -5019,6 +5106,33 @@ impl GpuixView {
             f64::from(f32::from(top.offset_in_item)),
             f64::from(f32::from(state.viewport_bounds().size.height)),
         ])
+    }
+
+    /// Geometry for sticky-header decisions: `[anchorIndex, viewportX, Y, W,
+    /// H]`, plus `[itemX, itemY, itemW, itemH]` when the item is at or below
+    /// the scroll anchor and measured. An item above the anchor (or not yet
+    /// measured) has no pixel bounds — `anchorIndex` still answers "has this
+    /// header scrolled past the top".
+    pub(crate) fn virtual_list_geometry(&self, id: u64, index: usize) -> Option<Vec<f64>> {
+        let state = &self.virtual_lists.get(&id)?.state;
+        let anchor = state.logical_scroll_top();
+        let viewport = state.viewport_bounds();
+        let mut out = vec![
+            anchor.item_ix as f64,
+            f64::from(f32::from(viewport.origin.x)),
+            f64::from(f32::from(viewport.origin.y)),
+            f64::from(f32::from(viewport.size.width)),
+            f64::from(f32::from(viewport.size.height)),
+        ];
+        if let Some(bounds) = state.bounds_for_item(index) {
+            out.extend([
+                f64::from(f32::from(bounds.origin.x)),
+                f64::from(f32::from(bounds.origin.y)),
+                f64::from(f32::from(bounds.size.width)),
+                f64::from(f32::from(bounds.size.height)),
+            ]);
+        }
+        Some(out)
     }
 
     pub(crate) fn set_virtual_list_offset(&self, id: u64, x: f32, y: f32) -> bool {

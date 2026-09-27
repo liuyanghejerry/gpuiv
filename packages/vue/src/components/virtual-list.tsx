@@ -10,6 +10,16 @@ export type WindowedVirtualListProps = Extract<VirtualListProps, { itemCount: nu
   renderItem: (index: number) => unknown
 }
 
+/** Sticky-header props, shared by the windowed wrapper. `stickyIndices` are
+ *  logical indices of section header rows, ascending. */
+export type StickyHeaderProps = {
+  /** Logical indices of section header rows, ascending. */
+  stickyIndices?: number[]
+  /** Content for the pinned overlay; defaults to `renderItem(index)`. The
+   *  content must paint its own opaque background — rows scroll beneath it. */
+  renderStickyHeader?: (index: number) => unknown
+}
+
 /** The logical scroll anchor of a virtual list, as gpui itself scrolls by it. */
 export interface VirtualListScrollTop {
   /** Index of the item the viewport top is anchored on. */
@@ -71,6 +81,11 @@ export const VirtualList = defineComponent({
       type: Function as PropType<(event: EventPayload) => void>,
       default: undefined,
     },
+    stickyIndices: { type: Array as PropType<number[]>, default: undefined },
+    renderStickyHeader: {
+      type: Function as PropType<(index: number) => unknown>,
+      default: undefined,
+    },
   },
   setup(props, { attrs, expose }) {
     const gpuix = useGpuix()
@@ -83,21 +98,6 @@ export const VirtualList = defineComponent({
         followTail: props.followTail,
       }),
     )
-
-    const handleRange = (
-      event: EventPayload & { startIndex?: number | null; endIndex?: number | null },
-    ): void => {
-      const pad = computePad(props.overdraw, props.estimatedItemHeight)
-      const next = {
-        start: Math.max(0, Math.floor(event.startIndex ?? 0) - pad),
-        end: Math.min(props.itemCount, Math.ceil(event.endIndex ?? 0) + pad),
-      }
-      const current = range.value
-      if (current.start !== next.start || current.end !== next.end) {
-        range.value = next
-      }
-      props.onVisibleRange?.(event)
-    }
 
     function scrollToItem(index: number, offsetInItem?: number): void {
       const id = root.value?.id
@@ -140,12 +140,75 @@ export const VirtualList = defineComponent({
       }
     }
 
+    // ── Sticky section header ─────────────────────────────────────────
+    //
+    // The pinned header is an overlay sibling painted after the list (gpui's
+    // draw order is insertion order for overlapping bounds), with
+    // `pointerEvents: "none"` so the wheel and text selection pass through to
+    // the list beneath. Which section is pinned comes from the renderer's
+    // geometry query: a header whose row top is above the viewport top — or
+    // whose index sits above the scroll anchor — is pinned.
+    const activeSticky = ref<number | null>(null)
+
+    function updateSticky(): void {
+      const indices = props.stickyIndices
+      if (!indices?.length) {
+        activeSticky.value = null
+        return
+      }
+      const id = root.value?.id
+      if (id == null) return
+      const renderer = gpuix.renderer
+      if (!renderer?.getVirtualListGeometry) return
+      let active: number | null = null
+      for (const index of indices) {
+        const geo = renderer.getVirtualListGeometry(id, index)
+        if (!geo || geo.length < 5) continue
+        const anchorIndex = geo[0]
+        const viewportTop = geo[2]
+        if (geo.length >= 9) {
+          const itemTop = geo[6]
+          // At or below the viewport top: the row shows in place, and every
+          // later header is further down — stop.
+          if (itemTop < viewportTop - 0.5) {
+            active = index
+          } else {
+            break
+          }
+        } else if (index < anchorIndex) {
+          // Above the anchor item, so fully above the viewport top.
+          active = index
+        } else {
+          // At or below the anchor but unmeasured: below the viewport.
+          break
+        }
+      }
+      activeSticky.value = active
+    }
+
+    const handleRange = (
+      event: EventPayload & { startIndex?: number | null; endIndex?: number | null },
+    ): void => {
+      const pad = computePad(props.overdraw, props.estimatedItemHeight)
+      const next = {
+        start: Math.max(0, Math.floor(event.startIndex ?? 0) - pad),
+        end: Math.min(props.itemCount, Math.ceil(event.endIndex ?? 0) + pad),
+      }
+      const current = range.value
+      if (current.start !== next.start || current.end !== next.end) {
+        range.value = next
+      }
+      updateSticky()
+      props.onVisibleRange?.(event)
+    }
+
     // `defineExpose` is an SFC-compiler macro; in a plain setup() the setup
     // context's `expose()` is the runtime form.
     expose({
       id: computed(() => root.value?.id ?? undefined),
       scrollToItem,
       getListScrollTop,
+      getActiveStickyIndex: () => activeSticky.value,
     })
 
     return () => {
@@ -154,7 +217,7 @@ export const VirtualList = defineComponent({
       const windowChildren = Array.from({ length: Math.max(0, end - start) }, (_, offset) =>
         props.renderItem(start + offset) as unknown as VNodeChild,
       )
-      return h(
+      const list = h(
         "virtual-list",
         {
           ref: root,
@@ -169,6 +232,36 @@ export const VirtualList = defineComponent({
         },
         windowChildren,
       )
+      if (!props.stickyIndices?.length) {
+        return list
+      }
+      // With sticky headers the component renders a relative wrapper so the
+      // pinned overlay can sit exactly over the list. The overlay paints
+      // after the list (gpui draws later overlapping bounds on top) and
+      // inserts no hitbox, so wheel and selection pass through.
+      const pinned = activeSticky.value
+      return h("div", { style: { position: "relative", display: "flex", flex: 1, minHeight: 0 } }, [
+        list,
+        pinned == null
+          ? null
+          : h(
+              "div",
+              {
+                style: {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  pointerEvents: "none",
+                },
+              },
+              [
+                (props.renderStickyHeader
+                  ? props.renderStickyHeader(pinned)
+                  : props.renderItem(pinned)) as unknown as VNodeChild,
+              ],
+            ),
+      ])
     }
   },
 })

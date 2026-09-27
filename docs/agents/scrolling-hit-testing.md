@@ -84,6 +84,13 @@ the wheel here. Give a pannable surface under absolute children
 behind it is blocked. It does not disable the listeners on the element itself,
 and it does not inherit.
 
+This is the sanctioned pattern for pinned chrome over a scroller:
+`<VirtualList>` sticky headers render an absolute sibling **after** the list
+(paints above it — gpui draws later overlapping bounds on top) with
+`pointerEvents: "none"`, so the wheel and text selection pass through to the
+rows beneath. The overlay is visual-only: clicks land on the content behind
+it.
+
 An absolutely positioned wrapper with **no** fill still takes hits, like an
 empty positioned `div` in a browser. A wrapper that only carries a scroll
 translation must set `pointerEvents: "none"`, or it swallows every press meant

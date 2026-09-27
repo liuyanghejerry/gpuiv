@@ -121,6 +121,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   getScrollOffset(elementId: number): number[] | null
   getListScrollTop(elementId: number): number[] | null
+  getVirtualListGeometry(elementId: number, index: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
@@ -772,6 +773,16 @@ export class TestRenderer implements NativeRenderer {
     const result = this.native.getListScrollTop(elementId)
     if (!result) return null
     return [result[0], result[1], result[2]]
+  }
+
+  /** Sticky-header geometry for a `<virtual-list>` item:
+   *  `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]`,
+   *  plus `[itemX, itemY, itemW, itemH]` when the item is at or below the
+   *  scroll anchor and measured. Null when the element is not a mounted
+   *  virtual list. */
+  getVirtualListGeometry(elementId: number, index: number): number[] | null {
+    this.native.flush()
+    return this.native.getVirtualListGeometry(elementId, index)
   }
 
   // ── Canvas API ──────────────────────────────────────────────────
