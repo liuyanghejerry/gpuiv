@@ -46,6 +46,20 @@ export interface BoxShadow {
   color: string
 }
 
+/** One styled segment of a `<text runs={…}>` element. Attributes left unset
+ *  fall back to the element's own `fontFamily` / `fontWeight` / `color`. */
+export interface TextRun {
+  text: string
+  color?: string
+  fontWeight?: string | number
+  fontStyle?: "normal" | "italic"
+  fontFamily?: string
+  /** `true` paints a 1px line in the run colour; an object refines it. */
+  underline?: boolean | { color?: string; thickness?: number; wavy?: boolean }
+  strikethrough?: boolean | { color?: string; thickness?: number }
+  backgroundColor?: string
+}
+
 /** CSS `outline`: a line outside the border box that takes no layout space. */
 export interface Outline {
   width: number
@@ -173,6 +187,10 @@ export interface StyleDesc {
   borderBottomRightRadius?: number
   boxShadow?: BoxShadow
   outline?: Outline
+
+  /** Styled segments for a `<text>` element — inline runs in one node.
+   *  Replaces the element's string children when present. */
+  runs?: TextRun[]
 
   fontSize?: number
   fontFamily?: string

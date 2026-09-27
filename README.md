@@ -3115,6 +3115,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` on `<img>` refs
 - [x] Virtual lists (`<virtual-list>`), with sticky section headers on the `<VirtualList>` wrapper (`stickyIndices` + `renderStickyHeader`, pinned overlay above the rows) and item-geometry queries (`getVirtualListGeometry`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth)
+- [x] Inline-styled text (`<text runs={…}>`: per-segment colour, weight, italic, family, underline/strikethrough, background)
 - [x] `outline` style (focus rings that take no layout space)
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
