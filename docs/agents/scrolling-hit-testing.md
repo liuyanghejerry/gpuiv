@@ -86,10 +86,10 @@ and it does not inherit.
 
 This is the sanctioned pattern for pinned chrome over a scroller:
 `<VirtualList>` sticky headers render an absolute sibling **after** the list
-(paints above it — gpui draws later overlapping bounds on top) with
-`pointerEvents: "none"`, so the wheel and text selection pass through to the
-rows beneath. The overlay is visual-only: clicks land on the content behind
-it.
+(paints above it — gpui draws later overlapping bounds on top). The wrapper
+sets `pointerEvents: "none"` and marks its host subtree as visual-only, so
+solid nested `div`/`text` content cannot intercept clicks. Wheel and text
+selection also pass through to the rows beneath.
 
 An absolutely positioned wrapper with **no** fill still takes hits, like an
 empty positioned `div` in a browser. A wrapper that only carries a scroll
@@ -113,4 +113,3 @@ a temp-file workaround. Prefer `fill="#000"` / `stroke="#000"` plus
 
 macOS traffic-light clearance is **86px**. The test renderer does not draw
 traffic lights, so that gap looks empty in PNGs.
-

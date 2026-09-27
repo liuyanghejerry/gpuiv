@@ -144,8 +144,9 @@ export const VirtualList = defineComponent({
     //
     // The pinned header is an overlay sibling painted after the list (gpui's
     // draw order is insertion order for overlapping bounds), with
-    // `pointerEvents: "none"` so the wheel and text selection pass through to
-    // the list beneath. Which section is pinned comes from the renderer's
+    // a pass-through subtree so the wheel, selection, and clicks reach the
+    // list beneath even when header children paint solid backgrounds. Which
+    // section is pinned comes from the renderer's
     // geometry query: a header whose row top is above the viewport top — or
     // whose index sits above the scroll anchor — is pinned.
     const activeSticky = ref<number | null>(null)
@@ -238,7 +239,7 @@ export const VirtualList = defineComponent({
       // With sticky headers the component renders a relative wrapper so the
       // pinned overlay can sit exactly over the list. The overlay paints
       // after the list (gpui draws later overlapping bounds on top) and
-      // inserts no hitbox, so wheel and selection pass through.
+      // inserts no blocking hitbox, so wheel, selection, and clicks pass through.
       const pinned = activeSticky.value
       return h("div", { style: { position: "relative", display: "flex", flex: 1, minHeight: 0 } }, [
         list,
@@ -247,6 +248,10 @@ export const VirtualList = defineComponent({
           : h(
               "div",
               {
+                // Unlike CSS pointer-events, GPUIV's pointerEvents does not
+                // inherit. The native build uses this marker to keep every
+                // host descendant visual-only, including component output.
+                __gpuivPassThrough: true,
                 style: {
                   position: "absolute",
                   top: 0,

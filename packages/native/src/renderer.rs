@@ -5404,6 +5404,9 @@ pub(crate) struct BuildCtx<'a> {
 pub(crate) struct Inherited {
     /// False once an ancestor sets `userSelect: "none"`.
     pub selectable: bool,
+    /// A visual-only overlay suppresses host hitboxes and listeners throughout
+    /// its subtree; `pointerEvents: "none"` alone does not inherit in GPUIV.
+    pub pass_through: bool,
     /// Selection wash colour for this subtree.
     pub selection_wash: gpui::Hsla,
     /// The nearest ancestor's `highlight`, resolved. `None` in every app that
@@ -5420,6 +5423,7 @@ impl Inherited {
         wash.a = 0.35;
         Self {
             selectable: true,
+            pass_through: false,
             selection_wash: wash,
             highlight: None,
         }
@@ -6328,6 +6332,14 @@ pub(crate) fn build_element(
     // elements see the same cascade.
     let parent_inherited = ctx.inherited.clone();
     ctx.inherited = parent_inherited.clone().descend(style);
+    if element
+        .custom_props
+        .get("__gpuivPassThrough")
+        .and_then(|value| value.as_bool())
+        == Some(true)
+    {
+        ctx.inherited.pass_through = true;
+    }
 
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
@@ -6601,10 +6613,25 @@ pub(crate) fn build_host_container(
     // use `ElementId::Name`, which is a different variant and cannot collide.
     let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
 
+    let pass_through = ctx.inherited.pass_through;
+    let visual_style = if pass_through {
+        style.cloned().map(|mut style| {
+            // Hover, active, and cursor styles cause GPUI to insert a hitbox
+            // even without listeners. The overlay keeps only its base paint.
+            style.hover = None;
+            style.active = None;
+            style.cursor = None;
+            style
+        })
+    } else {
+        None
+    };
+    let style = visual_style.as_ref().or(style);
+
     if let Some(style) = style {
         el = apply_interactive_styles(el, style);
 
-        if crate::style::should_occlude(style) {
+        if !pass_through && crate::style::should_occlude(style) {
             // BlockMouse (occlude) stops the hit test. The parent scroller
             // then never sees the wheel. In-flow fills must use
             // BlockMouseExceptScroll. Keep occlude for overlays that steal
@@ -6636,8 +6663,10 @@ pub(crate) fn build_host_container(
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
 
-        let needs_scroll_x = resolved_x == Some("scroll");
-        let needs_scroll_y = resolved_y == Some("scroll");
+        // A pinned visual header never owns a wheel target, even if its
+        // rendered content declares overflow scrolling.
+        let needs_scroll_x = !pass_through && resolved_x == Some("scroll");
+        let needs_scroll_y = !pass_through && resolved_y == Some("scroll");
 
         if needs_scroll_x && needs_scroll_y {
             el = el.overflow_scroll();
@@ -6685,16 +6714,18 @@ pub(crate) fn build_host_container(
             .unwrap_or_default(),
     ));
 
-    if let Some(handle) = ctx.focus_handles.get(&element.id) {
-        el = el.track_focus(handle);
-    }
-    if let Some(tab_index) = element
-        .custom_props
-        .get("tabIndex")
-        .and_then(|value| value.as_i64())
-        .and_then(|index| isize::try_from(index).ok())
-    {
-        el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
+    if !pass_through {
+        if let Some(handle) = ctx.focus_handles.get(&element.id) {
+            el = el.track_focus(handle);
+        }
+        if let Some(tab_index) = element
+            .custom_props
+            .get("tabIndex")
+            .and_then(|value| value.as_i64())
+            .and_then(|index| isize::try_from(index).ok())
+        {
+            el = el.tab_index(tab_index).tab_stop(tab_index >= 0);
+        }
     }
 
     // Vue text instances (`createText`) are also type `text` and hold
@@ -6712,12 +6743,14 @@ pub(crate) fn build_host_container(
 
     // Wire up events. The wiring is shared with `<canvas>`: every stateful
     // root gets the same event surface via wire_host_events.
-    el = wire_host_events(
-        el,
-        element,
-        ctx.event_callback,
-        ctx.pointer_capture_target == Some(element.id),
-    );
+    if !pass_through {
+        el = wire_host_events(
+            el,
+            element,
+            ctx.event_callback,
+            ctx.pointer_capture_target == Some(element.id),
+        );
+    }
 
     // Text content — selectable, same as a <text> leaf. An empty string is
     // not painted text: Vue compiles `{items.map(…)}` sitting among JSX

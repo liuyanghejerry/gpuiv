@@ -548,4 +548,61 @@ describeNative("virtual-list sticky section headers", () => {
     expect(app.renderer.getPaintedText()).toContain("head-0")
     app.unmount()
   })
+
+  it("passes clicks through solid nested header content", async () => {
+    const clicks: number[] = []
+    const list = ref<VirtualListInstance | null>(null)
+    const Header = defineComponent({
+      setup: () => () =>
+        h(
+          "div",
+          {
+            style: { height: 28, backgroundColor: "#111318" },
+            onClick: () => clicks.push(-1),
+          },
+          [
+            h(
+              "div",
+              {
+                style: { height: 28, backgroundColor: "#242832" },
+                onClick: () => clicks.push(-2),
+              },
+              "pinned",
+            ),
+          ],
+        ),
+    })
+    const App = defineComponent({
+      setup: () => () =>
+        h(VirtualList, {
+          ref: list,
+          itemCount: 30,
+          estimatedItemHeight: 40,
+          overdraw: 0,
+          style: { width: 400, height: 160 },
+          stickyIndices: [0, 10, 20],
+          renderItem: (index: number) =>
+            h(
+              "div",
+              {
+                key: index,
+                style: { height: 40, flexShrink: 0, backgroundColor: "#383c44" },
+                onClick: () => clicks.push(index),
+              },
+              `row-${index}`,
+            ),
+          renderStickyHeader: () => h(Header),
+        }),
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    list.value?.scrollToItem(12)
+    await app.settle()
+    await app.settle()
+    expect(app.renderer.getPaintedText()).toContain("pinned")
+
+    app.renderer.nativeSimulateClick(20, 10)
+    expect(clicks).toEqual([12])
+    app.unmount()
+  })
 })
