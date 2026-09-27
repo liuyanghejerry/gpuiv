@@ -4,38 +4,25 @@ Topic: what it would take to update only the dirty region of an uploaded
 canvas texture in place instead of re-allocating atlas tiles, plus the
 gpuiv-side canvas memory work deliberately deferred alongside it.
 
-**Status:** researched; workaround shipped. Not a `remorses/gpuix` topic — the
-blocking API lives in the zed submodule. Recorded 2026-09-10 while closing
-issue #49 P0-2; PR #66 ships the 256×256 tile-grid workaround (single-stroke
-upload 22.1MB → 426KB, idle frames 0 bytes) and documents the fork ask in its
-body.
+**Status:** in-place updates adopted (2026-09-27). The zed fork grew
+`Window::update_image` (commit `dbbe13dffc`, "support in-place image
+updates": stable atlas uploads across Metal, WGPU, DirectX), and gpuiv's
+canvas now keeps a stable `RenderImage::id` per 256×256 tile and rewrites
+the existing atlas allocation on every content flush — no per-flush tile
+re-allocation, no `drop_image` round-trip while a stroke repaints. The
+per-write granularity is still the whole tile (the `PlatformAtlas::update`
+API writes a full tile's bytes); only a resize re-allocates. The 1px tile
+border remains by design (linear-filter bleed between atlas regions).
+PR #66's tile-grid workaround is otherwise unchanged.
 
-## Local facts (zed fork at the current pin)
+## Local facts (zed fork, since `dbbe13dffc`)
 
 | Item | Fact | Where |
 |---|---|---|
-| `PlatformAtlas` trait | Only `get_or_insert_with` / `remove` / `contains` — **no sub-rect update on an existing tile** | `zed/crates/gpui/src/scene.rs` |
-| Atlas caching | Tiles are cached per `RenderImage::id` (monotonic counter) and frame data is private — any byte change must take a new id → new tile → full upload of that image's bytes | same area |
-| Sub-rect upload exists, unexposed | `MetalAtlasTexture::upload` internally supports a sub-rectangle `replace_region` | `gpui_apple` atlas code |
-
-## Proposed fork change (in `remorses/zed`, then bump the submodule)
-
-Extend `PlatformAtlas` with a sub-rect write on an existing tile, e.g.
-
-```rust
-fn write_tile_region(
-    &self,
-    key: &AtlasKey,
-    region: Bounds<DevicePixels>,
-    bytes: &[u8],
-    stride: u64,
-)
-```
-
-mapping to `replace_region` on Metal and `queue.write_texture` on wgpu, plus
-a way to keep a stable `ImageId` per canvas surface. That would drop the
-per-tile re-allocation and the 1px border duplication the tile-grid
-workaround pays.
+| `PlatformAtlas::update` | Rewrites an existing tile's bytes in place when the size matches (`replace_region` on Metal, `write_texture` on wgpu/DirectX); remove + re-insert otherwise | `zed/crates/gpui/src/platform.rs` |
+| `Window::update_image` | Applies new bytes to the atlas tile keyed by `RenderImage::id`; the id is a public field, so callers keep it stable across content changes | `zed/crates/gpui/src/window.rs`, `assets.rs` |
+| Stable id per canvas tile | gpuiv's `CanvasSurface` inherits each tile's previous id on rebuild and queues the image for `update_image` at the tile's next paint | `packages/native/src/canvas.rs` |
+| Write granularity | One full tile (plus its 1px border) per dirty flush — `update` has no sub-rect form yet | `PlatformAtlas::update` |
 
 ## Related gpuiv-side follow-ups (no fork needed, mid-term)
 
@@ -46,7 +33,7 @@ workaround pays.
 
 ## Revisit triggers
 
-- The fork grows the sub-rect write API → drop per-tile re-allocation and the
-  tile borders.
-- Canvas workloads show tile re-allocation/border cost dominating → prioritize
-  the fork PR.
+- The fork grows a true sub-rect write (bytes per dirty rect, not per
+  tile) → splice only the dirty rows into the atlas write.
+- Canvas workloads show the full-tile rewrite dominating (frequent
+  sub-tile-size dabs) → revisit tile granularity.
