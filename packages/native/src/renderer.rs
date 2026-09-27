@@ -7309,6 +7309,16 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
             el = el.shadow(vec![shadow]);
         }
     }
+    if let Some(ref outline) = style.outline {
+        if let Some(color) = crate::color::parse_color_rgba(&outline.color) {
+            let outline = gpui::Outline {
+                width: gpui::px(outline.width.max(0.0) as f32),
+                color: color.into(),
+                offset: gpui::px(outline.offset as f32),
+            };
+            el = el.outline(outline);
+        }
+    }
     if style.visibility.as_deref() == Some("hidden") {
         el = el.invisible();
     }
