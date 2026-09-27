@@ -578,6 +578,14 @@ export interface HostNode {
   scrollIntoView?(): void
 }
 
+/** Byte order of packed live image pixels. Alpha is straight in both. */
+export type ImagePixelFormat = "rgba" | "bgra"
+
+export interface ImagePixelsOptions {
+  /** Defaults to RGBA. BGRA matches GPUI's native image byte order. */
+  format?: ImagePixelFormat
+}
+
 /** An `<img>` host ref. Live uploads bypass `src` and the JSON mutation
  *  protocol: bytes/pixels go straight to the GPU image. */
 export interface ImgHostNode extends HostNode {
@@ -585,10 +593,15 @@ export interface ImgHostNode extends HostNode {
   /** Decode encoded bytes (PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or
    *  Netpbm) onto this node. */
   setImage?(bytes: Uint8Array): void
-  /** Paint packed straight-alpha RGBA pixels onto this node. `width`/`height`
+  /** Paint packed straight-alpha RGBA or BGRA pixels onto this node. `width`/`height`
    *  are bitmap pixels, not the layout box — upload a 2x bitmap into a 1x box
-   *  on retina. There is no density argument. */
-  setImagePixels?(width: number, height: number, pixels: Uint8Array): void
+   *  on retina. There is no density argument. The default format is RGBA. */
+  setImagePixels?(
+    width: number,
+    height: number,
+    pixels: Uint8Array,
+    options?: ImagePixelsOptions
+  ): void
 }
 
 /// Native renderer transport. The Vue host config sends one atomic batch per
@@ -718,13 +731,14 @@ export interface NativeRenderer {
   /** Push encoded image bytes (PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or
    *  Netpbm) onto an `<img>` host node. */
   setImage?(elementId: number, bytes: Uint8Array): void
-  /** Push packed straight-alpha RGBA pixels onto an `<img>` host node.
+  /** Push packed straight-alpha RGBA (default) or BGRA pixels onto an `<img>` host node.
    *  `width`/`height` are bitmap pixels; the layout box comes from style. */
   setImagePixels?(
     elementId: number,
     width: number,
     height: number,
-    pixels: Uint8Array
+    pixels: Uint8Array,
+    format?: ImagePixelFormat
   ): void
   /** Bring the window forward and focus it. Reveals a `show: false` window. */
   activateWindow?(): void

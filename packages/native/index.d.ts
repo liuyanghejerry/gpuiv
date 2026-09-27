@@ -321,8 +321,8 @@ export declare class GpuixRenderer {
   scrollInputCaretIntoView(elementId: number): void
   /** Scroll this element's nearest scroll parent until the element is visible. */
   scrollIntoView(elementId: number): void
-  /** Paint packed RGBA pixels onto an `<img>` host node. */
-  setImagePixels(elementId: number, width: number, height: number, pixels: Buffer): void
+  /** Paint packed RGBA (default) or BGRA pixels onto an `<img>` host node. */
+  setImagePixels(elementId: number, width: number, height: number, pixels: Buffer, format?: string | undefined | null): void
   /**
    * Decode PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or Netpbm bytes onto
    * an `<img>` host node. Prefer `setImagePixels` for live waveforms.
@@ -803,8 +803,8 @@ export declare class TestGpuixRenderer {
   scrollToItem(elementId: number, index: number, offsetInItem?: number | undefined | null): void
   /** Scroll this element's nearest scroll parent until the element is visible. */
   scrollIntoView(elementId: number): void
-  /** Packed RGBA pixels onto an `<img>` host node. */
-  setImagePixels(elementId: number, width: number, height: number, pixels: Buffer): void
+  /** Packed RGBA (default) or BGRA pixels onto an `<img>` host node. */
+  setImagePixels(elementId: number, width: number, height: number, pixels: Buffer, format?: string | undefined | null): void
   /** Encoded image bytes onto an `<img>` host node. */
   setImage(elementId: number, bytes: Buffer): void
   /**

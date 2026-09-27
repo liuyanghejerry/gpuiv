@@ -2060,8 +2060,10 @@ For a waveform, a canvas dump, or any frame you already have in memory, push
 **raw bytes** through the `<img>` ref. That call skips JSON.
 
 `setImage` takes encoded **PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or
-Netpbm**. `setImagePixels` takes packed **RGBA**. Prefer pixels for a live
-waveform. There is no PNG encode, and no JSON.
+Netpbm**. `setImagePixels` takes packed **RGBA** by default, or **BGRA** with
+`{ format: 'bgra' }`. BGRA matches GPUI's image byte order and skips the
+per-pixel channel swap on the UI thread. Prefer pixels for a live waveform.
+There is no PNG encode, and no JSON.
 
 Call either from `onMounted` / `watchEffect` after mount. A later `src` change
 overwrites the pixels.
@@ -2104,10 +2106,13 @@ A live waveform that already has RGBA should skip PNG:
 
 ```tsx
 img.value?.setImagePixels?.(1600, 160, rgbaBytes)
+img.value?.setImagePixels?.(1600, 160, bgraBytes, { format: 'bgra' })
 ```
 
-That buffer is **1600x160**. The layout box stays `800x80`. Alpha is straight,
-not premultiplied.
+Both buffers are **1600x160**. The layout box stays `800x80`. Alpha is straight,
+not premultiplied. ffmpeg (`-pix_fmt bgra`) and VideoToolbox can produce BGRA
+directly. node-canvas `toBuffer('raw')` also produces BGRA, but its alpha is
+premultiplied, so use that raw buffer only for opaque canvases.
 
 ### `<svg>`
 
@@ -3112,7 +3117,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Standalone build (pinned GPUI platform dependencies)
 - [x] Native text input and multiline textarea
 - [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block drag selection with markdown copy/paste, ⌘F search decorations, full-height source mode, anchor jumps; heading-specific spacing and rules, padded code blocks, single-width table borders, and muted completed tasks. The partial `theme` prop includes `border`, `codeBlockBackground`, and `tableHeaderBackground` colors; styled spans / decorations / programmatic selection / `selectionChange` / `selectionDrag` / clipboard interception props on `<input>`/`<textarea>`
-- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` on `<img>` refs
+- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` (RGBA or BGRA) on `<img>` refs
 - [x] Virtual lists (`<virtual-list>`), with sticky section headers on the `<VirtualList>` wrapper (`stickyIndices` + `renderStickyHeader`, pinned overlay above the rows) and item-geometry queries (`getVirtualListGeometry`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth)
 - [x] Inline-styled text (`<text runs={…}>`: per-segment colour, weight, italic, family, underline/strikethrough, background)

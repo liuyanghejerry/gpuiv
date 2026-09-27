@@ -1715,7 +1715,7 @@ impl TestGpuixRenderer {
         })
     }
 
-    /// Packed RGBA pixels onto an `<img>` host node.
+    /// Packed RGBA (default) or BGRA pixels onto an `<img>` host node.
     #[napi]
     pub fn set_image_pixels(
         &self,
@@ -1723,16 +1723,19 @@ impl TestGpuixRenderer {
         width: f64,
         height: f64,
         pixels: Buffer,
+        format: Option<String>,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let width = crate::renderer::dimension_u32(width, "width")?;
         let height = crate::renderer::dimension_u32(height, "height")?;
+        let format = crate::custom_elements::img::PixelFormat::parse(format.as_deref())
+            .map_err(Error::from_reason)?;
         let bytes = pixels.to_vec();
         with_test_state(|cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, window, app| {
                 view.update(app, |view, cx| {
-                    view.set_image_pixels(id, width, height, bytes, window, cx)
+                    view.set_image_pixels(id, width, height, bytes, format, window, cx)
                 })
             })
             .map_err(|e| Error::from_reason(e.to_string()))?

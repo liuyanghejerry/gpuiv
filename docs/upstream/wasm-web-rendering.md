@@ -129,3 +129,7 @@ server + Fast Refresh), `711945f` (wasm build fix), `7f6732a` (ignore browser
 bundle), `bbcea1f` (web resize cursors), `291b92d` (deploy WebGPU chat
 example), `a906cf9` (website backout), `f52fa54` (changelog nav), `5388016`
 (homepage hero: Arizona Flare font, Holocron `hero-bg.mp4` shader backdrop).
+
+`556c952` only bumps the website's Holocron tooling and quotes two guide icon
+frontmatter values. It stays with the declined website surface; the revisit
+triggers above are unchanged.
