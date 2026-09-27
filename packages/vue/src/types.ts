@@ -46,6 +46,14 @@ export interface BoxShadow {
   color: string
 }
 
+/** CSS `outline`: a line outside the border box that takes no layout space. */
+export interface Outline {
+  width: number
+  color: string
+  /** Gap between the border box and the line. Negative draws it inside. */
+  offset?: number
+}
+
 export interface LinearGradientStop {
   color: string
   /** Position along the gradient from 0 to 1. */
@@ -164,6 +172,8 @@ export interface StyleDesc {
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
   boxShadow?: BoxShadow
+  outline?: Outline
+
 
   fontSize?: number
   fontFamily?: string
