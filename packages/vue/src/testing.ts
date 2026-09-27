@@ -22,6 +22,7 @@ import type {
   DebugFrameOverlayStats,
   ElementBounds,
   HostNode,
+  ImagePixelFormat,
   MenuBarMenu,
   NativeRenderer,
   NewPathPromptOutcome,
@@ -87,7 +88,8 @@ interface NativeTestRendererApi extends NativeRenderer {
     elementId: number,
     width: number,
     height: number,
-    pixels: Uint8Array
+    pixels: Uint8Array,
+    format?: ImagePixelFormat
   ): void
   clockPause(): number
   clockSet(nowMs: number): number
@@ -332,15 +334,16 @@ export class TestRenderer implements NativeRenderer {
     this.flush()
   }
 
-  /** Push packed RGBA pixels onto an `<img>` node, flushing around it. */
+  /** Push packed RGBA (default) or BGRA pixels onto an `<img>` node, flushing around it. */
   setImagePixels(
     elementId: number,
     width: number,
     height: number,
-    pixels: Uint8Array
+    pixels: Uint8Array,
+    format?: ImagePixelFormat
   ): void {
     this.flush()
-    this.native.setImagePixels(elementId, width, height, pixels)
+    this.native.setImagePixels(elementId, width, height, pixels, format)
     this.flush()
   }
 

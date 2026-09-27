@@ -21,6 +21,7 @@ import type {
   ElementProps,
   HostNode,
   ImgHostNode,
+  ImagePixelsOptions,
   MutationRenderer,
   NativeRenderer,
   WindowKeyEventHandlers,
@@ -288,8 +289,13 @@ export function createGpuivRendererHost(
         img.setImage = (bytes: Uint8Array) => {
           if (img.id != null) inner.setImage?.(img.id, bytes)
         }
-        img.setImagePixels = (width: number, height: number, pixels: Uint8Array) => {
-          if (img.id != null) inner.setImagePixels?.(img.id, width, height, pixels)
+        img.setImagePixels = (
+          width: number,
+          height: number,
+          pixels: Uint8Array,
+          options?: ImagePixelsOptions,
+        ) => {
+          if (img.id != null) inner.setImagePixels?.(img.id, width, height, pixels, options?.format)
         }
       }
       return node

@@ -3,6 +3,9 @@
 // @ts-nocheck
 
 import { defineComponent, ref } from "vue"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { beforeEach, describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
 
@@ -133,6 +136,50 @@ describeNative("host ref APIs", () => {
       width: 240,
       height: 140,
     })
+  })
+
+  it("paints matching RGBA and BGRA buffers identically", async () => {
+    const img = ref(null)
+    const PixelImage = defineComponent({
+      setup() {
+        return () => <img ref={img} style={{ width: 120, height: 80 }} />
+      },
+    })
+    app = createTestApp(PixelImage)
+    await app.settle()
+
+    const fill = (first: number, green: number, third: number): Uint8Array => {
+      const bytes = new Uint8Array(12 * 8 * 4)
+      for (let i = 0; i < 12 * 8; i++) {
+        bytes.set([first, green, third, 255], i * 4)
+      }
+      return bytes
+    }
+    const directory = mkdtempSync(join(tmpdir(), "gpuiv-bgra-"))
+    const rgbaPath = join(directory, "rgba.png")
+    const bgraPath = join(directory, "bgra.png")
+    const swappedPath = join(directory, "swapped.png")
+    try {
+      img.value.setImagePixels(12, 8, fill(220, 120, 20))
+      await app.settle()
+      app.renderer.captureScreenshot(rgbaPath)
+
+      img.value.setImagePixels(12, 8, fill(20, 120, 220), { format: "bgra" })
+      await app.settle()
+      app.renderer.captureScreenshot(bgraPath)
+
+      img.value.setImagePixels(12, 8, fill(220, 120, 20), { format: "bgra" })
+      await app.settle()
+      app.renderer.captureScreenshot(swappedPath)
+
+      expect(readFileSync(bgraPath).equals(readFileSync(rgbaPath))).toBe(true)
+      expect(readFileSync(swappedPath).equals(readFileSync(rgbaPath))).toBe(false)
+      expect(() =>
+        img.value.setImagePixels(12, 8, fill(0, 0, 0), { format: "argb" }),
+      ).toThrow(/Unknown pixel format/)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 
   it("type-gates the image ref methods", async () => {

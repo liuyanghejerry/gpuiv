@@ -331,28 +331,58 @@ impl CustomElement for ImgElement {
     }
 }
 
-pub fn render_image_from_rgba(
+/// Byte order of a packed live image buffer. GPUI stores the result as BGRA.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PixelFormat {
+    Rgba,
+    Bgra,
+}
+
+impl PixelFormat {
+    pub fn parse(format: Option<&str>) -> std::result::Result<Self, String> {
+        match format {
+            None | Some("rgba") => Ok(Self::Rgba),
+            Some("bgra") => Ok(Self::Bgra),
+            Some(other) => Err(format!(
+                "Unknown pixel format {other:?}, expected \"rgba\" or \"bgra\""
+            )),
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Rgba => "RGBA",
+            Self::Bgra => "BGRA",
+        }
+    }
+}
+
+pub fn render_image_from_pixels(
     width: u32,
     height: u32,
     mut bytes: Vec<u8>,
+    format: PixelFormat,
 ) -> std::result::Result<std::sync::Arc<gpui::RenderImage>, String> {
+    let name = format.name();
     let expected = (width as u64)
         .checked_mul(height as u64)
         .and_then(|pixels| pixels.checked_mul(4))
         .and_then(|bytes| usize::try_from(bytes).ok())
-        .ok_or_else(|| format!("RGBA pixel buffer {width}x{height} is too large"))?;
+        .ok_or_else(|| format!("{name} pixel buffer {width}x{height} is too large"))?;
     if bytes.len() != expected {
         return Err(format!(
-            "RGBA pixel buffer length {} does not match {width}x{height} ({expected} bytes)",
+            "{name} pixel buffer length {} does not match {width}x{height} ({expected} bytes)",
             bytes.len(),
         ));
     }
-    for pixel in bytes.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
+    if format == PixelFormat::Rgba {
+        for pixel in bytes.chunks_exact_mut(4) {
+            pixel.swap(0, 2);
+        }
     }
     gpui::RenderImage::from_bgra(width, height, bytes)
         .map(std::sync::Arc::new)
-        .ok_or_else(|| "RGBA pixel buffer is not a valid image".to_string())
+        .ok_or_else(|| format!("{name} pixel buffer is not a valid image"))
 }
 
 pub fn render_image_from_encoded(
