@@ -3114,7 +3114,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block drag selection with markdown copy/paste, ⌘F search decorations, full-height source mode, anchor jumps; heading-specific spacing and rules, padded code blocks, single-width table borders, and muted completed tasks. The partial `theme` prop includes `border`, `codeBlockBackground`, and `tableHeaderBackground` colors; styled spans / decorations / programmatic selection / `selectionChange` / `selectionDrag` / clipboard interception props on `<input>`/`<textarea>`
 - [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` on `<img>` refs
 - [x] Virtual lists (`<virtual-list>`)
-- [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images)
+- [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth)
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
 - [x] Streaming markdown parsing (appends re-parse from the last stable block boundary; full parity with a full parse)

@@ -15,6 +15,11 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
+    "./math": {
+      "types": "./dist/math/index.d.ts",
+      "import": "./dist/math/index.js",
+      "default": "./dist/math/index.js"
+    },
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js",
@@ -62,6 +67,7 @@
     "markdown-it": "^14.3.0",
     "markdown-it-footnote": "^4.0.0",
     "markdown-it-mark": "^4.0.0",
+    "mathjax-full": "^3.2.2",
     "prosemirror-history": "^1.5.0",
     "prosemirror-inputrules": "^1.5.1",
     "prosemirror-markdown": "^1.13.7",

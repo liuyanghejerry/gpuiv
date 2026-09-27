@@ -43,6 +43,31 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("renders markdown footnotes as numbered markers and definitions", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown
+              source={
+                "A claim[^first] and another[^second].\n\n[^first]: The first note.\n[^second]: The second note."
+              }
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    // References and definitions share the document-order number; the
+    // raw labels never paint.
+    expect(painted).toContain("A claim[1] and another[2].")
+    expect(painted).toContain("[1] The first note.")
+    expect(painted).toContain("[2] The second note.")
+    expect(painted).not.toContain("first]")
+    app.unmount()
+  })
+
   it("renders standalone markdown images as blocks", () => {
     // A 1x1 transparent PNG data URL: a real image element, not text.
     const png =

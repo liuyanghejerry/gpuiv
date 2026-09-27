@@ -448,6 +448,13 @@ export interface ElementProps {
   onLinkClick?: (event: EventPayload) => void
   onVisibleRange?: (event: EventPayload) => void
 
+  // ── Markdown math ────────────────────────────────────────────────
+  /** Pre-rendered display formulas for `<markdown>`, keyed by TeX source.
+   *  Produce with `renderMathMap` from `@gpuiv/vue/math`; mapped `$$…$$`
+   *  blocks paint as centered SVG images, everything else falls back to
+   *  the literal TeX. */
+  math?: Record<string, { src: string; width: number; height: number; depth?: number }>
+
   // ── Focus props ────────────────────────────────────────────────
   /** Take keyboard focus when the element first mounts. Required for `<input>`:
    *  without it, or a click, the field never receives key events. */

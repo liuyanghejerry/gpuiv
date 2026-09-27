@@ -14,8 +14,10 @@
 //!
 //! Soundness guard: link-reference definitions (`[label]: url`) have non-local
 //! effects (a definition anywhere resolves references anywhere), so a source
-//! containing one drops to full reparses. The parity unit tests stream corpora
-//! through both paths and assert equality.
+//! containing one drops to full reparses. Footnote definitions
+//! (`[^label]: content`) match the same line shape and take the same guard;
+//! footnote numbering is therefore recomputed globally on every parse. The
+//! parity unit tests stream corpora through both paths and assert equality.
 //!
 //! Comet also mends hanging inline markers for its display tree
 //! (`super::mend`); GPUIV renders the canonical tree as-is, so that half is
@@ -35,6 +37,13 @@ pub struct InlineStyle {
     pub strikethrough: bool,
     /// Destination URL when inside a link.
     pub link: Option<String>,
+    /// Footnote label of a `[^label]` reference. The run's text carries the
+    /// label; the renderer replaces it with the document-order number.
+    pub footnote: Option<String>,
+    /// TeX source of an `$inline$` / mixed-in `$$…$$` formula. The run's
+    /// text is the literal TeX; the renderer styles it as a math fallback
+    /// (the mapped SVG pipeline is block-only for now).
+    pub math: Option<String>,
 }
 
 /// One run of identically-styled inline text.
@@ -78,6 +87,17 @@ pub enum Block {
         /// Per-column GFM alignment. Unspecified renders as Left.
         align: Vec<TableAlign>,
     },
+    /// A `[^label]: content` definition. Rendered in place; references and
+    /// definitions share the label and both show the document-order number.
+    FootnoteDefinition {
+        label: String,
+        children: Vec<Block>,
+    },
+    /// A standalone `$$…$$` display formula. Rendered from the element's
+    /// `math` map (TeX → SVG) when present, else a literal TeX fallback.
+    Math {
+        tex: String,
+    },
     Rule,
 }
 
@@ -97,12 +117,15 @@ pub struct TopBlock {
     pub block: Block,
 }
 
-/// The parse result: top-level blocks in document order.
+/// The parse result: top-level blocks in document order, plus footnote
+/// labels numbered by first appearance (reference or definition) — the
+/// number a rendered `[^label]` marker and its definition share.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct BlockTree {
     // Completed blocks are immutable; streamed tail updates share their
     // contents with earlier trees.
     pub blocks: Vec<Arc<TopBlock>>,
+    pub footnote_labels: Vec<String>,
 }
 
 impl BlockTree {
@@ -116,7 +139,11 @@ impl BlockTree {
 }
 
 fn options() -> Options {
-    Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS
+    Options::ENABLE_TABLES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_MATH
 }
 
 /// Parse a whole source into a [`BlockTree`].
@@ -156,7 +183,64 @@ fn parse_at(source: &str, offset: usize) -> BlockTree {
             _ => cur.bump(),
         }
     }
-    BlockTree { blocks }
+    let footnote_labels = collect_footnote_labels(&blocks);
+    BlockTree {
+        blocks,
+        footnote_labels,
+    }
+}
+
+/// Footnote labels in document order of first appearance — a reference
+/// before its definition still numbers from where it is read. Duplicates
+/// keep their first number.
+fn collect_footnote_labels(blocks: &[Arc<TopBlock>]) -> Vec<String> {
+    fn push_label(labels: &mut Vec<String>, label: &str) {
+        if !labels.iter().any(|seen| seen == label) {
+            labels.push(label.to_string());
+        }
+    }
+    fn walk_runs(labels: &mut Vec<String>, runs: &[InlineRun]) {
+        for run in runs {
+            if let Some(label) = &run.style.footnote {
+                push_label(labels, label);
+            }
+        }
+    }
+    fn walk_blocks(labels: &mut Vec<String>, blocks: &[Block]) {
+        for block in blocks {
+            match block {
+                Block::Paragraph { runs } | Block::Heading { runs, .. } => {
+                    walk_runs(labels, runs)
+                }
+                Block::BlockQuote { children } => walk_blocks(labels, children),
+                Block::FootnoteDefinition { label, children } => {
+                    push_label(labels, label);
+                    walk_blocks(labels, children);
+                }
+                Block::List { items, .. } => {
+                    for item in items {
+                        walk_blocks(labels, item);
+                    }
+                }
+                Block::Table { header, rows, .. } => {
+                    for cell in header {
+                        walk_runs(labels, cell);
+                    }
+                    for row in rows {
+                        for cell in row {
+                            walk_runs(labels, cell);
+                        }
+                    }
+                }
+                Block::Image { .. } | Block::CodeBlock { .. } | Block::Rule | Block::Math { .. } => {}
+            }
+        }
+    }
+    let mut labels = Vec::new();
+    for top in blocks {
+        walk_blocks(&mut labels, std::slice::from_ref(&top.block));
+    }
+    labels
 }
 
 struct Cursor<'a, 'e> {
@@ -212,6 +296,9 @@ fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
             if let Some(images) = take_standalone_images(cur) {
                 return images;
             }
+            if let Some(math) = take_display_math(cur) {
+                return math;
+            }
             vec![Block::Paragraph {
                 runs: parse_inline_container(cur, &InlineStyle::default()),
             }]
@@ -244,6 +331,10 @@ fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
             vec![Block::CodeBlock { language, code }]
         }
         Tag::BlockQuote(_) => vec![Block::BlockQuote {
+            children: parse_block_sequence(cur),
+        }],
+        Tag::FootnoteDefinition(label) => vec![Block::FootnoteDefinition {
+            label: label.into_string(),
             children: parse_block_sequence(cur),
         }],
         Tag::List(ordered_start) => {
@@ -398,6 +489,36 @@ fn take_standalone_images(cur: &mut Cursor) -> Option<Vec<Block>> {
     }
 }
 
+/// Consume a paragraph holding nothing but display math (`$$…$$`) — and
+/// optional whitespace between formulas — as one `Block::Math` per formula,
+/// through the paragraph's `End`. Returns `None` (consuming nothing) the
+/// moment any other inline content appears, so mixed paragraphs take the
+/// normal path where a formula degrades to a styled TeX run.
+fn take_display_math(cur: &mut Cursor) -> Option<Vec<Block>> {
+    let events = cur.events;
+    let mut ix = cur.ix;
+    let mut blocks = Vec::new();
+    loop {
+        while matches!(
+            events.get(ix).map(|(event, _)| event),
+            Some(Event::Text(text)) if text.trim().is_empty()
+        ) {
+            ix += 1;
+        }
+        match events.get(ix).map(|(event, _)| event) {
+            Some(Event::DisplayMath(tex)) => {
+                blocks.push(Block::Math { tex: tex.to_string() });
+                ix += 1;
+            }
+            Some(Event::End(TagEnd::Paragraph)) if !blocks.is_empty() => {
+                cur.ix = ix + 1;
+                return Some(blocks);
+            }
+            _ => return None,
+        }
+    }
+}
+
 /// Collect the alt text of one image, stopping at the image's own `End`.
 /// Nested inline formatting contributes its text but not its styling; any
 /// event that cannot be alt text fails the standalone match.
@@ -493,7 +614,19 @@ fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &Inlin
             if done { "[x] ".into() } else { "[ ] ".into() },
             style.clone(),
         ),
-        Event::FootnoteReference(t) => push(runs, format!("[{t}]"), style.clone()),
+        Event::FootnoteReference(t) => {
+            let label = t.into_string();
+            let mut s = style.clone();
+            s.footnote = Some(label.clone());
+            // The text is the label carrier; the renderer replaces it with
+            // the document-order number.
+            push(runs, label, s);
+        }
+        Event::InlineMath(t) | Event::DisplayMath(t) => {
+            let mut s = style.clone();
+            s.math = Some(t.to_string());
+            push(runs, t.into_string(), s);
+        }
         Event::Start(tag) => {
             let mut inner = style.clone();
             match tag {
@@ -520,7 +653,11 @@ fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &Inlin
 fn autolink_runs(runs: Vec<InlineRun>) -> Vec<InlineRun> {
     let mut out = Vec::with_capacity(runs.len());
     for run in runs {
-        if run.style.link.is_some() || run.style.code {
+        if run.style.link.is_some()
+            || run.style.code
+            || run.style.footnote.is_some()
+            || run.style.math.is_some()
+        {
             out.push(run);
         } else {
             push_text_autolinked(&mut out, &run.text, &run.style);
@@ -742,6 +879,12 @@ impl IncrementalParser {
         for top in tail.blocks {
             self.tree.blocks.push(top);
         }
+        // Footnote numbering is global (first appearance in the whole
+        // document), so a tail reparse recomputes it over the merged tree.
+        // Sources with definitions never take this path — `[^label]:` lines
+        // match the link-reference guard below — so this walk only runs for
+        // dangling references, and plain documents skip it entirely.
+        self.tree.footnote_labels = collect_footnote_labels(&self.tree.blocks);
     }
 }
 
@@ -989,6 +1132,85 @@ mod tests {
     }
 
     #[test]
+    fn footnote_references_and_definitions_parse() {
+        let tree = parse_full("Claim[^1] here.\n\n[^1]: The note text.");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
+            panic!("expected a paragraph");
+        };
+        // The reference run carries the label; its text is a carrier for the
+        // renderer, which replaces it with the document-order number.
+        let reference = runs
+            .iter()
+            .find(|run| run.style.footnote.is_some())
+            .expect("a footnote reference run");
+        assert_eq!(reference.style.footnote.as_deref(), Some("1"));
+
+        let Block::FootnoteDefinition { label, children } = b(&tree, 1) else {
+            panic!("expected a footnote definition, got {:?}", b(&tree, 1));
+        };
+        assert_eq!(label, "1");
+        assert_eq!(flat(&match &children[0] {
+            Block::Paragraph { runs } => runs.clone(),
+            other => panic!("expected a paragraph child, got {other:?}"),
+        }), "The note text.");
+        assert_eq!(tree.footnote_labels, vec!["1"]);
+    }
+
+    #[test]
+    fn footnote_numbers_follow_first_appearance() {
+        let tree = parse_full(
+            "Second[^b] then first[^a].\n\n[^a]: defined a\n[^b]: defined b\n[^c]: never referenced\n",
+        );
+        assert_eq!(tree.footnote_labels, vec!["b", "a", "c"]);
+        // Definitions parse as blocks in source order, references keep labels.
+        assert!(matches!(b(&tree, 1), Block::FootnoteDefinition { label, .. } if label == "a"));
+        assert!(matches!(b(&tree, 2), Block::FootnoteDefinition { label, .. } if label == "b"));
+        assert!(matches!(b(&tree, 3), Block::FootnoteDefinition { label, .. } if label == "c"));
+    }
+
+    #[test]
+    fn standalone_display_math_becomes_math_blocks() {
+        let tree = parse_full("Before.\n\n$$E = mc^2$$\n\n$$\\sum_i i$$\n\nAfter.");
+        assert!(matches!(b(&tree, 0), Block::Paragraph { .. }));
+        assert!(matches!(b(&tree, 1), Block::Math { tex } if tex == "E = mc^2"));
+        assert!(matches!(b(&tree, 2), Block::Math { tex } if tex == "\\sum_i i"));
+        assert!(matches!(b(&tree, 3), Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn inline_math_becomes_an_accent_math_run() {
+        let tree = parse_full("Value $a_1 + b^2$ here.");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
+            panic!("expected a paragraph");
+        };
+        let math = runs.iter().find(|run| run.style.math.is_some()).expect("a math run");
+        assert_eq!(math.style.math.as_deref(), Some("a_1 + b^2"));
+        assert_eq!(math.text, "a_1 + b^2");
+        assert_eq!(math.style.code, false);
+    }
+
+    #[test]
+    fn display_math_among_text_stays_a_styled_run() {
+        let tree = parse_full("Answer $$x = 1$$ inline-ish.");
+        let Block::Paragraph { runs } = b(&tree, 0) else {
+            panic!("expected a paragraph, got {:?}", b(&tree, 0));
+        };
+        assert!(runs.iter().any(|run| run.style.math.as_deref() == Some("x = 1")));
+    }
+
+    #[test]
+    fn footnote_references_stream_like_full_parses() {        // References without definitions take the incremental path (a
+        // `[^x]:` line would trip the link-definition guard); labels must
+        // still number identically to a full parse.
+        let text = "Intro[^a].\n\nMore[^b] text.\n\nTail.";
+        let mut incremental = IncrementalParser::new();
+        for chunk in text.split_inclusive('\n') {
+            incremental.append(chunk);
+        }
+        assert_eq!(incremental.tree(), &parse_full(text));
+    }
+
+    #[test]
     fn raw_html_renders_as_text_instead_of_vanishing() {
         let tree = parse_full("<div>hi</div>");
         let Block::Paragraph { runs } = b(&tree, 0) else {
@@ -1052,6 +1274,9 @@ mod tests {
         "para with <span>inline html</span> inside\n\n<div>\nblock html\n</div>\n",
         "###### deep heading\n\n#### h4\n",
         "![a chart](https://example.com/chart.png)\n\n![one](1.png) ![two](2.png)\n",
+        "A claim[^one] and another[^two].\n\n[^one]: The first note.\n[^two]: The second note,\n    continued lazily.\n",
+        "Dangling reference[^missing] with no definition yet.\n",
+        "Euler says $$e^{i\\pi} + 1 = 0$$ and inline $a_1$ too.\n",
     ];
 
     const STORY: &str = "\"How do we negotiate with machines that won't speak?\" someone asked.\n\nYuki almost laughed. \"You don't. You listen to the silence. And you finally understand what it means to be powerless.\"";
