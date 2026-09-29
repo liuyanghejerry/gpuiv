@@ -44,6 +44,18 @@ pub struct InlineStyle {
     /// text is the literal TeX; the renderer styles it as a math fallback
     /// (the mapped SVG pipeline is block-only for now).
     pub math: Option<String>,
+    /// A GFM task-list marker. The run's text is empty; the list renderer
+    /// consumes it and paints a checkbox in the marker column. `range` is the
+    /// marker's byte range in the source (`[ ]` / `[x]`, 3 bytes), so a toggle
+    /// can rewrite it in place.
+    pub task: Option<TaskMarker>,
+}
+
+/// A `- [ ]` / `- [x]` marker with its source byte range.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskMarker {
+    pub checked: bool,
+    pub range: std::ops::Range<usize>,
 }
 
 /// One run of identically-styled inline text.
@@ -591,6 +603,20 @@ fn parse_inline_container(cur: &mut Cursor, style: &InlineStyle) -> Vec<InlineRu
 }
 
 fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &InlineStyle) {
+    // Task markers need their source range to stay toggle-addressable, so
+    // they read it off the cursor before it advances. Ranges are already
+    // absolute source offsets: `parse_at` shifts the offset iterator.
+    if let Some((Event::TaskListMarker(checked), range)) = cur.peek() {
+        let (checked, range) = (*checked, range.clone());
+        cur.bump();
+        let mut s = style.clone();
+        s.task = Some(TaskMarker { checked, range });
+        runs.push(InlineRun {
+            text: String::new(),
+            style: s,
+        });
+        return;
+    }
     let Some(event) = cur.next_event() else {
         return;
     };
@@ -609,11 +635,6 @@ fn parse_inline_event(cur: &mut Cursor, runs: &mut Vec<InlineRun>, style: &Inlin
         Event::SoftBreak => push(runs, " ".into(), style.clone()),
         Event::HardBreak => push(runs, "\n".into(), style.clone()),
         Event::Html(t) | Event::InlineHtml(t) => push(runs, t.into_string(), style.clone()),
-        Event::TaskListMarker(done) => push(
-            runs,
-            if done { "[x] ".into() } else { "[ ] ".into() },
-            style.clone(),
-        ),
         Event::FootnoteReference(t) => {
             let label = t.into_string();
             let mut s = style.clone();
@@ -657,6 +678,7 @@ fn autolink_runs(runs: Vec<InlineRun>) -> Vec<InlineRun> {
             || run.style.code
             || run.style.footnote.is_some()
             || run.style.math.is_some()
+            || run.style.task.is_some()
         {
             out.push(run);
         } else {
@@ -1120,15 +1142,50 @@ mod tests {
     }
 
     #[test]
-    fn task_list_markers_become_literal_text() {
+    fn task_list_markers_carry_source_ranges() {
         let tree = parse_full("- [x] done\n- [ ] todo");
         let Block::List { items, .. } = b(&tree, 0) else {
+            panic!("expected a list");
+        };
+        // The marker is an empty-text run leading the item's first paragraph;
+        // the renderer paints the checkbox from it. Its byte range points at
+        // the 3-byte `[x]` / `[ ]` in the source so a toggle can rewrite it.
+        let Block::Paragraph { runs } = &items[0][0] else {
+            panic!("expected a paragraph");
+        };
+        let task = runs[0].style.task.as_ref().expect("a task marker run");
+        assert!(task.checked);
+        assert_eq!(task.range, 2..5);
+        assert_eq!(runs[0].text, "");
+        assert_eq!(flat(runs), "done");
+
+        let Block::Paragraph { runs } = &items[1][0] else {
+            panic!("expected a paragraph");
+        };
+        let task = runs[0].style.task.as_ref().expect("a task marker run");
+        assert!(!task.checked);
+        assert_eq!(task.range, 13..16);
+    }
+
+    #[test]
+    fn task_marker_ranges_stay_absolute_across_incremental_appends() {
+        let mut p = IncrementalParser::new();
+        let intro = "Intro.\n\n";
+        p.set_text(intro);
+        let appended = format!("{intro}- [ ] todo");
+        p.set_text(&appended);
+        let tree = p.tree();
+        let Block::List { items, .. } = b(tree, 1) else {
             panic!("expected a list");
         };
         let Block::Paragraph { runs } = &items[0][0] else {
             panic!("expected a paragraph");
         };
-        assert_eq!(flat(runs), "[x] done");
+        let task = runs[0].style.task.as_ref().expect("a task marker run");
+        // The tail reparse is offset by the stable prefix, so the marker's
+        // range addresses the original source, not the reparsed slice.
+        let expected = intro.len() + 2;
+        assert_eq!(task.range, expected..expected + 3);
     }
 
     #[test]

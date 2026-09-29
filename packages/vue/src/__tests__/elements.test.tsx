@@ -91,6 +91,75 @@ describeNative("native text elements (vue)", () => {
     app.unmount()
   })
 
+  it("renders task list checkboxes instead of literal markers", () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown source={"- [ ] buy milk\n- [x] ship it"} />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const painted = app.renderer.getPaintedText().join("\n")
+    // The checkbox replaces the marker column, so the literal `[ ]` / `[x]`
+    // no longer paint as text.
+    expect(painted).toContain("buy milk")
+    expect(painted).toContain("ship it")
+    expect(painted).not.toContain("[ ]")
+    expect(painted).not.toContain("[x]")
+    app.unmount()
+  })
+
+  it("toggles task checkboxes by rewriting the marker in the source", async () => {
+    const source = ref("- [ ] buy milk")
+    const toggles: { value?: string; startIndex?: number; endIndex?: number }[] = []
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ padding: 24, backgroundColor: "#060606" }}>
+            <markdown
+              source={source.value}
+              onTaskToggle={(event) => {
+                toggles.push({
+                  value: event.value,
+                  startIndex: event.startIndex,
+                  endIndex: event.endIndex,
+                })
+                // The element reports the rendered state and the marker's
+                // byte range; the app owns flipping `[ ]`↔`[x]`.
+                source.value =
+                  source.value.slice(0, event.startIndex ?? 0) +
+                  (event.value === "true" ? "[ ]" : "[x]") +
+                  source.value.slice(event.endIndex ?? 0)
+              }}
+            />
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+
+    // The checkbox sits in the marker column: outer padding 24, 14px box
+    // left-aligned in the 18px column, vertically centred on the 22px line.
+    app.renderer.nativeSimulateClick(30, 35)
+    await app.settle()
+    expect(toggles).toEqual([
+      { value: "false", startIndex: 2, endIndex: 5 },
+    ])
+    expect(source.value).toBe("- [x] buy milk")
+    expect(app.renderer.getPaintedText().join("\n")).toContain("buy milk")
+
+    // The rewritten source re-renders; the same click now reports checked.
+    app.renderer.nativeSimulateClick(30, 35)
+    await app.settle()
+    expect(toggles[1]).toEqual({ value: "true", startIndex: 2, endIndex: 5 })
+    expect(source.value).toBe("- [ ] buy milk")
+    app.unmount()
+  })
+
   it("renders styled inline runs on a <text> element", () => {
     const App = defineComponent({
       setup() {

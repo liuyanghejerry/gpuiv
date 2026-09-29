@@ -1928,7 +1928,9 @@ scroller. See [Scrolling](#scrolling).
 ### `<markdown>`
 
 GitHub-flavoured markdown: headings, lists, tables, block quotes, fenced code,
-strikethrough, task lists, and autolinked bare URLs.
+strikethrough, task lists, and autolinked bare URLs. Task items render as real
+checkboxes; clicking one fires `onTaskToggle` with the marker's rendered state
+and its byte offsets in `source`, so the app flips `[ ]`↔`[x]` itself.
 
 ```tsx
 <markdown source={readme} onLinkClick={(e) => open(e.value)} />
@@ -3119,7 +3121,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block drag selection with markdown copy/paste, ⌘F search decorations, full-height source mode, anchor jumps; heading-specific spacing and rules, padded code blocks, single-width table borders, and muted completed tasks. The partial `theme` prop includes `border`, `codeBlockBackground`, and `tableHeaderBackground` colors; styled spans / decorations / programmatic selection / `selectionChange` / `selectionDrag` / clipboard interception props on `<input>`/`<textarea>`
 - [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` (RGBA or BGRA) on `<img>` refs
 - [x] Virtual lists (`<virtual-list>`), with sticky section headers on the `<VirtualList>` wrapper (`stickyIndices` + `renderStickyHeader`, pinned overlay above the rows) and item-geometry queries (`getVirtualListGeometry`)
-- [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth)
+- [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, interactive task-list checkboxes with `onTaskToggle` source offsets, and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth)
 - [x] Inline-styled text (`<text runs={…}>`: per-segment colour, weight, italic, family, underline/strikethrough, background)
 - [x] `outline` style (focus rings that take no layout space)
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)

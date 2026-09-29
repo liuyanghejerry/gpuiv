@@ -241,6 +241,12 @@ pub struct Metrics {
     /// column keeps a readable width.
     pub md_table_min_column_content: f32,
     pub md_inline_code_radius: f32,
+    /// Task checkbox geometry: the box sits in the list marker column,
+    /// vertically centred on the first text line like the bullet disc.
+    pub md_task_box_side: f32,
+    pub md_task_box_radius: f32,
+    /// Check-mark stroke width inside the box.
+    pub md_task_stroke: f32,
     /// Markdown image blocks clamp their painted height to this, so one huge
     /// screenshot cannot swallow the message column. Width follows the
     /// container up to `max_w_full`.
@@ -321,6 +327,9 @@ impl Metrics {
             o.md_table_min_column_content,
         );
         set(&mut self.md_inline_code_radius, o.md_inline_code_radius);
+        set(&mut self.md_task_box_side, o.md_task_box_side);
+        set(&mut self.md_task_box_radius, o.md_task_box_radius);
+        set(&mut self.md_task_stroke, o.md_task_stroke);
         set(&mut self.md_image_max_height, o.md_image_max_height);
         set(&mut self.md_image_radius, o.md_image_radius);
         if let Some(sizes) = &o.md_heading_sizes {
@@ -386,6 +395,9 @@ impl Metrics {
             self.md_table_min_column_width,
             self.md_table_min_column_content,
             self.md_inline_code_radius,
+            self.md_task_box_side,
+            self.md_task_box_radius,
+            self.md_task_stroke,
             self.md_image_max_height,
             self.md_image_radius,
         ] {
@@ -431,6 +443,9 @@ impl Default for Metrics {
             md_table_min_column_width: 96.0,
             md_table_min_column_content: 48.0,
             md_inline_code_radius: 4.5,
+            md_task_box_side: 14.0,
+            md_task_box_radius: 4.0,
+            md_task_stroke: 1.75,
             md_image_max_height: 320.0,
             md_image_radius: 8.0,
             md_code_padding_x: 12.0,
@@ -783,6 +798,9 @@ pub struct MetricsOverride {
     pub md_table_min_column_width: Option<f64>,
     pub md_table_min_column_content: Option<f64>,
     pub md_inline_code_radius: Option<f64>,
+    pub md_task_box_side: Option<f64>,
+    pub md_task_box_radius: Option<f64>,
+    pub md_task_stroke: Option<f64>,
     pub md_image_max_height: Option<f64>,
     pub md_image_radius: Option<f64>,
     pub md_code_padding_x: Option<f64>,
