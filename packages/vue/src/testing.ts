@@ -975,6 +975,35 @@ export class TestRenderer implements NativeRenderer {
     native.setNextUrlSchemeError?.(error)
   }
 
+  /** Install the tray through the test bridge: records the descriptor and
+   *  the click callback instead of touching the OS status area. */
+  setTray(
+    desc: { iconPath: string; tooltip?: string | null; template?: boolean | null },
+    onClick: (() => void) | null,
+    callback: (error: Error | null) => void
+  ): void {
+    this.native.setTray?.(desc, onClick, callback)
+  }
+
+  /** Remove the tray through the test bridge. */
+  clearTray(callback: (error: Error | null) => void): void {
+    this.native.clearTray?.(callback)
+  }
+
+  /** The descriptor of the live tray, if `setTray` ran (test bridge). */
+  getTrayDesc(): { iconPath: string; tooltip?: string | null; template?: boolean | null } | null {
+    const native = this.native as {
+      getTrayDesc?(): { iconPath: string; tooltip?: string | null; template?: boolean | null } | null
+    }
+    return native.getTrayDesc?.() ?? null
+  }
+
+  /** Fire the recorded tray click callback, as the OS tray would. */
+  simulateTrayClick(): void {
+    const native = this.native as { simulateTrayClick?(): void }
+    native.simulateTrayClick?.()
+  }
+
   /** Put a straight-alpha RGBA image on the platform's in-memory test
    *  clipboard, mirroring the production encoder path. */
   writeClipboardImage(data: Uint8Array, width: number, height: number): void {
