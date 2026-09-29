@@ -25,8 +25,20 @@ import {
   type TreeNode,
 } from "./protocol.js"
 
+/** Extra addressing for one automation call. */
+export interface AutomationCallContext {
+  /** Window index in a multi-window process: 0 is the main window,
+   *  `createWindow` windows follow in creation order. In-process backends
+   *  drive one renderer and ignore it. */
+  window?: number
+}
+
 export interface AutomationBackend {
-  call<M extends MethodName>(method: M, params: ParamsOf<M>): Promise<ResultOf<M>>
+  call<M extends MethodName>(
+    method: M,
+    params: ParamsOf<M>,
+    context?: AutomationCallContext
+  ): Promise<ResultOf<M>>
   close(): Promise<void>
 }
 
@@ -35,13 +47,14 @@ abstract class ValidatedAutomationBackend implements AutomationBackend {
 
   async call<M extends MethodName>(
     method: M,
-    params: ParamsOf<M>
+    params: ParamsOf<M>,
+    context?: AutomationCallContext
   ): Promise<ResultOf<M>> {
     if (this.closed) {
       throw new AutomationError("Closed", "Automation session is closed")
     }
     const parsedParams = methods[method].params.parse(params) as ParamsOf<M>
-    const result = await this.request(method, parsedParams)
+    const result = await this.request(method, parsedParams, context)
     return methods[method].result.parse(result) as ResultOf<M>
   }
 
@@ -53,7 +66,8 @@ abstract class ValidatedAutomationBackend implements AutomationBackend {
 
   protected abstract request<M extends MethodName>(
     method: M,
-    params: ParamsOf<M>
+    params: ParamsOf<M>,
+    context?: AutomationCallContext
   ): unknown | Promise<unknown>
 
   abstract close(): Promise<void>
@@ -152,7 +166,8 @@ export class InProcessBackend extends ValidatedAutomationBackend {
 
   protected request<M extends MethodName>(
     method: M,
-    params: ParamsOf<M>
+    params: ParamsOf<M>,
+    _context?: AutomationCallContext
   ): unknown | Promise<unknown> {
     return this.handlers[method](params as never)
   }
@@ -327,10 +342,16 @@ export class SseBackend extends ValidatedAutomationBackend {
 
   protected async request<M extends MethodName>(
     method: M,
-    params: ParamsOf<M>
+    params: ParamsOf<M>,
+    context?: AutomationCallContext
   ): Promise<unknown> {
     const id = this.nextId++
-    const request = { id, method, params } as AutomationRequest
+    const request = {
+      id,
+      method,
+      params,
+      ...(context?.window === undefined ? {} : { window: context.window }),
+    } as AutomationRequest
     const pending = new PendingAutomationResponse()
     this.pending.set(id, pending)
     try {
@@ -625,7 +646,10 @@ export class App {
     drag: (from: PointTarget, to: PointTarget, options?: DragOptions) => Promise<void>
   }
 
-  constructor(private readonly backend: AutomationBackend) {
+  constructor(
+    private readonly backend: AutomationBackend,
+    private readonly windowIndex = 0
+  ) {
     this.clock = {
       pause: async () => (await this.call("clockPause", {})).nowMs,
       set: async (nowMs) => (await this.call("clockSet", { nowMs })).nowMs,
@@ -708,11 +732,21 @@ export class App {
     return target instanceof Locator ? target.center() : target
   }
 
+  /** A view of another window in the same process. Window 0 is the main
+   *  window; `createWindow` windows follow in creation order. Every locator
+   *  created on the returned view addresses that window's tree. */
+  window(index: number): App {
+    if (!Number.isInteger(index) || index < 0) {
+      throw new AutomationError("Protocol", "window index must be a non-negative integer")
+    }
+    return new App(this.backend, index)
+  }
+
   call<M extends MethodName>(
     method: M,
     params: ParamsOf<M>
   ): Promise<ResultOf<M>> {
-    return this.backend.call(method, params)
+    return this.backend.call(method, params, { window: this.windowIndex })
   }
 
   getByTestId(testId: string): Locator {
@@ -969,17 +1003,37 @@ export function handleAutomationRequest(
 }
 
 let stdioServerInstalled = false
+const stdioBackends: AutomationBackend[] = []
 
-/** Serve automation commands on stdin/stdout. Only the first backend wins:
- *  `createNativeRenderer` runs for every window, but one process has one
- *  stdin — later windows simply stay off the automation bus. */
+/** Serve automation commands on stdin/stdout for every window's backend.
+ *
+ * One process has one stdin, so the bus routes rather than multiplexes I/O:
+ * each renderer registers its backend here in creation order, and requests
+ * carry a `window` index (0 = main window, the default) selecting which
+ * backend answers. An index with no backend yet gets a NotFound reply instead
+ * of a hang. */
 export function serveAutomationStdio(backend: AutomationBackend): void {
+  stdioBackends.push(backend)
   if (stdioServerInstalled) return
   stdioServerInstalled = true
   const decoder = createSseDecoder((message) => {
     if (!("method" in message)) return
-    void handleAutomationRequest(message, backend).then((reply) => {
-      process.stdout.write(reply)
+    const window = message.window ?? 0
+    const target = stdioBackends[window]
+    const reply =
+      target != null
+        ? handleAutomationRequest(message, target)
+        : Promise.resolve(
+            encodeSse({
+              id: message.id,
+              error: {
+                code: "NotFound",
+                message: `window ${window} is not open (${stdioBackends.length} window(s) registered)`,
+              },
+            })
+          )
+    void reply.then((encoded) => {
+      process.stdout.write(encoded)
     })
   })
   process.stdin.setEncoding("utf8")

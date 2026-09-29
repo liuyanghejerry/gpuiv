@@ -46,6 +46,28 @@ describe.skipIf(process.platform !== 'darwin')('multi-window (live)', () => {
       // the automation tree.
       expect(await app.getByTestId('poke-count').textContent()).toContain('pokes: 0')
 
+      // The second window answers on the same automation bus through its
+      // window index — its own tree, its own click.
+      const second = app.window(1)
+      const poke = second.getByTestId('poke')
+      await poke.waitFor({ timeoutMs: 10_000 })
+      expect(await poke.textContent()).toContain('Poke main')
+      await poke.click()
+
+      const pokeDeadline = Date.now() + 10_000
+      let pokes = ''
+      while (Date.now() < pokeDeadline) {
+        pokes = await app.getByTestId('poke-count').textContent()
+        if (pokes.includes('pokes: 1')) break
+        await new Promise((resolve) => setTimeout(resolve, 100))
+      }
+      expect(pokes).toContain('pokes: 1')
+
+      // A window index that never opened fails fast instead of hanging.
+      await expect(app.window(2).getByTestId('anything').element()).rejects.toThrow(
+        /window 2 is not open/
+      )
+
       const screenshot = path.join(
         path.dirname(fileURLToPath(import.meta.url)),
         'screenshots',
