@@ -1,9 +1,10 @@
 /** CLI entry.
  *
- *   gpuiv-packager build    [--config] [--target]… [--node-path] [--out] [--no-smoke]
+ *   gpuiv-packager build    [--config] [--target]… [--node-path] [--out] [--no-smoke] [--no-dmg]
  *   gpuiv-packager keygen   [--out <path prefix>]
  *   gpuiv-packager publish  --channel <c> [--target]… [--notes] [--private-key] [--store s3|github] [store flags]
  *   gpuiv-packager promote  --channel <c> --version <v> [--target]… [--store s3|github] [store flags]
+ *   gpuiv-packager register [--config] [--product-dir <dir>] [--dry-run]
  *
  * S3 location flags: --endpoint --region --bucket --prefix (over
  * GPUIV_S3_* / AWS_* env). GitHub store flags: --repository --token
@@ -14,6 +15,7 @@ import { buildPackage } from "./index.js"
 import { generateKeyPair } from "./keys.js"
 import { promoteRelease, publishRelease } from "./publish.js"
 import { TARGETS } from "./targets.js"
+import { registerAssociations } from "./associations.js"
 
 export async function runCli(argv: string[]): Promise<number> {
   const command = argv[0]
@@ -85,6 +87,14 @@ export async function runCli(argv: string[]): Promise<number> {
         })
         return 0
       }
+      case "register": {
+        const flags = parseFlags(argv.slice(1), ["dry-run"])
+        return await registerAssociations({
+          configPath: flags.config,
+          productDir: flags["product-dir"],
+          dryRun: flags["dry-run"] === true,
+        })
+      }
       default:
         console.error(`[gpuiv-packager] unknown command "${command}"`)
         printUsage()
@@ -97,8 +107,7 @@ export async function runCli(argv: string[]): Promise<number> {
 }
 
 /** Flags that stand alone (`--no-smoke`) rather than taking a value. */
-function parseFlags(args: string[], booleanFlags: string[]): Record<string, string | string[]> {
-  const flags: Record<string, string | string[]> = {}
+function parseFlags(args: string[], booleanFlags: string[]): Record<string, string | string[]> {  const flags: Record<string, string | string[]> = {}
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]
     if (!arg.startsWith("--")) throw new Error(`Unexpected argument "${arg}"`)
@@ -178,6 +187,7 @@ Usage:
   gpuiv-packager keygen [--out <p>]   generate the ed25519 update-signing key pair
   gpuiv-packager publish [flags]      upload immutable release objects + fragment
   gpuiv-packager promote [flags]      merge fragments, flip the channel pointer
+  gpuiv-packager register [flags]     per-user file associations (win/linux host)
 
 build flags:
   --config <path>        config file (default: ./gpuiv.package.ts|js|json)
@@ -199,5 +209,13 @@ publish/promote flags:
   --endpoint/--region/--bucket/--prefix
                          S3 location (or GPUIV_S3_* / AWS_* env)
   --repository/--token/--tag-prefix/--feed-tag
-                         GitHub store (or GPUIV_GITHUB_* / GITHUB_* env)`)
+                         GitHub store (or GPUIV_GITHUB_* / GITHUB_* env)
+
+register flags:
+  --config <path>        config file (default: ./gpuiv.package.ts|js|json)
+  --product-dir <dir>    directory holding the built product (default: the
+                         config's outDir, host-target layout)
+  --dry-run              print what would be written without touching the
+                         system (implied when the host platform has no
+                         matching product)`)
 }

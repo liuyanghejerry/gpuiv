@@ -1,0 +1,5 @@
+---
+'@gpuiv/packager': minor
+---
+
+Windows and Linux file associations now have a run-time registration path for the portable products: new `win.fileAssociations` / `linux.fileAssociations` config groups, and `gpuiv-packager register [--config] [--product-dir] [--dry-run]` performs per-user registration on the host OS — no installer, no admin. Windows writes `HKCU\Software\Classes` ProgIds (quoted open command, icon) plus per-extension `OpenWithProgids`, so the app shows in Explorer's Open-with list (the default-handler claim stays the user's click — `UserChoice` is hash-protected by design); Linux installs `~/.local/share/applications/<bundleId>.desktop` (quoted `Exec`, joined `MimeType`) and refreshes `update-desktop-database` / `xdg-mime default`. Builders are pure and unit-tested on any host; on the wrong host the command prints the plan and exits non-zero. macOS needs no registration (bundle declarations). The Open Files example config declares `.md` associations for all three platforms.
