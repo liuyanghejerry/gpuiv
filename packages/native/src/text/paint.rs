@@ -13,6 +13,7 @@
 //! learned this the hard way; do not move registration into `build_element`.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -191,6 +192,25 @@ pub enum HighlightSource {
     Native(Arc<super::search::HighlightContext>),
 }
 
+/// One image embedded in a text run's line, positioned over a placeholder
+/// range the flattener reserved for it (markdown inline math). `depth` is the
+/// distance from the text baseline down to the image's bottom edge, so the
+/// image rides the line's baseline exactly.
+pub struct InlineImage {
+    /// Placeholder byte range in the laid-out text.
+    pub range: Range<usize>,
+    pub src: String,
+    pub width: f32,
+    pub height: f32,
+    pub depth: f32,
+}
+
+/// Rasterized SVGs for [`SelectableText::images`], shared across frames so a
+/// formula rasterizes once per element lifetime. Keyed by source string;
+/// `None` marks a source that failed to rasterize and is not retried.
+pub type InlineImageCache =
+    std::rc::Rc<std::cell::RefCell<HashMap<String, Option<Arc<gpui::RenderImage>>>>>;
+
 pub struct SelectableText {
     /// Element that owns the run, and the run's index within it. The selection
     /// key is derived from these, so nothing has to parse it back apart.
@@ -210,6 +230,14 @@ pub struct SelectableText {
     pub extra_wash: Option<Box<dyn Fn(&TextLayout, &mut Window)>>,
     /// Clickable byte ranges and their payloads, typically link URLs.
     pub links: Vec<(Range<usize>, String)>,
+    /// Images riding placeholder ranges in the text (inline math). Painted in
+    /// the underlay canvas — the placeholder paints no glyphs, so the image
+    /// shows through its own gap — aligned to the line baseline via `depth`.
+    pub images: Vec<InlineImage>,
+    /// Rasterized SVG cache backing `images`, owned by the custom element so
+    /// repeats across frames skip re-rasterizing. A fresh default cache still
+    /// works; it only loses the cross-frame reuse.
+    pub image_cache: InlineImageCache,
     /// Called with the payload of the range under a click.
     pub on_link: Option<Arc<dyn Fn(&str)>>,
     /// False under `userSelect: "none"`: the text is still painted, logged and
@@ -239,6 +267,8 @@ impl SelectableText {
             wash_color,
             extra_wash: None,
             links: Vec::new(),
+            images: Vec::new(),
+            image_cache: std::rc::Rc::new(std::cell::RefCell::new(HashMap::new())),
             on_link: None,
             selectable: true,
             group: None,
@@ -259,6 +289,8 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         wash_color,
         extra_wash,
         links,
+        images,
+        image_cache,
         on_link,
         selectable,
         group,
@@ -274,9 +306,12 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
 
     let underlay = canvas(
         |_, _, _| (),
-        move |_, _, window, _| {
+        move |_, _, window, cx| {
             if let Some(paint) = &extra_wash {
                 paint(&layout, window);
+            }
+            if !images.is_empty() {
+                paint_inline_images(&layout, &images, &image_cache, window, cx);
             }
             // Search washes sit UNDER the selection wash, so a selection over a
             // match still reads as a selection.
@@ -329,6 +364,59 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         .child(underlay)
         .child(styled)
         .into_any_element()
+}
+
+/// Paint inline images into their placeholder gaps. Runs at paint time, when
+/// the sibling `StyledText` has already measured: each image's left edge is
+/// its range's caret position, and its baseline sits on the same line the
+/// glyphs were painted on — gpui's own `padding + ascent` math — offset by
+/// the spec's `depth`.
+fn paint_inline_images(
+    layout: &TextLayout,
+    images: &[InlineImage],
+    cache: &InlineImageCache,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    for image in images {
+        let Some(position) = layout.position_for_index(image.range.start) else {
+            continue;
+        };
+        let Some(line) = layout.line_layout_for_index(image.range.start) else {
+            continue;
+        };
+        let line_height = layout.line_height();
+        let padding_top = (line_height - line.ascent() - line.descent()) / 2.0;
+        let baseline = position.y + padding_top + line.ascent();
+        // Paint callbacks run in window-absolute coordinates — the same space
+        // `range_rects` hands to `paint_quad` — so the absolute caret position
+        // is used as-is.
+        let bounds = Bounds {
+            origin: point(position.x, baseline - px(image.height - image.depth)),
+            size: size(px(image.width), px(image.height)),
+        };
+        let raster = cache
+            .borrow_mut()
+            .entry(image.src.clone())
+            .or_insert_with(|| rasterize_inline_svg(&image.src, cx))
+            .clone();
+        if let Some(raster) = raster {
+            let _ = window.paint_image(bounds, bounds, gpui::Corners::default(), raster, 0, false);
+        } else {
+            // The raster failed (non-SVG or malformed): leave the placeholder
+            // gap blank — it still keeps the line's spacing.
+            continue;
+        }
+    }
+}
+
+/// Rasterize a data-URL SVG through gpui's own usvg pipeline. `None` for
+/// anything else (a raster format, a malformed URL): the placeholder gap
+/// stays blank rather than painting a broken image.
+fn rasterize_inline_svg(src: &str, cx: &gpui::App) -> Option<Arc<gpui::RenderImage>> {
+    let (format, bytes) = crate::custom_elements::img::decode_image_data_url(src)?;
+    (format == gpui::ImageFormat::Svg)
+        .then(|| cx.svg_renderer().render_single_frame(&bytes, 1.0).ok())?
 }
 
 /// Paint one run's highlight washes and log their geometry.

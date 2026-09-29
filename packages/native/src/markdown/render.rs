@@ -67,32 +67,104 @@ const INLINE_CODE_INSET_Y: f32 = 2.0;
 // ── Flattened inline text ────────────────────────────────────────────
 
 /// Inline runs flattened into one string plus gpui `TextRun`s, with the byte
-/// ranges of clickable links and inline-code spans.
+/// ranges of clickable links, inline-code spans, and inline-formula images.
 ///
 /// Inline code needs its own ranges because `TextRun::background_color` can only
-/// paint a square box; the rounded pill is a canvas underlay.
+/// paint a square box; the rounded pill is a canvas underlay. Inline math
+/// images replace their TeX with space characters that reserve the formula's
+/// width; the image itself rides the range in [`SelectableText::images`].
 pub struct FlatText {
     pub text: SharedString,
     pub runs: Vec<TextRun>,
     pub links: Vec<(Range<usize>, String)>,
     pub code_ranges: Vec<Range<usize>>,
+    /// Mapped inline formulas: the placeholder range plus the render spec.
+    pub images: Vec<(Range<usize>, MathSpec)>,
+}
+
+/// Per-1em advances of the mono font's space family, measured from the live
+/// text system. NBSP, THIN SPACE, and HAIR SPACE give three denominations, so
+/// a placeholder reserves any width to within a hair space; fonts that draw
+/// them all the same width simply quantize to the coarsest one.
+#[derive(Clone, Copy, Debug)]
+pub struct SpaceAdvances {
+    pub nbsp: f32,
+    pub thin: f32,
+    pub hair: f32,
+}
+
+impl SpaceAdvances {
+    /// Measure the denominations by shaping runs of each space at a
+    /// reference size. `None` when the font system refuses the font.
+    pub fn measure(font: &gpui::Font, window: &Window) -> Option<Self> {
+        let system = window.text_system();
+        let reference = 100.0_f32;
+        let sample = 32;
+        let measure = |ch: char| -> Option<f32> {
+            let text: String = std::iter::repeat(ch).take(sample).collect();
+            let run = TextRun {
+                len: text.len(),
+                font: font.clone(),
+                color: gpui::black(),
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            };
+            let layout = system.layout_line(&text, px(reference), &[run], None);
+            let width = f32::from(layout.width);
+            (width > 0.0).then(|| width / reference / sample as f32)
+        };
+        Some(Self {
+            nbsp: measure('\u{a0}')?,
+            thin: measure('\u{2009}')?,
+            hair: measure('\u{200a}')?,
+        })
+    }
+
+    /// Space characters reserving `width` px at `font_size`: greedy coin
+    /// combination over the denominations, rounding the last hair space up so
+    /// the following glyph never overlaps the image.
+    pub fn placeholder(&self, width: f32, font_size: f32) -> String {
+        let denominations = [(self.nbsp, '\u{a0}'), (self.thin, '\u{2009}'), (self.hair, '\u{200a}')];
+        let mut remaining = width.max(0.0);
+        let mut out = String::new();
+        for (index, &(per_em, ch)) in denominations.iter().enumerate() {
+            let unit = (per_em * font_size).max(0.05);
+            let mut count = (remaining / unit) as usize;
+            remaining -= count as f32 * unit;
+            if index == denominations.len() - 1 && remaining > unit * 0.5 {
+                count += 1;
+            }
+            if count > 0 {
+                out.extend(std::iter::repeat(ch).take(count));
+            }
+        }
+        out
+    }
 }
 
 /// Flatten inline runs into shaped-text inputs. Pure given a theme.
 ///
 /// `footnotes` maps a footnote label to its document-order number (0-based);
 /// a label missing from the map (a dangling reference in a partial tree)
-/// falls back to the raw label so the marker stays readable.
+/// falls back to the raw label so the marker stays readable. A math run whose
+/// TeX hits `math` becomes a width-reserving placeholder plus an image entry,
+/// but only when `spaces` carries measured advances — without them (unit
+/// tests, or a font the system refuses) the run keeps the literal TeX.
 pub fn flatten_runs(
     runs: &[InlineRun],
     theme: &Theme,
     base_weight: FontWeight,
     footnotes: &HashMap<String, usize>,
+    math: &HashMap<String, MathSpec>,
+    font_size: f32,
+    spaces: Option<SpaceAdvances>,
 ) -> FlatText {
     let mut text = String::new();
     let mut out: Vec<TextRun> = Vec::with_capacity(runs.len());
     let mut links: Vec<(Range<usize>, String)> = Vec::new();
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
+    let mut images: Vec<(Range<usize>, MathSpec)> = Vec::new();
 
     for run in runs {
         if let Some(task) = &run.style.task {
@@ -138,6 +210,30 @@ pub fn flatten_runs(
                 strikethrough: None,
             });
             continue;
+        }
+
+        if let Some(tex) = &run.style.math {
+            if let Some(spec) = math.get(tex.trim()).cloned() {
+                if let Some(spaces) = spaces {
+                    let placeholder = spaces.placeholder(spec.width, font_size);
+                    if !placeholder.is_empty() {
+                        let start = text.len();
+                        text.push_str(&placeholder);
+                        images.push((start..text.len(), spec));
+                        out.push(TextRun {
+                            len: placeholder.len(),
+                            font: theme.mono_font(),
+                            // Spaces paint nothing; the color only matters if
+                            // a fallback font substitutes a visible glyph.
+                            color: theme.text,
+                            background_color: None,
+                            underline: None,
+                            strikethrough: None,
+                        });
+                        continue;
+                    }
+                }
+            }
         }
 
         text.push_str(&run.text);
@@ -205,6 +301,7 @@ pub fn flatten_runs(
         runs: out,
         links,
         code_ranges,
+        images,
     }
 }
 
@@ -315,6 +412,12 @@ pub struct MdContext {
     pub math: HashMap<String, MathSpec>,
     /// Pre-rendered mermaid diagrams keyed by the fence's trimmed source.
     pub mermaid: HashMap<String, MermaidSpec>,
+    /// Measured space advances for inline-formula placeholders. `None` keeps
+    /// mapped inline formulas on their literal-TeX fallback.
+    pub space_advances: Option<SpaceAdvances>,
+    /// Rasterized inline-formula SVGs, owned by the `<markdown>` element so
+    /// they survive across frames.
+    pub math_images: crate::text::InlineImageCache,
 }
 
 impl MdContext {
@@ -329,6 +432,8 @@ impl MdContext {
         highlight_set: Option<Arc<crate::text::HighlightContext>>,
         math: HashMap<String, MathSpec>,
         mermaid: HashMap<String, MermaidSpec>,
+        space_advances: Option<SpaceAdvances>,
+        math_images: crate::text::InlineImageCache,
     ) -> Self {
         Self {
             element_id,
@@ -343,6 +448,8 @@ impl MdContext {
             footnote_numbers: HashMap::new(),
             math,
             mermaid,
+            space_advances,
+            math_images,
         }
     }
 
@@ -577,7 +684,15 @@ fn text_element(
 ) -> AnyElement {
     use gpui::prelude::*;
 
-    let flat = flatten_runs(runs, &ctx.theme, weight, &ctx.footnote_numbers);
+    let flat = flatten_runs(
+        runs,
+        &ctx.theme,
+        weight,
+        &ctx.footnote_numbers,
+        &ctx.math,
+        size,
+        ctx.space_advances,
+    );
     let inner = flat_text_element(&flat, ctx);
     div()
         .w_full()
@@ -818,6 +933,18 @@ fn flat_text_element(flat: &FlatText, ctx: &mut MdContext) -> AnyElement {
     crate::text::selectable_text(crate::text::SelectableText {
         extra_wash: extra,
         links: flat.links.clone(),
+        images: flat
+            .images
+            .iter()
+            .map(|(range, spec)| crate::text::InlineImage {
+                range: range.clone(),
+                src: spec.src.clone(),
+                width: spec.width,
+                height: spec.height,
+                depth: spec.depth,
+            })
+            .collect(),
+        image_cache: ctx.math_images.clone(),
         on_link: ctx.on_link.clone(),
         selectable: ctx.selectable,
         highlight: ctx
@@ -970,8 +1097,11 @@ fn render_table(
     let text_system = window.text_system();
     // Table cells share the document's footnote numbering — an empty map here
     // would paint raw labels in cells (and measure the wrong max-content
-    // width) while the definitions below show numbers.
+    // width) while the definitions below show numbers. Inline math rides the
+    // element map so cells and prose render formulas identically.
     let footnote_numbers = ctx.footnote_numbers.clone();
+    let math = ctx.math.clone();
+    let spaces = ctx.space_advances;
     let mut flats: Vec<Vec<Option<FlatText>>> = Vec::with_capacity(all.len());
     let mut content = vec![0.0f32; cols];
     for (row_ix, row) in all.iter().enumerate() {
@@ -986,7 +1116,15 @@ fn render_table(
                 out.push(None);
                 continue;
             };
-            let flat = flatten_runs(runs, &theme, weight, &footnote_numbers);
+            let flat = flatten_runs(
+                runs,
+                &theme,
+                weight,
+                &footnote_numbers,
+                &math,
+                m.md_text_size,
+                spaces,
+            );
             if !flat.text.is_empty() {
                 // Cells are single-line; guard anyway, and keep the byte count
                 // identical so the runs still cover the text exactly.
@@ -1081,6 +1219,124 @@ mod tests {
     use super::*;
     use crate::markdown::parser::InlineStyle;
 
+    #[test]
+    fn space_placeholders_reserve_the_requested_width() {
+        // Menlo-ish denominations: nbsp ~0.6em, thin ~0.5em, hair ~0.166em.
+        let spaces = SpaceAdvances {
+            nbsp: 0.6,
+            thin: 0.5,
+            hair: 0.1666,
+        };
+        let font_size = 14.0;
+        let cases = [3.0, 9.5, 20.0, 47.3, 120.0];
+        for width in cases {
+            let placeholder = spaces.placeholder(width, font_size);
+            let reserved = placeholder
+                .chars()
+                .map(|ch| match ch {
+                    '\u{a0}' => spaces.nbsp,
+                    '\u{2009}' => spaces.thin,
+                    _ => spaces.hair,
+                })
+                .sum::<f32>()
+                * font_size;
+            // Reservation never undercuts the image by more than half a hair
+            // space, and never overshoots it by more than one.
+            let hair = spaces.hair * font_size;
+            assert!(
+                reserved >= width - hair * 0.5 && reserved <= width + hair,
+                "width {width}: reserved {reserved}, placeholder {placeholder:?}"
+            );
+        }
+        // A degenerate zero-width formula reserves nothing.
+        assert!(spaces.placeholder(0.0, font_size).is_empty());
+    }
+
+    #[test]
+    fn mapped_inline_math_becomes_a_placeholder_and_image_entry() {
+        let theme = Theme::dark();
+        let mut math = HashMap::new();
+        math.insert(
+            "a_1".to_string(),
+            MathSpec {
+                src: "data:image/svg+xml;base64,AAAA".to_string(),
+                width: 24.0,
+                height: 18.0,
+                depth: 4.0,
+            },
+        );
+        let runs = vec![
+            run("E = ", InlineStyle::default()),
+            run(
+                "a_1",
+                InlineStyle {
+                    math: Some("a_1".to_string()),
+                    ..Default::default()
+                },
+            ),
+            run(" here", InlineStyle::default()),
+        ];
+        let spaces = SpaceAdvances {
+            nbsp: 0.6,
+            thin: 0.5,
+            hair: 0.1666,
+        };
+        let flat = flatten_runs(
+            &runs,
+            &theme,
+            FontWeight::NORMAL,
+            &HashMap::new(),
+            &math,
+            14.0,
+            Some(spaces),
+        );
+        // The TeX never paints; the placeholder rides in its place.
+        assert!(!flat.text.contains("a_1"));
+        assert_eq!(flat.images.len(), 1);
+        let (range, spec) = &flat.images[0];
+        // Byte range: after "E = " and before " here".
+        assert_eq!(*range, 4..flat.text.len() - " here".len());
+        assert_eq!(spec.width, 24.0);
+        assert_eq!(spec.depth, 4.0);
+        // Runs still cover the flattened text exactly.
+        assert_eq!(
+            flat.runs.iter().map(|r| r.len).sum::<usize>(),
+            flat.text.len()
+        );
+
+        // Without measured advances the same run keeps the literal TeX.
+        let fallback = flatten_runs(
+            &runs,
+            &theme,
+            FontWeight::NORMAL,
+            &HashMap::new(),
+            &math,
+            14.0,
+            None,
+        );
+        assert!(fallback.text.contains("a_1"));
+        assert!(fallback.images.is_empty());
+
+        // An unmapped formula keeps the TeX even with advances available.
+        let unmapped = flatten_runs(
+            &[run(
+                "z_9",
+                InlineStyle {
+                    math: Some("z_9".to_string()),
+                    ..Default::default()
+                },
+            )],
+            &theme,
+            FontWeight::NORMAL,
+            &HashMap::new(),
+            &math,
+            14.0,
+            Some(spaces),
+        );
+        assert!(unmapped.text.contains("z_9"));
+        assert!(unmapped.images.is_empty());
+    }
+
     fn run(text: &str, style: InlineStyle) -> InlineRun {
         InlineRun {
             text: text.into(),
@@ -1112,6 +1368,9 @@ mod tests {
             &theme,
             FontWeight::NORMAL,
             &HashMap::new(),
+            &HashMap::new(),
+            14.0,
+            None,
         );
         assert_eq!(flat.text, "go here now");
         assert_eq!(
@@ -1148,6 +1407,9 @@ mod tests {
             &theme,
             FontWeight::NORMAL,
             &HashMap::new(),
+            &HashMap::new(),
+            14.0,
+            None,
         );
         assert_eq!(flat.code_ranges, vec![4..9, 14..17]);
         assert_eq!(flat.runs[1].color, theme.code_text);
@@ -1181,6 +1443,9 @@ mod tests {
             &theme,
             FontWeight::NORMAL,
             &footnotes,
+            &HashMap::new(),
+            14.0,
+            None,
         );
         // Numbered when known, raw label when dangling.
         assert_eq!(flat.text, "see [2][alpha]");
@@ -1217,6 +1482,9 @@ mod tests {
             &Theme::dark(),
             FontWeight::NORMAL,
             &HashMap::new(),
+            &HashMap::new(),
+            14.0,
+            None,
         );
         assert_eq!(flat.runs.len(), 1);
     }
