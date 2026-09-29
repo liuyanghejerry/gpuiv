@@ -436,8 +436,8 @@ each other's elements even though ids restart from 1 in each. The options are
 the same as `createApp`'s (`RenderOptions`). The returned handle adds `close()`;
 closing through the OS close button also works, but `close()` from JS is the
 tidy path — it drops the renderer from the frame loop instead of leaving an
-empty one ticking until the process exits. The automation stdio bus serves the
-main window only.
+empty one ticking until the process exits. Automation addresses any window
+through `app.window(index)`.
 
 ## Tray
 
@@ -2684,6 +2684,22 @@ createTestApp()              launch({ command, args })
 `click()` hits the center of the last painted bounds. `fill(text)` replaces the
 focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
 exactly one match exists.
+
+### Addressing another window
+
+Every window created with `createWindow()` answers on the same automation
+session — no second bus. `app.window(index)` returns a view whose locators
+address that window's tree; window 0 is the main window (the default for every
+unqualified locator), and `createWindow` windows follow in creation order. An
+index that never opened fails fast with `NotFound`:
+
+```ts
+await app.getByTestId('open-settings').click()
+const settings = app.window(1)
+await settings.getByTestId('theme-select').click()
+```
+
+In-process sessions (`connectTest`) drive one renderer and ignore the index.
 
 Every element that accepts `testId` records painted bounds, including `<img>`,
 `<svg>` and `<anchored>`. An `<anchored>` reports the box of the overlay itself,

@@ -308,8 +308,11 @@ export type MethodName = keyof typeof methods
 export type ParamsOf<M extends MethodName> = z.infer<(typeof methods)[M]["params"]>
 export type ResultOf<M extends MethodName> = z.infer<(typeof methods)[M]["result"]>
 
+/** A command for the automation bus. `window` addresses one window of a
+ *  multi-window process — 0 (the default) is the main window, `createWindow`
+ *  windows follow in creation order. Omitted by single-window clients. */
 export type AutomationRequest<M extends MethodName = MethodName> = {
-  [K in M]: { id: number; method: K; params: ParamsOf<K> }
+  [K in M]: { id: number; method: K; params: ParamsOf<K>; window?: number }
 }[M]
 
 export type AutomationSuccess<M extends MethodName = MethodName> = {
@@ -365,6 +368,14 @@ export function parseRequest(value: unknown): AutomationRequest {
   if (typeof value.id !== "number" || !Number.isInteger(value.id)) {
     throw new AutomationError("Protocol", "Request id must be an integer")
   }
+  if (
+    value.window !== undefined &&
+    (typeof value.window !== "number" ||
+      !Number.isInteger(value.window) ||
+      value.window < 0)
+  ) {
+    throw new AutomationError("Protocol", "Request window must be a non-negative integer")
+  }
   const method = parseMethodName(value.method)
   const parsed = methods[method].params.safeParse(value.params)
   if (!parsed.success) {
@@ -374,7 +385,12 @@ export function parseRequest(value: unknown): AutomationRequest {
       parsed.error.issues
     )
   }
-  return { id: value.id, method, params: parsed.data } as AutomationRequest
+  return {
+    id: value.id,
+    method,
+    params: parsed.data,
+    ...(value.window === undefined ? {} : { window: value.window }),
+  } as AutomationRequest
 }
 
 export function parseResponse(value: unknown): AutomationResponse {
