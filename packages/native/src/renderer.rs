@@ -327,8 +327,129 @@ fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) 
     }
 }
 
+/// Whether the process's single GPUI UI thread was ever started. Never
+/// reset: after the last window closes the process is on its way out.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+static UI_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "macos")]
+/// Open one `GpuixView` window on `cx` and arm its close veto. Shared by the
+/// first window (inside `run_embedded`) and later windows opened on the
+/// already-running application.
+fn open_gpuix_window(
+    cx: &mut gpui::App,
+    window_options: &WindowOptions,
+    width: f64,
+    height: f64,
+    activate: bool,
+    tree: &Arc<Mutex<RetainedTree>>,
+    callback: &Option<EventCallback>,
+    title: &str,
+    selection: &SharedSelection,
+    canvas_surfaces: &crate::canvas::CanvasStore,
+) -> Result<gpui::WindowHandle<GpuixView>> {
+    let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
+    // A saved x/y pair restores the last position; anything else opens
+    // centered.
+    let bounds = match requested_window_origin(window_options.x, window_options.y) {
+        Some(origin) => gpui::Bounds { origin, size },
+        None => gpui::Bounds::centered(None, size, cx),
+    };
+
+    let window_handle = cx
+        .open_window(
+            to_gpui_window_options(window_options, bounds),
+            |_window, cx| {
+                cx.new(|_| {
+                    GpuixView::new(
+                        tree.clone(),
+                        callback.clone(),
+                        title.to_string(),
+                        selection.clone(),
+                        canvas_surfaces.clone(),
+                    )
+                })
+            },
+        )
+        .map_err(|error| Error::from_reason(format!("Failed to open the GPUI window: {error}")))?;
+
+    // The close veto reads live view state at close time, so arming later
+    // (setWindowObservers) needs no re-register. A weak handle: a strong one
+    // would leak the view entity at process exit (GPUI asserts on leaked
+    // handles).
+    if let Err(error) = window_handle.update(cx, |_view, window, cx| {
+        let entity = cx.entity().downgrade();
+        window.on_window_should_close(cx, move |_window, cx| {
+            let Some(entity) = entity.upgrade() else {
+                return true;
+            };
+            let mut allow = true;
+            let _ = entity.update(cx, |view, _cx| {
+                if view.window_should_close {
+                    emit_event_full(
+                        &view.event_callback,
+                        view.window_key_event_id,
+                        "windowShouldClose",
+                        |_| {},
+                    );
+                    allow = false;
+                }
+            });
+            allow
+        });
+    }) {
+        log::error!("Failed to install the close interceptor: {error:#}");
+    }
+    // `focus: false` must also skip `cx.activate`: the window flag only
+    // decides key status inside the app, activation is what steals focus.
+    if activate {
+        cx.activate(true);
+    }
+    Ok(window_handle)
+}
+
 #[cfg(target_os = "macos")]
 impl GpuixRenderer {
+    /// Open this renderer's window on the already-running GPUI application.
+    /// The app, its menu bar, and its URL observers belong to the process and
+    /// stay with the first renderer; only the window is new.
+    fn open_window_macos(&self, options: WindowOptions) -> Result<()> {
+        let width = options.width.unwrap_or(800.0);
+        let height = options.height.unwrap_or(600.0);
+        let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
+        let activate = options.focus.unwrap_or(true);
+        let tree = self.tree.clone();
+        let callback = self.event_callback_for_view();
+        let selection = self.selection.clone();
+        let canvas_surfaces = self.canvas_surfaces.clone();
+
+        let handle = GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|cx| {
+                open_gpuix_window(
+                    cx,
+                    &options,
+                    width,
+                    height,
+                    activate,
+                    &tree,
+                    &callback,
+                    &title,
+                    &selection,
+                    &canvas_surfaces,
+                )
+            })
+        })?;
+
+        *self.window.lock().unwrap() = Some(handle);
+        *self.initialized.lock().unwrap() = true;
+        self.event_callback.lock().unwrap().take();
+        Ok(())
+    }
+
     fn window_handle(&self) -> Result<gpui::WindowHandle<GpuixView>> {
         self.window
             .lock()
@@ -811,20 +932,22 @@ async fn run_ui_commands(
                 })
             }
             UiCommand::GetAutomationBounds { response } => {
-                window.update(cx, move |_view, window, cx| {
+                window.update(cx, move |view, window, cx| {
+                    let state = view.paint_state.clone();
                     cx.notify();
                     window.refresh();
                     window.on_next_frame(move |_window, _cx| {
-                        response.send(crate::automation::all_bounds()).ok();
+                        response.send(state.all_bounds()).ok();
                     });
                 })
             }
             UiCommand::GetElementBounds { id, response } => {
-                window.update(cx, move |_view, window, cx| {
+                window.update(cx, move |view, window, cx| {
+                    let state = view.paint_state.clone();
                     cx.notify();
                     window.refresh();
                     window.on_next_frame(move |_window, _cx| {
-                        response.send(crate::automation::get_bounds(id)).ok();
+                        response.send(state.get_bounds(id)).ok();
                     });
                 })
             }
@@ -1275,7 +1398,7 @@ impl GpuixRenderer {
 
     fn automation_bounds(&self) -> Result<HashMap<u64, crate::automation::ElementBounds>> {
         #[cfg(target_os = "macos")]
-        return Ok(crate::automation::all_bounds());
+        return self.update_window(|view, _window, _cx| view.paint_state.all_bounds());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
@@ -1295,7 +1418,7 @@ impl GpuixRenderer {
 
     fn element_bounds(&self, id: u64) -> Result<Option<crate::automation::ElementBounds>> {
         #[cfg(target_os = "macos")]
-        return Ok(crate::automation::get_bounds(id));
+        return self.update_window(move |view, _window, _cx| view.paint_state.get_bounds(id));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
@@ -1458,9 +1581,9 @@ impl GpuixRenderer {
             }
         }
         if MAC_PLATFORM.with(|platform| platform.borrow().is_some()) {
-            return Err(Error::from_reason(
-                "A GPUI application already exists on this thread",
-            ));
+            // The application already runs: this is a second renderer, which
+            // means a second window on the existing app.
+            return self.open_window_macos(options);
         }
 
         let width = options.width.unwrap_or(800.0);
@@ -1519,60 +1642,21 @@ impl GpuixRenderer {
             // the keymap, so every binding must exist before it runs.
             #[cfg(target_os = "macos")]
             crate::app_menu::init(&app_name, cx);
-            let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
-            // A saved x/y pair restores the last position; anything else
-            // opens centered, as before.
-            let bounds = match requested_window_origin(window_options.x, window_options.y) {
-                Some(origin) => gpui::Bounds { origin, size },
-                None => gpui::Bounds::centered(None, size, cx),
-            };
 
-            match cx.open_window(
-                to_gpui_window_options(&window_options, bounds),
-                |_window, cx| {
-                    cx.new(|_| {
-                        GpuixView::new(
-                            tree.clone(),
-                            callback.clone(),
-                            title,
-                            selection.clone(),
-                            canvas_surfaces.clone(),
-                        )
-                    })
-                },
+            match open_gpuix_window(
+                cx,
+                &window_options,
+                width,
+                height,
+                activate,
+                &tree,
+                &callback,
+                &title,
+                &selection,
+                &canvas_surfaces,
             ) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
-                    // The close veto reads live view state at close time, so
-                    // arming later (setWindowObservers) needs no re-register.
-                    // A weak handle: a strong one would leak the view entity
-                    // at process exit (GPUI asserts on leaked handles).
-                    if let Err(error) = window_handle.update(cx, |_view, window, cx| {
-                        let entity = cx.entity().downgrade();
-                        window.on_window_should_close(cx, move |_window, cx| {
-                            let Some(entity) = entity.upgrade() else {
-                                return true;
-                            };
-                            let mut allow = true;
-                            let _ = entity.update(cx, |view, _cx| {
-                                if view.window_should_close {
-                                    emit_event_full(
-                                        &view.event_callback,
-                                        view.window_key_event_id,
-                                        "windowShouldClose",
-                                        |_| {},
-                                    );
-                                    allow = false;
-                                }
-                            });
-                            allow
-                        });
-                    }) {
-                        log::error!("Failed to install the close interceptor: {error:#}");
-                    }
-                    if activate {
-                        cx.activate(true);
-                    }
                 }
                 Err(error) => {
                     *startup_error_for_app.borrow_mut() = Some(error.to_string());
@@ -1657,6 +1741,14 @@ impl GpuixRenderer {
         let options = options.unwrap_or_default();
         if *self.initialized.lock().unwrap() {
             return Err(Error::from_reason("Renderer is already initialized"));
+        }
+        // One GPUI application per process: it owns the platform event loop,
+        // so a second renderer cannot spawn its own UI thread. Routing a
+        // second window through the existing UI thread is not built yet.
+        if UI_THREAD_STARTED.swap(true, Ordering::AcqRel) {
+            return Err(Error::from_reason(
+                "Multiple windows are not supported on this platform yet",
+            ));
         }
 
         let width = options.width.unwrap_or(800.0);
@@ -3670,7 +3762,13 @@ impl GpuixRenderer {
 
     #[napi]
     pub fn get_painted_text(&self) -> Vec<String> {
-        crate::text::painted_text()
+        #[cfg(target_os = "macos")]
+        return self
+            .update_window(|view, _window, _cx| view.paint_state.painted_text())
+            .unwrap_or_default();
+
+        #[cfg(not(target_os = "macos"))]
+        Vec::new()
     }
 
     /// Every highlight wash painted in the last frame, in paint order.
@@ -3679,10 +3777,16 @@ impl GpuixRenderer {
     /// assert on `highlight` without a screenshot.
     #[napi]
     pub fn get_painted_highlights(&self) -> Vec<crate::element_tree::HighlightMatch> {
-        crate::text::painted_highlights()
+        #[cfg(target_os = "macos")]
+        return self
+            .update_window(|view, _window, _cx| view.paint_state.painted_highlights())
+            .unwrap_or_default()
             .into_iter()
             .map(Into::into)
-            .collect()
+            .collect();
+
+        #[cfg(not(target_os = "macos"))]
+        Vec::new()
     }
 
     #[napi]
@@ -4484,7 +4588,7 @@ impl WebGpuixRenderer {
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getAutomationTree)]
     pub fn get_automation_tree(&self) -> Result<String, wasm_bindgen::JsValue> {
         notify_web();
-        let bounds = crate::automation::all_bounds();
+        let bounds = update_web_window(|view, _window, _cx| view.paint_state.all_bounds())?;
         let tree = self.tree.lock().unwrap();
         serde_json::to_string(&tree.to_automation_json(&bounds)).map_err(|error| {
             wasm_bindgen::JsValue::from_str(&format!("JSON serialization failed: {error}"))
@@ -4496,7 +4600,10 @@ impl WebGpuixRenderer {
         &self,
         element_id: f64,
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-        let Some(bounds) = crate::automation::get_bounds(web_element_id(element_id)?) else {
+        let id = web_element_id(element_id)?;
+        let Some(bounds) =
+            update_web_window(move |view, _window, _cx| view.paint_state.get_bounds(id))?
+        else {
             return Ok(wasm_bindgen::JsValue::NULL);
         };
         element_bounds_js(bounds)
@@ -4555,7 +4662,9 @@ impl WebGpuixRenderer {
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getPaintedText)]
     pub fn get_painted_text(&self) -> wasm_bindgen::JsValue {
-        web_string_array(crate::text::painted_text())
+        let painted = update_web_window(|view, _window, _cx| view.paint_state.painted_text())
+            .unwrap_or_default();
+        web_string_array(painted)
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = simulateClick)]
@@ -4800,6 +4909,10 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    /// Automation bounds, text-selection registry and paint logs for this
+    /// window's current frame. Render installs it as the thread's current
+    /// paint state so paint hooks address their own window.
+    pub(crate) paint_state: crate::text::paint::SharedPaintState,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Virtual-list scrolls queued for the next `GpuixView::render`, applied
@@ -4859,6 +4972,7 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
+            paint_state: std::sync::Arc::new(crate::text::paint::WindowPaintState::new()),
             virtual_lists: HashMap::new(),
             pending_list_scrolls: HashMap::new(),
             selection_drag_position: None,
@@ -6114,7 +6228,8 @@ impl GpuixView {
         }
 
         let before = entry.state.logical_scroll_top();
-        let selection_moved = crate::text::paint::update_drag_at(&self.selection, position);
+        let selection_moved =
+            crate::text::paint::update_drag_at(&self.paint_state, &self.selection, position);
         entry.state.scroll_by(gpui::px(step));
         let after = entry.state.logical_scroll_top();
         let list_moved =
@@ -6257,6 +6372,10 @@ impl gpui::Render for GpuixView {
         cx: &mut gpui::Context<Self>,
     ) -> impl gpui::IntoElement {
         use gpui::IntoElement;
+
+        // Everything the paint hooks record this frame (automation bounds,
+        // selection registry, paint logs) belongs to this window.
+        crate::text::paint::set_current_paint_state(&self.paint_state);
 
         window.set_window_title(&self.window_title);
 

@@ -110,8 +110,13 @@ const automationBackends = new WeakMap<NativeRenderer, InProcessBackend>()
  *  cost of a large mounted tree into a pinned core while scrolling. */
 const DEFAULT_FRAME_MS = 16
 
+type Tickable = Pick<GpuixRenderer, "requiresTick" | "tick">
+
 export interface FrameLoop {
   stop: () => void
+  /** Drive an additional renderer (another window) in the same loop. */
+  addRenderer: (renderer: Tickable) => void
+  removeRenderer: (renderer: Tickable) => void
 }
 
 /**
@@ -129,21 +134,23 @@ export interface FrameLoop {
  * Each frame is scheduled only after the previous one finishes, so a slow frame
  * delays the next one instead of letting timers pile up.
  *
- * `tick()` returning false means the last window closed. The loop stops and
- * `onTerminated` runs. `createApp()` uses that to exit the process.
+ * `tick()` returning false means the application stopped — the last window
+ * closed. All renderers share one application, so the first false stops the
+ * loop and `onTerminated` runs. `createApp()` uses that to exit the process.
  *
  * A throw from `tick()` must not stop the timer. On macOS that timer is the
  * AppKit pump; if it dies the window freezes while bun may still be alive.
  */
 export function startFrameLoop(
-  renderer: Pick<GpuixRenderer, "requiresTick" | "tick">,
+  renderer: Tickable,
   options: { frameMs?: number; onTerminated?: () => void } = {}
 ): FrameLoop {
   if (!renderer.requiresTick()) {
-    return { stop: () => {} }
+    return { stop: () => {}, addRenderer: () => {}, removeRenderer: () => {} }
   }
 
   const frameMs = options.frameMs ?? DEFAULT_FRAME_MS
+  const renderers = new Set<Tickable>([renderer])
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
 
@@ -153,16 +160,26 @@ export function startFrameLoop(
     timer = null
   }
 
+  const addRenderer = (extra: Tickable): void => {
+    if (extra.requiresTick()) renderers.add(extra)
+  }
+
+  const removeRenderer = (extra: Tickable): void => {
+    renderers.delete(extra)
+  }
+
   const loop = (): void => {
     if (stopped) return
     const started = performance.now()
     let running = true
-    try {
-      running = renderer.tick()
-    } catch (error) {
-      scheduleRuntimeError(error, "frame loop tick")
+    for (const current of renderers) {
+      try {
+        if (current.tick() === false) running = false
+      } catch (error) {
+        scheduleRuntimeError(error, "frame loop tick")
+      }
     }
-    if (running === false) {
+    if (!running) {
       stop()
       options.onTerminated?.()
       return
@@ -172,7 +189,7 @@ export function startFrameLoop(
   }
   loop()
 
-  return { stop }
+  return { stop, addRenderer, removeRenderer }
 }
 
 const RENDER_HOST_KEY = "__gpuivRenderHost"
@@ -184,10 +201,18 @@ export interface GpuivAppHandle {
   unmount: () => void
 }
 
+/** A `createWindow` handle: everything `createApp` returns, plus `close`,
+ *  which tears the tree down and closes the OS window. */
+export interface GpuivWindowHandle extends GpuivAppHandle {
+  close: () => void
+}
+
 type RenderSlot = {
   renderer?: NativeRenderer
   handle?: GpuivAppHandle
   loop?: FrameLoop
+  /** Windows opened through `createWindow`, newest last. */
+  extraWindows?: GpuivWindowHandle[]
   /** Last non-overlay root — the Reload button remounts it with lastOptions. */
   rootComponent?: Component
   lastOptions?: RenderOptions
@@ -287,7 +312,9 @@ function showRuntimeError(thrown: Error | string, errorContext?: string): void {
   if (slot.overlayShown) return
   slot.overlayShown = true
   try {
-    mountTree(slot, runtimeErrorOverlay(formatted, () => reloadApp(slot)), slot.lastOptions ?? {})
+    const host = slot.renderer
+    if (!host) return
+    mountTree(slot, host, runtimeErrorOverlay(formatted, () => reloadApp(slot)), slot.lastOptions ?? {})
   } catch (overlayError) {
     slot.overlayShown = false
     console.error("[gpuiv] failed to show runtime error overlay:", overlayError)
@@ -458,6 +485,13 @@ export interface RenderOptions extends WindowOptions, WindowKeyEventHandlers {
 export function resetApp(): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
   slot?.loop?.stop()
+  for (const window of slot?.extraWindows ?? []) {
+    try {
+      window.close()
+    } catch {
+      // A window whose renderer already died must not block the rest.
+    }
+  }
   slot?.handle?.unmount()
   Reflect.deleteProperty(globalThis, RENDER_HOST_KEY)
   uninstallRuntimeErrorHandlers()
@@ -545,25 +579,30 @@ export function createApp(
     // run — is the only thing that applies the new data.
     return slot.handle
   }
-  return mountTree(slot, rootComponent, options)
+  return mountTree(slot, host, rootComponent, options)
 }
 
-/** Mount `rootComponent` on the slot's renderer, replacing any live tree.
- *  Shared by createApp, the runtime error overlay, and its Reload button —
- *  each mount is a fresh app instance with the errorHandler wired, the
- *  render-level observer rebound, and the automation inspector reattached. */
+/** Where `mountTree` records the live handle of one window. The main slot is
+ *  one; every `createWindow` mount gets its own. */
+interface WindowMount {
+  handle?: GpuivAppHandle
+  mountSerial?: number
+}
+
+/** Mount `rootComponent` on `host`, replacing any live tree on that renderer.
+ *  Shared by createApp, createWindow, the runtime error overlay, and its
+ *  Reload button — each mount is a fresh app instance with the errorHandler
+ *  wired, the render-level observer rebound, and the automation inspector
+ *  reattached. */
 function mountTree(
-  slot: RenderSlot,
+  mount: WindowMount,
+  host: NativeRenderer,
   rootComponent: Component,
   options: RenderOptions
 ): GpuivAppHandle {
-  const host = slot.renderer
-  if (!host) {
-    throw new Error("GPUIX renderer is not initialized")
-  }
   const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen, onSelectionChange } = options
-  const previous = slot.handle
-  slot.handle = undefined
+  const previous = mount.handle
+  mount.handle = undefined
   if (previous) {
     console.log("[gpuiv] remount: unmount previous tree")
     previous.unmount()
@@ -571,7 +610,7 @@ function mountTree(
   // Bump after the old tree is gone: an error thrown during its unmount
   // schedules against the old serial and is dropped, while an error in the
   // new mount schedules against this one.
-  slot.mountSerial = (slot.mountSerial ?? 0) + 1
+  mount.mountSerial = (mount.mountSerial ?? 0) + 1
 
   const windowKeyEventId = nextWindowKeyEventId(host)
   const windowSelectionEventId = nextWindowSelectionEventId(host)
@@ -628,8 +667,71 @@ function mountTree(
       }
     },
   }
-  slot.handle = handle
+  mount.handle = handle
 
   console.log("[gpuiv] mount complete")
   return handle
+}
+
+/**
+ * Mount `rootComponent` in a NEW native window.
+ *
+ * Requires `createApp` to have run first — the first window owns the process's
+ * GPUI application (and, on macOS, the menu bar). Every window gets its own
+ * renderer, so element ids, events, selection, scroll state and automation
+ * queries stay per-window.
+ *
+ * The returned handle's `close()` unmounts the tree, closes the OS window, and
+ * drops the renderer from the frame loop. Closing through the OS close button
+ * (without an `onWindowShouldClose` veto) also closes the window; the frame
+ * loop keeps its empty renderer until the process exits — close() from JS is
+ * the tidy path.
+ *
+ * Not supported on Windows/Linux yet.
+ */
+export function createWindow(
+  rootComponent: Component,
+  options: RenderOptions = {}
+): GpuivWindowHandle {
+  const {
+    onEvent,
+    onKeyDown,
+    onKeyUp,
+    debugFrameOverlay,
+    onRuntimeError: _onRuntimeError,
+    errorOverlay: _errorOverlay,
+    renderer: _injected,
+    ...windowOptions
+  } = options
+  const slot = renderSlot()
+  if (!slot.renderer) {
+    throw new Error("createWindow requires a main window: call createApp first")
+  }
+
+  const renderer = createNativeRenderer()
+  renderer.init(windowOptions)
+  if (debugFrameOverlay) {
+    renderer.setDebugFrameOverlay?.(debugFrameOverlay)
+  }
+  installRuntimeErrorHandlers()
+  slot.loop?.addRenderer(renderer)
+
+  const mount: WindowMount = {}
+  const handle = mountTree(mount, renderer, rootComponent, options)
+  const window: GpuivWindowHandle = {
+    ...handle,
+    close: () => {
+      handle.unmount()
+      try {
+        renderer.closeWindow?.()
+      } catch (error) {
+        scheduleRuntimeError(error, "window close")
+      }
+      slot.loop?.removeRenderer(renderer)
+      slot.extraWindows = slot.extraWindows?.filter((open) => open !== window)
+    },
+  }
+  ;(slot.extraWindows ??= []).push(window)
+  console.log("[gpuiv] created native window")
+  return window
 }
