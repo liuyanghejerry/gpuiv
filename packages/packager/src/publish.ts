@@ -23,7 +23,9 @@ import path from "node:path"
 import { loadConfig } from "./config.js"
 import { getTargetSpec } from "./targets.js"
 import { loadPrivateKey, parsePublicKey, publicKeyId, signBuffer } from "./keys.js"
-import { resolveS3Config, S3Store, type S3EnvConfig } from "./s3.js"
+import { openFeedStore, type FeedStoreKind } from "./feed-store.js"
+import type { S3EnvConfig } from "./s3.js"
+import type { GithubEnvConfig } from "./github.js"
 
 export interface ReleasePlatformEntry {
   url: string
@@ -54,7 +56,11 @@ export interface PublishArgs {
   channel: string
   notes?: string
   privateKeyPath?: string
+  /** Feed backend; S3 stays the default, GitHub serves the same keys as
+   * release assets (docs/auto-update-plan.md). */
+  store?: FeedStoreKind
   s3?: Partial<S3EnvConfig>
+  github?: Partial<GithubEnvConfig>
 }
 
 export async function publishRelease(args: PublishArgs): Promise<void> {
@@ -76,7 +82,7 @@ export async function publishRelease(args: PublishArgs): Promise<void> {
     )
   }
 
-  const store = new S3Store({ ...resolveS3Config(args.s3) })
+  const store = openFeedStore(args.store ?? "s3", { s3: args.s3, github: args.github })
   const version = config.version
   const notes = args.notes ?? config.releaseNotes ?? ""
   const pubDate = new Date().toISOString()
@@ -128,11 +134,13 @@ export interface PromoteArgs {
   version: string
   channel: string
   targets: string[]
+  store?: FeedStoreKind
   s3?: Partial<S3EnvConfig>
+  github?: Partial<GithubEnvConfig>
 }
 
 export async function promoteRelease(args: PromoteArgs): Promise<void> {
-  const store = new S3Store({ ...resolveS3Config(args.s3) })
+  const store = openFeedStore(args.store ?? "s3", { s3: args.s3, github: args.github })
   const releaseKey = `releases/${args.version}`
   let manifest: ReleaseManifest | null = null
   for (const targetName of args.targets) {

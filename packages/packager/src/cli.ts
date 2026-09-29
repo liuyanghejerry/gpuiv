@@ -2,11 +2,12 @@
  *
  *   gpuiv-packager build    [--config] [--target]… [--node-path] [--out] [--no-smoke]
  *   gpuiv-packager keygen   [--out <path prefix>]
- *   gpuiv-packager publish  --channel <c> [--target]… [--notes] [--private-key] [s3 flags]
- *   gpuiv-packager promote  --channel <c> --version <v> [--target]… [s3 flags]
+ *   gpuiv-packager publish  --channel <c> [--target]… [--notes] [--private-key] [--store s3|github] [store flags]
+ *   gpuiv-packager promote  --channel <c> --version <v> [--target]… [--store s3|github] [store flags]
  *
  * S3 location flags: --endpoint --region --bucket --prefix (over
- * GPUIV_S3_* / AWS_* env). */
+ * GPUIV_S3_* / AWS_* env). GitHub store flags: --repository --token
+ * --tag-prefix --feed-tag (over GPUIV_GITHUB_* / GITHUB_* env). */
 
 import { writeFileSync } from "node:fs"
 import { buildPackage } from "./index.js"
@@ -63,7 +64,9 @@ export async function runCli(argv: string[]): Promise<number> {
           channel: String(flags.channel),
           notes: flags.notes,
           privateKeyPath: flags["private-key"],
+          store: storeKind(flags),
           s3: s3Overrides(flags),
+          github: githubOverrides(flags),
         })
         return 0
       }
@@ -74,7 +77,9 @@ export async function runCli(argv: string[]): Promise<number> {
           channel: String(flags.channel),
           version: String(flags.version),
           targets: flagList(flags.target),
+          store: storeKind(flags),
           s3: s3Overrides(flags),
+          github: githubOverrides(flags),
         })
         return 0
       }
@@ -142,6 +147,27 @@ function s3Overrides(flags: Record<string, string | string[]>): {
   return overrides
 }
 
+function storeKind(flags: Record<string, string | string[]>): "s3" | "github" {
+  const value = flags.store
+  if (value === undefined) return "s3"
+  if (value === "s3" || value === "github") return value
+  throw new Error(`--store must be "s3" or "github", got "${value}"`)
+}
+
+function githubOverrides(flags: Record<string, string | string[]>): {
+  repository?: string
+  token?: string
+  tagPrefix?: string
+  feedTag?: string
+} {
+  const overrides: Record<string, string> = {}
+  for (const key of ["repository", "token", "tag-prefix", "feed-tag"]) {
+    const value = flags[key] as FlagValue
+    if (typeof value === "string") overrides[key === "tag-prefix" ? "tagPrefix" : key === "feed-tag" ? "feedTag" : key] = value
+  }
+  return overrides
+}
+
 function printUsage(): void {
   console.log(`gpuiv-packager — package a GPUIV app for distribution
 
@@ -166,6 +192,9 @@ publish/promote flags:
   --version <v>          (promote) the release to point the channel at
   --notes <text>         (publish) release notes
   --private-key <path>   signing key file (or GPUIV_UPDATE_PRIVATE_KEY env)
+  --store s3|github      feed backend (default s3)
   --endpoint/--region/--bucket/--prefix
-                         S3 location (or GPUIV_S3_* / AWS_* env)`)
+                         S3 location (or GPUIV_S3_* / AWS_* env)
+  --repository/--token/--tag-prefix/--feed-tag
+                         GitHub store (or GPUIV_GITHUB_* / GITHUB_* env)`)
 }
