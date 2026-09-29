@@ -9,6 +9,8 @@ export {
   showSystemNotification,
 } from "./notifications.js"
 export { onOpenUrls, onOpenRequests, parseOpenRequest, registerUrlScheme } from "./deep-links.js"
+export { setTray, clearTray } from "./tray.js"
+export type { TrayOptions } from "./tray.js"
 export type { OpenRequest } from "./deep-links.js"
 export type {
   NewPathPromptOptions,

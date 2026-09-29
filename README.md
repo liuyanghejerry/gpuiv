@@ -410,6 +410,26 @@ const renderer = useGpuixRequired()
 chrome. `zoomWindow()` toggles macOS zoom or Windows/Linux maximize/restore;
 it is not fullscreen. Programmatic edge resizing is not exposed.
 
+## Tray
+
+`setTray` / `clearTray` manage the process tray (macOS status item, Windows
+notify icon). One tray per process — a second `setTray` replaces the first —
+and the third argument fires on a tray click:
+
+```tsx
+import { setTray, clearTray } from '@gpuiv/vue'
+
+await setTray(renderer, { iconPath: trayPng, tooltip: 'Chat', template: true }, () => {
+  showMainWindow()
+})
+await clearTray(renderer)
+```
+
+`template: true` renders the icon as a monochrome macOS menu-bar template.
+Windows loads `.ico` (other formats best-effort). Linux reports unsupported —
+StatusNotifierItem over DBus is not implemented. A tray menu is not offered
+yet; clicks are the whole surface.
+
 Use `windowDragRegion` on a dedicated title/spacer `<div>` to hand dragging
 to the OS, without a JS mouse handler. Keep buttons and inputs **beside**
 that region, not inside it: this is not CSS `app-region` inheritance or a

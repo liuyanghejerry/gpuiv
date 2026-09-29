@@ -846,11 +846,29 @@ export interface NativeRenderer {
   /** Register the app as the handler for a URL scheme (e.g. `"myapp"` for
    *  `myapp://` URLs). The callback receives `(null)` on success or the
    *  failure reason — macOS requires 12+, a bundle id, and an installed
-   *  app; Windows and Linux report unsupported. */
+   *  app; Windows registers per-user candidate keys (the default-protocol
+   *  claim stays the user's confirmation), Linux installs a per-user
+   *  desktop entry claimed through `xdg-mime`. */
   registerUrlScheme?(
     scheme: string,
     callback: (error: Error | null) => void
   ): void
+
+  // ── Tray ──────────────────────────────────────────────────────
+  /** Install the process tray (macOS status item, Windows notify icon).
+   *  One tray per process: a second call replaces the first. `onClick`
+   *  fires on a tray click. macOS and Windows; Linux reports unsupported. */
+  setTray?(
+    desc: {
+      iconPath: string
+      tooltip?: string | null
+      template?: boolean | null
+    },
+    onClick: (() => void) | null,
+    callback: (error: Error | null) => void
+  ): void
+  /** Remove the tray installed by `setTray`. */
+  clearTray?(callback: (error: Error | null) => void): void
 }
 
 /** One entry of a [`MenuBarMenu`]. Exactly one of `separator`, `submenu`, or

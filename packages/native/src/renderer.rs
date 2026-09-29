@@ -620,6 +620,13 @@ enum UiCommand {
         scheme: String,
         callback: ThreadsafeFunction<()>,
     },
+    SetTray {
+        request: crate::tray::TrayRequest,
+        callback: ThreadsafeFunction<()>,
+    },
+    ClearTray {
+        callback: ThreadsafeFunction<()>,
+    },
     GetWindowBounds {
         response: SyncSender<WindowBounds>,
     },
@@ -1214,6 +1221,21 @@ async fn run_ui_commands(
                         callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
                     })
                     .detach();
+                })
+            }
+            UiCommand::SetTray { request, callback } => {
+                window.update(cx, move |_view, _window, _cx| {
+                    // Main thread (the UI loop) is where the tray lives on
+                    // both platforms; the work is small and synchronous.
+                    let result = crate::tray::set(request)
+                        .map_err(napi::Error::from_reason);
+                    callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+                })
+            }
+            UiCommand::ClearTray { callback } => {
+                window.update(cx, move |_view, _window, _cx| {
+                    crate::tray::clear();
+                    callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
                 })
             }
             UiCommand::GetWindowBounds { response } => {
@@ -2451,7 +2473,83 @@ impl GpuixRenderer {
             target_os = "freebsd"
         )))]
         {
-            let _ = (identifier, name);
+            let _ = identifier;
+            let _ = name;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Install the process tray (status item / notify icon). One tray per
+    /// process: a second call replaces the first. `on_click` fires on a tray
+    /// click; `callback` reports whether installation succeeded.
+    #[napi]
+    pub fn set_tray(
+        &self,
+        desc: crate::tray::TrayDesc,
+        on_click: Option<ThreadsafeFunction<()>>,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        let request = crate::tray::TrayRequest { desc, on_click };
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|_cx| {
+                let result = crate::tray::set(request).map_err(Error::from_reason);
+                callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetTray { request, callback });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = request;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Remove the tray installed by `set_tray`.
+    #[napi]
+    pub fn clear_tray(&self, callback: ThreadsafeFunction<()>) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|_cx| {
+                crate::tray::clear();
+                callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ClearTray { callback });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = callback;
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))

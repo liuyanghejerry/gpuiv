@@ -284,6 +284,8 @@ pub struct TestGpuixRenderer {
     open_urls_handler: RefCell<crate::open_urls::OpenUrls>,
     last_url_scheme: RefCell<Option<String>>,
     url_scheme_errors: RefCell<VecDeque<Option<String>>>,
+    tray: RefCell<Option<crate::tray::TrayDesc>>,
+    tray_click: RefCell<Option<ThreadsafeFunction<()>>>,
 }
 
 #[napi]
@@ -387,6 +389,8 @@ impl TestGpuixRenderer {
             open_urls_handler: RefCell::new(crate::open_urls::OpenUrls::new()),
             last_url_scheme: RefCell::new(None),
             url_scheme_errors: RefCell::new(Default::default()),
+            tray: RefCell::new(None),
+            tray_click: RefCell::new(None),
         })
     }
 
@@ -962,6 +966,42 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn set_next_url_scheme_error(&self, error: Option<String>) {
         self.url_scheme_errors.borrow_mut().push_back(error);
+    }
+
+    /// Test stand-in for the production `setTray`: records the descriptor
+    /// and the click callback instead of touching the OS status area.
+    #[napi]
+    pub fn set_tray(
+        &self,
+        desc: crate::tray::TrayDesc,
+        on_click: Option<ThreadsafeFunction<()>>,
+        callback: ThreadsafeFunction<()>,
+    ) {
+        *self.tray.borrow_mut() = Some(desc);
+        *self.tray_click.borrow_mut() = on_click;
+        callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+
+    /// Test stand-in for `clearTray`.
+    #[napi]
+    pub fn clear_tray(&self, callback: ThreadsafeFunction<()>) {
+        *self.tray.borrow_mut() = None;
+        *self.tray_click.borrow_mut() = None;
+        callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+
+    /// The descriptor of the live tray, if `setTray` ran.
+    #[napi]
+    pub fn get_tray_desc(&self) -> Option<crate::tray::TrayDesc> {
+        self.tray.borrow().clone()
+    }
+
+    /// Fire the recorded click callback, as the OS tray would.
+    #[napi]
+    pub fn simulate_tray_click(&self) {
+        if let Some(callback) = self.tray_click.borrow().as_ref() {
+            callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+        }
     }
 
     /// The offscreen test window's frame, through the same `Window::bounds()`

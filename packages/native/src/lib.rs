@@ -27,6 +27,7 @@ mod motion;
 mod notifications;
 mod open_urls;
 mod renderer;
+mod tray;
 mod url_scheme;
 // The data model is public so `examples/bench_serde.rs` measures the real
 // types instead of a copy that silently drifts from them.

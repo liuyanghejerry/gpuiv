@@ -209,6 +209,22 @@ export declare class GpuixRenderer {
    */
   setAppIdentity(identifier: string, name: string): void
   /**
+   * Install the process tray (status item / notify icon). One tray per
+   * process: a second call replaces the first. `on_click` fires on a tray
+   * click; `callback` reports whether installation succeeded.
+   */
+  setTray(desc: TrayDesc, onClick: (((err: Error | null, ) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
+  /** Remove the tray installed by `set_tray`. */
+  clearTray(callback: ((err: Error | null, ) => any)): void
+  /**
+   * Register a system-wide hotkey. Registering an accelerator again
+   * replaces it. `on_trigger` fires whenever the combination is pressed
+   * anywhere in the OS; `callback` reports whether registration succeeded.
+   */
+  registerGlobalShortcut(request: HotkeyRequest, onTrigger: (((err: Error | null, ) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
+  /** Remove a hotkey registered by `register_global_shortcut`. */
+  unregisterGlobalShortcut(accelerator: string, callback: ((err: Error | null, ) => any)): void
+  /**
    * Post a notification to the OS notification center. A notification
    * whose `tag` matches an earlier one replaces it where the platform
    * supports it. Returns the effective tag — the described one, or a
@@ -590,6 +606,34 @@ export declare class TestGpuixRenderer {
    * null for success.
    */
   setNextUrlSchemeError(error?: string | undefined | null): void
+  /**
+   * Test stand-in for the production `setTray`: records the descriptor
+   * and the click callback instead of touching the OS status area.
+   */
+  setTray(desc: TrayDesc, onClick: (((err: Error | null, ) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
+  /** Test stand-in for `clearTray`. */
+  clearTray(callback: ((err: Error | null, ) => any)): void
+  /** The descriptor of the live tray, if `setTray` ran. */
+  getTrayDesc(): TrayDesc | null
+  /** Fire the recorded click callback, as the OS tray would. */
+  simulateTrayClick(): void
+  /**
+   * Test stand-in for the production `registerGlobalShortcut`: validates
+   * the accelerator through the real parser, records the trigger, and
+   * answers registration through the canned queue (empty = success).
+   */
+  registerGlobalShortcut(request: HotkeyRequest, onTrigger: (((err: Error | null, ) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
+  /** Test stand-in for `unregisterGlobalShortcut`. */
+  unregisterGlobalShortcut(accelerator: string, callback: ((err: Error | null, ) => any)): void
+  /** Whether a hotkey with this accelerator is currently registered. */
+  hasGlobalShortcut(accelerator: string): boolean
+  /** Fire the recorded trigger for an accelerator, as the OS would. */
+  fireGlobalShortcut(accelerator: string): void
+  /**
+   * Queue the next answer for `registerGlobalShortcut`: the error
+   * message, or null for success.
+   */
+  setNextHotkeyError(error?: string | undefined | null): void
   /**
    * The offscreen test window's frame, through the same `Window::bounds()`
    * the production renderer reads. The visual test window opens offscreen
@@ -1112,6 +1156,15 @@ export interface HighlightRect {
   height: number
 }
 
+export interface HotkeyRequest {
+  /**
+   * `'+'`-separated modifiers and key, e.g. `"cmd+shift+j"`,
+   * `"ctrl+alt+t"`. Modifiers: `ctrl`, `alt`/`option`, `shift`,
+   * `cmd`/`win`/`super`. Keys: `a`–`z`, `0`–`9`, `f1`–`f12`.
+   */
+  accelerator: string
+}
+
 /** Where one `decorations` range of an editor landed on screen. */
 export interface InputDecorationInfo {
   start: number
@@ -1333,6 +1386,20 @@ export interface SystemNotificationResponseJs {
    * itself was activated.
    */
   actionId?: string
+}
+
+export interface TrayDesc {
+  /**
+   * Filesystem path of the icon (macOS: any image AppKit reads, 16-18px
+   * logical; Windows: `.ico` preferred, other formats best-effort).
+   */
+  iconPath: string
+  tooltip?: string
+  /**
+   * macOS: render the icon as a monochrome template that follows the
+   * menu-bar appearance. Default false.
+   */
+  template?: boolean
 }
 
 /**

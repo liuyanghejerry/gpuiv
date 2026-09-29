@@ -49,11 +49,32 @@ core-text = "=21.0.0"
 core-graphics = "=0.24.0"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
+# Tray (NSStatusItem) lives in GPUIV, not GPUI — versions match the zed
+# workspace so cargo unifies them with gpui_macos's own copies.
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSControl",
+    "NSImage",
+    "NSStatusBar",
+    "NSStatusBarButton",
+    "NSStatusItem",
+    "objc2-core-foundation",
+] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = [
+    "NSString",
+] }
 
 # Same crate GPUI uses. A .node cannot ship an exe manifest, so Windows DPI
 # awareness is set at runtime in renderer.rs instead of via windows-manifest.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi"] }
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_UI_HiDpi",
+    # Tray: Shell_NotifyIconW on a message-only window.
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+] }
 
 [features]
 # test-support is default so published binaries include TestGpuixRenderer,
