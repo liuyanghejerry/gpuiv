@@ -115,3 +115,23 @@ export function zipDarwin(opts: { appPath: string; zipPath: string }): void {
   rmSync(opts.zipPath, { force: true })
   run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", opts.appPath, opts.zipPath])
 }
+
+/** A plain compressed image of the `.app`. The zip stays the feed artifact
+ * (notarytool accepts zips, the updater swaps them); the dmg is the
+ * human-downloadable shape beside it. A "pretty" windowed dmg (background,
+ * icon placement) needs AppleScript and is not worth the fragility until
+ * signing lands. */
+export function buildDmg(opts: { appPath: string; dmgPath: string; volumeName: string }): void {
+  rmSync(opts.dmgPath, { force: true })
+  run("hdiutil", [
+    "create",
+    "-volname",
+    opts.volumeName,
+    "-srcfolder",
+    opts.appPath,
+    "-format",
+    "UDZO",
+    "-ov",
+    opts.dmgPath,
+  ])
+}

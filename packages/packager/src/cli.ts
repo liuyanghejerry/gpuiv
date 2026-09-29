@@ -25,19 +25,21 @@ export async function runCli(argv: string[]): Promise<number> {
   try {
     switch (command) {
       case "build": {
-        const flags = parseFlags(argv.slice(1), ["no-smoke"])
+        const flags = parseFlags(argv.slice(1), ["no-smoke", "no-dmg"])
         const results = await buildPackage({
           configPath: flags.config,
           targets: flagList(flags.target),
           nodePath: flags["node-path"],
           outDir: flags.out,
           smoke: !flags["no-smoke"],
+          dmg: !flags["no-dmg"],
           smokeTimeoutMs: flags["smoke-timeout"] ? Number(flags["smoke-timeout"]) : undefined,
         })
         console.log(`\n[gpuiv-packager] ${results.length} artifact(s):`)
         for (const result of results) {
           const smoke = result.smokeScreenshot ? "smoke ✓" : "no smoke"
           console.log(`  ${result.artifactZip} (${result.artifactMb} MB, ${smoke})`)
+          if (result.artifactDmg) console.log(`  ${result.artifactDmg}`)
         }
         return 0
       }
@@ -184,6 +186,7 @@ build flags:
   --node-path <path>     explicit .node binding for the target
   --out <dir>            output directory (default: dist/package)
   --no-smoke             skip the packaged-app smoke test
+  --no-dmg               skip the macOS .dmg (darwin targets build one by default)
   --smoke-timeout <ms>   smoke test timeout (default from config)
 
 publish/promote flags:

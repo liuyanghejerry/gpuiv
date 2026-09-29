@@ -60,6 +60,9 @@ export interface PackageConfig {
     /** Extra Info.plist keys, merged over generated keys. Supports nested
      * dictionaries/arrays, e.g. CFBundleURLTypes for deep links. */
     plist?: Record<string, PlistValue>
+    /** Build a `.dmg` beside the zip for darwin targets (default true; needs
+     * `hdiutil`, so cross-packaging from other hosts skips it). */
+    dmg?: boolean
   }
   /** Bun target names to build when none are passed on the CLI. */
   targets?: string[]

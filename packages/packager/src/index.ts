@@ -17,7 +17,7 @@ import { defaultHostTargetName, loadConfig, type PackageConfig, type ResolvedCon
 import { bundleApp, executableLayout } from "./bundle.js"
 import { stageBindingShim } from "./shim.js"
 import { resolveNodeFile, getTarget, TARGETS, type TargetSpec } from "./targets.js"
-import { wrapMacApp, zipDarwin } from "./macos.js"
+import { buildDmg, wrapMacApp, zipDarwin } from "./macos.js"
 import { organizeWindowsProduct, zipWindows } from "./windows.js"
 import { smokeTest } from "./smoke.js"
 
@@ -36,6 +36,9 @@ export interface BuildPackageArgs {
   smoke?: boolean
   /** Overrides the config's smokeTimeoutMs. */
   smokeTimeoutMs?: number
+  /** Default true for darwin targets (`mac.dmg` in the config, `--no-dmg`
+   * on the CLI). A dmg needs `hdiutil`, so it is skipped off macOS. */
+  dmg?: boolean
 }
 
 export interface PackageResult {
@@ -43,6 +46,8 @@ export interface PackageResult {
   productDir: string
   exePath: string
   artifactZip: string
+  /** The human-downloadable dmg beside the zip, when one was built. */
+  artifactDmg?: string
   artifactMb: number
   smokeScreenshot?: string
 }
@@ -120,10 +125,17 @@ async function buildOne(config: ResolvedConfig, spec: TargetSpec, args: BuildPac
   const zipName = `${sanitize(config.productName)}-${spec.name}.zip`
   const zipPath = path.join(config.outDir, zipName)
   let smokeScreenshot: string | undefined
+  let dmgPath: string | undefined
 
   if (spec.platform === "darwin") {
     wrapMacApp({ config, appPath: layout.productDir, exePath: layout.exePath })
     zipDarwin({ appPath: layout.productDir, zipPath })
+    // The dmg rides beside the zip: humans drag it from the release, the
+    // updater and notarytool keep consuming the zip.
+    if ((args.dmg ?? config.mac?.dmg ?? true) && process.platform === "darwin") {
+      dmgPath = path.join(config.outDir, `${sanitize(config.productName)}-${spec.name}.dmg`)
+      buildDmg({ appPath: layout.productDir, dmgPath, volumeName: config.productName })
+    }
   } else if (spec.platform === "win32") {
     organizeWindowsProduct({ config, productDir: layout.productDir })
     zipWindows({ productDir: layout.productDir, zipPath })
@@ -149,11 +161,13 @@ async function buildOne(config: ResolvedConfig, spec: TargetSpec, args: BuildPac
   }
 
   console.log(`[gpuiv-packager] artifact: ${zipPath} (${mb(zipPath)} MB)`)
+  if (dmgPath) console.log(`[gpuiv-packager] artifact: ${dmgPath} (${mb(dmgPath)} MB)`)
   return {
     target: spec.name,
     productDir: layout.productDir,
     exePath: layout.exePath,
     artifactZip: spec.platform === "linux" ? layout.productDir : zipPath,
+    artifactDmg: dmgPath,
     artifactMb: mb(spec.platform === "linux" ? layout.productDir : zipPath),
     smokeScreenshot,
   }
