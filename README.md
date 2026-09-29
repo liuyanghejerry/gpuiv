@@ -437,8 +437,7 @@ the same as `createApp`'s (`RenderOptions`). The returned handle adds `close()`;
 closing through the OS close button also works, but `close()` from JS is the
 tidy path — it drops the renderer from the frame loop instead of leaving an
 empty one ticking until the process exits. The automation stdio bus serves the
-main window only. Windows and Linux support is pending (the second `init()`
-reports an explicit error there today).
+main window only.
 
 ## Tray
 
@@ -3252,7 +3251,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Canvas PNG export (`toDataURL`, `toBlob`, renderer `canvasToPng`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
-- [x] Multiple windows on macOS (`createWindow()`: one renderer per window, ids/events/selection/automation stay per-window; Windows/Linux pending)
+- [x] Multiple windows (`createWindow()`: one renderer per window, ids/events/selection/automation stay per-window; on Windows/Linux later windows open on the process's single UI thread)
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
 - [x] Vue Fast Refresh during `bun --hot` (HMR preload: edited components reload in place, the rest of the tree keeps `ref` state)
 - [x] Vue DevTools (`connectVueDevtools()` + the standalone devtools server: component tree and `setup()` state)
