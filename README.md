@@ -430,6 +430,24 @@ Windows loads `.ico` (other formats best-effort). Linux reports unsupported —
 StatusNotifierItem over DBus is not implemented. A tray menu is not offered
 yet; clicks are the whole surface.
 
+## Global shortcuts
+
+`registerGlobalShortcut` / `unregisterGlobalShortcut` arm system-wide hotkeys
+that work with any app focused. Registering an accelerator again replaces it:
+
+```tsx
+import { registerGlobalShortcut, unregisterGlobalShortcut } from '@gpuiv/vue'
+
+await registerGlobalShortcut(renderer, 'cmd+shift+j', () => focusComposer())
+await unregisterGlobalShortcut(renderer, 'cmd+shift+j')
+```
+
+Accelerators are `'+'`-separated modifiers — `ctrl`, `alt`/`option`, `shift`,
+`cmd`/`win`/`super` — then one key: `a`–`z`, `0`–`9`, `f1`–`f12`. macOS uses
+Carbon `RegisterEventHotKey` (no accessibility permission needed); Windows
+uses `RegisterHotKey` (a combination another app already claimed fails).
+Linux reports unsupported — X11 `XGrabKey` does not survive Wayland.
+
 Use `windowDragRegion` on a dedicated title/spacer `<div>` to hand dragging
 to the OS, without a JS mouse handler. Keep buttons and inputs **beside**
 that region, not inside it: this is not CSS `app-region` inheritance or a

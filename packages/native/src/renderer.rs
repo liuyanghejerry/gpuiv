@@ -627,6 +627,15 @@ enum UiCommand {
     ClearTray {
         callback: ThreadsafeFunction<()>,
     },
+    RegisterGlobalShortcut {
+        request: crate::hotkeys::HotkeyRequest,
+        on_trigger: Option<ThreadsafeFunction<()>>,
+        callback: ThreadsafeFunction<()>,
+    },
+    UnregisterGlobalShortcut {
+        accelerator: String,
+        callback: ThreadsafeFunction<()>,
+    },
     GetWindowBounds {
         response: SyncSender<WindowBounds>,
     },
@@ -1235,6 +1244,19 @@ async fn run_ui_commands(
             UiCommand::ClearTray { callback } => {
                 window.update(cx, move |_view, _window, _cx| {
                     crate::tray::clear();
+                    callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+                })
+            }
+            UiCommand::RegisterGlobalShortcut { request, on_trigger, callback } => {
+                window.update(cx, move |_view, _window, _cx| {
+                    let result =
+                        crate::hotkeys::set(request, on_trigger).map_err(napi::Error::from_reason);
+                    callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+                })
+            }
+            UiCommand::UnregisterGlobalShortcut { accelerator, callback } => {
+                window.update(cx, move |_view, _window, _cx| {
+                    crate::hotkeys::clear(&accelerator);
                     callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
                 })
             }
@@ -2550,6 +2572,90 @@ impl GpuixRenderer {
         )))]
         {
             let _ = callback;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Register a system-wide hotkey. Registering an accelerator again
+    /// replaces it. `on_trigger` fires whenever the combination is pressed
+    /// anywhere in the OS; `callback` reports whether registration succeeded.
+    #[napi]
+    pub fn register_global_shortcut(
+        &self,
+        request: crate::hotkeys::HotkeyRequest,
+        on_trigger: Option<ThreadsafeFunction<()>>,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|_cx| {
+                let result = crate::hotkeys::set(request, on_trigger).map_err(Error::from_reason);
+                callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::RegisterGlobalShortcut {
+            request,
+            on_trigger,
+            callback,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (request, on_trigger);
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Remove a hotkey registered by `register_global_shortcut`.
+    #[napi]
+    pub fn unregister_global_shortcut(
+        &self,
+        accelerator: String,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|_cx| {
+                crate::hotkeys::clear(&accelerator);
+                callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::UnregisterGlobalShortcut {
+            accelerator,
+            callback,
+        });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (accelerator, callback);
             Err(Error::from_reason(
                 "The production GPUIX renderer does not support this operating system",
             ))

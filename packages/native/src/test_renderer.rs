@@ -286,6 +286,8 @@ pub struct TestGpuixRenderer {
     url_scheme_errors: RefCell<VecDeque<Option<String>>>,
     tray: RefCell<Option<crate::tray::TrayDesc>>,
     tray_click: RefCell<Option<ThreadsafeFunction<()>>>,
+    hotkeys: RefCell<std::collections::HashMap<String, Option<ThreadsafeFunction<()>>>>,
+    hotkey_errors: RefCell<VecDeque<Option<String>>>,
 }
 
 #[napi]
@@ -391,6 +393,8 @@ impl TestGpuixRenderer {
             url_scheme_errors: RefCell::new(Default::default()),
             tray: RefCell::new(None),
             tray_click: RefCell::new(None),
+            hotkeys: RefCell::new(Default::default()),
+            hotkey_errors: RefCell::new(Default::default()),
         })
     }
 
@@ -1002,6 +1006,66 @@ impl TestGpuixRenderer {
         if let Some(callback) = self.tray_click.borrow().as_ref() {
             callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
         }
+    }
+
+    /// Test stand-in for the production `registerGlobalShortcut`: validates
+    /// the accelerator through the real parser, records the trigger, and
+    /// answers registration through the canned queue (empty = success).
+    #[napi]
+    pub fn register_global_shortcut(
+        &self,
+        request: crate::hotkeys::HotkeyRequest,
+        on_trigger: Option<ThreadsafeFunction<()>>,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        let outcome = match crate::hotkeys::validate_for_tests(&request.accelerator) {
+            Err(message) => Err(Error::from_reason(message)),
+            Ok(()) => match self.hotkey_errors.borrow_mut().pop_front().flatten() {
+                Some(message) => Err(Error::from_reason(message)),
+                None => {
+                    self.hotkeys
+                        .borrow_mut()
+                        .insert(request.accelerator.clone(), on_trigger);
+                    Ok(())
+                }
+            },
+        };
+        callback.call(outcome, ThreadsafeFunctionCallMode::NonBlocking);
+        Ok(())
+    }
+
+    /// Test stand-in for `unregisterGlobalShortcut`.
+    #[napi]
+    pub fn unregister_global_shortcut(
+        &self,
+        accelerator: String,
+        callback: ThreadsafeFunction<()>,
+    ) {
+        self.hotkeys.borrow_mut().remove(&accelerator);
+        callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+
+    /// Whether a hotkey with this accelerator is currently registered.
+    #[napi]
+    pub fn has_global_shortcut(&self, accelerator: String) -> bool {
+        self.hotkeys.borrow().contains_key(&accelerator)
+    }
+
+    /// Fire the recorded trigger for an accelerator, as the OS would.
+    #[napi]
+    pub fn fire_global_shortcut(&self, accelerator: String) {
+        self.hotkeys.borrow().get(&accelerator).map(|trigger| {
+            if let Some(callback) = trigger {
+                callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+            }
+        });
+    }
+
+    /// Queue the next answer for `registerGlobalShortcut`: the error
+    /// message, or null for success.
+    #[napi]
+    pub fn set_next_hotkey_error(&self, error: Option<String>) {
+        self.hotkey_errors.borrow_mut().push_back(error);
     }
 
     /// The offscreen test window's frame, through the same `Window::bounds()`

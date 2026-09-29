@@ -1004,6 +1004,40 @@ export class TestRenderer implements NativeRenderer {
     native.simulateTrayClick?.()
   }
 
+  /** Register a hotkey through the test bridge: validates via the real
+   *  parser, records the trigger, answers from the canned queue. */
+  registerGlobalShortcut(
+    request: { accelerator: string },
+    onTrigger: (() => void) | null,
+    callback: (error: Error | null) => void
+  ): void {
+    this.native.registerGlobalShortcut?.(request, onTrigger, callback)
+  }
+
+  /** Unregister a hotkey through the test bridge. */
+  unregisterGlobalShortcut(accelerator: string, callback: (error: Error | null) => void): void {
+    this.native.unregisterGlobalShortcut?.(accelerator, callback)
+  }
+
+  /** Whether the test bridge currently holds this accelerator. */
+  hasGlobalShortcut(accelerator: string): boolean {
+    const native = this.native as { hasGlobalShortcut?(accelerator: string): boolean }
+    return native.hasGlobalShortcut?.(accelerator) ?? false
+  }
+
+  /** Fire the recorded trigger, as the OS would. */
+  fireGlobalShortcut(accelerator: string): void {
+    const native = this.native as { fireGlobalShortcut?(accelerator: string): void }
+    native.fireGlobalShortcut?.(accelerator)
+  }
+
+  /** Queue the next answer for `registerGlobalShortcut`: the error
+   *  message, or null for success. */
+  setNextHotkeyError(error: string | null): void {
+    const native = this.native as { setNextHotkeyError?(error: string | null): void }
+    native.setNextHotkeyError?.(error)
+  }
+
   /** Put a straight-alpha RGBA image on the platform's in-memory test
    *  clipboard, mirroring the production encoder path. */
   writeClipboardImage(data: Uint8Array, width: number, height: number): void {
