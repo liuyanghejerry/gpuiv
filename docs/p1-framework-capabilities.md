@@ -135,7 +135,7 @@ lifecycle design. PDF layout/export remains independent of these shell APIs.
 
 ## Third delivery: markdown math (display formulas)
 
-Issue #101 P0-2, display half. Inline baseline-aligned formulas remain open.
+Issue #101 P0-2, display half; the inline half is the last entry in this list.
 
 - [x] `renderMathMap(source, options?)` in `@gpuiv/vue/math`: scans for
   `$$…$$` / `$…$` (code spans skipped), renders via MathJax v3 headless
@@ -148,9 +148,15 @@ Issue #101 P0-2, display half. Inline baseline-aligned formulas remain open.
   literal TeX (accent mono run inline, muted card for blocks).
 - [x] Streaming parity: math parses through the incremental path like any
   other block (no distance effects); corpus covers it.
-- [ ] Inline math as baseline-aligned SVG runs inside a paragraph — needs
-  image runs in the text layout pipeline (`SelectableText` lays out one
-  `StyledText`); the map already carries `depth` px for that layout.
+- [x] Inline math as baseline-aligned images inside a paragraph: the flattener
+  replaces a mapped `$inline$` run with space characters whose advances
+  reserve the formula's width (NBSP / THIN / HAIR denominations measured from
+  the live mono font, greedy combination, rounding up so the next glyph never
+  overlaps), and the text underlay paints the rasterized SVG (usvg, cached
+  per element lifetime) with its bottom `depth` px below the line baseline —
+  gpui's own `padding + ascent` baseline math. Copy and search see the
+  placeholder spaces, not the TeX (DOM inline-image parity); unmapped inline
+  formulas keep the literal TeX.
 
 ## Validation scope
 

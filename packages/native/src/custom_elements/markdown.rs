@@ -49,6 +49,9 @@ pub struct MarkdownElement {
     /// reset to a full parse. A same-source frame is a no-op (one `str`
     /// compare, no hashing).
     parser: IncrementalParser,
+    /// Rasterized inline-formula SVGs shared with every frame's `MdContext`,
+    /// so a formula rasterizes once for the element's lifetime.
+    math_images: crate::text::InlineImageCache,
 }
 
 impl MarkdownElement {
@@ -72,7 +75,15 @@ impl CustomElement for MarkdownElement {
         let theme = self.theme.clone();
         let math = self.math.clone();
         let mermaid = self.mermaid.clone();
+        let math_images = self.math_images.clone();
         let tree = self.tree();
+
+        // Inline-formula placeholders reserve each image's exact advance;
+        // the denominations come from the live font, measured once a frame.
+        let space_advances = crate::markdown::render::SpaceAdvances::measure(
+            &theme.mono_font(),
+            window,
+        );
 
         // Link clicks are hit-tested per byte range inside the painted text, so
         // clicking prose emits nothing and clicking the second link emits the
@@ -119,6 +130,8 @@ impl CustomElement for MarkdownElement {
             ctx.highlight_set.clone(),
             math,
             mermaid,
+            space_advances,
+            math_images,
         );
         let body = render_tree(tree, &mut md, window);
 

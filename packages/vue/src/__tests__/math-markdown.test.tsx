@@ -10,10 +10,12 @@ describeNative("markdown math", () => {
     const source = "Before.\n\n$$E = mc^2$$\n\nInline $a_1 + b^2$ stays text."
     const math = await renderMathMap(source, { color: "#e8e8e8" })
 
-    // The map covers both formulas; only the display one is block-rendered.
+    // The map covers both formulas; both now paint as images — the block
+    // centered, the inline one riding the text line — so no literal TeX
+    // reaches the paint log.
     expect(math["E = mc^2"].src.startsWith("data:image/svg+xml;base64,")).toBe(true)
-    expect(math["E = mc^2"].width).toBeGreaterThan(0)
-    expect(math["E = mc^2"].height).toBeGreaterThan(1)
+    expect(math["a_1 + b^2"].width).toBeGreaterThan(0)
+    expect(math["a_1 + b^2"].height).toBeGreaterThan(1)
 
     const App = defineComponent({
       setup() {
@@ -22,11 +24,32 @@ describeNative("markdown math", () => {
     })
     const app = createTestApp(App)
     const painted = app.renderer.getPaintedText().join("\n")
-    // Mapped display math paints as an image: no literal TeX in the paint log.
     expect(painted).toContain("Before.")
     expect(painted).not.toContain("E = mc^2")
-    // Inline math keeps its TeX source visible as the fallback run.
-    expect(painted).toContain("a_1 + b^2")
+    expect(painted).not.toContain("a_1 + b^2")
+    // The surrounding prose still paints around the inline image.
+    expect(painted).toContain("Inline")
+    expect(painted).toContain("stays text.")
+    app.unmount()
+  })
+
+  it("keeps selection working across an inline formula image", async () => {
+    const source = "Before $a^2$ after"
+    const math = await renderMathMap(source)
+    const App = defineComponent({
+      setup() {
+        return () => h("markdown", { source, math })
+      },
+    })
+    const app = createTestApp(App)
+    await app.settle()
+    // A drag across the formula selects the surrounding text; the formula
+    // itself contributes its space placeholder, never the TeX. The paragraph's
+    // first line spans y 0..22 with no outer padding.
+    const selected = app.renderer.dragSelect(0, 10, 900, 12)
+    expect(selected).toContain("Before")
+    expect(selected).toContain("after")
+    expect(selected).not.toContain("a^2")
     app.unmount()
   })
 

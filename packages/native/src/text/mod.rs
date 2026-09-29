@@ -16,6 +16,6 @@ pub mod selection;
 pub use paint::{
     chrome_text, log_painted_text, painted_highlights, painted_text, range_rects,
     record_start_region, selectable_text, selection_frame_reset, selection_key, HighlightSource,
-    PaintedHighlight, SelectableText, SharedSelection,
+    InlineImage, InlineImageCache, PaintedHighlight, SelectableText, SharedSelection,
 };
 pub use search::{GroupList, HighlightContext, HighlightSet};

@@ -460,7 +460,7 @@ fn svg_bytes(src: &str) -> Option<Vec<u8>> {
     std::fs::read(src).ok()
 }
 
-fn decode_image_data_url(src: &str) -> Option<(gpui::ImageFormat, Vec<u8>)> {
+pub(crate) fn decode_image_data_url(src: &str) -> Option<(gpui::ImageFormat, Vec<u8>)> {
     let (metadata, data) = src.strip_prefix("data:")?.split_once(',')?;
     let mut parts = metadata.split(';');
     let mime_type = parts.next()?.to_ascii_lowercase();
