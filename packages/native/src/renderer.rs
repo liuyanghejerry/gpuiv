@@ -327,10 +327,24 @@ fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) 
     }
 }
 
-/// Whether the process's single GPUI UI thread was ever started. Never
-/// reset: after the last window closes the process is on its way out.
+/// Whether the process's single GPUI UI thread was ever started, and the
+/// channel every renderer sends its commands through. One GPUI application
+/// owns the platform event loop per process; the first renderer spawns the
+/// thread, later renderers open their windows through the same channel.
+/// `RUNNING` is never reset: after the last window closes the process is on
+/// its way out.
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-static UI_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
+static UI_THREAD_COMMANDS: std::sync::OnceLock<mpsc::UnboundedSender<UiCommand>> =
+    std::sync::OnceLock::new();
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+static UI_THREAD_RUNNING: AtomicBool = AtomicBool::new(false);
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+static NEXT_WINDOW_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn next_window_id() -> u64 {
+    NEXT_WINDOW_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
 
 #[cfg(target_os = "macos")]
 /// Open one `GpuixView` window on `cx` and arm its close veto. Shared by the
@@ -570,7 +584,89 @@ enum ClockControl {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+/// One window's worth of state for a window the UI thread opens on request.
+struct OpenWindowRequest {
+    id: u64,
+    options: WindowOptions,
+    activate: bool,
+    tree: Arc<Mutex<RetainedTree>>,
+    callback: Option<EventCallback>,
+    selection: SharedSelection,
+    canvas_surfaces: crate::canvas::CanvasStore,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
+    /// Open one more window on the UI thread.
+    OpenWindow {
+        request: OpenWindowRequest,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    /// One command addressed to one window of this process.
+    ForWindow {
+        id: u64,
+        command: WindowCommand,
+    },
+    OpenUrl(String),
+    WriteClipboardImage {
+        png: Vec<u8>,
+    },
+    ReadClipboardImage {
+        response: SyncSender<Option<Vec<u8>>>,
+    },
+    WriteClipboardText {
+        text: String,
+    },
+    ReadClipboardText {
+        response: SyncSender<Option<String>>,
+    },
+    PromptForPaths {
+        options: PathPromptOptionsDesc,
+        callback: ThreadsafeFunction<PathPromptOutcome>,
+    },
+    PromptForNewPath {
+        directory: String,
+        suggested_name: Option<String>,
+        callback: ThreadsafeFunction<NewPathPromptOutcome>,
+    },
+    SetAppIdentity {
+        identifier: String,
+        name: String,
+    },
+    ShowSystemNotification(gpui::SystemNotification),
+    DismissSystemNotification(String),
+    SetSystemNotificationResponseCallback {
+        callback: ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>,
+    },
+    RegisterUrlScheme {
+        scheme: String,
+        callback: ThreadsafeFunction<()>,
+    },
+    SetTray {
+        request: crate::tray::TrayRequest,
+        callback: ThreadsafeFunction<()>,
+    },
+    ClearTray {
+        callback: ThreadsafeFunction<()>,
+    },
+    RegisterGlobalShortcut {
+        request: crate::hotkeys::HotkeyRequest,
+        on_trigger: Option<ThreadsafeFunction<()>>,
+        callback: ThreadsafeFunction<()>,
+    },
+    UnregisterGlobalShortcut {
+        accelerator: String,
+        callback: ThreadsafeFunction<()>,
+    },
+    AddFonts {
+        fonts: Vec<std::borrow::Cow<'static, [u8]>>,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+/// A command that one particular window executes.
+enum WindowCommand {
     Invalidate,
     ActivateWindow,
     SetWindowTitle(String),
@@ -691,63 +787,8 @@ enum UiCommand {
     IsFullscreen {
         response: SyncSender<bool>,
     },
-    OpenUrl(String),
-    WriteClipboardImage {
-        png: Vec<u8>,
-    },
-    ReadClipboardImage {
-        response: SyncSender<Option<Vec<u8>>>,
-    },
-    WriteClipboardText {
-        text: String,
-    },
-    ReadClipboardText {
-        response: SyncSender<Option<String>>,
-    },
-    PromptForPaths {
-        options: PathPromptOptionsDesc,
-        callback: ThreadsafeFunction<PathPromptOutcome>,
-    },
-    PromptForNewPath {
-        directory: String,
-        suggested_name: Option<String>,
-        callback: ThreadsafeFunction<NewPathPromptOutcome>,
-    },
-    SetAppIdentity {
-        identifier: String,
-        name: String,
-    },
-    ShowSystemNotification(gpui::SystemNotification),
-    DismissSystemNotification(String),
-    SetSystemNotificationResponseCallback {
-        callback: ThreadsafeFunction<crate::notifications::SystemNotificationResponseJs>,
-    },
-    RegisterUrlScheme {
-        scheme: String,
-        callback: ThreadsafeFunction<()>,
-    },
-    SetTray {
-        request: crate::tray::TrayRequest,
-        callback: ThreadsafeFunction<()>,
-    },
-    ClearTray {
-        callback: ThreadsafeFunction<()>,
-    },
-    RegisterGlobalShortcut {
-        request: crate::hotkeys::HotkeyRequest,
-        on_trigger: Option<ThreadsafeFunction<()>>,
-        callback: ThreadsafeFunction<()>,
-    },
-    UnregisterGlobalShortcut {
-        accelerator: String,
-        callback: ThreadsafeFunction<()>,
-    },
     GetWindowBounds {
         response: SyncSender<WindowBounds>,
-    },
-    AddFonts {
-        fonts: Vec<std::borrow::Cow<'static, [u8]>>,
-        response: SyncSender<std::result::Result<(), String>>,
     },
 }
 
@@ -817,365 +858,41 @@ fn resolve_new_path_prompt(
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 async fn run_ui_commands(
     mut commands: mpsc::UnboundedReceiver<UiCommand>,
-    window: gpui::WindowHandle<GpuixView>,
+    first_window_id: u64,
+    first_window: gpui::WindowHandle<GpuixView>,
     cx: &mut gpui::AsyncApp,
 ) {
+    // Every window the UI thread owns, keyed by the id its renderer assigned.
+    let mut windows: HashMap<u64, gpui::WindowHandle<GpuixView>> =
+        HashMap::from([(first_window_id, first_window)]);
     while let Some(command) = commands.next().await {
+        // App-level commands (clipboard, notifications, dialogs, tray) borrow
+        // the first window as their handle into the app; any live window works
+        // and the first one outlives the others by construction.
+        let window = first_window;
         let result = match command {
-            UiCommand::Invalidate => refresh_ui_window(window, cx),
-            UiCommand::ActivateWindow => window.update(cx, |_view, window, cx| {
-                cx.activate(true);
-                window.activate_window();
-            }),
-            UiCommand::GetWindowSize { response } => {
-                window.update(cx, move |_view, window, _cx| {
-                    let size = window.viewport_size();
-                    response
-                        .send(WindowSize {
-                            width: f32::from(size.width) as f64,
-                            height: f32::from(size.height) as f64,
-                        })
-                        .ok();
-                })
-            }
-            UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
-                view.window_title = title;
-                cx.notify();
-                window.refresh();
-            }),
-            UiCommand::SetDebugFrameOverlay(mode) => {
-                window.update(cx, move |_view, window, _cx| {
-                    window.set_debug_frame_overlay_mode(mode);
-                })
-            }
-            UiCommand::CycleDebugFrameOverlay { response } => {
-                window.update(cx, move |_view, window, _cx| {
-                    window.cycle_debug_frame_overlay_mode();
-                    response
-                        .send(
-                            debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).into(),
-                        )
-                        .ok();
-                })
-            }
-            UiCommand::GetDebugFrameOverlay { response } => {
-                window.update(cx, move |_view, window, _cx| {
-                    response
-                        .send(
-                            debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).into(),
-                        )
-                        .ok();
-                })
-            }
-            UiCommand::GetDebugFrameOverlayStats { response } => {
-                window.update(cx, move |_view, window, _cx| {
-                    response
-                        .send(debug_frame_overlay_stats_js(
-                            window.debug_frame_overlay_stats(),
-                        ))
-                        .ok();
-                })
-            }
-            UiCommand::ResetDebugFrameOverlayStats => window.update(cx, |_view, window, _cx| {
-                window.reset_debug_frame_overlay_stats();
-            }),
-            UiCommand::ScrollTo { id, x, y } => {
-                window.update(cx, move |view, _window, _cx| {
-                    view.apply_scroll_to(id, x, y);
-                });
-                refresh_ui_window(window, cx)
-            }
-            UiCommand::ScrollToItem { id, index, offset } => {
-                window.update(cx, move |view, _window, _cx| {
-                    view.apply_scroll_to_item(id, index, offset);
-                });
-                refresh_ui_window(window, cx)
-            }
-            UiCommand::ScrollIntoView { id } => window.update(cx, |view, window, cx| {
-                if view.scroll_element_into_view(id) {
-                    cx.notify();
-                    window.refresh();
+            UiCommand::ForWindow { id, command } => {
+                let closing = matches!(command, WindowCommand::CloseWindow);
+                match windows.get(&id) {
+                    Some(window) => {
+                        let result = run_window_command(*window, command, cx);
+                        // remove_window detaches the handle; drop it so later
+                        // commands fail fast instead of updating a dead window.
+                        if closing {
+                            windows.remove(&id);
+                        }
+                        result
+                    }
+                    None => Err(anyhow::anyhow!("window {id} is closed")),
                 }
-            }),
-            UiCommand::SetImagePixels {
-                id,
-                width,
-                height,
-                bytes,
-                format,
-                response,
-            } => window.update(cx, move |view, window, cx| {
+            }
+            UiCommand::OpenWindow { request, response } => {
+                let opened = open_threaded_window(&mut windows, request, cx);
                 response
-                    .send(view.set_image_pixels(id, width, height, bytes, format, window, cx))
+                    .send(opened.map_err(|error| format!("{error:#}")))
                     .ok();
-            }),
-            UiCommand::SetImage { id, bytes, response } => {
-                window.update(cx, move |view, window, cx| {
-                    response
-                        .send(view.set_encoded_image(id, bytes, window, cx))
-                        .ok();
-                })
+                Ok(())
             }
-            UiCommand::GetScrollOffset { id, response } => {
-                window.update(cx, move |view, _window, _cx| {
-                    response.send(view.scroll_offset(id)).ok();
-                })
-            }
-            UiCommand::GetListScrollTop { id, response } => {
-                window.update(cx, move |view, _window, _cx| {
-                    response.send(view.virtual_list_scroll_top(id)).ok();
-                })
-            }
-            UiCommand::GetVirtualListGeometry { id, index, response } => {
-                window.update(cx, move |view, _window, _cx| {
-                    response.send(view.virtual_list_geometry(id, index)).ok();
-                })
-            }
-            UiCommand::GetAutomationBounds { response } => {
-                window.update(cx, move |view, window, cx| {
-                    let state = view.paint_state.clone();
-                    cx.notify();
-                    window.refresh();
-                    window.on_next_frame(move |_window, _cx| {
-                        response.send(state.all_bounds()).ok();
-                    });
-                })
-            }
-            UiCommand::GetElementBounds { id, response } => {
-                window.update(cx, move |view, window, cx| {
-                    let state = view.paint_state.clone();
-                    cx.notify();
-                    window.refresh();
-                    window.on_next_frame(move |_window, _cx| {
-                        response.send(state.get_bounds(id)).ok();
-                    });
-                })
-            }
-            UiCommand::GetInputTextOffset { id, x, y, response } => {
-                window.update(cx, move |view, _window, cx| {
-                    let result = view
-                        .custom_registry
-                        .editor_entity(id)
-                        .ok_or_else(|| format!("element {id} is not a text editor"))
-                        .map(|entity| entity.read(cx).utf16_index_for_window_point(x, y));
-                    response.send(result).ok();
-                })
-            }
-            UiCommand::GetInputTextHit {
-                ids,
-                x,
-                y,
-                response,
-            } => window.update(cx, move |view, _window, cx| {
-                response.send(view.input_text_hit(&ids, x, y, cx)).ok();
-            }),
-            UiCommand::ScrollInputCaretIntoView(id) => {
-                window.update(cx, move |view, window, cx| {
-                    view.scroll_input_caret_into_view(id, cx);
-                    cx.notify();
-                    window.refresh();
-                })
-            }
-            UiCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
-                view.request_focus(id, window, cx);
-                window.refresh();
-            }),
-            UiCommand::SetPointerCapture(id) => window.update(cx, move |view, _window, cx| {
-                view.pointer_capture_target = Some(id);
-                cx.notify();
-            }),
-            UiCommand::ReleasePointerCapture => window
-                .update(cx, move |view, window, cx| {
-                    view.pointer_capture_target = None;
-                    window.release_pointer();
-                    cx.notify();
-                }),
-            UiCommand::ControlClock { control, response } => {
-                window.update(cx, move |view, _window, cx| {
-                    let now_ms = match control {
-                        ClockControl::Pause => view.clock.pause(),
-                        ClockControl::Set(now_ms) => view.clock.set_ms(now_ms),
-                        ClockControl::FastForward(delta_ms) => view.clock.fast_forward_ms(delta_ms),
-                        ClockControl::Resume => view.clock.resume(),
-                    };
-                    cx.notify();
-                    response.send(now_ms).ok();
-                })
-            }
-            UiCommand::DispatchMouse { input, response } => {
-                // Mouse handlers can update GpuixView during dispatch; entering
-                // through AnyWindowHandle avoids holding the root view lease
-                // while they run, which would abort the process.
-                let result =
-                    gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
-                        match input {
-                            MouseInput::Click {
-                                x,
-                                y,
-                                button,
-                                modifiers,
-                            } => {
-                                crate::automation::dispatch_click(
-                                    window, cx, x, y, button, modifiers,
-                                );
-                            }
-                            MouseInput::Down {
-                                x,
-                                y,
-                                button,
-                                modifiers,
-                            } => {
-                                crate::automation::dispatch_mouse_down(
-                                    window, cx, x, y, button, modifiers,
-                                );
-                            }
-                            MouseInput::Up {
-                                x,
-                                y,
-                                button,
-                                modifiers,
-                            } => {
-                                crate::automation::dispatch_mouse_up(
-                                    window, cx, x, y, button, modifiers,
-                                );
-                            }
-                            MouseInput::Move {
-                                x,
-                                y,
-                                pressed_button,
-                                modifiers,
-                            } => {
-                                crate::automation::dispatch_mouse_move(
-                                    window,
-                                    cx,
-                                    x,
-                                    y,
-                                    pressed_button,
-                                    modifiers,
-                                );
-                            }
-                            MouseInput::Wheel {
-                                x,
-                                y,
-                                delta_x,
-                                delta_y,
-                                modifiers,
-                            } => {
-                                crate::automation::dispatch_scroll_wheel(
-                                    window, cx, x, y, delta_x, delta_y, modifiers,
-                                );
-                            }
-                            MouseInput::Pinch {
-                                x,
-                                y,
-                                delta,
-                                phase,
-                                modifiers,
-                            } => {
-                                crate::automation::dispatch_pinch(
-                                    window, cx, x, y, delta, phase, modifiers,
-                                );
-                            }
-                        }
-                    });
-                response
-                    .send(
-                        result
-                            .as_ref()
-                            .map(|_| ())
-                            .map_err(|error| format!("{error:#}")),
-                    )
-                    .ok();
-                result
-            }
-            UiCommand::DispatchKey { input, response } => {
-                let result = gpui::AnyWindowHandle::from(window)
-                    .update(cx, move |_view, window, cx| match input {
-                        KeyInput::Keystrokes(keystrokes) => {
-                            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
-                        }
-                        KeyInput::Down { keystroke, is_held } => {
-                            crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
-                        }
-                        KeyInput::Up(keystroke) => {
-                            crate::automation::dispatch_key_up(window, cx, &keystroke)
-                        }
-                    })
-                    .and_then(|result| result.map_err(anyhow::Error::msg));
-                response
-                    .send(
-                        result
-                            .as_ref()
-                            .map(|_| ())
-                            .map_err(|error| format!("{error:#}")),
-                    )
-                    .ok();
-                result
-            }
-            UiCommand::FocusNext => window.update(cx, |_view, window, cx| window.focus_next(cx)),
-            UiCommand::FocusPrevious => {
-                window.update(cx, |_view, window, cx| window.focus_prev(cx))
-            }
-            UiCommand::GetFocusedElementId { response } => {
-                window.update(cx, |view, window, _cx| {
-                    response.send(view.focused_element_id(window)).ok();
-                })
-            }
-            UiCommand::FocusNextWithin(id) => window.update(cx, |view, window, cx| {
-                view.focus_next_within(id, window, cx);
-                cx.notify();
-                window.refresh();
-            }),
-            UiCommand::FocusPreviousWithin(id) => window.update(cx, |view, window, cx| {
-                view.focus_previous_within(id, window, cx);
-                cx.notify();
-                window.refresh();
-            }),
-            UiCommand::SetWindowKeyEvents {
-                key_down,
-                key_up,
-                event_id,
-            } => window.update(cx, move |view, window, cx| {
-                view.window_key_down = key_down;
-                view.window_key_up = key_up;
-                view.window_key_event_id = event_id;
-                cx.notify();
-                window.refresh();
-            }),
-            UiCommand::SetWindowObservers {
-                should_close,
-                reopen,
-                event_id,
-            } => window.update(cx, move |view, window, cx| {
-                view.window_should_close = should_close;
-                view.app_reopen = reopen;
-                view.window_key_event_id = event_id;
-                cx.notify();
-                window.refresh();
-            }),
-            UiCommand::SetWindowSelectionChange { enabled, event_id } => {
-                window.update(cx, move |view, window, cx| {
-                    view.set_selection_change_listener(enabled, event_id);
-                    cx.notify();
-                    window.refresh();
-                })
-            }
-            UiCommand::CloseWindow => {
-                window.update(cx, |_view, window, _cx| window.remove_window())
-            }
-            UiCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
-            UiCommand::ToggleFullscreen => {
-                window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
-            }
-            UiCommand::MinimizeWindow => {
-                window.update(cx, |_view, window, _cx| window.minimize_window())
-            }
-            UiCommand::ZoomWindow => {
-                window.update(cx, |_view, window, _cx| window.zoom_window())
-            }
-            UiCommand::IsFullscreen { response } => window.update(cx, move |_view, window, _cx| {
-                response.send(window.is_fullscreen());
-            }),
             UiCommand::OpenUrl(url) => window.update(cx, move |_view, _window, cx| {
                 cx.open_url(&url);
             }),
@@ -1297,11 +1014,6 @@ async fn run_ui_commands(
                     callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
                 })
             }
-            UiCommand::GetWindowBounds { response } => {
-                window.update(cx, move |_view, window, _cx| {
-                    response.send(window_bounds_js(window.bounds()));
-                })
-            }
             UiCommand::AddFonts { fonts, response } => {
                 let added = cx.update(|cx| {
                     cx.text_system()
@@ -1322,6 +1034,429 @@ async fn run_ui_commands(
         }
     }
     cx.update(|cx| cx.quit());
+}
+
+/// Run one window-scoped command against its window.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn run_window_command(
+    window: gpui::WindowHandle<GpuixView>,
+    command: WindowCommand,
+    cx: &mut gpui::AsyncApp,
+) -> anyhow::Result<()> {
+    match command {
+        WindowCommand::Invalidate => refresh_ui_window(window, cx),
+        WindowCommand::ActivateWindow => window.update(cx, |_view, window, cx| {
+            cx.activate(true);
+            window.activate_window();
+        }),
+        WindowCommand::GetWindowSize { response } => {
+            window.update(cx, move |_view, window, _cx| {
+                let size = window.viewport_size();
+                response
+                    .send(WindowSize {
+                        width: f32::from(size.width) as f64,
+                        height: f32::from(size.height) as f64,
+                    })
+                    .ok();
+            })
+        }
+        WindowCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
+            view.window_title = title;
+            cx.notify();
+            window.refresh();
+        }),
+        WindowCommand::SetDebugFrameOverlay(mode) => {
+            window.update(cx, move |_view, window, _cx| {
+                window.set_debug_frame_overlay_mode(mode);
+            })
+        }
+        WindowCommand::CycleDebugFrameOverlay { response } => {
+            window.update(cx, move |_view, window, _cx| {
+                window.cycle_debug_frame_overlay_mode();
+                response
+                    .send(
+                        debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).into(),
+                    )
+                    .ok();
+            })
+        }
+        WindowCommand::GetDebugFrameOverlay { response } => {
+            window.update(cx, move |_view, window, _cx| {
+                response
+                    .send(
+                        debug_frame_overlay_mode_name(window.debug_frame_overlay_mode()).into(),
+                    )
+                    .ok();
+            })
+        }
+        WindowCommand::GetDebugFrameOverlayStats { response } => {
+            window.update(cx, move |_view, window, _cx| {
+                response
+                    .send(debug_frame_overlay_stats_js(
+                        window.debug_frame_overlay_stats(),
+                    ))
+                    .ok();
+            })
+        }
+        WindowCommand::ResetDebugFrameOverlayStats => window.update(cx, |_view, window, _cx| {
+            window.reset_debug_frame_overlay_stats();
+        }),
+        WindowCommand::ScrollTo { id, x, y } => {
+            window.update(cx, move |view, _window, _cx| {
+                view.apply_scroll_to(id, x, y);
+            });
+            refresh_ui_window(window, cx)
+        }
+        WindowCommand::ScrollToItem { id, index, offset } => {
+            window.update(cx, move |view, _window, _cx| {
+                view.apply_scroll_to_item(id, index, offset);
+            });
+            refresh_ui_window(window, cx)
+        }
+        WindowCommand::ScrollIntoView { id } => window.update(cx, |view, window, cx| {
+            if view.scroll_element_into_view(id) {
+                cx.notify();
+                window.refresh();
+            }
+        }),
+        WindowCommand::SetImagePixels {
+            id,
+            width,
+            height,
+            bytes,
+            format,
+            response,
+        } => window.update(cx, move |view, window, cx| {
+            response
+                .send(view.set_image_pixels(id, width, height, bytes, format, window, cx))
+                .ok();
+        }),
+        WindowCommand::SetImage { id, bytes, response } => {
+            window.update(cx, move |view, window, cx| {
+                response
+                    .send(view.set_encoded_image(id, bytes, window, cx))
+                    .ok();
+            })
+        }
+        WindowCommand::GetScrollOffset { id, response } => {
+            window.update(cx, move |view, _window, _cx| {
+                response.send(view.scroll_offset(id)).ok();
+            })
+        }
+        WindowCommand::GetListScrollTop { id, response } => {
+            window.update(cx, move |view, _window, _cx| {
+                response.send(view.virtual_list_scroll_top(id)).ok();
+            })
+        }
+        WindowCommand::GetVirtualListGeometry { id, index, response } => {
+            window.update(cx, move |view, _window, _cx| {
+                response.send(view.virtual_list_geometry(id, index)).ok();
+            })
+        }
+        WindowCommand::GetAutomationBounds { response } => {
+            window.update(cx, move |view, window, cx| {
+                let state = view.paint_state.clone();
+                cx.notify();
+                window.refresh();
+                window.on_next_frame(move |_window, _cx| {
+                    response.send(state.all_bounds()).ok();
+                });
+            })
+        }
+        WindowCommand::GetElementBounds { id, response } => {
+            window.update(cx, move |view, window, cx| {
+                let state = view.paint_state.clone();
+                cx.notify();
+                window.refresh();
+                window.on_next_frame(move |_window, _cx| {
+                    response.send(state.get_bounds(id)).ok();
+                });
+            })
+        }
+        WindowCommand::GetInputTextOffset { id, x, y, response } => {
+            window.update(cx, move |view, _window, cx| {
+                let result = view
+                    .custom_registry
+                    .editor_entity(id)
+                    .ok_or_else(|| format!("element {id} is not a text editor"))
+                    .map(|entity| entity.read(cx).utf16_index_for_window_point(x, y));
+                response.send(result).ok();
+            })
+        }
+        WindowCommand::GetInputTextHit {
+            ids,
+            x,
+            y,
+            response,
+        } => window.update(cx, move |view, _window, cx| {
+            response.send(view.input_text_hit(&ids, x, y, cx)).ok();
+        }),
+        WindowCommand::ScrollInputCaretIntoView(id) => {
+            window.update(cx, move |view, window, cx| {
+                view.scroll_input_caret_into_view(id, cx);
+                cx.notify();
+                window.refresh();
+            })
+        }
+        WindowCommand::FocusElement(id) => window.update(cx, move |view, window, cx| {
+            view.request_focus(id, window, cx);
+            window.refresh();
+        }),
+        WindowCommand::SetPointerCapture(id) => window.update(cx, move |view, _window, cx| {
+            view.pointer_capture_target = Some(id);
+            cx.notify();
+        }),
+        WindowCommand::ReleasePointerCapture => window
+            .update(cx, move |view, window, cx| {
+                view.pointer_capture_target = None;
+                window.release_pointer();
+                cx.notify();
+            }),
+        WindowCommand::ControlClock { control, response } => {
+            window.update(cx, move |view, _window, cx| {
+                let now_ms = match control {
+                    ClockControl::Pause => view.clock.pause(),
+                    ClockControl::Set(now_ms) => view.clock.set_ms(now_ms),
+                    ClockControl::FastForward(delta_ms) => view.clock.fast_forward_ms(delta_ms),
+                    ClockControl::Resume => view.clock.resume(),
+                };
+                cx.notify();
+                response.send(now_ms).ok();
+            })
+        }
+        WindowCommand::DispatchMouse { input, response } => {
+            // Mouse handlers can update GpuixView during dispatch; entering
+            // through AnyWindowHandle avoids holding the root view lease
+            // while they run, which would abort the process.
+            let result =
+                gpui::AnyWindowHandle::from(window).update(cx, move |_view, window, cx| {
+                    match input {
+                        MouseInput::Click {
+                            x,
+                            y,
+                            button,
+                            modifiers,
+                        } => {
+                            crate::automation::dispatch_click(
+                                window, cx, x, y, button, modifiers,
+                            );
+                        }
+                        MouseInput::Down {
+                            x,
+                            y,
+                            button,
+                            modifiers,
+                        } => {
+                            crate::automation::dispatch_mouse_down(
+                                window, cx, x, y, button, modifiers,
+                            );
+                        }
+                        MouseInput::Up {
+                            x,
+                            y,
+                            button,
+                            modifiers,
+                        } => {
+                            crate::automation::dispatch_mouse_up(
+                                window, cx, x, y, button, modifiers,
+                            );
+                        }
+                        MouseInput::Move {
+                            x,
+                            y,
+                            pressed_button,
+                            modifiers,
+                        } => {
+                            crate::automation::dispatch_mouse_move(
+                                window,
+                                cx,
+                                x,
+                                y,
+                                pressed_button,
+                                modifiers,
+                            );
+                        }
+                        MouseInput::Wheel {
+                            x,
+                            y,
+                            delta_x,
+                            delta_y,
+                            modifiers,
+                        } => {
+                            crate::automation::dispatch_scroll_wheel(
+                                window, cx, x, y, delta_x, delta_y, modifiers,
+                            );
+                        }
+                        MouseInput::Pinch {
+                            x,
+                            y,
+                            delta,
+                            phase,
+                            modifiers,
+                        } => {
+                            crate::automation::dispatch_pinch(
+                                window, cx, x, y, delta, phase, modifiers,
+                            );
+                        }
+                    }
+                });
+            response
+                .send(
+                    result
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|error| format!("{error:#}")),
+                )
+                .ok();
+            result
+        }
+        WindowCommand::DispatchKey { input, response } => {
+            let result = gpui::AnyWindowHandle::from(window)
+                .update(cx, move |_view, window, cx| match input {
+                    KeyInput::Keystrokes(keystrokes) => {
+                        crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
+                    }
+                    KeyInput::Down { keystroke, is_held } => {
+                        crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
+                    }
+                    KeyInput::Up(keystroke) => {
+                        crate::automation::dispatch_key_up(window, cx, &keystroke)
+                    }
+                })
+                .and_then(|result| result.map_err(anyhow::Error::msg));
+            response
+                .send(
+                    result
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|error| format!("{error:#}")),
+                )
+                .ok();
+            result
+        }
+        WindowCommand::FocusNext => window.update(cx, |_view, window, cx| window.focus_next(cx)),
+        WindowCommand::FocusPrevious => {
+            window.update(cx, |_view, window, cx| window.focus_prev(cx))
+        }
+        WindowCommand::GetFocusedElementId { response } => {
+            window.update(cx, |view, window, _cx| {
+                response.send(view.focused_element_id(window)).ok();
+            })
+        }
+        WindowCommand::FocusNextWithin(id) => window.update(cx, |view, window, cx| {
+            view.focus_next_within(id, window, cx);
+            cx.notify();
+            window.refresh();
+        }),
+        WindowCommand::FocusPreviousWithin(id) => window.update(cx, |view, window, cx| {
+            view.focus_previous_within(id, window, cx);
+            cx.notify();
+            window.refresh();
+        }),
+        WindowCommand::SetWindowKeyEvents {
+            key_down,
+            key_up,
+            event_id,
+        } => window.update(cx, move |view, window, cx| {
+            view.window_key_down = key_down;
+            view.window_key_up = key_up;
+            view.window_key_event_id = event_id;
+            cx.notify();
+            window.refresh();
+        }),
+        WindowCommand::SetWindowObservers {
+            should_close,
+            reopen,
+            event_id,
+        } => window.update(cx, move |view, window, cx| {
+            view.window_should_close = should_close;
+            view.app_reopen = reopen;
+            view.window_key_event_id = event_id;
+            cx.notify();
+            window.refresh();
+        }),
+        WindowCommand::SetWindowSelectionChange { enabled, event_id } => {
+            window.update(cx, move |view, window, cx| {
+                view.set_selection_change_listener(enabled, event_id);
+                cx.notify();
+                window.refresh();
+            })
+        }
+        WindowCommand::CloseWindow => {
+            window.update(cx, |_view, window, _cx| window.remove_window())
+        }
+        WindowCommand::Blur => window.update(cx, |_view, window, _cx| window.blur()),
+        WindowCommand::ToggleFullscreen => {
+            window.update(cx, |_view, window, _cx| window.toggle_fullscreen())
+        }
+        WindowCommand::MinimizeWindow => {
+            window.update(cx, |_view, window, _cx| window.minimize_window())
+        }
+        WindowCommand::ZoomWindow => {
+            window.update(cx, |_view, window, _cx| window.zoom_window())
+        }
+        WindowCommand::IsFullscreen { response } => window.update(cx, move |_view, window, _cx| {
+            response.send(window.is_fullscreen());
+        }),
+        WindowCommand::GetWindowBounds { response } => {
+            window.update(cx, move |_view, window, _cx| {
+                response.send(window_bounds_js(window.bounds()));
+            })
+        }
+    }
+}
+
+/// Open the window an `OpenWindow` request describes on the UI thread.
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+fn open_threaded_window(
+    windows: &mut HashMap<u64, gpui::WindowHandle<GpuixView>>,
+    request: OpenWindowRequest,
+    cx: &mut gpui::AsyncApp,
+) -> anyhow::Result<()> {
+    let title = request
+        .options
+        .title
+        .clone()
+        .unwrap_or_else(|| "GPUIX".to_string());
+    let width = request.options.width.unwrap_or(800.0);
+    let height = request.options.height.unwrap_or(600.0);
+    let activate = request.activate;
+    let window = cx.update(|cx| {
+        let size = gpui::size(gpui::px(width as f32), gpui::px(height as f32));
+        // A layer-shell surface is positioned by the compositor from its
+        // anchor, so it opens at the origin; a saved x/y pair restores the
+        // last position; a normal window is centered.
+        let bounds = if request.options.layer_shell.is_some() {
+            gpui::Bounds {
+                origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                size,
+            }
+        } else if let Some(origin) = requested_window_origin(request.options.x, request.options.y)
+        {
+            gpui::Bounds { origin, size }
+        } else {
+            gpui::Bounds::centered(None, size, cx)
+        };
+        cx.open_window(
+            to_gpui_window_options(&request.options, bounds),
+            |_window, cx| {
+                cx.new(|_| {
+                    GpuixView::new(
+                        request.tree.clone(),
+                        request.callback.clone(),
+                        title,
+                        request.selection.clone(),
+                        request.canvas_surfaces.clone(),
+                    )
+                })
+            },
+        )
+    })?;
+    if activate {
+        cx.update(|cx| cx.activate(true));
+    }
+    windows.insert(request.id, window);
+    Ok(())
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -1347,12 +1482,10 @@ pub struct GpuixRenderer {
     canvas_surfaces: crate::canvas::CanvasStore,
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     ui_commands: Mutex<Option<mpsc::UnboundedSender<UiCommand>>>,
-    /// False after `Platform::run` returns. `tick()` reports that so JS can
-    /// `process.exit`, matching macOS where `pump_events` returning false is
-    /// the last-window-closed signal. The UI thread owns the Win32/Linux loop,
-    /// so `tick()` cannot pump it; it only observes this flag.
+    /// The id this renderer's window is known by on the UI thread. Assigned
+    /// in `init`, before the window opens.
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-    ui_running: Arc<AtomicBool>,
+    window_id: Mutex<u64>,
     /// This renderer's own window. App-level callbacks (`appReopen`) address
     /// the process's first window through the `GPUI_WINDOW` thread-local
     /// instead; this handle is what the napi methods talk to.
@@ -1387,9 +1520,17 @@ impl GpuixRenderer {
     }
 
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    fn send_window_command(&self, command: WindowCommand) -> Result<()> {
+        self.send_ui_command(UiCommand::ForWindow {
+            id: *self.window_id.lock().unwrap(),
+            command,
+        })
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn dispatch_mouse_input(&self, input: MouseInput) -> Result<()> {
         let (response_sender, response_receiver) = sync_channel(1);
-        self.send_ui_command(UiCommand::DispatchMouse {
+        self.send_window_command(WindowCommand::DispatchMouse {
             input,
             response: response_sender,
         })?;
@@ -1403,7 +1544,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetAutomationBounds { response })?;
+            self.send_window_command(WindowCommand::GetAutomationBounds { response })?;
             return recv_ui_response(receiver, "the automation bounds query");
         }
 
@@ -1423,7 +1564,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetElementBounds { id, response })?;
+            self.send_window_command(WindowCommand::GetElementBounds { id, response })?;
             return recv_ui_response(receiver, "the element bounds query");
         }
 
@@ -1452,7 +1593,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetInputTextOffset { id, x, y, response })?;
+            self.send_window_command(WindowCommand::GetInputTextOffset { id, x, y, response })?;
             return recv_ui_response(receiver, "the input text offset query")?
                 .map_err(Error::from_reason);
         }
@@ -1476,7 +1617,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetInputTextHit {
+            self.send_window_command(WindowCommand::GetInputTextHit {
                 ids,
                 x,
                 y,
@@ -1500,7 +1641,7 @@ impl GpuixRenderer {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn control_clock(&self, control: ClockControl) -> Result<f64> {
         let (response, receiver) = sync_channel(1);
-        self.send_ui_command(UiCommand::ControlClock { control, response })?;
+        self.send_window_command(WindowCommand::ControlClock { control, response })?;
         recv_ui_response(receiver, "the automation clock command")
     }
 
@@ -1509,7 +1650,7 @@ impl GpuixRenderer {
         return self.invalidate_window();
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::Invalidate);
+        return self.send_window_command(WindowCommand::Invalidate);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1539,7 +1680,7 @@ impl GpuixRenderer {
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             ui_commands: Mutex::new(None),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-            ui_running: Arc::new(AtomicBool::new(false)),
+            window_id: Mutex::new(0),
             #[cfg(target_os = "macos")]
             window: Mutex::new(None),
             #[cfg(target_os = "macos")]
@@ -1742,13 +1883,11 @@ impl GpuixRenderer {
         if *self.initialized.lock().unwrap() {
             return Err(Error::from_reason("Renderer is already initialized"));
         }
-        // One GPUI application per process: it owns the platform event loop,
-        // so a second renderer cannot spawn its own UI thread. Routing a
-        // second window through the existing UI thread is not built yet.
-        if UI_THREAD_STARTED.swap(true, Ordering::AcqRel) {
-            return Err(Error::from_reason(
-                "Multiple windows are not supported on this platform yet",
-            ));
+        let window_id = next_window_id();
+        // The UI thread already runs: this is a second renderer, opening its
+        // window on the process's existing GPUI application.
+        if let Some(sender) = UI_THREAD_COMMANDS.get() {
+            return self.open_window_threaded(options, window_id, sender.clone());
         }
 
         let width = options.width.unwrap_or(800.0);
@@ -1765,8 +1904,6 @@ impl GpuixRenderer {
         let (command_sender, command_receiver) = mpsc::unbounded();
         let (startup_sender, startup_receiver) = sync_channel(1);
         let exit_startup_sender = startup_sender.clone();
-        let ui_running = self.ui_running.clone();
-        let ui_running_for_run = ui_running.clone();
 
         std::thread::Builder::new()
             .name("gpuix-ui".to_string())
@@ -1826,17 +1963,17 @@ impl GpuixRenderer {
                             };
 
                             cx.spawn(async move |cx| {
-                                run_ui_commands(command_receiver, window, cx).await;
+                                run_ui_commands(command_receiver, window_id, window, cx).await;
                             })
                             .detach();
                             if activate {
                                 cx.activate(true);
                             }
-                            ui_running_for_run.store(true, Ordering::Release);
+                            UI_THREAD_RUNNING.store(true, Ordering::Release);
                             startup_sender.send(Ok(())).ok();
                         });
                 }));
-                ui_running.store(false, Ordering::Release);
+                UI_THREAD_RUNNING.store(false, Ordering::Release);
 
                 let error = match result {
                     Ok(()) => {
@@ -1858,7 +1995,42 @@ impl GpuixRenderer {
             .map_err(|_| Error::from_reason("The GPUI UI thread stopped during initialization"))?
             .map_err(Error::from_reason)?;
 
+        let _ = UI_THREAD_COMMANDS.set(command_sender.clone());
         *self.ui_commands.lock().unwrap() = Some(command_sender);
+        *self.window_id.lock().unwrap() = window_id;
+        *self.initialized.lock().unwrap() = true;
+        self.event_callback.lock().unwrap().take();
+        Ok(())
+    }
+
+    /// Open this renderer's window on the already-running UI thread through
+    /// the shared command channel; the app, its URL observers and its quit
+    /// mode belong to the process and stay with the first renderer.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    fn open_window_threaded(
+        &self,
+        options: WindowOptions,
+        window_id: u64,
+        sender: mpsc::UnboundedSender<UiCommand>,
+    ) -> Result<()> {
+        let (response, receiver) = sync_channel(1);
+        sender
+            .unbounded_send(UiCommand::OpenWindow {
+                request: OpenWindowRequest {
+                    id: window_id,
+                    activate: options.focus.unwrap_or(true),
+                    options,
+                    tree: self.tree.clone(),
+                    callback: self.event_callback_for_view(),
+                    selection: self.selection.clone(),
+                    canvas_surfaces: self.canvas_surfaces.clone(),
+                },
+                response,
+            })
+            .map_err(|_| Error::from_reason("The GPUI UI thread is not running"))?;
+        recv_ui_response(receiver, "the window open command")?.map_err(Error::from_reason)?;
+        *self.ui_commands.lock().unwrap() = Some(sender);
+        *self.window_id.lock().unwrap() = window_id;
         *self.initialized.lock().unwrap() = true;
         self.event_callback.lock().unwrap().take();
         Ok(())
@@ -2044,7 +2216,7 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
-            self.send_ui_command(UiCommand::SetPointerCapture(id))?;
+            self.send_window_command(WindowCommand::SetPointerCapture(id))?;
             self.request_invalidate()
         }
 
@@ -2073,7 +2245,7 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
-            self.send_ui_command(UiCommand::ReleasePointerCapture)
+            self.send_window_command(WindowCommand::ReleasePointerCapture)
         }
 
         #[cfg(not(any(
@@ -2119,7 +2291,7 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
-            let running = self.ui_running.load(Ordering::Acquire);
+            let running = UI_THREAD_RUNNING.load(Ordering::Acquire);
             if !running {
                 self.ui_commands.lock().unwrap().take();
             }
@@ -2176,7 +2348,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetWindowSize { response })?;
+            self.send_window_command(WindowCommand::GetWindowSize { response })?;
             return recv_ui_response(receiver, "the window size query");
         }
 
@@ -2210,7 +2382,7 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
-            self.send_ui_command(UiCommand::SetDebugFrameOverlay(mode))?;
+            self.send_window_command(WindowCommand::SetDebugFrameOverlay(mode))?;
             return self.debug_frame_overlay_mode();
         }
 
@@ -2235,7 +2407,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::CycleDebugFrameOverlay { response })?;
+            self.send_window_command(WindowCommand::CycleDebugFrameOverlay { response })?;
             return recv_ui_response(receiver, "the debug frame overlay query");
         }
 
@@ -2262,7 +2434,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetDebugFrameOverlay { response })?;
+            self.send_window_command(WindowCommand::GetDebugFrameOverlay { response })?;
             recv_ui_response(receiver, "the debug frame overlay query")
         }
 
@@ -2284,7 +2456,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ResetDebugFrameOverlayStats);
+        return self.send_window_command(WindowCommand::ResetDebugFrameOverlayStats);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2306,7 +2478,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetDebugFrameOverlayStats { response })?;
+            self.send_window_command(WindowCommand::GetDebugFrameOverlayStats { response })?;
             match receiver.recv_timeout(Duration::from_secs(2)) {
                 Ok(stats) => Ok(stats),
                 Err(RecvTimeoutError::Timeout) => Err(Error::from_reason(
@@ -2338,7 +2510,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ActivateWindow);
+        return self.send_window_command(WindowCommand::ActivateWindow);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2358,7 +2530,7 @@ impl GpuixRenderer {
         return self.update_window(|_view, window, _cx| window.toggle_fullscreen());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ToggleFullscreen);
+        return self.send_window_command(WindowCommand::ToggleFullscreen);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2380,7 +2552,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::IsFullscreen { response })?;
+            self.send_window_command(WindowCommand::IsFullscreen { response })?;
             return recv_ui_response(receiver, "the fullscreen query");
         }
 
@@ -2408,7 +2580,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetWindowBounds { response })?;
+            self.send_window_command(WindowCommand::GetWindowBounds { response })?;
             return recv_ui_response(receiver, "the window bounds query");
         }
 
@@ -2430,7 +2602,7 @@ impl GpuixRenderer {
         return self.update_window(|_view, window, _cx| window.minimize_window());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::MinimizeWindow);
+        return self.send_window_command(WindowCommand::MinimizeWindow);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2451,7 +2623,7 @@ impl GpuixRenderer {
         return self.update_window(|_view, window, _cx| window.zoom_window());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ZoomWindow);
+        return self.send_window_command(WindowCommand::ZoomWindow);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3086,7 +3258,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::SetWindowObservers {
+        return self.send_window_command(WindowCommand::SetWindowObservers {
             should_close,
             reopen,
             event_id,
@@ -3116,7 +3288,7 @@ impl GpuixRenderer {
         return self.update_window(|_view, window, _cx| window.remove_window());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::CloseWindow);
+        return self.send_window_command(WindowCommand::CloseWindow);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3187,7 +3359,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::SetWindowTitle(title));
+        return self.send_window_command(WindowCommand::SetWindowTitle(title));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3210,7 +3382,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::FocusElement(id));
+        return self.send_window_command(WindowCommand::FocusElement(id));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3227,7 +3399,7 @@ impl GpuixRenderer {
         return self.update_window(move |_view, window, _cx| window.blur());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::Blur);
+        return self.send_window_command(WindowCommand::Blur);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3245,7 +3417,7 @@ impl GpuixRenderer {
         return self.update_window(|_view, window, cx| window.focus_next(cx));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::FocusNext);
+        return self.send_window_command(WindowCommand::FocusNext);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3263,7 +3435,7 @@ impl GpuixRenderer {
         return self.update_window(|_view, window, cx| window.focus_prev(cx));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::FocusPrevious);
+        return self.send_window_command(WindowCommand::FocusPrevious);
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3285,7 +3457,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetFocusedElementId { response })?;
+            self.send_window_command(WindowCommand::GetFocusedElementId { response })?;
             return recv_ui_response(receiver, "the focused element id query")
                 .map(|id| id.map(|id| id as f64));
         }
@@ -3311,7 +3483,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::FocusNextWithin(id));
+        return self.send_window_command(WindowCommand::FocusNextWithin(id));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3334,7 +3506,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::FocusPreviousWithin(id));
+        return self.send_window_command(WindowCommand::FocusPreviousWithin(id));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3359,7 +3531,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::SetWindowKeyEvents {
+        return self.send_window_command(WindowCommand::SetWindowKeyEvents {
             key_down,
             key_up,
             event_id,
@@ -3386,7 +3558,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::SetWindowSelectionChange { enabled, event_id });
+        return self.send_window_command(WindowCommand::SetWindowSelectionChange { enabled, event_id });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3430,7 +3602,7 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollTo {
+        return self.send_window_command(WindowCommand::ScrollTo {
             id,
             x: x as f32,
             y: y as f32,
@@ -3458,7 +3630,7 @@ impl GpuixRenderer {
         });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollInputCaretIntoView(id));
+        return self.send_window_command(WindowCommand::ScrollInputCaretIntoView(id));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3485,7 +3657,7 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollIntoView { id });
+        return self.send_window_command(WindowCommand::ScrollIntoView { id });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3523,7 +3695,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::SetImagePixels {
+            self.send_window_command(WindowCommand::SetImagePixels {
                 id,
                 width,
                 height,
@@ -3561,7 +3733,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::SetImage { id, bytes, response })?;
+            self.send_window_command(WindowCommand::SetImage { id, bytes, response })?;
             return recv_ui_response(receiver, "the encoded image upload")?
                 .map_err(Error::from_reason);
         }
@@ -3601,7 +3773,7 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollToItem { id, index, offset });
+        return self.send_window_command(WindowCommand::ScrollToItem { id, index, offset });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -3631,7 +3803,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetListScrollTop { id, response })?;
+            self.send_window_command(WindowCommand::GetListScrollTop { id, response })?;
             return Ok(
                 recv_ui_response(receiver, "the GPUI list scroll query")?.map(|top| top.to_vec())
             );
@@ -3667,7 +3839,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetVirtualListGeometry { id, index, response })?;
+            self.send_window_command(WindowCommand::GetVirtualListGeometry { id, index, response })?;
             return Ok(
                 recv_ui_response(receiver, "the GPUI list geometry query")?.map(|g| g.to_vec())
             );
@@ -3694,7 +3866,7 @@ impl GpuixRenderer {
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
             let (response, receiver) = sync_channel(1);
-            self.send_ui_command(UiCommand::GetScrollOffset { id, response })?;
+            self.send_window_command(WindowCommand::GetScrollOffset { id, response })?;
             return Ok(
                 recv_ui_response(receiver, "the GPUI scroll query")?.map(|[x, y]| vec![x, y])
             );
@@ -4027,7 +4199,7 @@ impl GpuixRenderer {
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     fn dispatch_key_input(&self, input: KeyInput) -> Result<()> {
         let (response_sender, response_receiver) = sync_channel(1);
-        self.send_ui_command(UiCommand::DispatchKey {
+        self.send_window_command(WindowCommand::DispatchKey {
             input,
             response: response_sender,
         })?;
