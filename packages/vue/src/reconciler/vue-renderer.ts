@@ -77,6 +77,7 @@ const EVENT_TYPES = new Set([
   "showMore",
   "lineClick",
   "linkClick",
+  "taskToggle",
   "visibleRange",
   "compositionStart",
   "compositionUpdate",

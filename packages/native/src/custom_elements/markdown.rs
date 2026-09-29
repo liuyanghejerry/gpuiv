@@ -14,7 +14,7 @@ use std::sync::Arc;
 use gpui::SharedString;
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::markdown::parser::{BlockTree, IncrementalParser};
+use crate::markdown::parser::{BlockTree, IncrementalParser, TaskMarker};
 use crate::markdown::render::{render_tree, MdContext};
 use crate::renderer::emit_event_full;
 use crate::theme::{Theme, ThemeFonts};
@@ -85,6 +85,24 @@ impl CustomElement for MarkdownElement {
             None
         };
 
+        // Task toggles ride the same event callback as links but as their own
+        // event type: the payload carries the marker's rendered state and its
+        // source byte range, so the app can rewrite `[ ]`↔`[x]` in place.
+        let on_task: Option<Arc<dyn Fn(&TaskMarker)>> = if ctx.events.contains("taskToggle") {
+            let callback = ctx.event_callback.clone();
+            let element_id = ctx.id;
+            Some(Arc::new(move |task: &TaskMarker| {
+                let (checked, start, end) = (task.checked, task.range.start, task.range.end);
+                emit_event_full(&callback, element_id, "taskToggle", |p| {
+                    p.value = Some(if checked { "true".into() } else { "false".into() });
+                    p.start_index = Some(start as f64);
+                    p.end_index = Some(end as f64);
+                });
+            }))
+        } else {
+            None
+        };
+
         let mut md = MdContext::new(
             ctx.id,
             ctx.selection.clone(),
@@ -92,6 +110,7 @@ impl CustomElement for MarkdownElement {
             ctx.selection_wash,
             theme.clone(),
             on_link,
+            on_task,
             ctx.highlight_set.clone(),
             math,
         );
@@ -127,7 +146,7 @@ impl CustomElement for MarkdownElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["linkClick", "click", "mouseEnter", "mouseLeave", "fileDrop"]
+        &["linkClick", "taskToggle", "click", "mouseEnter", "mouseLeave", "fileDrop"]
     }
 
     fn destroy(&mut self) {

@@ -473,6 +473,10 @@ export interface ElementProps {
   onShowMore?: (event: EventPayload) => void
   onLineClick?: (event: EventPayload) => void
   onLinkClick?: (event: EventPayload) => void
+  /** A `<markdown>` task checkbox was clicked. `value` is `"true"`/`"false"`
+   *  for the marker's rendered state; `startIndex`/`endIndex` are its source
+   *  byte offsets, so the app can rewrite `[ ]`↔`[x]` in place. */
+  onTaskToggle?: (event: EventPayload) => void
   onVisibleRange?: (event: EventPayload) => void
 
   // ── Markdown math ────────────────────────────────────────────────

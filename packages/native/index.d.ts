@@ -1016,9 +1016,11 @@ export interface EventPayload {
    * Element-defined string payload.
    * Populated for: `<diff>` toggleFile (the file path), showMore (the
    * hidden line count), and lineClick (the line text); `<markdown>`
-   * linkClick (the URL); input selectionDrag (`"end"` on release);
-   * window-level `windowSelectionChange` (joined selected text, or absent
-   * when the selection is empty).
+   * linkClick (the URL) and taskToggle (`"true"`/`"false"` — the marker's
+   * rendered state; pair with `start_index`/`end_index`); input
+   * selectionDrag (`"end"` on release); window-level
+   * `windowSelectionChange` (joined selected text, or absent when the
+   * selection is empty).
    */
   value?: string
   /** Line number on the pre-change side. Populated for: `<diff>` lineClick. */
@@ -1026,13 +1028,15 @@ export interface EventPayload {
   /** Line number on the post-change side. Populated for: `<diff>` lineClick. */
   newLine?: number
   /**
-   * First visible logical index, or a text selection's UTF-16 anchor.
-   * Populated for: visibleRange, selectionChange, selectionDrag.
+   * First visible logical index, a text selection's UTF-16 anchor, or the
+   * `<markdown>` taskToggle marker's source byte start.
+   * Populated for: visibleRange, selectionChange, selectionDrag, taskToggle.
    */
   startIndex?: number
   /**
-   * Exclusive visible index, or a text selection's UTF-16 head.
-   * Populated for: visibleRange, selectionChange, selectionDrag.
+   * Exclusive visible index, a text selection's UTF-16 head, or the
+   * `<markdown>` taskToggle marker's exclusive source byte end.
+   * Populated for: visibleRange, selectionChange, selectionDrag, taskToggle.
    */
   endIndex?: number
   /**

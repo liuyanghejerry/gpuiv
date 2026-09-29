@@ -17,7 +17,7 @@ use gpui::{
     UnderlineStyle, Window,
 };
 
-use super::parser::{Block, BlockTree, InlineRun, InlineStyle, TableAlign};
+use super::parser::{Block, BlockTree, InlineRun, InlineStyle, TableAlign, TaskMarker};
 use crate::syntax::cache::highlight_cached;
 use crate::text::{range_rects, runs::runs_for_spans, SharedSelection};
 use crate::theme::{Metrics, Theme, ThemeFonts};
@@ -95,6 +95,24 @@ pub fn flatten_runs(
     let mut code_ranges: Vec<Range<usize>> = Vec::new();
 
     for run in runs {
+        if let Some(task) = &run.style.task {
+            // Only reached where the list renderer does not consume the
+            // marker (an ordered task item, say): keep the literal GFM text
+            // so the state stays readable instead of vanishing.
+            let marker = if task.checked { "[x] " } else { "[ ] " };
+            text.push_str(marker);
+            let mut f = theme.sans_font();
+            f.weight = base_weight;
+            out.push(TextRun {
+                len: marker.len(),
+                font: f,
+                color: theme.text_muted,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            });
+            continue;
+        }
         if run.text.is_empty() {
             continue;
         }
@@ -251,6 +269,10 @@ pub struct MdContext {
     /// Called with the URL of the link under a click. Hit testing happens per
     /// byte range inside the painted text, not per block.
     pub on_link: Option<Arc<dyn Fn(&str)>>,
+    /// Called when a task checkbox is clicked, with the marker as rendered.
+    /// The JS side receives `checked` plus the marker's source byte range and
+    /// rewrites `[ ]`↔`[x]` itself — the element stays read-only.
+    pub on_task: Option<Arc<dyn Fn(&TaskMarker)>>,
     /// Footnote label → document-order number, from the tree's label order.
     /// `render_tree` fills it before the first block renders.
     pub footnote_numbers: HashMap<String, usize>,
@@ -266,6 +288,7 @@ impl MdContext {
         selection_wash: Hsla,
         theme: Theme,
         on_link: Option<Arc<dyn Fn(&str)>>,
+        on_task: Option<Arc<dyn Fn(&TaskMarker)>>,
         highlight_set: Option<Arc<crate::text::HighlightContext>>,
         math: HashMap<String, MathSpec>,
     ) -> Self {
@@ -278,6 +301,7 @@ impl MdContext {
             highlight_set,
             next_sub: 0,
             on_link,
+            on_task,
             footnote_numbers: HashMap::new(),
             math,
         }
@@ -367,10 +391,20 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
         } => {
             let mut list = div().flex().flex_col().gap(px(4.0));
             for (item_ix, item) in items.iter().enumerate() {
+                // A task marker leads the item's first paragraph. Unordered
+                // items promote it to the marker column as a checkbox and
+                // render the paragraph without it; ordered items keep the
+                // number and flatten the marker literally (above).
+                let task = if ordered_start.is_none() {
+                    leading_task(item)
+                } else {
+                    None
+                };
                 // Ordered numbers are accent-tinted text; unordered markers are
                 // a real 5px disc, because the glyph "•" reads too small at 14px.
-                let marker: AnyElement = match ordered_start {
-                    Some(start) => div()
+                let marker: AnyElement = match (&task, ordered_start) {
+                    (Some(task), _) => task_checkbox(task, ctx),
+                    (None, Some(start)) => div()
                         .flex_none()
                         .min_w(px(18.0))
                         .text_size(px(m.md_text_size))
@@ -381,7 +415,7 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
                             None,
                         ))
                         .into_any_element(),
-                    None => div()
+                    (None, None) => div()
                         .flex_none()
                         .min_w(px(18.0))
                         // Centre the disc on the first text line's cap band.
@@ -400,7 +434,25 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
                 };
                 let children: Vec<AnyElement> = item
                     .iter()
-                    .map(|child| render_block(child, ctx, window))
+                    .enumerate()
+                    .map(|(block_ix, child)| {
+                        if block_ix == 0 && task.is_some() {
+                            // The marker run is consumed by the checkbox; the
+                            // paragraph starts at its first visible run.
+                            if let Block::Paragraph { runs } = child {
+                                if runs.len() > 1 {
+                                    return text_element(
+                                        &runs[1..],
+                                        m.md_text_size,
+                                        m.md_line_height,
+                                        FontWeight::NORMAL,
+                                        ctx,
+                                    );
+                                }
+                            }
+                        }
+                        render_block(child, ctx, window)
+                    })
                     .collect();
                 list = list.child(
                     div().flex().flex_row().gap(px(8.0)).child(marker).child(
@@ -578,6 +630,88 @@ fn render_image(url: &str, alt: &str, ctx: &mut MdContext) -> AnyElement {
         .flex()
         .flex_col()
         .child(image)
+        .into_any_element()
+}
+
+/// The task marker leading an item's first paragraph, if any.
+fn leading_task(item: &[Block]) -> Option<TaskMarker> {
+    let Block::Paragraph { runs } = item.first()? else {
+        return None;
+    };
+    runs.first().and_then(|run| run.style.task.clone())
+}
+
+/// The checkbox that replaces a task item's bullet.
+///
+/// The box is a stateful div (click needs element state) with a host-derived
+/// id; the check itself is a stroked path because no theme font guarantees a
+/// ✓ glyph on every platform. Clicking reports the marker as rendered — the
+/// JS side owns flipping `[ ]`↔`[x]` in the source.
+fn task_checkbox(task: &TaskMarker, ctx: &MdContext) -> AnyElement {
+    use gpui::prelude::*;
+
+    let theme = ctx.theme.clone();
+    let m = &theme.metrics;
+    let side = m.md_task_box_side;
+
+    let mut checkbox = div()
+        .id(SharedString::from(format!(
+            "__gpuix_markdown_task_{}_{}",
+            ctx.element_id, task.range.start
+        )))
+        .w(px(side))
+        .h(px(side))
+        .rounded(px(m.md_task_box_radius))
+        .border(px(1.0))
+        .border_color(if task.checked {
+            theme.accent
+        } else {
+            opacity(theme.accent, 0.55)
+        })
+        .when(task.checked, |el| el.bg(theme.accent))
+        .when(!task.checked, |el| {
+            el.hover(|style| style.bg(opacity(theme.accent, 0.15)))
+        })
+        .flex()
+        .items_center()
+        .justify_center();
+
+    if task.checked {
+        let stroke = m.md_task_stroke;
+        let color = theme.bg;
+        checkbox = checkbox.child(gpui::canvas(
+            move |_bounds, _window, _cx| (),
+            move |bounds, _state, window, _cx| {
+                let x = bounds.origin.x;
+                let y = bounds.origin.y;
+                let mut builder = gpui::PathBuilder::stroke(px(stroke));
+                builder.move_to(gpui::point(x + px(0.20 * side), y + px(0.52 * side)));
+                builder.line_to(gpui::point(x + px(0.44 * side), y + px(0.74 * side)));
+                builder.line_to(gpui::point(x + px(0.80 * side), y + px(0.26 * side)));
+                if let Ok(path) = builder.build() {
+                    window.paint_path(path, color);
+                }
+            },
+        )
+        // A canvas without a size lays out at 0×0 and paints nothing.
+        .w(px(side))
+        .h(px(side)));
+    }
+
+    if let Some(on_task) = ctx.on_task.clone() {
+        let task = task.clone();
+        checkbox = checkbox.on_click(move |_event, _window, _cx| on_task(&task));
+    }
+
+    // Marker-column geometry matches the bullet: fixed width, one line tall,
+    // box centred on the first text line.
+    div()
+        .flex_none()
+        .min_w(px(18.0))
+        .h(px(m.md_line_height))
+        .flex()
+        .items_center()
+        .child(checkbox)
         .into_any_element()
 }
 
