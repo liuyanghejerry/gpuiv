@@ -1568,17 +1568,24 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_painted_text(&self) -> Result<Vec<String>> {
         self.flush()?;
-        Ok(crate::text::painted_text())
+        with_test_state(|cx, _window, view| {
+            Ok(view.update(cx, |view, _| view.paint_state.painted_text()))
+        })
     }
 
     /// Every highlight wash painted in the last frame, in paint order.
     #[napi]
     pub fn get_painted_highlights(&self) -> Result<Vec<crate::element_tree::HighlightMatch>> {
         self.flush()?;
-        Ok(crate::text::painted_highlights()
-            .into_iter()
-            .map(Into::into)
-            .collect())
+        with_test_state(|cx, _window, view| {
+            Ok(view.update(cx, |view, _| {
+                view.paint_state
+                    .painted_highlights()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect()
+            }))
+        })
     }
 
     /// The styled runs of an `<input>`/`<textarea>` element as laid out in the
@@ -2092,8 +2099,11 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_automation_tree(&self) -> Result<String> {
         self.flush()?;
+        let bounds = with_test_state(|cx, _window, view| {
+            Ok(view.update(cx, |view, _| view.paint_state.all_bounds()))
+        })?;
         let tree = self.tree.lock().unwrap();
-        let json = tree.to_automation_json(&crate::automation::all_bounds());
+        let json = tree.to_automation_json(&bounds);
         serde_json::to_string(&json)
             .map_err(|e| Error::from_reason(format!("JSON serialization failed: {}", e)))
     }
@@ -2168,7 +2178,10 @@ impl TestGpuixRenderer {
     pub fn get_element_bounds(&self, id: f64) -> Result<Option<crate::renderer::ElementBounds>> {
         let id = to_element_id(id)?;
         self.flush()?;
-        Ok(crate::automation::get_bounds(id).map(crate::renderer::ElementBounds::from_painted))
+        let bounds = with_test_state(|cx, _window, view| {
+            Ok(view.update(cx, |view, _| view.paint_state.get_bounds(id)))
+        })?;
+        Ok(bounds.map(crate::renderer::ElementBounds::from_painted))
     }
 
     #[napi]

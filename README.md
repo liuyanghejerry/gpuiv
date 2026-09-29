@@ -410,6 +410,36 @@ const renderer = useGpuixRequired()
 chrome. `zoomWindow()` toggles macOS zoom or Windows/Linux maximize/restore;
 it is not fullscreen. Programmatic edge resizing is not exposed.
 
+## Multiple windows
+
+`createWindow()` mounts a component in a **new native window** (macOS).
+`createApp()` must have run first — the first window owns the process's GPUI
+application and the macOS menu bar:
+
+```tsx
+import { createApp, createWindow } from '@gpuiv/vue'
+
+createApp(MainWindow, { title: 'Main', width: 800, height: 600 })
+
+const second = createWindow(SecondWindow, {
+  title: 'Settings',
+  width: 420,
+  height: 300,
+  onWindowShouldClose: () => saveAndClose(),
+})
+second.close() // unmount the tree, close the OS window, drop the frame-loop slot
+```
+
+Each window gets its own renderer, so element ids, events, focus, selection,
+scroll state and automation queries stay per-window — two windows never see
+each other's elements even though ids restart from 1 in each. The options are
+the same as `createApp`'s (`RenderOptions`). The returned handle adds `close()`;
+closing through the OS close button also works, but `close()` from JS is the
+tidy path — it drops the renderer from the frame loop instead of leaving an
+empty one ticking until the process exits. The automation stdio bus serves the
+main window only. Windows and Linux support is pending (the second `init()`
+reports an explicit error there today).
+
 ## Tray
 
 `setTray` / `clearTray` manage the process tray (macOS status item, Windows
@@ -3222,7 +3252,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Canvas PNG export (`toDataURL`, `toBlob`, renderer `canvasToPng`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
 - [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
-- [ ] Multiple windows
+- [x] Multiple windows on macOS (`createWindow()`: one renderer per window, ids/events/selection/automation stay per-window; Windows/Linux pending)
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
 - [x] Vue Fast Refresh during `bun --hot` (HMR preload: edited components reload in place, the rest of the tree keeps `ref` state)
 - [x] Vue DevTools (`connectVueDevtools()` + the standalone devtools server: component tree and `setup()` state)
