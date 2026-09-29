@@ -75,7 +75,40 @@ export function windowsAssociationPlan(opts: {
 
 /** Write the plan with `reg add`. Windows only — callers gate the host. */
 export function registerWindowsAssociations(plan: WindowsAssociationPlan): void {
-  for (const key of plan.keys) {
+  writeRegistryKeys(plan.keys)
+}
+
+/** The per-user registration plan for one URL scheme (`myapp://…`). Registers
+ * the app as a candidate handler; the default-protocol claim is the user's
+ * confirmation — Windows hash-protects protocol UserChoice exactly like file
+ * extensions. */
+export function windowsUrlSchemePlan(opts: {
+  scheme: string
+  productName: string
+  exePath: string
+}): RegistryKey[] {
+  const quoted = `"${opts.exePath}"`
+  return [
+    {
+      key: `HKCU\\Software\\Classes\\${opts.scheme}`,
+      values: [
+        { name: "", type: "REG_SZ", data: `URL:${opts.productName} ${opts.scheme} protocol` },
+        { name: "URL Protocol", type: "REG_SZ", data: "" },
+      ],
+    },
+    {
+      key: `HKCU\\Software\\Classes\\${opts.scheme}\\DefaultIcon`,
+      values: [{ name: "", type: "REG_SZ", data: `${quoted},0` }],
+    },
+    {
+      key: `HKCU\\Software\\Classes\\${opts.scheme}\\shell\\open\\command`,
+      values: [{ name: "", type: "REG_SZ", data: `${quoted} "%1"` }],
+    },
+  ]
+}
+
+export function writeRegistryKeys(keys: RegistryKey[]): void {
+  for (const key of keys) {
     for (const value of key.values) {
       const args = ["add", key.key]
       if (value.name) args.push("/v", value.name)
@@ -93,12 +126,17 @@ export interface DesktopEntrySpec {
   productName: string
   exePath: string
   associations: LinuxFileAssociation[]
+  /** URL schemes; each becomes `x-scheme-handler/<scheme>` in MimeType. */
+  urlSchemes?: string[]
 }
 
 /** The `.desktop` entry text. `Exec` quotes a spaced path and appends `%f`
  * so the file manager passes the opened file as argv. */
 export function desktopEntry(spec: DesktopEntrySpec): string {
-  const mimeTypes = spec.associations.flatMap((group) => group.mimeTypes)
+  const mimeTypes = [
+    ...spec.associations.flatMap((group) => group.mimeTypes),
+    ...(spec.urlSchemes ?? []).map((scheme) => `x-scheme-handler/${scheme}`),
+  ]
   const names = new Set(spec.associations.map((group) => group.name ?? spec.productName))
   const lines = [
     "[Desktop Entry]",
@@ -140,7 +178,12 @@ export function registerLinuxAssociations(opts: DesktopEntrySpec & { iconPath?: 
     }
   }
   spawnSoft("update-desktop-database", [applications])
-  const mimeTypes = [...new Set(opts.associations.flatMap((group) => group.mimeTypes))]
+  const mimeTypes = [
+    ...new Set([
+      ...opts.associations.flatMap((group) => group.mimeTypes),
+      ...(opts.urlSchemes ?? []).map((scheme) => `x-scheme-handler/${scheme}`),
+    ]),
+  ]
   for (const mime of mimeTypes) {
     spawnSoft("xdg-mime", ["default", desktopFile, mime])
   }
@@ -181,8 +224,9 @@ export async function registerAssociations(opts: {
 
   if (spec.platform === "win32") {
     const associations = config.win?.fileAssociations ?? []
-    if (associations.length === 0) {
-      console.log("[gpuiv-packager] no win.fileAssociations in the config — nothing to register")
+    const urlSchemes = config.win?.urlSchemes ?? []
+    if (associations.length === 0 && urlSchemes.length === 0) {
+      console.log("[gpuiv-packager] no win.fileAssociations / win.urlSchemes in the config — nothing to register")
       return 0
     }
     for (const [index, association] of associations.entries()) {
@@ -205,13 +249,34 @@ export async function registerAssociations(opts: {
       registerWindowsAssociations(plan)
       console.log(`[gpuiv-packager] registered ${association.extensions.join(", ")} → ${plan.progId}`)
     }
+    for (const scheme of urlSchemes) {
+      const keys = windowsUrlSchemePlan({ scheme, productName: config.productName, exePath })
+      if (dryRun) {
+        console.log(`[gpuiv-packager] plan (URL scheme ${scheme}:):`)
+        for (const key of keys) {
+          for (const value of key.values) {
+            console.log(`  ${key.key} / ${value.name || "(default)"} = "${value.data}"`)
+          }
+        }
+        continue
+      }
+      writeRegistryKeys(keys)
+      console.log(`[gpuiv-packager] registered ${scheme}: links (default claim is the user's confirmation)`)
+    }
   } else {
     const associations = config.linux?.fileAssociations ?? []
-    if (associations.length === 0) {
-      console.log("[gpuiv-packager] no linux.fileAssociations in the config — nothing to register")
+    const urlSchemes = config.linux?.urlSchemes ?? []
+    if (associations.length === 0 && urlSchemes.length === 0) {
+      console.log("[gpuiv-packager] no linux.fileAssociations / linux.urlSchemes in the config — nothing to register")
       return 0
     }
-    const entry = { bundleId: config.bundleId, productName: config.productName, exePath, associations }
+    const entry = {
+      bundleId: config.bundleId,
+      productName: config.productName,
+      exePath,
+      associations,
+      urlSchemes,
+    }
     if (dryRun) {
       console.log(`[gpuiv-packager] plan (~/.local/share/applications/${config.bundleId}.desktop):`)
       console.log(desktopEntry(entry).trimEnd())

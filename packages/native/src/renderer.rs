@@ -1198,13 +1198,19 @@ async fn run_ui_commands(
             }
             UiCommand::RegisterUrlScheme { scheme, callback } => {
                 window.update(cx, move |_view, _window, cx| {
-                    let registration = cx.register_url_scheme(&scheme);
+                    // GPUI's Windows/Linux ports return `unimplemented` for
+                    // the claim; registration is per-user OS state our own
+                    // code writes (url_scheme.rs — same keys/entries the
+                    // packager's `register` installs). Delivery stays with
+                    // GPUI's `on_open_urls`, which both ports implement.
+                    let registration = cx.background_spawn(async move {
+                        crate::url_scheme::register(&scheme)
+                            .map_err(Error::from_reason)
+                    });
                     // `Context::spawn` hands the owning view's weak entity
                     // alongside the async app; the registration needs neither.
                     cx.spawn(async move |_view, _cx| {
-                        let result = registration
-                            .await
-                            .map_err(|error| Error::from_reason(format!("{error:#}")));
+                        let result = registration.await;
                         callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
                     })
                     .detach();
