@@ -869,6 +869,23 @@ export interface NativeRenderer {
   ): void
   /** Remove the tray installed by `setTray`. */
   clearTray?(callback: (error: Error | null) => void): void
+
+  // ── Global shortcuts ──────────────────────────────────────────
+  /** Arm a system-wide hotkey; the same accelerator replaces its earlier
+   *  registration. `onTrigger` fires whenever the combination is pressed
+   *  anywhere in the OS. Accelerators: `'+'`-separated modifiers (`ctrl`,
+   *  `alt`/`option`, `shift`, `cmd`/`win`/`super`) then one key (`a`–`z`,
+   *  `0`–`9`, `f1`–`f12`). macOS and Windows; Linux reports unsupported. */
+  registerGlobalShortcut?(
+    request: { accelerator: string },
+    onTrigger: (() => void) | null,
+    callback: (error: Error | null) => void
+  ): void
+  /** Remove a hotkey registered by `registerGlobalShortcut`. */
+  unregisterGlobalShortcut?(
+    accelerator: string,
+    callback: (error: Error | null) => void
+  ): void
 }
 
 /** One entry of a [`MenuBarMenu`]. Exactly one of `separator`, `submenu`, or
