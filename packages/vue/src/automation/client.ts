@@ -968,7 +968,14 @@ export function handleAutomationRequest(
   )
 }
 
+let stdioServerInstalled = false
+
+/** Serve automation commands on stdin/stdout. Only the first backend wins:
+ *  `createNativeRenderer` runs for every window, but one process has one
+ *  stdin — later windows simply stay off the automation bus. */
 export function serveAutomationStdio(backend: AutomationBackend): void {
+  if (stdioServerInstalled) return
+  stdioServerInstalled = true
   const decoder = createSseDecoder((message) => {
     if (!("method" in message)) return
     void handleAutomationRequest(message, backend).then((reply) => {

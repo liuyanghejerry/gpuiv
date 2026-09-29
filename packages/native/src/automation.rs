@@ -28,7 +28,7 @@ pub struct ElementBounds {
 }
 
 impl ElementBounds {
-    fn from_gpui(bounds: Bounds<Pixels>) -> Self {
+    pub(crate) fn from_gpui(bounds: Bounds<Pixels>) -> Self {
         Self {
             x: f64::from(f32::from(bounds.origin.x)),
             y: f64::from(f32::from(bounds.origin.y)),
@@ -36,10 +36,6 @@ impl ElementBounds {
             height: f64::from(f32::from(bounds.size.height)),
         }
     }
-}
-
-thread_local! {
-    static BOUNDS: RefCell<HashMap<u64, ElementBounds>> = RefCell::new(HashMap::new());
 }
 
 /// Zero-size canvas. Keep it ahead of the app subtree under the root.
@@ -52,7 +48,7 @@ pub fn bounds_frame_reset() -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |_, _, _, _| {
-            BOUNDS.with(|cell| cell.borrow_mut().clear());
+            crate::text::paint::current_paint_state().bounds_frame_reset();
         },
     )
     .absolute()
@@ -71,18 +67,7 @@ pub fn track_own_bounds<E: gpui::InteractiveElement>(el: E, id: u64) -> E {
 }
 
 pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
-    BOUNDS.with(|cell| {
-        cell.borrow_mut()
-            .insert(id, ElementBounds::from_gpui(bounds));
-    });
-}
-
-pub fn get_bounds(id: u64) -> Option<ElementBounds> {
-    BOUNDS.with(|cell| cell.borrow().get(&id).copied())
-}
-
-pub fn all_bounds() -> HashMap<u64, ElementBounds> {
-    BOUNDS.with(|cell| cell.borrow().clone())
+    crate::text::paint::current_paint_state().record_bounds(id, bounds);
 }
 
 pub fn bounds_tracker(
@@ -119,8 +104,7 @@ pub fn bounds_tracker(
             record_bounds(id, real);
             if let Some(selectable) = selection_start {
                 crate::text::record_start_region(real, selectable);
-            }
-        },
+            }        },
     )
     .absolute()
     .size_full()

@@ -1,5 +1,5 @@
 // GPUIX Vue - Vue 3 bindings for GPUI
-export { createApp, createNativeRenderer, resetApp, startFrameLoop } from "./renderer.js"
+export { createApp, createNativeRenderer, createWindow, resetApp, startFrameLoop } from "./renderer.js"
 export type { FrameLoop, GpuivAppHandle, RenderOptions } from "./renderer.js"
 export { promptForPaths, promptForNewPath, setMenus } from "./dialogs.js"
 export {
