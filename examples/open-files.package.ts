@@ -13,4 +13,10 @@ export default {
       extensions: ["md", "markdown"], mimeTypes: ["text/markdown"],
     }],
   },
+  win: {
+    fileAssociations: [{ extensions: ["md", "markdown"], name: "Markdown document" }],
+  },
+  linux: {
+    fileAssociations: [{ extensions: ["md", "markdown"], mimeTypes: ["text/markdown"], name: "Markdown document" }],
+  },
 } satisfies PackageConfig

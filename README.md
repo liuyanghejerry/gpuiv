@@ -2972,8 +2972,26 @@ new declaration. `mac.plist` supports nested dictionaries/arrays for advanced
 keys (including `CFBundleURLTypes`) and overrides generated keys.
 
 Try `cd examples && bun run package --config ./open-files.package.ts`, then
-open Markdown files with the resulting `.app`. Windows/Linux association
-registration and cross-platform single-instance forwarding are still pending.
+open Markdown files with the resulting `.app`.
+
+Windows and Linux register per-user at run time — no installer, no admin. In
+`gpuiv.package.ts`:
+
+```ts
+win: { fileAssociations: [{ extensions: ['md', 'markdown'], name: 'Markdown document' }] },
+linux: { fileAssociations: [{ extensions: ['md', 'markdown'], mimeTypes: ['text/markdown'] }] },
+```
+
+Then, on the target machine, `gpuiv-packager register --config gpuiv.package.ts`
+(`/path/to/product` defaults to the config's `outDir`; `--dry-run` prints the
+plan). Windows writes `HKCU\Software\Classes` ProgIds plus per-extension
+`OpenWithProgids` — the app appears in Explorer's Open-with list, and claiming
+the *default* handler is the user's one click (Microsoft hash-protects
+`UserChoice` against programmatic writes). Linux installs
+`~/.local/share/applications/<bundleId>.desktop` and refreshes the desktop
+databases; `xdg-mime` marks the app the default for the declared MIME types.
+macOS needs nothing — the declarations ship in the bundle.
+
 The macOS acceptance script `bun scripts/test-file-associations.ts` builds an
 isolated app and checks real cold/warm Launch Services delivery in the
 background; it removes the test app afterward. See the

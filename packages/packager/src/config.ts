@@ -31,6 +31,26 @@ export interface MacTypeDeclaration {
   exported?: boolean
 }
 
+/** A Windows file-association group, registered per-user at run time. */
+export interface WinFileAssociation {
+  /** Extensions without a leading dot, e.g. `["md"]`. */
+  extensions: string[]
+  /** Shown in Explorer's Open-with list. Defaults to the product name. */
+  name?: string
+  /** Registry ProgId, defaults to `<bundleId>.<extension group>`. */
+  progId?: string
+}
+
+/** A Linux file-association group, registered per-user at run time. */
+export interface LinuxFileAssociation {
+  /** Extensions without a leading dot, e.g. `["md"]`. */
+  extensions: string[]
+  /** MIME types, e.g. `text/markdown` — required for `xdg-mime default`. */
+  mimeTypes: string[]
+  /** Shown in the file manager. Defaults to the product name. */
+  name?: string
+}
+
 export interface PackageConfig {
   /** App entry file (TS/TSX), bundled with `Bun.build({ compile })`. */
   entry: string
@@ -63,6 +83,16 @@ export interface PackageConfig {
     /** Build a `.dmg` beside the zip for darwin targets (default true; needs
      * `hdiutil`, so cross-packaging from other hosts skips it). */
     dmg?: boolean
+  }
+  /** Windows product declarations. File associations register at RUN time
+   * (per-user `HKCU`, no installer, no admin): `gpuiv-packager register`. */
+  win?: {
+    fileAssociations?: WinFileAssociation[]
+  }
+  /** Linux product declarations. File associations register at RUN time
+   * (per-user XDG desktop entry): `gpuiv-packager register`. */
+  linux?: {
+    fileAssociations?: LinuxFileAssociation[]
   }
   /** Bun target names to build when none are passed on the CLI. */
   targets?: string[]
@@ -171,6 +201,18 @@ function validate(raw: PackageConfig, file: string): void {
   const identifier = (value: string) => /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/.test(value)
   for (const key of ["documentTypes", "typeDeclarations"] as const) {
     if (raw.mac?.[key] !== undefined && !Array.isArray(raw.mac[key])) problems.push(`mac.${key} must be an array`)
+  }
+  const extensions = (list: unknown): boolean =>
+    Array.isArray(list) && list.length > 0 && list.every((item) => typeof item === "string" && /^[A-Za-z0-9]+$/.test(item))
+  for (const group of raw.win?.fileAssociations ?? []) {
+    if (!group || !extensions(group.extensions)) {
+      problems.push("win.fileAssociations require non-empty extensions of letters/digits (no leading dot)")
+    }
+  }
+  for (const group of raw.linux?.fileAssociations ?? []) {
+    if (!group || !extensions(group.extensions) || !strings(group.mimeTypes)) {
+      problems.push("linux.fileAssociations require non-empty extensions and mimeTypes (xdg-mime needs them)")
+    }
   }
   for (const type of Array.isArray(raw.mac?.documentTypes) ? raw.mac.documentTypes : []) {
     if (!type || typeof type.name !== "string" || !type.name.trim()

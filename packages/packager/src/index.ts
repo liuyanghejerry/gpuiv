@@ -23,7 +23,7 @@ import { organizeWindowsProduct, zipWindows } from "./windows.js"
 import { smokeTest } from "./smoke.js"
 
 export { defaultHostTargetName, loadConfig } from "./config.js"
-export type { PackageConfig, ResolvedConfig, MacDocumentType, MacTypeDeclaration, PlistValue } from "./config.js"
+export type { PackageConfig, ResolvedConfig, MacDocumentType, MacTypeDeclaration, PlistValue, WinFileAssociation, LinuxFileAssociation } from "./config.js"
 export { TARGETS } from "./targets.js"
 export { buildAppIcons, writeIco } from "./icons.js"
 
