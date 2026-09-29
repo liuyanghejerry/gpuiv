@@ -87,7 +87,10 @@ export function onOpenRequests(renderer: NativeRenderer, handler: (request: Open
 /** Register the app as the handler for a URL scheme (e.g. `"myapp"` for
  *  `myapp://` URLs). Resolves when registration completed; rejects with the
  *  platform's reason when it did not — macOS requires 12+, a bundle id, and
- *  an installed app; Windows and Linux report unsupported. */
+ *  an installed app. Windows registers per-user candidate handler keys
+ *  (`HKCU`, the default-protocol claim stays the user's confirmation);
+ *  Linux installs a per-user desktop entry and claims the handler through
+ *  `xdg-mime`. */
 export function registerUrlScheme(renderer: NativeRenderer, scheme: string): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!renderer.registerUrlScheme) return reject(missing("registerUrlScheme"))

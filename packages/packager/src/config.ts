@@ -88,11 +88,16 @@ export interface PackageConfig {
    * (per-user `HKCU`, no installer, no admin): `gpuiv-packager register`. */
   win?: {
     fileAssociations?: WinFileAssociation[]
+    /** URL schemes the app handles, e.g. `["myapp"]` for `myapp://…`. */
+    urlSchemes?: string[]
   }
   /** Linux product declarations. File associations register at RUN time
    * (per-user XDG desktop entry): `gpuiv-packager register`. */
   linux?: {
     fileAssociations?: LinuxFileAssociation[]
+    /** URL schemes the app handles; added to the desktop entry's MimeType as
+   * `x-scheme-handler/<scheme>` and claimed via `xdg-mime default`. */
+    urlSchemes?: string[]
   }
   /** Bun target names to build when none are passed on the CLI. */
   targets?: string[]
@@ -213,6 +218,14 @@ function validate(raw: PackageConfig, file: string): void {
     if (!group || !extensions(group.extensions) || !strings(group.mimeTypes)) {
       problems.push("linux.fileAssociations require non-empty extensions and mimeTypes (xdg-mime needs them)")
     }
+  }
+  const schemes = (list: unknown): boolean =>
+    Array.isArray(list) && list.every((item) => typeof item === "string" && /^[A-Za-z][A-Za-z0-9+.-]*$/.test(item))
+  if (raw.win?.urlSchemes !== undefined && !schemes(raw.win.urlSchemes)) {
+    problems.push("win.urlSchemes must be URL scheme names (letters/digits/+/-/.)")
+  }
+  if (raw.linux?.urlSchemes !== undefined && !schemes(raw.linux.urlSchemes)) {
+    problems.push("linux.urlSchemes must be URL scheme names (letters/digits/+/-/.)")
   }
   for (const type of Array.isArray(raw.mac?.documentTypes) ? raw.mac.documentTypes : []) {
     if (!type || typeof type.name !== "string" || !type.name.trim()

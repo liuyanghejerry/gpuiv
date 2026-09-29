@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import path from "node:path"
 
-import { desktopEntry, registerAssociations, windowsAssociationPlan } from "../associations.js"
+import { desktopEntry, registerAssociations, windowsAssociationPlan, windowsUrlSchemePlan } from "../associations.js"
 import { loadConfig, type PackageConfig } from "../config.js"
 
 describe("windows association plan", () => {
@@ -57,12 +57,55 @@ describe("linux desktop entry", () => {
     expect(entry).toContain("Type=Application")
     expect(entry).toContain("Name=Notes App")
   })
+
+  it("adds URL schemes as x-scheme-handler mime types", () => {
+    const entry = desktopEntry({
+      bundleId: "dev.gpuiv.notes",
+      productName: "Notes App",
+      exePath: "/opt/Notes App/Notes App",
+      associations: [],
+      urlSchemes: ["notes", "md-notes"],
+    })
+    expect(entry).toContain("MimeType=x-scheme-handler/notes;x-scheme-handler/md-notes;")
+  })
+})
+
+describe("windows url scheme plan", () => {
+  it("marks the class as a URL protocol with a quoted open command", () => {
+    const keys = windowsUrlSchemePlan({
+      scheme: "notes",
+      productName: "Notes App",
+      exePath: "C:\\Tools\\Notes App\\Notes App.exe",
+    })
+    const byKey = new Map(keys.map((key) => [key.key, key.values]))
+    expect(byKey.get("HKCU\\Software\\Classes\\notes")).toEqual([
+      { name: "", type: "REG_SZ", data: "URL:Notes App notes protocol" },
+      { name: "URL Protocol", type: "REG_SZ", data: "" },
+    ])
+    expect(byKey.get("HKCU\\Software\\Classes\\notes\\shell\\open\\command")).toEqual([
+      { name: "", type: "REG_SZ", data: '"C:\\Tools\\Notes App\\Notes App.exe" "%1"' },
+    ])
+  })
 })
 
 describe("association config validation", () => {
   const base = {
     entry: "./a.tsx", productName: "X", bundleId: "dev.x", version: "1.0.0",
   } satisfies PackageConfig
+
+  it("rejects malformed url scheme names", async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "gpuiv-scheme-config-"))
+    try {
+      const file = path.join(dir, "gpuiv.package.json")
+      writeFileSync(file, JSON.stringify({
+        ...base,
+        win: { urlSchemes: ["1bad name"] },
+      }))
+      await expect(loadConfig(file)).rejects.toThrow(/urlSchemes/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
 
   it("rejects empty extensions and linux groups without mime types", async () => {
     const dir = mkdtempSync(path.join(tmpdir(), "gpuiv-assoc-config-"))
