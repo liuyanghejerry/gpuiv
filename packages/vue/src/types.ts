@@ -486,6 +486,14 @@ export interface ElementProps {
    *  the literal TeX. */
   math?: Record<string, { src: string; width: number; height: number; depth?: number }>
 
+  // ── Markdown diagrams ─────────────────────────────────────────────
+  /** Pre-rendered mermaid diagrams for `<markdown>`, keyed by the fence's
+   *  source with outer whitespace trimmed. GPUIV ships no diagram renderer
+   *  (mermaid needs a real browser layout); produce entries app-side (a
+   *  headless browser, a build step, a remote renderer) and mapped fences
+   *  paint as images, everything else degrades to a labelled code card. */
+  mermaid?: Record<string, { src: string }>
+
   // ── Focus props ────────────────────────────────────────────────
   /** Take keyboard focus when the element first mounts. Required for `<input>`:
    *  without it, or a click, the field never receives key events. */

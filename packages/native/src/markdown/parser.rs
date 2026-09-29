@@ -86,6 +86,13 @@ pub enum Block {
         language: Option<String>,
         code: String,
     },
+    /// A ` ```mermaid ` fence. There is no framework-side diagram renderer
+    /// (mermaid needs a real browser layout); the block exists so the app can
+    /// supply pre-rendered images through the `mermaid` map and unmapped
+    /// fences degrade to a labelled code card.
+    Mermaid {
+        code: String,
+    },
     BlockQuote {
         children: Vec<Block>,
     },
@@ -244,7 +251,11 @@ fn collect_footnote_labels(blocks: &[Arc<TopBlock>]) -> Vec<String> {
                         }
                     }
                 }
-                Block::Image { .. } | Block::CodeBlock { .. } | Block::Rule | Block::Math { .. } => {}
+                Block::Image { .. }
+                | Block::CodeBlock { .. }
+                | Block::Mermaid { .. }
+                | Block::Rule
+                | Block::Math { .. } => {}
             }
         }
     }
@@ -340,7 +351,11 @@ fn parse_started_block(cur: &mut Cursor) -> Vec<Block> {
             if code.ends_with('\n') {
                 code.pop();
             }
-            vec![Block::CodeBlock { language, code }]
+            if language.as_deref() == Some("mermaid") {
+                vec![Block::Mermaid { code }]
+            } else {
+                vec![Block::CodeBlock { language, code }]
+            }
         }
         Tag::BlockQuote(_) => vec![Block::BlockQuote {
             children: parse_block_sequence(cur),
@@ -1139,6 +1154,35 @@ mod tests {
     fn parses_horizontal_rules() {
         let tree = parse_full("a\n\n---\n\nb");
         assert!(matches!(b(&tree, 1), Block::Rule));
+    }
+
+    #[test]
+    fn mermaid_fences_parse_as_their_own_block() {
+        let tree = parse_full("```mermaid\ngraph TD;\n  A-->B;\n```");
+        let Block::Mermaid { code } = b(&tree, 0) else {
+            panic!("expected a mermaid block, got {:?}", b(&tree, 0));
+        };
+        // Trailing newline stripped like any fenced block.
+        assert_eq!(code, "graph TD;\n  A-->B;");
+
+        // The fence is still a code fence for the incremental parser; verify
+        // the tail reparse produces the same block.
+        let mut p = IncrementalParser::new();
+        let intro = "Intro.\n\n";
+        p.set_text(intro);
+        let appended = format!("{intro}```mermaid\npie\n```");
+        p.set_text(&appended);
+        let Block::Mermaid { code } = b(p.tree(), 1) else {
+            panic!("expected a mermaid block after append");
+        };
+        assert_eq!(code, "pie");
+
+        // An info string with more tokens still matches on the first.
+        let tree = parse_full("```mermaid title=Chart\nflow\n```");
+        let Block::Mermaid { code } = b(&tree, 0) else {
+            panic!("expected a mermaid block");
+        };
+        assert_eq!(code, "flow");
     }
 
     #[test]

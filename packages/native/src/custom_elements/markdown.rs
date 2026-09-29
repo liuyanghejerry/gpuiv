@@ -39,6 +39,10 @@ pub struct MarkdownElement {
     /// Populated from the `math` prop; `renderMathMap` in `@gpuiv/vue/math`
     /// is the producer.
     math: HashMap<String, crate::markdown::render::MathSpec>,
+    /// Pre-rendered mermaid diagrams, keyed by the fence's trimmed source.
+    /// Populated from the `mermaid` prop; the producer is app-side — there is
+    /// no in-process mermaid renderer.
+    mermaid: HashMap<String, crate::markdown::render::MermaidSpec>,
     /// Streaming parse state: an append to `source` reparses only from the
     /// last stable top-level block boundary, so a token-by-token feed costs
     /// O(tail), not O(document). Sources that stop being a prefix extension
@@ -67,6 +71,7 @@ impl CustomElement for MarkdownElement {
 
         let theme = self.theme.clone();
         let math = self.math.clone();
+        let mermaid = self.mermaid.clone();
         let tree = self.tree();
 
         // Link clicks are hit-tested per byte range inside the painted text, so
@@ -113,6 +118,7 @@ impl CustomElement for MarkdownElement {
             on_task,
             ctx.highlight_set.clone(),
             math,
+            mermaid,
         );
         let body = render_tree(tree, &mut md, window);
 
@@ -137,12 +143,15 @@ impl CustomElement for MarkdownElement {
             "source" => self.source = value.as_str().unwrap_or("").to_string(),
             "theme" => self.theme = Theme::from_prop(Some(&value)),
             "math" => self.math = crate::markdown::render::math_map_from_prop(&value),
+            "mermaid" => {
+                self.mermaid = crate::markdown::render::mermaid_map_from_prop(&value);
+            }
             _ => {}
         }
     }
 
     fn supported_props(&self) -> &'static [&'static str] {
-        &["source", "theme", "math"]
+        &["source", "theme", "math", "mermaid"]
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
