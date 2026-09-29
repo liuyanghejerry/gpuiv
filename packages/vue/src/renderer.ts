@@ -686,8 +686,6 @@ function mountTree(
  * (without an `onWindowShouldClose` veto) also closes the window; the frame
  * loop keeps its empty renderer until the process exits — close() from JS is
  * the tidy path.
- *
- * Not supported on Windows/Linux yet.
  */
 export function createWindow(
   rootComponent: Component,

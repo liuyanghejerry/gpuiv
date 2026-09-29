@@ -370,7 +370,6 @@ user-facing APIs belong there. This list is only the remaining engineering work.
       pure-TS updater (`docs/auto-update-plan.md`), Linux AppImage,
       universal-macOS `lipo` spike. See `docs/packaging-plan.md` phasing
 - [ ] **Window resize** - expose GPUI's runtime resize API (minimize / zoom / fullscreen shipped in PR #84)
-- [ ] **Multiple windows on Windows/Linux** - macOS ships (`createWindow()`); the threaded UI loop owns one GPUI application per process, so a second renderer must route through the existing UI thread's `UiCommand` channel
 - [ ] **Native hot reload** - cannot unload a `.node`. `bun run dev` rebuilds and restarts
 
 ## Testing
