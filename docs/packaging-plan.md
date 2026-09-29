@@ -290,9 +290,11 @@ signing hook (paid credentials), universal-macOS `lipo` spike
 (accept-or-reject).
 
 **P2 — the rest of the desktop story**
-Linux AppImage (native build already exists sans test-support), NSIS/MSIX
-installer, deep-link registration (plist `CFBundleURLTypes` + installer
-registry writes), and the auto-update client — designed in
+Linux AppImage (the tarball ships; AppImage itself still needs `linuxdeploy`
+on a Linux host — the packaging jobs run on macOS/Windows, and dispatching CI
+from a branch would publish the real feed, so it waits for a maintainer-side
+run), NSIS/MSIX installer, deep-link registration (plist `CFBundleURLTypes` +
+installer registry writes), and the auto-update client — designed in
 [auto-update-plan.md](./auto-update-plan.md) (S3-backed signed feed,
 ed25519-pinned pure-TS updater, per-platform apply-and-relaunch).
 

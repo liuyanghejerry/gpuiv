@@ -356,6 +356,48 @@ jobs:
           path: examples/dist/package/
           if-no-files-found: error
 
+  # Linux products ship as tarballs (the packager's linux path); no publish
+  # step — update support for linux targets is P2.
+  package-linux:
+    name: package-linux
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download Linux bindings
+        uses: actions/download-artifact@v4
+        with:
+          path: packages/native
+          pattern: bindings-*-unknown-linux-gnu
+          merge-multiple: true
+
+      - name: Build @gpuiv/vue
+        run: bun run build
+        working-directory: packages/vue
+
+      # Both linux arches cross-compile from the x64 runner. No smoke test:
+      # the linux bindings build without test-support (GPUI's wgpu image
+      # readback), so the packaged app has no automation renderer yet.
+      - name: Package chat for linux
+        run: bun run package --target linux-x64 --target linux-arm64 --no-smoke
+        working-directory: examples
+        timeout-minutes: 25
+
+      - name: Upload packaged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-linux
+          path: examples/dist/package/
+          if-no-files-found: error
+
   # The single writer of the channel pointer: after both platform jobs have
   # published their immutable fragments, merge them and flip stable.json.
   # Inert without the S3 secrets or the GitHub store opt-in.

@@ -18,6 +18,7 @@ import { bundleApp, executableLayout } from "./bundle.js"
 import { stageBindingShim } from "./shim.js"
 import { resolveNodeFile, getTarget, TARGETS, type TargetSpec } from "./targets.js"
 import { buildDmg, wrapMacApp, zipDarwin } from "./macos.js"
+import { tarLinux } from "./linux.js"
 import { organizeWindowsProduct, zipWindows } from "./windows.js"
 import { smokeTest } from "./smoke.js"
 
@@ -124,6 +125,7 @@ async function buildOne(config: ResolvedConfig, spec: TargetSpec, args: BuildPac
 
   const zipName = `${sanitize(config.productName)}-${spec.name}.zip`
   const zipPath = path.join(config.outDir, zipName)
+  let artifactPath = zipPath
   let smokeScreenshot: string | undefined
   let dmgPath: string | undefined
 
@@ -140,8 +142,10 @@ async function buildOne(config: ResolvedConfig, spec: TargetSpec, args: BuildPac
     organizeWindowsProduct({ config, productDir: layout.productDir })
     zipWindows({ productDir: layout.productDir, zipPath })
   } else {
-    // Linux products ship as the plain folder for now; AppImage is P2.
-    console.warn(`[gpuiv-packager] linux target: shipping the folder unpacked (no zip yet)`)
+    // Linux ships the executable folder as a tarball (update support stays
+    // P2; publish skips linux targets).
+    artifactPath = zipPath.replace(/\.zip$/, ".tar.gz")
+    tarLinux({ productDir: layout.productDir, tarPath: artifactPath })
   }
 
   const smokeEnabled = args.smoke !== false && config.smokeTestId !== null
@@ -160,15 +164,15 @@ async function buildOne(config: ResolvedConfig, spec: TargetSpec, args: BuildPac
     )
   }
 
-  console.log(`[gpuiv-packager] artifact: ${zipPath} (${mb(zipPath)} MB)`)
+  console.log(`[gpuiv-packager] artifact: ${artifactPath} (${mb(artifactPath)} MB)`)
   if (dmgPath) console.log(`[gpuiv-packager] artifact: ${dmgPath} (${mb(dmgPath)} MB)`)
   return {
     target: spec.name,
     productDir: layout.productDir,
     exePath: layout.exePath,
-    artifactZip: spec.platform === "linux" ? layout.productDir : zipPath,
+    artifactZip: artifactPath,
     artifactDmg: dmgPath,
-    artifactMb: mb(spec.platform === "linux" ? layout.productDir : zipPath),
+    artifactMb: mb(artifactPath),
     smokeScreenshot,
   }
 }
