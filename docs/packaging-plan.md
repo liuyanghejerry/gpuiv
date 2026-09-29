@@ -282,9 +282,10 @@ is why §4 is non-optional.
    ship `Chat.app` + `Chat-win32-x64.zip` as CI artifacts.
 
 **P1 — distributable with confidence**
-Developer ID signing + notarization in CI, GitHub Release attach +
-`latest.json`, dmg, Windows signing hook, universal-macOS `lipo` spike
-(accept-or-reject).
+Developer ID signing + notarization in CI (paid credentials), GitHub Release
+attach + `latest.json` (shipped as the `--store github` feed backend —
+opt-in via the `GPUIV_FEED_STORE` repo variable), dmg, Windows signing hook
+(paid credentials), universal-macOS `lipo` spike (accept-or-reject).
 
 **P2 — the rest of the desktop story**
 Linux AppImage (native build already exists sans test-support), NSIS/MSIX

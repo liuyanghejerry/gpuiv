@@ -36,7 +36,15 @@ engine and events; each app renders its own progress UI.
   feed to one host, one auth model, and rate limits; an S3 prefix is a URL
   the client already knows how to consume, works on every cloud and
   self-hosted (MinIO), and puts a CDN in front for free. GitHub Releases can
-  still *be* that URL later — the client never knows.
+  still *be* that URL later — the client never knows. That later arrived:
+  `gpuiv-packager publish/promote --store github` serves the identical key
+  layout as release assets (`releases/<version>/<asset>` on prereleases
+  tagged `app-v<version>`, the mutable `<channel>.json` on the `app-feed`
+  release, replaced by delete + re-upload on promote). S3 stays the default
+  store; CI picks the GitHub store when the `GPUIV_FEED_STORE` repo variable
+  is `github` (no S3 secrets needed — the workflow's `GITHUB_TOKEN` with
+  `contents: write` is the credential, public releases give the updater
+  tokenless download URLs).
 - **A custom JSON manifest + ed25519, not Sparkle.** Sparkle is the macOS
   standard but it is an Objective-C framework: wiring it in means linking it
   through the zed fork and exposing it over napi, a large native surface for

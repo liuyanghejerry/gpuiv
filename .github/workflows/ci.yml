@@ -241,12 +241,19 @@ jobs:
     runs-on: macos-latest
     env:
       # Feed publishing is inert without these secrets (forks stay green).
+      # Setting the GPUIV_FEED_STORE repo variable to "github" switches
+      # publishing to GitHub Releases (GITHUB_TOKEN, no S3 secrets needed).
+      GPUIV_FEED_STORE: ${{ vars.GPUIV_FEED_STORE }}
+      GPUIV_GITHUB_REPOSITORY: ${{ github.repository }}
+      GPUIV_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GPUIV_S3_ENDPOINT: ${{ secrets.GPUIV_S3_ENDPOINT }}
       GPUIV_S3_REGION: ${{ secrets.GPUIV_S3_REGION }}
       GPUIV_S3_BUCKET: ${{ secrets.GPUIV_S3_BUCKET }}
       GPUIV_S3_PREFIX: ${{ secrets.GPUIV_S3_PREFIX }}
       GPUIV_S3_ACCESS_KEY_ID: ${{ secrets.GPUIV_S3_ACCESS_KEY_ID }}
       GPUIV_S3_SECRET_ACCESS_KEY: ${{ secrets.GPUIV_S3_SECRET_ACCESS_KEY }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -276,11 +283,11 @@ jobs:
         timeout-minutes: 25
 
       - name: Publish darwin release objects
-        if: ${{ env.GPUIV_S3_ENDPOINT != '' }}
+        if: ${{ env.GPUIV_S3_ENDPOINT != '' || env.GPUIV_FEED_STORE == 'github' }}
         working-directory: examples
         env:
           GPUIV_UPDATE_PRIVATE_KEY: ${{ secrets.GPUIV_UPDATE_PRIVATE_KEY }}
-        run: bun run publish-release -- --channel stable --target darwin-arm64 --target darwin-x64
+        run: bun run publish-release -- --channel stable --target darwin-arm64 --target darwin-x64 --store "${GPUIV_FEED_STORE:-s3}"
 
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
@@ -295,12 +302,17 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     env:
+      GPUIV_FEED_STORE: ${{ vars.GPUIV_FEED_STORE }}
+      GPUIV_GITHUB_REPOSITORY: ${{ github.repository }}
+      GPUIV_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GPUIV_S3_ENDPOINT: ${{ secrets.GPUIV_S3_ENDPOINT }}
       GPUIV_S3_REGION: ${{ secrets.GPUIV_S3_REGION }}
       GPUIV_S3_BUCKET: ${{ secrets.GPUIV_S3_BUCKET }}
       GPUIV_S3_PREFIX: ${{ secrets.GPUIV_S3_PREFIX }}
       GPUIV_S3_ACCESS_KEY_ID: ${{ secrets.GPUIV_S3_ACCESS_KEY_ID }}
       GPUIV_S3_SECRET_ACCESS_KEY: ${{ secrets.GPUIV_S3_SECRET_ACCESS_KEY }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -330,12 +342,12 @@ jobs:
         timeout-minutes: 25
 
       - name: Publish win32 release objects
-        if: ${{ env.GPUIV_S3_ENDPOINT != '' }}
+        if: ${{ env.GPUIV_S3_ENDPOINT != '' || env.GPUIV_FEED_STORE == 'github' }}
         working-directory: examples
         shell: bash
         env:
           GPUIV_UPDATE_PRIVATE_KEY: ${{ secrets.GPUIV_UPDATE_PRIVATE_KEY }}
-        run: bun run publish-release -- --channel stable --target win32-x64
+        run: bun run publish-release -- --channel stable --target win32-x64 --store "${GPUIV_FEED_STORE:-s3}"
 
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
@@ -346,7 +358,7 @@ jobs:
 
   # The single writer of the channel pointer: after both platform jobs have
   # published their immutable fragments, merge them and flip stable.json.
-  # Inert without the S3 secrets.
+  # Inert without the S3 secrets or the GitHub store opt-in.
   promote-release:
     name: promote-release
     needs:
@@ -355,12 +367,17 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     env:
+      GPUIV_FEED_STORE: ${{ vars.GPUIV_FEED_STORE }}
+      GPUIV_GITHUB_REPOSITORY: ${{ github.repository }}
+      GPUIV_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GPUIV_S3_ENDPOINT: ${{ secrets.GPUIV_S3_ENDPOINT }}
       GPUIV_S3_REGION: ${{ secrets.GPUIV_S3_REGION }}
       GPUIV_S3_BUCKET: ${{ secrets.GPUIV_S3_BUCKET }}
       GPUIV_S3_PREFIX: ${{ secrets.GPUIV_S3_PREFIX }}
       GPUIV_S3_ACCESS_KEY_ID: ${{ secrets.GPUIV_S3_ACCESS_KEY_ID }}
       GPUIV_S3_SECRET_ACCESS_KEY: ${{ secrets.GPUIV_S3_SECRET_ACCESS_KEY }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -368,7 +385,7 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Promote the channel pointer
-        if: ${{ env.GPUIV_S3_ENDPOINT != '' }}
+        if: ${{ env.GPUIV_S3_ENDPOINT != '' || env.GPUIV_FEED_STORE == 'github' }}
         shell: bash
         run: |
           bun install
@@ -376,7 +393,8 @@ jobs:
           echo "promoting $VERSION"
           cd examples
           bun run promote-release -- --channel stable --version "$VERSION" \
-            --target darwin-arm64 --target darwin-x64 --target win32-x64
+            --target darwin-arm64 --target darwin-x64 --target win32-x64 \
+            --store "${GPUIV_FEED_STORE:-s3}"
 
   # Full self-update verification: two packaged versions against an
   # in-process mock S3, the packaged v0.1.0 product auto-downloads and
