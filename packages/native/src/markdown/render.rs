@@ -252,6 +252,41 @@ pub(crate) fn math_map_from_prop(value: &serde_json::Value) -> HashMap<String, M
     map
 }
 
+/// One pre-rendered diagram from the element's `mermaid` map. The app runs
+/// mermaid wherever it wants (headless browser, build step, remote renderer)
+/// and hands back a self-contained image; GPUIV deliberately ships no
+/// renderer, because mermaid needs a real browser layout.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MermaidSpec {
+    /// `data:image/svg+xml;base64,…` or any `<img>` source.
+    pub src: String,
+}
+
+impl MermaidSpec {
+    pub(crate) fn from_prop(value: &serde_json::Value) -> Option<Self> {
+        let src = value.get("src")?.as_str()?.to_string();
+        if src.is_empty() {
+            return None;
+        }
+        Some(MermaidSpec { src })
+    }
+}
+
+/// Parse the `mermaid` prop: `{ "<fence source>": { src } }`. Keys must match
+/// the fence's source with outer whitespace trimmed, the same convention as
+/// the `math` map.
+pub(crate) fn mermaid_map_from_prop(value: &serde_json::Value) -> HashMap<String, MermaidSpec> {
+    let mut map = HashMap::new();
+    if let Some(entries) = value.as_object() {
+        for (code, spec) in entries {
+            if let Some(spec) = MermaidSpec::from_prop(spec) {
+                map.insert(code.clone(), spec);
+            }
+        }
+    }
+    map
+}
+
 /// Everything block rendering needs. Carries a mutable counter so each painted
 /// text run gets a distinct, document-ordered selection sub-key.
 pub struct MdContext {
@@ -278,6 +313,8 @@ pub struct MdContext {
     pub footnote_numbers: HashMap<String, usize>,
     /// Pre-rendered display formulas keyed by TeX source.
     pub math: HashMap<String, MathSpec>,
+    /// Pre-rendered mermaid diagrams keyed by the fence's trimmed source.
+    pub mermaid: HashMap<String, MermaidSpec>,
 }
 
 impl MdContext {
@@ -291,6 +328,7 @@ impl MdContext {
         on_task: Option<Arc<dyn Fn(&TaskMarker)>>,
         highlight_set: Option<Arc<crate::text::HighlightContext>>,
         math: HashMap<String, MathSpec>,
+        mermaid: HashMap<String, MermaidSpec>,
     ) -> Self {
         Self {
             element_id,
@@ -304,6 +342,7 @@ impl MdContext {
             on_task,
             footnote_numbers: HashMap::new(),
             math,
+            mermaid,
         }
     }
 
@@ -361,6 +400,7 @@ pub fn render_block(block: &Block, ctx: &mut MdContext, window: &Window) -> AnyE
             text_element(runs, size, line, FontWeight::SEMIBOLD, ctx)
         }
         Block::CodeBlock { language, code } => render_code_block(language.as_deref(), code, ctx),
+        Block::Mermaid { code } => render_mermaid(code, ctx),
         Block::Image { url, alt } => render_image(url, alt, ctx),
         Block::Math { tex } => render_math(tex, ctx),
         Block::BlockQuote { children } => div()
@@ -587,6 +627,37 @@ fn render_math(tex: &str, ctx: &mut MdContext) -> AnyElement {
             None,
         ))
         .into_any_element()
+}
+
+/// A ` ```mermaid ` fence. Mapped entries paint as an image block sized by
+/// the `<img>` pipeline (natural size, clamped like any markdown image); an
+/// unmapped fence degrades to the fenced-code card with a `mermaid` label —
+/// ColaMD's own v1.8.1 fallback — never to nothing.
+fn render_mermaid(code: &str, ctx: &mut MdContext) -> AnyElement {
+    use gpui::prelude::*;
+
+    let theme = ctx.theme.clone();
+    let m = &theme.metrics;
+    // Same trimmed-key convention as the math map.
+    if let Some(spec) = ctx.mermaid.get(code.trim()).cloned() {
+        let sub = ctx.take_sub();
+        let id = SharedString::from(format!("__gpuix_md_mermaid_{}_{}", ctx.element_id, sub));
+        if let Some(image) = crate::custom_elements::img::standalone_img(&spec.src, id) {
+            return div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .justify_center()
+                .child(
+                    image
+                        .max_w_full()
+                        .max_h(px(m.md_image_max_height))
+                        .rounded(px(m.md_image_radius)),
+                )
+                .into_any_element();
+        }
+    }
+    render_code_block(Some("mermaid"), code, ctx)
 }
 
 /// A standalone image block. `gpui::img` sizes itself from the bitmap once
