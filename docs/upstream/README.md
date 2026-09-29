@@ -37,7 +37,7 @@ lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ledger
 
-Inventoried range: `9fcd628..9362f04` (2026-09-27). Earlier history is in
+Inventoried range: `9fcd628..4ecca30` (2026-09-29). Earlier history is in
 [Sync log](#sync-log) below.
 
 | Topic | Upstream commits | Status | Notes |
@@ -116,7 +116,7 @@ Inventoried range: `9fcd628..9362f04` (2026-09-27). Earlier history is in
 | Padded element bounds | `cff4907` (bounds hunk) | synced | Already local in PR #20: `bounds_tracker` records the real border box of padded elements; GPU tests assert the box and click corners |
 | Tab defaults and cancelable key events | `cff4907` (keyboard half) `148c9e8` (Combobox blur half) | pending | Not selected in this sync-now round. Needs a Vue `KeyEvent`/`tabNavigation` design and migration from app-owned Tab handling; the GPUI Shift+Tab fix from `9a02694` is already pinned |
 | Dialog, dismiss layers, viewport fill | `cff4907` (dialog half) `148c9e8` (layer half) `6382a80` `ef1c12e` (Dialog halves) `7a200d9` `1032e25` (Dialog example half) | pending | Not selected in this sync-now round. Vue component API, layer ordering, focus restore and modal behavior need a maintainer decision; native focus fixes are already in PRs #130–#131 |
-| Focus-visible styles and keyboard focus dim | `dced20d` (style half) `ae10f8b` `3cb85a6` `8aefc16` `3448a76` `e1dcc09` `b2d6975` `1032e25` (popup style half) | pending | Not selected in this sync-now round. Decide whether other controls dim by default; a Vue port should retain our existing `style.outline` object rather than inherit upstream's flat outline props |
+| Focus-visible styles and keyboard focus dim | `dced20d` (style half) `ae10f8b` `3cb85a6` `8aefc16` `3448a76` `e1dcc09` `b2d6975` `1032e25` (popup style half) `5187660` | pending | Not selected in this sync-now round. Decide whether other controls dim by default; a Vue port should retain our existing `style.outline` object rather than inherit upstream's flat outline props. `5187660` (2026-09-27 round) splits the two states the old `focusVisible` key conflated: `focusVisible` now only styles the focused element, every other focusable element dims to 40% with or without one, and a new non-inherited `keyboardFocusDim: false` style key opts an element out (Select/Dialog popups use it instead of `focusVisible: {}`); window-wide `render({ keyboardFocusDim: false })` unchanged |
 | Headless Button | `dced20d` (Button half) `1032e25` (Button example half) | pending | Not selected in this sync-now round. Needs a Vue/Base UI component port and keyboard activation tests; upstream React/Solid example changes do not copy directly into our diverged chat demo |
 | BGRA live image uploads | `550f560` | synced | PR #132 — optional `{ format: "bgra" }` on Vue `<img>` refs, native/test renderer format parsing and direct BGRA upload, GPU screenshot equivalence test; `9362f04`'s generated declaration follows our native build |
 | `asChild` for Select/Combobox items | `ef9b670` | synced | PR #92 — Vue-native `asChild` on `SelectItem`/`ComboboxItem`: `cloneAsChild` in floating.tsx `cloneVNode`-merges item props onto the single child (style arrays flatten in `toGpuixStyle`, handler arrays fire child-first, `mergeRef: true` keeps the ComboboxItem mount ref); no `renderSlot`/ref-forwarding port — our registry keys by value, component children use fallthrough attrs. All six chat pickers migrated (MenuRow root is the item now); element-child + filled-component-child + Combobox filter GPU tests; README asChild section |
@@ -127,6 +127,7 @@ Inventoried range: `9fcd628..9362f04` (2026-09-27). Earlier history is in
 | Browser boot fixes | `af9c8bb` | declined | [browser-boot-fixes.md](./browser-boot-fixes.md) — browser-only `process` guards and Wasm key-event queue; its CSS `OVERLAY_MONO` stack would un-mono our desktop overlay |
 | README intro rewrites | `9b02323` `d85a31e` | declined | their marketing/SEO copy (plus a website hero tweak); our README is fork-specific |
 | gitignore `idle-hello.cjs` | `3920a5e` | declined | their hermes experiment artifact; nothing here generates that file |
+| Disktree example → standalone npm package | `ad218e7` `cbc4065` `b3c2823` `193f9c9` `0846f89` `e8efacb` `4ecca30` | declined | [disktree-example-package.md](./disktree-example-package.md) — their disk-treemap example extracted into upstream's own `disktree` npm product (CLI + embeddable app, local publish); upstream-only surface, no binding-layer changes in the range |
 
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8. `8d3ec09` (Windows `bun -e` `fileURLToPath`) matched
@@ -134,7 +135,7 @@ our ported subprocess tests already — `events.test.tsx` and
 `runtime-error-overlay.test.tsx` have used `fileURLToPath` from the start.
 `9362f04` only regenerates the native declaration; this round regenerated it from the Rust API.
 
-**Last inventoried upstream head:** `9362f04` (2026-09-27)
+**Last inventoried upstream head:** `4ecca30` (2026-09-27)
 
 ## Sync log
 
@@ -203,6 +204,7 @@ from upstream through `367ef48`:
 | #130 | Test renderer focus events: `Window::set_active_for_tests` lets the offscreen test window deliver `onFocus`/`onBlur`; Vue regression asserts both transitions — upstream `148c9e8` (native test half) |
 | #131 | Pending focus lifecycle: request survives a pre-creation frame, then yields to a later Tab/click; native test entry point and Vue GPU regressions — upstream `6382a80` `ef1c12e` (native halves) |
 | #132 | BGRA live image uploads: native `PixelFormat`, optional Vue `<img>` ref format, GPU screenshot equivalence and invalid-format test — upstream `550f560`; ledger round `9fcd628..9362f04` also records already-local bounds/Zed fixes, pending keyboard/Dialog/focus/Button topics, and the website/release-doc extensions to existing declined topics |
+| — | Ledger round `9362f04..4ecca30`: no sync-now topics; `5187660` folds into the pending focus-dim row (dim now independent of `focusVisible`, new `keyboardFocusDim: false` key), disktree example/npm package declined — inventoried via the GitHub API (git-over-HTTPS to github.com was unreachable this round; no `zed` submodule movement) |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
