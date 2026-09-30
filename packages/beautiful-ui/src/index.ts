@@ -1,8 +1,7 @@
 /** @gpuiv/beautiful-ui — AI chat primitives rendered natively on the GPU.
  *
  *  Ported from beautiful-ui (https://github.com/slev12397/beautiful-ui):
- *  Phase 0 design tokens + Phase 1 primitives (ContextCards, SearchList,
- *  FilterTable, RecommendationCard, ChatComposer, CodeBlock, LoadingState).
+ *  Vue primitives, native canvas charts, workflow editor, and screen viewer.
  *
  *  @see https://github.com/liuyanghejerry/gpuiv/issues/110
  */
@@ -12,6 +11,7 @@ export { lightTokens, darkTokens, createShadows, radius, fonts, ease, duration }
 export type { Tokens, Shadows, Shadow } from "./tokens.js"
 export { mix, withAlpha, toSrgb, parseColor } from "./colors.js"
 export { createTheme, provideTheme, useTheme, type Theme } from "./theme.js"
+export { loadBeautifulFonts } from "./fonts.js"
 export { icons, type IconName } from "./icons.js"
 
 // atoms

@@ -32,9 +32,11 @@
  *    background inside a rounded `overflow: "hidden"` card.
  */
 
+import { activationKeys } from "../interaction.js"
+import { motion } from "../motion.js"
 import { computed, defineComponent, ref, type PropType } from "vue"
-import { motion } from "@gpuiv/vue"
-import { ease, radius } from "../tokens.js"
+
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Button, EntityChip, ValuePill, type ButtonVariant, type ValuePillTone } from "../atoms/index.js"
 
@@ -181,6 +183,7 @@ export const RecommendationCard = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             width: "100%",
             maxWidth: 380,
             overflow: "hidden",
@@ -256,6 +259,11 @@ export const RecommendationCard = defineComponent({
                     selected.value = i
                     accepted.value = false
                   }}
+                  tabIndex={0}
+                  onKeyDown={activationKeys(() => {
+                    selected.value = i
+                    accepted.value = false
+                  })}
                   style={{
                     display: "flex",
                     alignItems: "center",

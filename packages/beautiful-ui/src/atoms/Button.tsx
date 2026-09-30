@@ -6,16 +6,18 @@
  *  boxShadow), and the `transition` is GPUIV's native hover/active swap.
  */
 
-import { defineComponent, type PropType } from "vue"
-import type { StyleDesc } from "@gpuiv/vue"
-import { radius } from "../tokens.js"
+import { defineComponent, ref, type PropType } from "vue"
+import type { StyleDesc, EventPayload } from "@gpuiv/vue"
+import { fonts, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
+import { activationKeys } from "../interaction.js"
 
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "accent" | "success" | "quiet"
 export type ButtonSize = "xs" | "sm" | "md"
 
 export const Button = defineComponent({
   name: "BuiButton",
+  inheritAttrs: false,
   props: {
     variant: { type: String as PropType<ButtonVariant>, default: "secondary" },
     size: { type: String as PropType<ButtonSize>, default: "md" },
@@ -27,6 +29,7 @@ export const Button = defineComponent({
   },
   setup(props, { attrs, slots }) {
     const theme = useTheme()
+    const focused = ref(false)
     return () => {
       const t = theme.tokens.value
       const shadows = theme.shadows.value
@@ -51,9 +54,11 @@ export const Button = defineComponent({
         userSelect: "none",
         cursor: props.disabled ? "default" : "pointer",
         fontWeight: 500,
+        active: { opacity: 0.8 },
         ...sizeStyle[props.size],
         ...variantStyle[props.variant],
         ...(attrs.style as StyleDesc | undefined),
+        ...(focused.value && !props.disabled ? { outline: { width: 1.5, color: t.accent, offset: 2 } } : {}),
       }
       if (props.disabled) {
         style.opacity = 0.5
@@ -63,10 +68,21 @@ export const Button = defineComponent({
         <div
           {...attrs}
           role="button"
+          tabIndex={props.disabled ? -1 : ((attrs.tabIndex as number | undefined) ?? 0)}
           aria-disabled={props.disabled || undefined}
+          aria-valuetext={props.disabled ? "Disabled" : undefined}
           testId={props.testId}
+          onFocus={(event: EventPayload) => {
+            focused.value = true
+            ;(attrs.onFocus as ((event: unknown) => void) | undefined)?.(event)
+          }}
+          onBlur={(event: EventPayload) => {
+            focused.value = false
+            ;(attrs.onBlur as ((event: unknown) => void) | undefined)?.(event)
+          }}
           onClick={props.disabled ? undefined : props.onClick}
-          style={style}
+          onKeyDown={props.disabled ? undefined : activationKeys(() => props.onClick?.())}
+          style={{ fontFamily: fonts.sans, ...style }}
         >
           {slots.default?.()}
         </div>

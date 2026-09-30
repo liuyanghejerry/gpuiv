@@ -66,7 +66,7 @@ export const lightTokens: Tokens = {
   line: "oklch(0.946 0.003 264.542)",
   lineStrong: "oklch(0.912 0.005 258.326)",
   lineSoft: "oklch(0.966 0.002 264.542)",
-  gridLine: "oklch(0.946 0.003 264.542)",
+  gridLine: "oklch(0.946 0.003 264.542 / 0.78)",
   field: "oklch(0.961 0.001 286.375)",
   stripe: "oklch(0.405 0 0 / 0.075)",
   stripeBg: "oklch(0.97 0 0)",
@@ -103,7 +103,7 @@ export const darkTokens: Tokens = {
   line: "oklch(0.308 0.006 258.354)",
   lineStrong: "oklch(0.356 0.007 264.474)",
   lineSoft: "oklch(0.278 0.006 258.354)",
-  gridLine: "oklch(0.308 0.006 258.354)",
+  gridLine: "oklch(0.308 0.006 258.354 / 0.78)",
   field: "oklch(0.293 0.006 271.223)",
   stripe: "oklch(1 0 0 / 0.055)",
   stripeBg: "oklch(0.226 0.004 264.485)",
@@ -214,9 +214,9 @@ export const radius = {
 /* ── Type ──────────────────────────────────────── */
 
 export const fonts = {
-  /** Inter; falls back to the system font when not installed. */
+  /** Bundled Inter, registered by provideTheme/useTheme. */
   sans: "Inter",
-  /** JetBrains Mono; falls back to the system monospace when not installed. */
+  /** Bundled JetBrains Mono, registered by provideTheme/useTheme. */
   mono: "JetBrains Mono",
 } as const
 

@@ -31,9 +31,11 @@
  *    per-element and does not inherit the button's hover colour).
  */
 
+import { activationKeys } from "../interaction.js"
+import { motion } from "../motion.js"
 import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType } from "vue"
-import { motion, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
-import { ease, radius } from "../tokens.js"
+import { useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Icon } from "../atoms/Icon.js"
 import type { IconName } from "../icons.js"
@@ -166,6 +168,7 @@ export const ChatComposer = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             flexDirection: "column",
             height: 288,
@@ -212,6 +215,8 @@ export const ChatComposer = defineComponent({
                       hover: selected ? undefined : { opacity: 0.75 },
                     }}
                     onClick={() => (tab.value = item)}
+                    tabIndex={0}
+                    onKeyDown={activationKeys(() => (tab.value = item))}
                   >
                     {item}
                   </div>
@@ -305,6 +310,9 @@ export const ChatComposer = defineComponent({
                 },
               }}
               onClick={focusComposer}
+              role="button"
+              tabIndex={0}
+              onKeyDown={activationKeys(focusComposer)}
             >
               <textarea
                 ref={composerRef}
@@ -344,6 +352,8 @@ export const ChatComposer = defineComponent({
                     active: canSend.value ? { opacity: 0.88 } : undefined,
                   }}
                   onClick={send}
+                  tabIndex={0}
+                  onKeyDown={activationKeys(send)}
                 >
                   <Icon name="arrowUp" size={16} color={canSend.value ? t.surface : t.ink2} />
                 </div>

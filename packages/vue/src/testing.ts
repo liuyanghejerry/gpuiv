@@ -258,6 +258,11 @@ export interface A11yTreeNode {
     author_id?: string
     expanded?: boolean
     selected?: boolean
+    toggled?: "True" | "False" | "Mixed"
+    numeric_value?: number
+    min_numeric_value?: number
+    max_numeric_value?: number
+    orientation?: string
     level?: number
     on_action?: string[]
   }

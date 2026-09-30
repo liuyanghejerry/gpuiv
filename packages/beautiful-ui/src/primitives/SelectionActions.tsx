@@ -72,14 +72,16 @@
  *  - Enter submits through the input's `onSubmit` (GPUIV's single-line
  *    input consumes Enter before keyDown — the ApprovalCard finding); the
  *    `<form>` reduces to that handler. The placeholder keeps the native
- *    tint (`placeholder:text-ink-3` is not stylable), and roles/aria-* are
- *    passthroughs — no DOM accessibility tree.
+ *    tint (`placeholder:text-ink-3` is not stylable); roles and tab order use
+ *    GPUI native accessibility.
  *  - The unused `variant` prop is accepted for gallery/registry parity.
  */
 
+import { activationKeys } from "../interaction.js"
+import { motion } from "../motion.js"
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue"
-import { motion, useElementBounds, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
-import { ease, radius } from "../tokens.js"
+import { useElementBounds, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
+import { fonts, ease, radius } from "../tokens.js"
 import { withAlpha } from "../colors.js"
 import { useTheme } from "../theme.js"
 import { Button } from "../atoms/Button.js"
@@ -467,7 +469,7 @@ export const SelectionActions = defineComponent({
       )
 
       return (
-        <div style={{ width: "100%", maxWidth: 460 }}>
+        <div style={{ fontFamily: fonts.sans, width: "100%", maxWidth: 460 }}>
           <div ref={hostRef} style={{ position: "relative", paddingBottom: 48 }}>
             {/* passage — one wrapping word row; selection words carry the tint */}
             <div
@@ -547,6 +549,8 @@ export const SelectionActions = defineComponent({
                           role="button"
                           testId="sa-keep"
                           onClick={reset}
+                          tabIndex={0}
+                          onKeyDown={activationKeys(reset)}
                           style={{
                             display: "flex",
                             alignItems: "center",
@@ -579,6 +583,10 @@ export const SelectionActions = defineComponent({
                           onClick={() => {
                             run(action.value)
                           }}
+                          tabIndex={0}
+                          onKeyDown={activationKeys(() => {
+                            run(action.value)
+                          })}
                           style={{
                             display: "flex",
                             width: 28,
@@ -653,6 +661,10 @@ export const SelectionActions = defineComponent({
                               onClick={() => {
                                 expanded.value = !expanded.value
                               }}
+                              tabIndex={0}
+                              onKeyDown={activationKeys(() => {
+                                expanded.value = !expanded.value
+                              })}
                               style={{
                                 display: "flex",
                                 width: 28,
@@ -686,6 +698,10 @@ export const SelectionActions = defineComponent({
                               onClick={() => {
                                 if (hasPrompt) run(prompt.value.trim())
                               }}
+                              tabIndex={0}
+                              onKeyDown={activationKeys(() => {
+                                if (hasPrompt) run(prompt.value.trim())
+                              })}
                               style={{
                                 display: "flex",
                                 width: 28,

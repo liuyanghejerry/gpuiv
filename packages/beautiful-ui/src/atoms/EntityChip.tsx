@@ -2,7 +2,7 @@
  *  Ported from beautiful-ui `components/atoms/EntityChip.tsx`. */
 
 import { defineComponent } from "vue"
-import { radius } from "../tokens.js"
+import { fonts, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 
 /** Monogram mark — a colored disc with an initial or short glyph. */
@@ -16,6 +16,7 @@ export const Monogram = defineComponent({
     return () => (
       <div
         style={{
+          fontFamily: fonts.sans,
           display: "flex",
           width: 16,
           height: 16,
@@ -49,6 +50,7 @@ export const EntityChip = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             alignItems: "center",
             gap: 4,

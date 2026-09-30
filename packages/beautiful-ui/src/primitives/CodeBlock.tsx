@@ -28,6 +28,7 @@
  *    synchronous) and shows "Copied" for 1.2s.
  */
 
+import { activationKeys } from "../interaction.js"
 import { computed, defineComponent, onBeforeUnmount, ref, type PropType } from "vue"
 import { useGpuix, type GpuixTheme } from "@gpuiv/vue"
 import { fonts, radius } from "../tokens.js"
@@ -153,6 +154,7 @@ export const CodeBlock = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             width: "100%",
             maxWidth: 420,
             overflow: "hidden",
@@ -202,6 +204,8 @@ export const CodeBlock = defineComponent({
                 role="button"
                 aria-label="Copy code"
                 onClick={copySource}
+                tabIndex={0}
+                onKeyDown={activationKeys(copySource)}
                 style={{
                   marginRight: -4,
                   display: "flex",

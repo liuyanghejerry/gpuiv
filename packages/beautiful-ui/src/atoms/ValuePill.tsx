@@ -4,7 +4,7 @@
 
 import { defineComponent, type PropType } from "vue"
 import { withAlpha } from "../colors.js"
-import { radius } from "../tokens.js"
+import { fonts, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 
 export type ValuePillTone = "neutral" | "green" | "orange" | "red" | "accent"
@@ -29,6 +29,7 @@ export const ValuePill = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             alignItems: "center",
             borderRadius: radius.pill,

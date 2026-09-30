@@ -12,7 +12,7 @@
  *    the flagship model plays a one-shot accent-tinted band — a
  *    linear-gradient `motion.div` whose `left` tweens across the measured
  *    composer width (one 0.72s outStrong pass), then
- *    unmounts. No swell/wave; `prefers-reduced-motion` is not readable.
+ *    unmounts. No swell/wave; theme.reducedMotion disables decorative motion.
  *  - Both menus move from CSS absolutes above the composer to raw
  *    `<anchored deferred side="top">` layers (the repo's overlay rule): the
  *    @ menu is the composer's measured width with `align: "start"`; the model
@@ -56,15 +56,16 @@
  *  - The demo takeover stops on focus/click/keys routed through the bar's own
  *    elements (no capture phase); the leftover demo draft clears on the first
  *    click or keystroke in the input — programmatic focus cannot be told
- *    apart from a click, so `onFocus` alone only stops the loop. `aria-*` and
- *    `tabIndex` are passthroughs (no accessibility tree), and
+ *    apart from a click, so `onFocus` alone only stops the loop. roles and tab order use native accessibility;
  *    `overflow-wrap: anywhere` has no native equivalent.
  */
 
+import { activationKeys } from "../interaction.js"
+import { motion } from "../motion.js"
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue"
-import { motion, useElementBounds, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
+import { useElementBounds, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
 
-import { ease, radius } from "../tokens.js"
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { withAlpha } from "../colors.js"
 import { Icon } from "../atoms/Icon.js"
@@ -354,8 +355,8 @@ export const PromptBar = defineComponent({
         eqTimer = undefined
       }
       if (!on) return
-      eqTimer = setInterval(() => {
-        eqPhase.value = !eqPhase.value
+      if (!theme.reducedMotion.value) eqTimer = setInterval(() => {
+        eqPhase.value = theme.reducedMotion.value ? false : !eqPhase.value
       }, EQ_STEP_MS)
       dictationTimer = setTimeout(() => {
         dictationTimer = undefined
@@ -626,11 +627,11 @@ export const PromptBar = defineComponent({
               {[0, 1, 2].map((i) => (
                 <div
                   key={i}
-                  motion={{
+                  motion={theme.motion({
                     initial: false,
                     animate: { height: eqHeights[i] },
                     transition: { duration: EQ_STEP_MS / 1000, ease: "easeInOut", delay: i * 0.12 },
-                  }}
+                  })}
                   style={{ width: 2.5, borderRadius: 1.25, backgroundColor: t.accentInk }}
                 />
               ))}
@@ -718,11 +719,11 @@ export const PromptBar = defineComponent({
               },
               [
                 <div
-                  motion={{
+                  motion={theme.motion({
                     initial: { opacity: 0, height: Math.max(menuRows.length, 1) * MENU_ROW_HEIGHT },
                     animate: { opacity: 1, height: 4 + Math.max(menuRows.length, 1) * MENU_ROW_HEIGHT + MENU_FOOTER_HEIGHT },
                     transition: MENU_REVEAL,
-                  }}
+                  })}
                   style={{ overflow: "hidden" }}
                   onMouseLeave={() => {
                     engaged.value = false
@@ -779,6 +780,9 @@ export const PromptBar = defineComponent({
                           onClick={() => {
                             pick(row)
                           }}
+                          onKeyDown={activationKeys(() => {
+                            pick(row)
+                          })}
                           style={{
                             position: "relative",
                             display: "flex",
@@ -837,6 +841,10 @@ export const PromptBar = defineComponent({
                                 stopAuto()
                                 connected.value = !connected.value
                               }}
+                              onKeyDown={activationKeys(() => {
+                                stopAuto()
+                                connected.value = !connected.value
+                              })}
                               style={{
                                 flexShrink: 0,
                                 fontSize: 12,
@@ -895,11 +903,11 @@ export const PromptBar = defineComponent({
             },
             [
               <div
-                motion={{
+                motion={theme.motion({
                   initial: { opacity: 0, height: MODELS.length * MODEL_ROW_HEIGHT },
                   animate: { opacity: 1, height: 8 + MODELS.length * MODEL_ROW_HEIGHT },
                   transition: MENU_REVEAL,
-                }}
+                })}
                 style={{ overflow: "hidden" }}
                 onMouseLeave={() => {
                   modelHovered.value = null
@@ -938,6 +946,11 @@ export const PromptBar = defineComponent({
                         selectModel(mo)
                         focusInput()
                       }}
+                      onKeyDown={activationKeys(() => {
+                        stopAuto()
+                        selectModel(mo)
+                        focusInput()
+                      })}
                       style={{
                         position: "relative",
                         display: "flex",
@@ -983,7 +996,7 @@ export const PromptBar = defineComponent({
         <div
           testId="promptbar-root"
           style={
-            props.demo
+            { fontFamily: fonts.sans, ...(props.demo
               ? {
                   display: "flex",
                   width: "100%",
@@ -993,7 +1006,7 @@ export const PromptBar = defineComponent({
                   justifyContent: "flex-end",
                   paddingBottom: 32,
                 }
-              : { width: "100%" }
+              : { width: "100%" }) }
           }
         >
           <div ref={anchorRef} style={{ position: "relative", width: "100%" }}>
@@ -1109,6 +1122,11 @@ export const PromptBar = defineComponent({
                           stopAuto()
                           attachments.value = attachments.value.filter((_, j) => j !== i)
                         }}
+                        tabIndex={0}
+                        onKeyDown={activationKeys(() => {
+                          stopAuto()
+                          attachments.value = attachments.value.filter((_, j) => j !== i)
+                        })}
                         style={{
                           display: "flex",
                           width: 24,

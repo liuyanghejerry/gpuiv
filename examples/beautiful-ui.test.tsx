@@ -41,6 +41,8 @@ describeNative("beautiful-ui gallery", () => {
       "InsightCards (Phase 3)",
       "PromptBar (Phase 3)",
       "RecordsTable (Phase 3)",
+      "Flowchart",
+      "AgentScreen",
     ]) {
       expect(text).toContain(section)
     }

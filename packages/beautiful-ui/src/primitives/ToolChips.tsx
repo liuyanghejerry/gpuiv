@@ -48,12 +48,14 @@
  *  - All `transition-colors` hovers swap instantly (no transitions outside
  *    motion), and `className` is gone with the CSS.
  *  - ARIA is minimal (`role="button"` + `aria-expanded` where the original
- *    had them); there is no DOM accessibility tree. `onOpenChange` /
+ *    had them), exposed through GPUI's native accessibility tree. `onOpenChange` /
  *    `onToggleRow` keep the original's callback-prop shape.
  */
 
+import { activationKeys } from "../interaction.js"
+import { AnimateHeight, motion } from "../motion.js"
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
-import { AnimateHeight, motion } from "@gpuiv/vue"
+
 import { ease, fonts, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Icon } from "../atoms/Icon.js"
@@ -249,11 +251,11 @@ export const ToolChips = defineComponent({
             align="start"
             gap={6}
             fit="switch"
-            motion={{
+            motion={theme.motion({
               initial: { opacity: 0 },
               animate: { opacity: 1 },
               transition: { duration: 0.16, ease: ease.outStrong },
-            }}
+            })}
             style={{
               width: 288,
               overflow: "hidden",
@@ -316,6 +318,7 @@ export const ToolChips = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             flexDirection: "column",
             minHeight: 220,
@@ -332,6 +335,11 @@ export const ToolChips = defineComponent({
               open.value = !open.value
               props.onOpenChange?.(open.value)
             }}
+            tabIndex={0}
+            onKeyDown={activationKeys(() => {
+              open.value = !open.value
+              props.onOpenChange?.(open.value)
+            })}
             style={{
               display: "flex",
               alignItems: "center",
@@ -384,6 +392,8 @@ export const ToolChips = defineComponent({
                         testId={`toolchips-row-${row.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
                         aria-expanded={rowOpen}
                         onClick={() => toggleRow(row.label)}
+                        tabIndex={0}
+                        onKeyDown={activationKeys(() => toggleRow(row.label))}
                         onMouseEnter={() => rowEnter(row.label)}
                         onMouseLeave={() => rowLeave(row.label)}
                         style={{
@@ -426,6 +436,9 @@ export const ToolChips = defineComponent({
                         </div>
                         <div
                           onClick={() => toggleRow(row.label)}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={activationKeys(() => toggleRow(row.label))}
                           onMouseEnter={() => rowEnter(row.label)}
                           onMouseLeave={() => rowLeave(row.label)}
                           style={{

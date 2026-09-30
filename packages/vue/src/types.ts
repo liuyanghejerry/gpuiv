@@ -514,6 +514,12 @@ export interface ElementProps {
   "aria-id"?: string
   "aria-expanded"?: boolean
   "aria-selected"?: boolean
+  "aria-checked"?: boolean | "mixed"
+  "aria-pressed"?: boolean | "mixed"
+  "aria-valuenow"?: number
+  "aria-valuemin"?: number
+  "aria-valuemax"?: number
+  "aria-orientation"?: "horizontal" | "vertical"
   /** String value reported to assistive technology. */
   "aria-valuetext"?: string
   /** Heading level, 1-based. */
@@ -541,6 +547,12 @@ type VirtualListShared = {
   "aria-id"?: string
   "aria-expanded"?: boolean
   "aria-selected"?: boolean
+  "aria-checked"?: boolean | "mixed"
+  "aria-pressed"?: boolean | "mixed"
+  "aria-valuenow"?: number
+  "aria-valuemin"?: number
+  "aria-valuemax"?: number
+  "aria-orientation"?: "horizontal" | "vertical"
   "aria-valuetext"?: string
   "aria-level"?: number
   testId?: string

@@ -119,6 +119,12 @@ const UNIVERSAL_PROPS = new Set([
   "aria-id",
   "aria-expanded",
   "aria-selected",
+  "aria-checked",
+  "aria-pressed",
+  "aria-valuenow",
+  "aria-valuemin",
+  "aria-valuemax",
+  "aria-orientation",
   "aria-valuetext",
   "aria-level",
 ])

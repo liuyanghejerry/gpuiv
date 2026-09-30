@@ -8,8 +8,9 @@
  */
 
 import { computed, defineComponent, type PropType } from "vue"
-import { motion } from "@gpuiv/vue"
-import { duration, ease, radius } from "../tokens.js"
+import { motion } from "../motion.js"
+
+import { fonts, duration, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Icon } from "../atoms/Icon.js"
 
@@ -73,7 +74,7 @@ export const ContextCards = defineComponent({
         accent: t.accent,
       }
       return (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 380 }}>
+        <div style={{ fontFamily: fonts.sans, display: "flex", flexDirection: "column", gap: 8, width: "100%", maxWidth: 380 }}>
           {/* header */}
           <motion.div
             initial={{ opacity: 0 }}

@@ -3240,6 +3240,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Element bounds queries (`getElementBounds`, `useElementBounds`)
 - [x] Auto-height transitions (`<AnimateHeight>`)
 - [x] Custom font loading (`loadFont`, `loadFontBytes`)
+- [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, keyboard controls, editable/resizable records grid, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](packages/beautiful-ui/README.md)
 - [x] Cross-element text selection
 - [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
 - [x] Native `hover` and `active` styles
