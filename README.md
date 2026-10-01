@@ -28,6 +28,7 @@ cd examples && bun --hot chat.tsx
 | **blurred window** | `bun --hot blurred-window.tsx` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
+| **ansi-log** | `bun --hot ansi-log.tsx` | Selectable ANSI colours, streaming output, and a virtualized log |
 | **single-instance** | `bun --hot single-instance.tsx ./notes.md` | Elect one process before creating a window; forward later CLI launches with their original working directory |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **error-handling** | `bun --hot error-handling.tsx` | The runtime error story end to end: overlay + Reload, an `onErrorCaptured` boundary, and an `onRuntimeError` report log |
@@ -1918,6 +1919,37 @@ Three elements render text with Syntect syntax highlighting computed in
 Rust. Colours come from a theme prop, so a late-arriving highlight recolours runs
 without ever changing layout.
 
+### ANSI output
+
+`AnsiText` turns a short ANSI string into selectable native text runs without
+adding a scroll container. `AnsiLog` owns one virtual list for long output:
+
+```tsx
+import { AnsiText, AnsiLog, createAnsiParser } from '@gpuiv/vue'
+
+<AnsiText source={'\x1b[32mConnected\x1b[0m'} />
+<AnsiLog source={output.value} style={{ height: 300 }} lineHeight={20} />
+
+// For an application-owned stream, preserve control state across chunks.
+const parser = createAnsiParser()
+const runs = parser.write(chunk)
+```
+
+Appending to `source` decodes only the new suffix, including escape sequences
+split across updates. Replacing the source or changing `options` resets decoding.
+`options` supplies default `foreground` / `background` colours or a sixteen-colour
+`palette`. Supported SGR attributes include normal/bright, 256-colour and RGB
+colours, bold, italic, underline, strikethrough, inverse and concealed text.
+Other terminal commands and OSC/DCS payloads are discarded; this is a log
+viewer, with CR/CRLF normalized to newlines and fixed-height, unwrapped rows.
+
+`AnsiLog` follows the tail by default; scrolling away preserves the reading
+position. Set `followTail={false}` to start at the top. A template ref exposes
+the same `id`, `scrollToItem` and `getListScrollTop` methods as `VirtualList`.
+Keep it as the only scroll parent. `parseAnsi` handles a complete string;
+`createAnsiParser` returns a reusable `write` / `reset` parser, and both return
+the existing `TextRun[]` protocol. Selection copies plain output without escapes.
+
 ### `<code>`
 
 A syntax-highlighted code block. One row per line at an exact line height, so the
@@ -3230,6 +3262,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Virtual lists (`<virtual-list>`), with sticky section headers on the `<VirtualList>` wrapper (`stickyIndices` + `renderStickyHeader`, pinned overlay above the rows) and item-geometry queries (`getVirtualListGeometry`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, interactive task-list checkboxes with `onTaskToggle` source offsets, inline and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth; inline formulas ride the text baseline — and ` ```mermaid ` fences rendered from an app-supplied `mermaid` map with a labelled-code-card fallback)
 - [x] Inline-styled text (`<text runs={…}>`: per-segment colour, weight, italic, family, underline/strikethrough, background)
+- [x] Selectable ANSI output (`AnsiText`, virtualized streaming `AnsiLog`, `parseAnsi` / `createAnsiParser`)
 - [x] `outline` style (focus rings that take no layout space)
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)

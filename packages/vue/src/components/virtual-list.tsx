@@ -1,6 +1,6 @@
 /** Windowed wrapper around the native `<virtual-list>` element. */
 
-import { computed, defineComponent, h, ref, type PropType, type VNodeChild } from "vue"
+import { computed, defineComponent, h, ref, watch, type PropType, type VNodeChild } from "vue"
 import type { EventPayload } from "@gpuiv/native"
 import type { HostNode, VirtualListProps } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
@@ -98,6 +98,18 @@ export const VirtualList = defineComponent({
         followTail: props.followTail,
       }),
     )
+
+    // A short list can grow without changing its visible range in GPUI: the
+    // newly appended rows are still inside the viewport, but were outside our
+    // initial mounted window. Fill the existing window up to its bounded
+    // overdraw budget before committing the new count.
+    watch(() => props.itemCount, (count, previous) => {
+      const current = range.value
+      if (count > previous && current.end === previous) {
+        const capacity = computePad(props.overdraw, props.estimatedItemHeight) * 2
+        range.value = { start: current.start, end: Math.max(current.end, Math.min(count, current.start + capacity)) }
+      }
+    }, { flush: "sync" })
 
     function scrollToItem(index: number, offsetInItem?: number): void {
       const id = root.value?.id
