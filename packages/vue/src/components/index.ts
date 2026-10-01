@@ -1,6 +1,8 @@
 // GPUIX Vue components and native motion wrappers.
 
 export { motion } from "./motion.js"
+export { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "./collapsible.js"
+export type { CollapsibleProps, CollapsibleTriggerProps, CollapsiblePanelProps, CollapsibleState } from "./collapsible.js"
 export { Spinner } from "./spinner.js"
 export { AnsiLog, AnsiText } from "./ansi-log.js"
 export type { VirtualListInstance, WindowedVirtualListProps } from "./virtual-list.js"

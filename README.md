@@ -30,6 +30,7 @@ cd examples && bun --hot chat.tsx
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
 | **window-resize** | `bun --hot window-resize.tsx` | Independent runtime resizing of two native windows |
 | **ansi-log** | `bun --hot ansi-log.tsx` | Selectable ANSI colours, streaming output, and a virtualized log |
+| **collapsible** | `bun --hot collapsible.tsx` | Keyboard-operated panels, animated height, and retained input state |
 | **single-instance** | `bun --hot single-instance.tsx ./notes.md` | Elect one process before creating a window; forward later CLI launches with their original working directory |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
 | **error-handling** | `bun --hot error-handling.tsx` | The runtime error story end to end: overlay + Reload, an `onErrorCaptured` boundary, and an `onRuntimeError` report log |
@@ -1029,6 +1030,8 @@ import { AnimateHeight } from '@gpuiv/vue'
 
 For direct access, `useElementBounds(ref)` polls an element's last painted
 window-space bounds (`renderer.getElementBounds` underneath).
+Set `initialHeight={0}` to animate newly mounted content from a closed height.
+`AnimateHeight` delivers completion handlers only for the current height target.
 
 ### Capture exact frames
 
@@ -1617,9 +1620,39 @@ All control components come from the main package:
 |---|---|
 | `@gpuiv/vue` | `Select` (Root), `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, plus `SelectGroup`, `SelectLabel`, `SelectSeparator`, `SelectScrollUpButton`, `SelectScrollDownButton` |
 | `@gpuiv/vue` | `FloatingLayer` — the positioned layer behind `SelectContent`, usable directly |
+| `@gpuiv/vue` | `Collapsible` (Root), `CollapsibleTrigger`, `CollapsiblePanel` |
 
-There is **no Combobox or Tooltip in the Vue binding yet**, and no `asChild`.
-Style the existing primitives and compose them yourself.
+`Combobox` and `Tooltip` also use the Root / children split. Style the primitives
+and compose them in your application.
+
+### Collapsible panels
+
+`Collapsible` owns the open state. Use `defaultOpen` for local state, or `open`
+with `onOpenChange` / `onUpdate:open` for a controlled binding. `disabled`
+prevents trigger activation; the trigger supports clicks, Enter and Space and
+reports `aria-expanded`.
+
+```tsx
+import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from '@gpuiv/vue'
+
+<Collapsible defaultOpen>
+  <CollapsibleTrigger style={{ padding: 12 }}>
+    <text>Connection details</text>
+  </CollapsibleTrigger>
+  <CollapsiblePanel keepMounted duration={0.2}>
+    <input placeholder="Server address" />
+  </CollapsiblePanel>
+</Collapsible>
+```
+
+The panel animates its natural height and unmounts after closing. `keepMounted`
+preserves child state; fully closed content does not paint or enter Tab order.
+Closing a focused panel restores focus to its own trigger. `duration={0}`
+changes layout immediately. `CollapsibleTrigger asChild` decorates one child
+without an extra host element, merging its ref and event handlers.
+
+Root, Trigger and Panel accept a style function and a scoped slot receiving
+`{ open, disabled }`, so application components can style their own states.
 
 ### Build a local Select
 
@@ -3277,10 +3310,11 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Spinner loading primitive (`Spinner`, dots and pulse variants)
 - [x] Element bounds queries (`getElementBounds`, `useElementBounds`)
 - [x] Auto-height transitions (`<AnimateHeight>`)
+- [x] Headless Collapsible (`Collapsible`, `CollapsibleTrigger`, `CollapsiblePanel`; controlled state, keyboard, focus restoration and retained panels)
 - [x] Custom font loading (`loadFont`, `loadFontBytes`)
 - [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, keyboard controls, editable/resizable records grid, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](packages/beautiful-ui/README.md)
 - [x] Cross-element text selection
-- [x] Headless Select (Combobox and Tooltip are not ported to the Vue binding yet)
+- [x] Headless Select, Combobox and Tooltip
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)

@@ -73,6 +73,8 @@ export type {
   SafeToRemove,
 } from "./components/animate-presence.js"
 export { AnimateHeight } from "./components/animate-height.js"
+export { Collapsible, CollapsibleTrigger, CollapsiblePanel } from "./components/collapsible.js"
+export type { CollapsibleProps, CollapsibleTriggerProps, CollapsiblePanelProps, CollapsibleState } from "./components/collapsible.js"
 export { MarkdownEditor } from "./markdown-editor/component.js"
 export type {
   MarkdownEditorSpan,
