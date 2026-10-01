@@ -257,6 +257,7 @@ export const AgentScreen = defineComponent({
                       variant="quiet"
                       size="sm"
                       testId="agent-screen-collapse"
+                      style={{ pointerEvents: "auto" }}
                       onClick={() => void setOpen(false)}
                     >
                       Collapse

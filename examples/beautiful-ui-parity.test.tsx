@@ -392,8 +392,22 @@ describeNative("beautiful-ui behavior parity", () => {
       // Recording replaces Teach with End and adds the REC badge. Finish the
       // resulting focus/layout update before resolving the next click's bounds.
       await until(app, () => app.renderer.getPaintedText().includes("End"))
+      const collapseBounds = await automation.getByTestId("agent-screen-collapse").bounds()
       await automation.getByTestId("agent-screen-collapse").click()
-      expect(app.renderer.findByTestId("agent-screen-viewer")).toBeFalsy()
+      expect(
+        app.renderer.findByTestId("agent-screen-viewer"),
+        JSON.stringify({
+          collapseBounds,
+          nodes: app.renderer.findByType("div").map((node) => ({
+            id: node.id,
+            parentId: node.parentId,
+            testId: node.testId,
+            bounds: app.renderer.getElementBounds(node.id),
+            style: node.style,
+            events: [...node.events],
+          })),
+        }),
+      ).toBeFalsy()
       await until(app, () => app.renderer.getAllText().includes("REC 00:01"))
       await automation.getByTestId("agent-screen-open").click()
       await automation.getByTestId("agent-screen-end").click()
