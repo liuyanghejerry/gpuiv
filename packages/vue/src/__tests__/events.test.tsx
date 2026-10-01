@@ -25,7 +25,8 @@ describe("frame loop (vue)", () => {
         'import { GpuixRenderer } from "@gpuiv/native"',
         "const renderer = new GpuixRenderer(() => {})",
         "renderer.init({ focus: false })",
-        "renderer.tick()",
+        // Drain window creation and first-frame work before measuring idle ticks.
+        "for (let index = 0; index < 30; index += 1) renderer.tick()",
         "const startedAt = performance.now()",
         "for (let index = 0; index < 30; index += 1) renderer.tick()",
         "console.log(performance.now() - startedAt)",
