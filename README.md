@@ -28,6 +28,7 @@ cd examples && bun --hot chat.tsx
 | **blurred window** | `bun --hot blurred-window.tsx` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
+| **window-resize** | `bun --hot window-resize.tsx` | Independent runtime resizing of two native windows |
 | **ansi-log** | `bun --hot ansi-log.tsx` | Selectable ANSI colours, streaming output, and a virtualized log |
 | **single-instance** | `bun --hot single-instance.tsx ./notes.md` | Elect one process before creating a window; forward later CLI launches with their original working directory |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
@@ -398,7 +399,7 @@ code that builds its own host with `createGpuivRendererHost()` can hit this.
 
 ## Window controls
 
-`toggleFullscreen()`, `isFullscreen()`, `minimizeWindow()`, and `zoomWindow()` drive the
+`toggleFullscreen()`, `isFullscreen()`, `minimizeWindow()`, `zoomWindow()`, and `resizeWindow()` drive the
 window at runtime — the same commands the traffic-light and taskbar chrome
 use. They are renderer commands (`useGpuixRequired()` reaches them):
 
@@ -409,7 +410,11 @@ const renderer = useGpuixRequired()
 
 `minimizeWindow()` complements the built-in `⌘M` menu item for custom
 chrome. `zoomWindow()` toggles macOS zoom or Windows/Linux maximize/restore;
-it is not fullscreen. Programmatic edge resizing is not exposed.
+it is not fullscreen. `resizeWindow(width, height)` requests a content-viewport
+size in logical pixels, excluding the titlebar, on this renderer's window.
+Dimensions must be positive, finite numbers. GPUI and the OS own size constraints
+and apply the request asynchronously; `getWindowSize()` / `useWindowSize()` report
+the resulting viewport. Runtime window positioning remains unavailable.
 
 ## Multiple windows
 
@@ -3281,7 +3286,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Wayland layer-shell surfaces (`layerShell` window option: panels, docks, wallpapers; Linux/Wayland only)
 - [x] Background launch (`focus`, `show`, `activateWindow`)
-- [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`, `closeWindow`)
+- [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`, `closeWindow`, `resizeWindow`)
 - [x] Window position (`getWindowBounds()`; `x`/`y` window options restore a saved position)
 - [x] Window close interception (`onWindowShouldClose` vetoes and observes; `closeWindow()` confirms)
 - [x] Dock relaunch observer (`onReopen`, macOS)

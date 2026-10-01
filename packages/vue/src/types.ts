@@ -740,6 +740,11 @@ export interface NativeRenderer {
 
   // ── Window API ─────────────────────────────────────────────────
   getWindowSize?(): { width: number; height: number }
+  /** Request a content-viewport size in logical pixels, excluding the titlebar.
+   *  Dimensions must be positive and finite. The platform applies the request
+   *  asynchronously and owns constraints; observe `getWindowSize` / `useWindowSize`
+   *  for the resulting size. Targets this renderer's window. */
+  resizeWindow?(width: number, height: number): void
   /** The window's frame on screen: logical points, origin at the main
    *  display's top-left, including the native titlebar where present
    *  (`getWindowSize` reports the content viewport). Note: the Windows
