@@ -135,7 +135,16 @@ our ported subprocess tests already — `events.test.tsx` and
 `runtime-error-overlay.test.tsx` have used `fileURLToPath` from the start.
 `9362f04` only regenerates the native declaration; this round regenerated it from the Rust API.
 
-**Last inventoried upstream head:** `4ecca30` (2026-09-27)
+**Last inventoried upstream head:** `4ecca30` (checked again 2026-10-01; no new commits)
+
+### Fork-local desktop follow-ups
+
+The 2026-10-01 issue review adds these APIs in this fork; they do not port new
+upstream commits or change the pinned Zed revision:
+
+| Issue | Local implementation | Relationship to upstream |
+|---|---|---|
+| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | `resizeWindow(width, height)` and the two-window `examples/window-resize.tsx` | [PR #151](https://github.com/liuyanghejerry/gpuiv/pull/151) — Direct translation of the pinned GPUI `Window::resize` API |
 
 ## Sync log
 

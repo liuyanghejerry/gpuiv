@@ -184,6 +184,17 @@ pub(crate) fn window_bounds_js(bounds: gpui::Bounds<gpui::Pixels>) -> WindowBoun
     }
 }
 
+pub(crate) fn window_resize_size(width: f64, height: f64) -> Result<gpui::Size<gpui::Pixels>> {
+    let width_px = width as f32;
+    let height_px = height as f32;
+    if !width_px.is_finite() || width_px <= 0.0 || !height_px.is_finite() || height_px <= 0.0 {
+        return Err(Error::from_reason(
+            "resizeWindow width and height must be positive, finite numbers representable as GPUI pixels",
+        ));
+    }
+    Ok(gpui::size(gpui::px(width_px), gpui::px(height_px)))
+}
+
 /// A saved opening position, when the window options carry a complete one.
 /// A half-present pair is ignored — a position with one coordinate missing
 /// is a bug in whatever saved it, and opening half-centered would be worse
@@ -784,6 +795,7 @@ enum WindowCommand {
     ToggleFullscreen,
     MinimizeWindow,
     ZoomWindow,
+    ResizeWindow(gpui::Size<gpui::Pixels>),
     IsFullscreen {
         response: SyncSender<bool>,
     },
@@ -1394,6 +1406,9 @@ fn run_window_command(
         }
         WindowCommand::ZoomWindow => {
             window.update(cx, |_view, window, _cx| window.zoom_window())
+        }
+        WindowCommand::ResizeWindow(size) => {
+            window.update(cx, |_view, window, _cx| window.resize(size))
         }
         WindowCommand::IsFullscreen { response } => window.update(cx, move |_view, window, _cx| {
             response.send(window.is_fullscreen());
@@ -2531,6 +2546,29 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_window_command(WindowCommand::ToggleFullscreen);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
+    /// Request a content-viewport size in logical pixels. The platform applies
+    /// the resize asynchronously and owns any size constraints.
+    #[napi]
+    pub fn resize_window(&self, width: f64, height: f64) -> Result<()> {
+        let size = window_resize_size(width, height)?;
+
+        #[cfg(target_os = "macos")]
+        return self.update_window(|_view, window, _cx| window.resize(size));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_window_command(WindowCommand::ResizeWindow(size));
 
         #[cfg(not(any(
             target_os = "macos",

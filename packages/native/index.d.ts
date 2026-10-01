@@ -183,6 +183,11 @@ export declare class GpuixRenderer {
   activateWindow(): void
   /** Toggle the window between normal and fullscreen. */
   toggleFullscreen(): void
+  /**
+   * Request a content-viewport size in logical pixels. The platform applies
+   * the resize asynchronously and owns any size constraints.
+   */
+  resizeWindow(width: number, height: number): void
   /** Whether the window is currently fullscreen. */
   isFullscreen(): boolean
   /**
@@ -640,6 +645,15 @@ export declare class TestGpuixRenderer {
    * at (-10000, -10000) — assert on size, or on that sentinel origin.
    */
   getWindowBounds(): WindowBounds
+  /** The test window's content viewport in logical pixels. */
+  getWindowSize(): WindowSize
+  /**
+   * Validate and record a resize request. Like zoom/fullscreen, the native
+   * platform's async resize cannot be driven by TestDispatcher; use the live
+   * automation renderer to verify viewport changes and layout.
+   */
+  resizeWindow(width: number, height: number): void
+  getLastWindowResize(): WindowSize | null
   /** Test stand-in for the production `promptForNewPath`. */
   promptForNewPath(directory: string | undefined | null, suggestedName: string | undefined | null, callback: ((err: Error | null, arg: NewPathPromptOutcome) => any)): void
   /** Queue the next answer for `promptForNewPath`; `null` means cancelled. */
