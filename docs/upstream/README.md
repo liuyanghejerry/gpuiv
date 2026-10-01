@@ -144,7 +144,7 @@ upstream commits or change the pinned Zed revision:
 
 | Issue | Local implementation | Relationship to upstream |
 |---|---|---|
-| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | `Collapsible` / `CollapsibleTrigger` / `CollapsiblePanel` | Vue implementation following the Base UI Root / Trigger / Panel split, using `AnimateHeight` and existing native focus APIs |
+| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | `Collapsible` / `CollapsibleTrigger` / `CollapsiblePanel` | [PR #153](https://github.com/liuyanghejerry/gpuiv/pull/153) — Vue implementation following the Base UI Root / Trigger / Panel split, using `AnimateHeight` and existing native focus APIs |
 
 ## Sync log
 
