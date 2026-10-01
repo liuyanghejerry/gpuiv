@@ -435,10 +435,9 @@ export const ToolChips = defineComponent({
                           {row.label}
                         </div>
                         <div
+                          // The fill needs its own click listener, but keys
+                          // bubble to the row: keep one tab stop/activation.
                           onClick={() => toggleRow(row.label)}
-                          role="button"
-                          tabIndex={0}
-                          onKeyDown={activationKeys(() => toggleRow(row.label))}
                           onMouseEnter={() => rowEnter(row.label)}
                           onMouseLeave={() => rowLeave(row.label)}
                           style={{

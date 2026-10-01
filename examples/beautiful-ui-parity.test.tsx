@@ -13,6 +13,8 @@ import {
   RecordsTable,
   StreamingText,
   ThinkingState,
+  ToolChips,
+  SidebarNav,
   createTheme,
   Shimmer,
   mix,
@@ -21,10 +23,10 @@ import {
 } from "@gpuiv/beautiful-ui"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
-const host = (render: () => ReturnType<typeof h>) =>
+const host = (render: () => ReturnType<typeof h>, reducedMotion = false) =>
   defineComponent({
     setup() {
-      provideTheme()
+      provideTheme(createTheme({ reducedMotion }))
       return render
     },
   })
@@ -44,6 +46,91 @@ const rowIds = (app: ReturnType<typeof createTestApp>) =>
     .filter((id): id is string => id?.startsWith("records-row-") ?? false)
 
 describeNative("beautiful-ui behavior parity", () => {
+  it("gives each tool row one tab stop and toggles once per keyboard or chip click", async () => {
+    const toggles: Array<[string, boolean]> = []
+    const app = createTestApp(
+      host(
+        () =>
+          h("div", {}, [
+            h(ToolChips, {
+              steps: [
+                {
+                  icon: "think",
+                  label: "Thinking",
+                  chip: "Plan",
+                  mono: false,
+                  detailMono: false,
+                  detail: [{ text: "Plan detail" }],
+                },
+              ],
+              diffs: [],
+              onToggleRow: (label, open) => toggles.push([label, open]),
+            }),
+            h(Button, { testId: "after-tools" }, () => "Next"),
+          ]),
+        true,
+      ),
+    )
+    try {
+      await until(app, () => !!app.renderer.findByTestId("toolchips-row-thinking"))
+      const row = app.renderer.findByTestId("toolchips-row-thinking")!
+      app.renderer.focusElement(row.id)
+      app.renderer.focusNext()
+      await app.settle()
+      expect(app.renderer.getFocusedElementId()).toBe(app.renderer.findByTestId("after-tools")!.id)
+      app.renderer.nativeSimulateKeystrokes(row.id, "enter space")
+      await app.settle()
+      expect(toggles).toEqual([
+        ["Thinking", true],
+        ["Thinking", false],
+      ])
+      const chip = app.renderer.findByType("div").find((node) => node.parentId === row.id && node.events.has("click"))!
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      await app.settle()
+      const box = app.renderer.getElementBounds(chip.id)!
+      const automation = await connectTest(app.renderer, app.settle)
+      await automation.mouse.click({ x: box.x + box.width / 2, y: box.y + box.height / 2 })
+      expect(toggles).toEqual([
+        ["Thinking", true],
+        ["Thinking", false],
+        ["Thinking", true],
+      ])
+    } finally {
+      app.unmount()
+    }
+  })
+
+  it("skips invisible sidebar expand/collapse actions during native focus traversal", async () => {
+    const app = createTestApp(host(() => h(SidebarNav)))
+    try {
+      const workspace = app.renderer.findByTestId("sidebar-workspace-trigger")!.id
+      const collapse = app.renderer.findByTestId("sidebar-collapse")!.id
+      const expand = app.renderer.findByTestId("sidebar-expand")!.id
+      const visited = (start: number) => {
+        app.renderer.focusElement(start)
+        const ids: Array<number | null> = []
+        for (let i = 0; i < 16; i++) {
+          app.renderer.focusNext()
+          ids.push(app.renderer.getFocusedElementId())
+        }
+        return ids
+      }
+      expect(visited(workspace)).not.toContain(expand)
+      expect(app.renderer.findByTestId("sidebar-expand")!.events.has("keyDown")).toBe(false)
+      app.renderer.nativeSimulateKeystrokes(collapse, "enter")
+      await app.settle()
+      const collapsedOrder = visited(expand)
+      expect(collapsedOrder).not.toContain(collapse)
+      expect(collapsedOrder).not.toContain(workspace)
+      expect(app.renderer.findByTestId("sidebar-collapse")!.events.has("keyDown")).toBe(false)
+      app.renderer.nativeSimulateKeystrokes(expand, "space")
+      await app.settle()
+      expect(visited(workspace)).not.toContain(expand)
+    } finally {
+      app.unmount()
+    }
+  })
+
   it("resumes a completed non-looping stream when tokens arrive", async () => {
     const content = ref<StreamingToken[]>([{ text: "initial" }])
     let completions = 0

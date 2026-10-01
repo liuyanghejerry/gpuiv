@@ -592,9 +592,9 @@ export const SidebarNav = defineComponent({
                 role="button"
                 aria-label="Collapse sidebar"
                 testId="sidebar-collapse"
-                onClick={collapse}
-                tabIndex={0}
-                onKeyDown={activationKeys(collapse)}
+                onClick={isCollapsed ? undefined : collapse}
+                tabIndex={isCollapsed ? -1 : 0}
+                onKeyDown={isCollapsed ? undefined : activationKeys(collapse)}
                 style={copyStyle({
                   position: "absolute",
                   right: 8,
@@ -617,13 +617,13 @@ export const SidebarNav = defineComponent({
                 role="button"
                 aria-label="Expand sidebar"
                 testId="sidebar-expand"
-                onClick={() => {
+                onClick={isCollapsed ? () => {
                   collapsed.value = false
-                }}
-                tabIndex={0}
-                onKeyDown={activationKeys(() => {
+                } : undefined}
+                tabIndex={isCollapsed ? 0 : -1}
+                onKeyDown={isCollapsed ? activationKeys(() => {
                   collapsed.value = false
-                })}
+                }) : undefined}
                 style={{
                   position: "absolute",
                   left: 8,
