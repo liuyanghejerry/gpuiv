@@ -12,27 +12,35 @@ describeNative("runtime window resize", () => {
       </div>,
     }), { width: 400, height: 300 })
     try {
+      await app.settle()
+      // GPUI's test platform chooses its own viewport on Windows.
+      const initialSize = app.renderer.getWindowSize()
+      expect(initialSize.width).toBeGreaterThan(0)
+      expect(initialSize.height).toBeGreaterThan(0)
       expect(app.renderer.getLastWindowResize()).toBeNull()
       app.renderer.resizeWindow(620, 420)
       await app.settle()
       expect(app.renderer.getLastWindowResize()).toEqual({ width: 620, height: 420 })
-      expect(app.renderer.getWindowSize()).toEqual({ width: 400, height: 300 })
+      expect(app.renderer.getWindowSize()).toEqual(initialSize)
 
       app.renderer.resizeWindow(320, 240)
       await app.settle()
       expect(app.renderer.getLastWindowResize()).toEqual({ width: 320, height: 240 })
+      expect(app.renderer.getWindowSize()).toEqual(initialSize)
     } finally { app.unmount() }
   })
 
   it("rejects invalid dimensions before changing the window", async () => {
     const app = createTestApp(defineComponent({ setup: () => () => <text>Window</text> }), { width: 400, height: 300 })
     try {
+      await app.settle()
+      const initialSize = app.renderer.getWindowSize()
       for (const value of [0, -1, NaN, Infinity, -Infinity, 1e300, Number.MIN_VALUE]) {
         expect(() => app.renderer.resizeWindow(value, 300)).toThrow(/positive, finite/)
         expect(() => app.renderer.resizeWindow(400, value)).toThrow(/positive, finite/)
       }
       await app.settle()
-      expect(app.renderer.getWindowSize()).toEqual({ width: 400, height: 300 })
+      expect(app.renderer.getWindowSize()).toEqual(initialSize)
       expect(app.renderer.getLastWindowResize()).toBeNull()
     } finally { app.unmount() }
   })
