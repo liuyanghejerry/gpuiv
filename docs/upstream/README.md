@@ -144,7 +144,7 @@ upstream commits or change the pinned Zed revision:
 
 | Issue | Local implementation | Relationship to upstream |
 |---|---|---|
-| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | `resizeWindow(width, height)` and the two-window `examples/window-resize.tsx` | Direct translation of the pinned GPUI `Window::resize` API |
+| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | `resizeWindow(width, height)` and the two-window `examples/window-resize.tsx` | [PR #151](https://github.com/liuyanghejerry/gpuiv/pull/151) — Direct translation of the pinned GPUI `Window::resize` API |
 
 ## Sync log
 
