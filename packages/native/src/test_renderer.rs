@@ -258,6 +258,7 @@ pub struct TestGpuixRenderer {
     fullscreen: RefCell<bool>,
     minimize_calls: RefCell<usize>,
     zoom_calls: RefCell<usize>,
+    last_window_resize: RefCell<Option<crate::renderer::WindowSize>>,
     /// The last URL handed to `openUrl`. The test platform records its own
     /// copy where the bridge cannot read it (`pub(crate)`), so tests assert
     /// here.
@@ -375,6 +376,7 @@ impl TestGpuixRenderer {
             fullscreen: RefCell::new(false),
             minimize_calls: RefCell::new(0),
             zoom_calls: RefCell::new(0),
+            last_window_resize: RefCell::new(None),
             last_opened_url: RefCell::new(None),
             path_prompt_answers: RefCell::new(Default::default()),
             last_path_prompt_options: RefCell::new(None),
@@ -1079,6 +1081,36 @@ impl TestGpuixRenderer {
             })
             .map_err(|error| Error::from_reason(error.to_string()))
         })
+    }
+
+    /// The test window's content viewport in logical pixels.
+    #[napi]
+    pub fn get_window_size(&self) -> Result<crate::renderer::WindowSize> {
+        with_test_state(|cx, window, _| {
+            cx.update_window(window, |_, window, _| {
+                let size = window.viewport_size();
+                crate::renderer::WindowSize {
+                    width: f64::from(f32::from(size.width)),
+                    height: f64::from(f32::from(size.height)),
+                }
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    }
+
+    /// Validate and record a resize request. Like zoom/fullscreen, the native
+    /// platform's async resize cannot be driven by TestDispatcher; use the live
+    /// automation renderer to verify viewport changes and layout.
+    #[napi]
+    pub fn resize_window(&self, width: f64, height: f64) -> Result<()> {
+        crate::renderer::window_resize_size(width, height)?;
+        *self.last_window_resize.borrow_mut() = Some(crate::renderer::WindowSize { width, height });
+        Ok(())
+    }
+
+    #[napi]
+    pub fn get_last_window_resize(&self) -> Option<crate::renderer::WindowSize> {
+        self.last_window_resize.borrow().clone()
     }
 
     /// Test stand-in for the production `promptForNewPath`.

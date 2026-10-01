@@ -853,6 +853,20 @@ export class TestRenderer implements NativeRenderer {
     this.native.zoomWindow?.()
   }
 
+  resizeWindow(width: number, height: number): void {
+    this.native.resizeWindow?.(width, height)
+  }
+
+  /** Last validated request; the offscreen bridge records resizing just as it
+   *  records zoom. Live automation verifies actual viewport changes. */
+  getLastWindowResize(): { width: number; height: number } | null {
+    return (this.native as { getLastWindowResize?(): { width: number; height: number } | null }).getLastWindowResize?.() ?? null
+  }
+
+  getWindowSize(): { width: number; height: number } {
+    return this.native.getWindowSize?.() ?? { width: 0, height: 0 }
+  }
+
   getZoomCalls(): number {
     return (this.native as { getZoomCalls?(): number }).getZoomCalls?.() ?? 0
   }
