@@ -2,6 +2,7 @@
 
 export { motion } from "./motion.js"
 export { Spinner } from "./spinner.js"
+export { AnsiLog, AnsiText } from "./ansi-log.js"
 export type { VirtualListInstance, WindowedVirtualListProps } from "./virtual-list.js"
 export type { VirtualListScrollTop } from "./virtual-list.js"
 export { VirtualList } from "./virtual-list.js"

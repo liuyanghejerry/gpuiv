@@ -145,6 +145,7 @@ upstream commits or change the pinned Zed revision:
 | Issue | Local implementation | Relationship to upstream |
 |---|---|---|
 | [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | `resizeWindow(width, height)` and the two-window `examples/window-resize.tsx` | [PR #151](https://github.com/liuyanghejerry/gpuiv/pull/151) — Direct translation of the pinned GPUI `Window::resize` API |
+| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | Selectable `AnsiText`, streaming `AnsiLog`, and `parseAnsi` / `createAnsiParser` | [PR #152](https://github.com/liuyanghejerry/gpuiv/pull/152) — Vue components over native text runs and the retained `VirtualList` wrapper; short-list append mounting is fixed in the wrapper |
 
 ## Sync log
 
@@ -214,6 +215,8 @@ from upstream through `367ef48`:
 | #131 | Pending focus lifecycle: request survives a pre-creation frame, then yields to a later Tab/click; native test entry point and Vue GPU regressions — upstream `6382a80` `ef1c12e` (native halves) |
 | #132 | BGRA live image uploads: native `PixelFormat`, optional Vue `<img>` ref format, GPU screenshot equivalence and invalid-format test — upstream `550f560`; ledger round `9fcd628..9362f04` also records already-local bounds/Zed fixes, pending keyboard/Dialog/focus/Button topics, and the website/release-doc extensions to existing declined topics |
 | — | Ledger round `9362f04..4ecca30`: no sync-now topics; `5187660` folds into the pending focus-dim row (dim now independent of `focusVisible`, new `keyboardFocusDim: false` key), disktree example/npm package declined — inventoried via the GitHub API (git-over-HTTPS to github.com was unreachable this round; no `zed` submodule movement) |
+| #151 | Runtime window resizing through GPUI `Window::resize`, validated dimensions, per-window command routing and two-window live automation — fork-local desktop work |
+| #152 | Selectable ANSI text and streaming virtualized logs, incremental SGR parsing and short-list append mounting — fork-local Vue desktop work |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
