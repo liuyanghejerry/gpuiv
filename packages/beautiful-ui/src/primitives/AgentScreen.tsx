@@ -118,7 +118,7 @@ export const AgentScreen = defineComponent({
     }
     return () => {
       const t = theme.tokens.value
-      const viewport = renderer?.getWindowSize?.() ?? { width: 1280, height: 800 }
+      const viewport = renderer?.getWindowSize?.() ?? renderer?.getWindowBounds?.() ?? { width: 1280, height: 800 }
       const width = Math.min(
         960,
         Math.max(100, viewport.width - 48),
@@ -257,7 +257,6 @@ export const AgentScreen = defineComponent({
                       variant="quiet"
                       size="sm"
                       testId="agent-screen-collapse"
-                      style={{ pointerEvents: "auto" }}
                       onClick={() => void setOpen(false)}
                     >
                       Collapse

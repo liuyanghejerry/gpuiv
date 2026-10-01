@@ -372,7 +372,7 @@ describeNative("beautiful-ui behavior parity", () => {
     }
   })
 
-  it("keeps recording while the agent viewer is collapsed", async () => {
+  it("fits a smaller window and keeps recording while the agent viewer is collapsed", async () => {
     let starts = 0
     const durations: number[] = []
     const app = createTestApp(
@@ -383,31 +383,26 @@ describeNative("beautiful-ui behavior parity", () => {
           onEndTask: (seconds) => durations.push(seconds),
         }),
       ),
+      { width: 800, height: 600 },
     )
     try {
       const automation = await connectTest(app.renderer, app.settle)
       await automation.getByTestId("agent-screen-open").click()
+      const windowBounds = app.renderer.getWindowBounds()
+      const viewerBounds = await automation.getByTestId("agent-screen-viewer").bounds()
+      expect(viewerBounds.x).toBeGreaterThanOrEqual(0)
+      expect(viewerBounds.y).toBeGreaterThanOrEqual(0)
+      expect(viewerBounds.x + viewerBounds.width).toBeLessThanOrEqual(windowBounds.width)
+      expect(viewerBounds.y + viewerBounds.height).toBeLessThanOrEqual(windowBounds.height)
       await automation.getByTestId("agent-screen-teach").click()
       expect(starts).toBe(1)
       // Recording replaces Teach with End and adds the REC badge. Finish the
       // resulting focus/layout update before resolving the next click's bounds.
       await until(app, () => app.renderer.getPaintedText().includes("End"))
       const collapseBounds = await automation.getByTestId("agent-screen-collapse").bounds()
+      expect(collapseBounds.x + collapseBounds.width).toBeLessThanOrEqual(windowBounds.width)
       await automation.getByTestId("agent-screen-collapse").click()
-      expect(
-        app.renderer.findByTestId("agent-screen-viewer"),
-        JSON.stringify({
-          collapseBounds,
-          nodes: app.renderer.findByType("div").map((node) => ({
-            id: node.id,
-            parentId: node.parentId,
-            testId: node.testId,
-            bounds: app.renderer.getElementBounds(node.id),
-            style: node.style,
-            events: [...node.events],
-          })),
-        }),
-      ).toBeFalsy()
+      expect(app.renderer.findByTestId("agent-screen-viewer")).toBeFalsy()
       await until(app, () => app.renderer.getAllText().includes("REC 00:01"))
       await automation.getByTestId("agent-screen-open").click()
       await automation.getByTestId("agent-screen-end").click()
