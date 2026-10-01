@@ -81,6 +81,9 @@ export type {
   MarkdownEditorTheme,
 } from "./markdown-editor/component.js"
 export { Spinner } from "./components/spinner.js"
+export { AnsiLog, AnsiText } from "./components/ansi-log.js"
+export { ANSI_PALETTE, createAnsiParser, parseAnsi } from "./ansi.js"
+export type { AnsiOptions, AnsiParser } from "./ansi.js"
 export { VirtualList } from "./components/virtual-list.js"
 export { GpuixCanvas } from "./components/gpuix-canvas.js"
 export type { GpuixCanvasInstance } from "./components/gpuix-canvas.js"
@@ -204,6 +207,7 @@ export type {
   NativeRenderer,
   NativeWindowInsets,
   StyleDesc,
+  TextRun,
   SyntaxTheme,
   WindowKeyEventHandlers,
 } from "./types.js"

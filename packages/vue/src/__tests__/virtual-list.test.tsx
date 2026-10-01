@@ -48,6 +48,25 @@ function windowStart(applied: Op[]): number | undefined {
 }
 
 describe("virtual-list windowing", () => {
+  it("mounts newly appended short-list rows without a visibleRange event", async () => {
+    const count = ref(2)
+    const { mock, host, app } = mount(defineComponent({ setup: () => () => h(VirtualList, {
+      itemCount: count.value, estimatedItemHeight: 40, overdraw: 100,
+      renderItem: (i: number) => h("text", `row${i}`),
+    }) }))
+    try {
+      mock.applied.length = 0
+      count.value = 5
+      await nextTick(); host.flushMutations()
+      const texts = mock.applied.filter((op) => op[0] === "setText").map((op) => op[2])
+      expect(texts).toEqual(["row2", "row3", "row4"])
+      mock.applied.length = 0
+      count.value = 10000
+      await nextTick(); host.flushMutations()
+      expect(mock.applied.filter((op) => op[0] === "setText").length).toBeLessThan(100)
+    } finally { app.unmount(); host.flushMutations() }
+  })
+
   it("mounts only the initial window of items", () => {
     const items = Array.from({ length: 100 }, (_, i) => i)
     const Comp = defineComponent({

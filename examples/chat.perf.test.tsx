@@ -31,6 +31,7 @@ const throttle = readMacCpuThrottle()
 const TURNS = 1_000
 const WARMUP = 10
 const WHEEL_SAMPLES = 40
+const SIDEBAR_WARMUP = 2
 const WHEEL_X = 700
 const WHEEL_Y = 400
 
@@ -50,8 +51,8 @@ const BUDGET = {
   idleMaxMs: 20 * CI_SCALE,
   wheelP95Ms: 10 * CI_SCALE,
   wheelMaxMs: 20 * CI_SCALE,
-  // Parallel vitest workers can delay the 8 automation clicks; 80 leaves
-  // headroom while still catching real regressions (idle ~14ms).
+  // Steady-state clicks exclude each direction's first animation setup;
+  // 80 leaves headroom while still catching regressions (idle ~14ms).
   sidebarMs: 80 * CI_SCALE,
 }
 
@@ -207,11 +208,12 @@ describeNative('chat performance (vue)', () => {
     await automation.clock.pause()
 
     const samples: number[] = []
-    for (let i = 0; i < 8; i++) {
+    // Prime both collapse and expand, like the idle/wheel warmup above.
+    for (let i = 0; i < SIDEBAR_WARMUP + 8; i++) {
       const testId = i % 2 === 0 ? 'sidebar-collapse' : 'sidebar-expand'
       const start = performance.now()
       await automation.getByTestId(testId).click()
-      samples.push(performance.now() - start)
+      if (i >= SIDEBAR_WARMUP) samples.push(performance.now() - start)
       await automation.clock.fastForward(200)
     }
     await automation.clock.resume()
