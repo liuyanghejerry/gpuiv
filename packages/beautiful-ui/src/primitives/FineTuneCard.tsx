@@ -48,17 +48,17 @@
  *  - `tabular-nums` on the numeric input is dropped (no
  *    font-feature-settings); `touch-action: none` on the handle is dropped
  *    (no touch-pan conflict on desktop GPUIV).
- *  - `<label>`/`<button>` semantics and the slider's `aria-valuenow/min/max`
- *    reduce to `role`, `aria-label`, `aria-valuetext` and `tabIndex`
- *    passthroughs — there is no DOM accessibility tree in GPUIV;
- *    `focus-visible` outlines are dropped. Buttons keep keyboard parity via
- *    tabIndex + Enter/Space.
+ *  - Sliders expose their numeric value and range through GPUI's native
+ *    accessibility tree. Buttons keep Tab + Enter/Space keyboard activation
+ *    and show focus outlines.
+
  */
 
 import { computed, defineComponent, h, ref, type PropType } from "vue"
-import { motion, useElementBounds, type EventPayload, type HostNode } from "@gpuiv/vue"
+import { motion } from "../motion.js"
+import { useElementBounds, type EventPayload, type HostNode } from "@gpuiv/vue"
 
-import { ease, radius } from "../tokens.js"
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { withAlpha } from "../colors.js"
 import { Icon } from "../atoms/Icon.js"
@@ -170,6 +170,7 @@ const ScrubField = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             alignItems: "center",
             flexGrow: 1,
@@ -191,6 +192,10 @@ const ScrubField = defineComponent({
             role="slider"
             aria-label={props.label}
             aria-valuetext={String(props.value)}
+            aria-valuenow={props.value}
+            aria-valuemin={props.min}
+            aria-valuemax={props.max}
+            aria-orientation="horizontal"
             tabIndex={0}
             testId={props.testId}
             onMouseDown={onMouseDown}
@@ -337,6 +342,7 @@ export const FineTuneCard = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             position: "relative",
             width: "100%",
             maxWidth: 240,

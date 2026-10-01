@@ -43,13 +43,15 @@
  *    layers carry `pointerEvents: "none"` and the row stays fully
  *    clickable/hoverable, as in the source.
  *  - The `<button>` becomes a div with `role="button"` + `aria-expanded`
- *    passthrough — there is no DOM accessibility tree in GPUIV.
+ *    semantics in GPUI's native accessibility tree, with Enter/Space activation.
  *  - `onToggleRow` stays a callback prop (the codebase's `onSend`/`onCopy`
  *    convention) instead of a Vue emit.
  */
 
+import { activationKeys } from "../interaction.js"
+import { AnimateHeight, motion } from "../motion.js"
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
-import { AnimateHeight, motion } from "@gpuiv/vue"
+
 import { ease, fonts, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Icon } from "../atoms/Icon.js"
@@ -284,6 +286,7 @@ export const TaskRows = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             flexDirection: "column",
             width: "100%",
@@ -331,6 +334,11 @@ export const TaskRows = defineComponent({
                       manualOpen.value = { ...manualOpen.value, [row.key]: !open }
                       props.onToggleRow?.(row.key, !open)
                     }}
+                    tabIndex={0}
+                    onKeyDown={activationKeys(() => {
+                      manualOpen.value = { ...manualOpen.value, [row.key]: !open }
+                      props.onToggleRow?.(row.key, !open)
+                    })}
                     style={{
                       display: "flex",
                       alignItems: "center",

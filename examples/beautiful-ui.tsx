@@ -9,6 +9,9 @@
 import { defineComponent, inject, onBeforeUnmount, onMounted, provide, ref, watch, type InjectionKey, type Ref } from "vue"
 import { createApp, useElementBounds, useGpuix, type HostNode, type ShallowRef, type ElementBounds } from "@gpuiv/vue"
 import {
+  AgentScreen,
+  Flowchart,
+  fonts,
   Button,
   ChatComposer,
   Chip,
@@ -245,6 +248,7 @@ export const App = defineComponent({
             width: "100%",
             height: "100%",
             backgroundColor: t.canvas,
+            fontFamily: fonts.sans,
           }}
         >
           {/* window header */}
@@ -311,6 +315,7 @@ export const App = defineComponent({
                   <LoadingState variant="Drive" />
                   <LoadingState variant="Dots" />
                   <LoadingState variant="Orbit" />
+                  <LoadingState variant="Surfer" />
                 </div>
               </Section>
               <Section title="ThinkingState (Phase 2: AnimateHeight)">
@@ -366,6 +371,8 @@ export const App = defineComponent({
               <Section title="PromptBar (Phase 3)">
                 <PromptBar />
               </Section>
+              <Section title="Flowchart"><Flowchart /></Section>
+              <Section title="AgentScreen"><AgentScreen /></Section>
               <Section title="RecordsTable (Phase 3)">
                 {/* 10 of the 60 demo rows — the full set lives in the
                     component's default; the gallery keeps its idle frame

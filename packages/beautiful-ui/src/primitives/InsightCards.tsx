@@ -43,17 +43,17 @@
  *    press feedback is dropped (no transform).
  *  - The anomaly metric toggle's `transition-colors` and every hover colour
  *    fade are instant swaps (nested `hover:` styles remain); `tabular-nums`,
- *    `tracking`, `aria-pressed` (no accessibility tree — aria is a
- *    passthrough) and the pager glyphs' `hover:text-ink` (an `<svg>` tints
+ *    `tracking` and the pager glyphs' `hover:text-ink` (an `<svg>` tints
  *    only from its own `color`, same as ApprovalCard) are dropped. The
  *    source header's "autoplay" note is vestigial — there is no timer in
  *    the original, and none is added.
  */
 
+import { activationKeys } from "../interaction.js"
+import { motion } from "../motion.js"
 import { computed, defineComponent, h, onBeforeUnmount, ref, watch, type Component, type PropType } from "vue"
 import {
   GpuixCanvas,
-  motion,
   useElementBounds,
   type EventPayload,
   type GpuixCanvasInstance,
@@ -338,7 +338,7 @@ const ChartStage = defineComponent({
       // left/top are px-only in GPUIV — positions derive from the measured
       // stage width instead of CSS percentages.
       return (
-        <div ref={stage} style={{ position: "relative", height: STAGE_HEIGHT, overflow: "hidden" }}>
+        <div ref={stage} style={{ fontFamily: fonts.sans, position: "relative", height: STAGE_HEIGHT, overflow: "hidden" }}>
           <GpuixCanvas
             ref={canvas}
             width={width.value * RENDER_SCALE}
@@ -488,7 +488,7 @@ export const InsightCompareCard = defineComponent({
       const t = theme.tokens.value
       const shadows = theme.shadows.value
       return (
-        <div style={{ minHeight: 278, borderRadius: radius.card, backgroundColor: t.surface, padding: 12, ...shadows.hairline }}>
+        <div style={{ fontFamily: fonts.sans, minHeight: 278, borderRadius: radius.card, backgroundColor: t.surface, padding: 12, ...shadows.hairline }}>
           {/* legend — one column per series */}
           <div style={{ display: "flex", gap: 16 }}>
             {props.series.map((s, i) => (
@@ -597,7 +597,7 @@ export const InsightAnomalyCard = defineComponent({
           ? formatValue(data[hoverIndex.value])
           : `${ANOMALY_THRESHOLDS[metric.value]} threshold`
       return (
-        <div style={{ minHeight: 278, borderRadius: radius.card, backgroundColor: t.surface, padding: 12, ...shadows.hairline }}>
+        <div style={{ fontFamily: fonts.sans, minHeight: 278, borderRadius: radius.card, backgroundColor: t.surface, padding: 12, ...shadows.hairline }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: t.ink }}>
               <Icon name="arrowUp" size={12} color={t.red} />
@@ -645,6 +645,10 @@ export const InsightAnomalyCard = defineComponent({
                       onClick={() => {
                         metric.value = item
                       }}
+                      tabIndex={0}
+                      onKeyDown={activationKeys(() => {
+                        metric.value = item
+                      })}
                       style={{
                         borderRadius: radius.pill,
                         paddingLeft: 8,
@@ -722,7 +726,7 @@ export const InsightAllocationCard = defineComponent({
       }
       const toneColor: Record<AllocationTone, string> = { orange: t.orange, ink2: t.ink2, ink3: t.ink3 }
       return (
-        <div style={{ minHeight: 278, borderRadius: radius.card, backgroundColor: t.surface, padding: 12, ...shadows.hairline }}>
+        <div style={{ fontFamily: fonts.sans, minHeight: 278, borderRadius: radius.card, backgroundColor: t.surface, padding: 12, ...shadows.hairline }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 500, color: t.ink }}>
             <div
               style={{
@@ -813,6 +817,10 @@ export const InsightAllocationCard = defineComponent({
                   onClick={() => {
                     selected.value = s.name
                   }}
+                  tabIndex={0}
+                  onKeyDown={activationKeys(() => {
+                    selected.value = s.name
+                  })}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -998,7 +1006,7 @@ export const InsightCards = defineComponent({
 
       const Card = current.card
       return (
-        <div testId="insight-root" style={{ display: "flex", flexDirection: "column", minHeight: 408, width: "100%", maxWidth: 344 }}>
+        <div testId="insight-root" style={{ fontFamily: fonts.sans, display: "flex", flexDirection: "column", minHeight: 408, width: "100%", maxWidth: 344 }}>
           {/* pager header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -1019,6 +1027,10 @@ export const InsightCards = defineComponent({
                   onClick={() => {
                     move(button.direction)
                   }}
+                  tabIndex={0}
+                  onKeyDown={activationKeys(() => {
+                    move(button.direction)
+                  })}
                   style={{
                     display: "flex",
                     width: 24,

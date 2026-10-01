@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use gpui::prelude::*;
-use gpui::{AccessibleAction, Role};
+use gpui::{AccessibleAction, Orientation, Role, Toggled};
 
 use crate::element_tree::EventPayload;
 use crate::renderer::{emit_event_full, EventCallback};
@@ -58,6 +58,41 @@ where
     if let Some(selected) = bool_prop(props, "aria-selected") {
         el = el.aria_selected(selected);
     }
+    // GPUI exposes AccessKit's toggle state for radios, checkboxes, switches
+    // and toggle buttons. Keep DOM prop spelling at the Vue boundary.
+    if let Some(toggled) = props
+        .get("aria-checked")
+        .or_else(|| props.get("aria-pressed"))
+    {
+        let state = match toggled {
+            serde_json::Value::Bool(true) => Some(Toggled::True),
+            serde_json::Value::Bool(false) => Some(Toggled::False),
+            serde_json::Value::String(value) if value == "mixed" => Some(Toggled::Mixed),
+            serde_json::Value::String(value) if value == "true" => Some(Toggled::True),
+            serde_json::Value::String(value) if value == "false" => Some(Toggled::False),
+            _ => None,
+        };
+        if let Some(state) = state {
+            el = el.aria_toggled(state);
+        }
+    }
+    if let Some(value) = props.get("aria-valuenow").and_then(|value| value.as_f64()) {
+        el = el.aria_numeric_value(value);
+    }
+    if let Some(value) = props.get("aria-valuemin").and_then(|value| value.as_f64()) {
+        el = el.aria_min_numeric_value(value);
+    }
+    if let Some(value) = props.get("aria-valuemax").and_then(|value| value.as_f64()) {
+        el = el.aria_max_numeric_value(value);
+    }
+    match props
+        .get("aria-orientation")
+        .and_then(|value| value.as_str())
+    {
+        Some("horizontal") => el = el.aria_orientation(Orientation::Horizontal),
+        Some("vertical") => el = el.aria_orientation(Orientation::Vertical),
+        _ => {}
+    }
     if let Some(level) = usize_prop(props, "aria-level") {
         el = el.aria_level(level);
     }
@@ -96,11 +131,16 @@ where
     }
     let callback = callback.clone();
     el.on_a11y_action(AccessibleAction::Click, move |_data, _window, _cx| {
-        emit_event_full(&callback, element_id, "click", |payload: &mut EventPayload| {
-            payload.button = Some(0);
-            payload.click_count = Some(1);
-            payload.is_right_click = Some(false);
-        });
+        emit_event_full(
+            &callback,
+            element_id,
+            "click",
+            |payload: &mut EventPayload| {
+                payload.button = Some(0);
+                payload.click_count = Some(1);
+                payload.is_right_click = Some(false);
+            },
+        );
     })
 }
 

@@ -292,4 +292,27 @@ describeNative("accessibility (vue)", () => {
     await app.settle()
     expect(withRole(app.renderer.getA11yTree(), "Button")[0]?.label).toBe("On")
   })
+  it("updates toggle states and slider ranges in the painted accessibility tree", async () => {
+    const checked = ref(false)
+    const value = ref(25)
+    const Controls = defineComponent({
+      setup() {
+        return () => <div>
+          <div role="checkbox" aria-label="Include row" aria-checked={checked.value} style={{ width: 100, height: 30 }} />
+          <div role="button" aria-label="Pinned" aria-pressed="mixed" style={{ width: 100, height: 30 }} />
+          <div role="slider" aria-label="Confidence" aria-valuenow={value.value} aria-valuemin={0} aria-valuemax={100} aria-orientation="horizontal" style={{ width: 100, height: 30 }} />
+        </div>
+      },
+    })
+    app = createTestApp(Controls)
+    expect(withRole(app.renderer.getA11yTree(), "CheckBox")[0]).toMatchObject({ toggled: "False" })
+    expect(withRole(app.renderer.getA11yTree(), "Button")[0]).toMatchObject({ toggled: "Mixed" })
+    expect(withRole(app.renderer.getA11yTree(), "Slider")[0]).toMatchObject({ numeric_value: 25, min_numeric_value: 0, max_numeric_value: 100, orientation: "Horizontal" })
+    checked.value = true
+    value.value = 75
+    await app.settle()
+    expect(withRole(app.renderer.getA11yTree(), "CheckBox")[0]).toMatchObject({ toggled: "True" })
+    expect(withRole(app.renderer.getA11yTree(), "Slider")[0]).toMatchObject({ numeric_value: 75 })
+  })
+
 })

@@ -38,18 +38,17 @@
  *    single-line input consumes Enter before `keyDown` (same as SearchList).
  *    The `<label>`'s click-to-focus becomes a row `onClick` →
  *    `focusElement`.
- *  - Inactive questions get `pointerEvents: "none"` instead of roving
- *    `tabIndex`; option rows are not keyboard-activatable (the footer
- *    pills/nav remain clickable), and `aria-live` is dropped — there is no
- *    DOM accessibility tree, roles/aria-* are a passthrough only.
- *  - `prefers-reduced-motion` is not read (no media-query hook in GPUIV);
- *    the slide and roll always animate.
+ *  - Inactive questions are excluded from pointer and keyboard navigation.
+ *    Options expose checkbox/radio state through the native accessibility
+ *    tree. theme.reducedMotion disables slide and roll transitions.
  *  - The original's unused `variant` prop is dropped.
  */
 
+import { activationKeys } from "../interaction.js"
+import { motion } from "../motion.js"
 import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType } from "vue"
-import { motion, useElementBounds, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
-import { ease, radius } from "../tokens.js"
+import { useElementBounds, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Button } from "../atoms/Button.js"
 import { GlideMenuItem, GlideMenuRoot } from "../atoms/GlideMenu.js"
@@ -177,7 +176,7 @@ const RollingDigits = defineComponent({
         flexShrink: 0,
       } as const
       return (
-        <div style={{ display: "flex", alignItems: "center", height: COUNTER_LINE }}>
+        <div style={{ fontFamily: fonts.sans, display: "flex", alignItems: "center", height: COUNTER_LINE }}>
           {counterSegments(props.value, oldValue.value, rolling.value).map((segment, i) => {
             if (segment.kind === "run") {
               return (
@@ -195,11 +194,11 @@ const RollingDigits = defineComponent({
                 style={{ height: COUNTER_LINE, overflow: "hidden", flexShrink: 0 }}
               >
                 <div
-                  motion={{
+                  motion={theme.motion({
                     initial: { top: up ? 0 : -COUNTER_LINE },
                     animate: { top: up ? -COUNTER_LINE : 0 },
                     transition: ROLL_TRANSITION,
-                  }}
+                  })}
                   style={{ position: "relative", display: "flex", flexDirection: "column" }}
                 >
                   <div style={charStyle}>{topChar === "" ? null : topChar}</div>
@@ -258,12 +257,12 @@ const QuestionSlide = defineComponent({
       return (
         <div
           ref={root}
-          motion={{
+          motion={theme.motion({
             initial: false,
             animate: { opacity: props.active ? 1 : 0 },
             transition: SLIDE_TRANSITION,
-          }}
-          style={props.active ? {} : { pointerEvents: "none" as const }}
+          })}
+          style={{ fontFamily: fonts.sans, ...(props.active ? {} : { pointerEvents: "none" as const }) }}
         >
           <div style={{ paddingRight: 28, fontSize: 14, fontWeight: 500, color: t.ink }}>{question.q}</div>
           <GlideMenuRoot style={{ marginTop: 10, gap: 4 }}>
@@ -272,11 +271,18 @@ const QuestionSlide = defineComponent({
               return (
                 <GlideMenuItem key={option}>
                   <div
-                    role="button"
+                    role={question.type === "radio" ? "radio" : "checkbox"}
+                    aria-selected={on}
+                    aria-checked={on}
+                    aria-valuetext={on ? "Selected" : "Not selected"}
                     testId={`approval-option-${i}`}
                     onClick={() => {
                       if (props.active) props.onToggle(i)
                     }}
+                    tabIndex={props.active ? 0 : -1}
+                    onKeyDown={activationKeys(() => {
+                      if (props.active) props.onToggle(i)
+                    })}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -323,6 +329,11 @@ const QuestionSlide = defineComponent({
                 onClick={() => {
                   if (props.active) focusInput()
                 }}
+                role="button"
+                tabIndex={props.active ? 0 : -1}
+                onKeyDown={activationKeys(() => {
+                  if (props.active) focusInput()
+                })}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -339,6 +350,7 @@ const QuestionSlide = defineComponent({
                   value={props.custom}
                   placeholder={props.customPlaceholder}
                   aria-label="Custom answer"
+                  tabIndex={props.active ? 0 : -1}
                   onChange={(event: EventPayload) => {
                     if (props.active) props.onCustomChange(event.value ?? "")
                   }}
@@ -480,7 +492,12 @@ export const ApprovalCard = defineComponent({
             onClick={() => {
               open.value = true
             }}
+            tabIndex={0}
+            onKeyDown={activationKeys(() => {
+              open.value = true
+            })}
             style={{
+              fontFamily: fonts.sans,
               alignSelf: "flex-start",
               borderRadius: radius.control,
               backgroundColor: t.surface,
@@ -507,7 +524,7 @@ export const ApprovalCard = defineComponent({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.26, ease: ease.outStrong }}
-            style={{ display: "flex", alignItems: "center", gap: 12, width: "100%", maxWidth: 320 }}
+            style={{ fontFamily: fonts.sans, display: "flex", alignItems: "center", gap: 12, width: "100%", maxWidth: 320 }}
           >
             <div
               style={{
@@ -546,6 +563,8 @@ export const ApprovalCard = defineComponent({
                 role="button"
                 testId="approval-restart"
                 onClick={reset}
+                tabIndex={0}
+                onKeyDown={activationKeys(reset)}
                 style={{ fontSize: 12, fontWeight: 500, color: t.ink3, cursor: "pointer", hover: { color: t.ink } }}
               >
                 Start over
@@ -557,7 +576,7 @@ export const ApprovalCard = defineComponent({
 
       const isReady = ready.value
       return (
-        <div style={{ width: "100%", maxWidth: 320 }}>
+        <div style={{ fontFamily: fonts.sans, width: "100%", maxWidth: 320 }}>
           <motion.div
             initial={{ opacity: 0, top: 8 }}
             animate={{ opacity: 1, top: 0 }}
@@ -573,20 +592,20 @@ export const ApprovalCard = defineComponent({
             <div style={{ padding: 12 }}>
               {/* viewport — tweens its height to the active question */}
               <div
-                motion={{
+                motion={theme.motion({
                   initial: false,
                   animate: isReady ? { height: heights.value[qi.value] ?? 0 } : {},
                   transition: SLIDE_TRANSITION,
-                }}
+                })}
                 style={{ overflow: "hidden" }}
               >
                 {/* track — slides so the active question fills the viewport */}
                 <div
-                  motion={{
+                  motion={theme.motion({
                     initial: false,
                     animate: isReady ? { top: -trackY.value } : {},
                     transition: SLIDE_TRANSITION,
-                  }}
+                  })}
                   style={{ position: "relative", display: "flex", flexDirection: "column", gap: TRACK_GAP }}
                 >
                   {props.questions.map((question, qIdx) =>
@@ -627,6 +646,8 @@ export const ApprovalCard = defineComponent({
                   aria-label="Previous question"
                   aria-disabled={qi.value <= 0 || undefined}
                   onClick={qi.value <= 0 ? undefined : () => goTo(qi.value - 1)}
+                  tabIndex={qi.value <= 0 ? -1 : 0}
+                  onKeyDown={activationKeys(qi.value <= 0 ? undefined : () => goTo(qi.value - 1))}
                   style={{
                     display: "flex",
                     width: 18,
@@ -647,6 +668,8 @@ export const ApprovalCard = defineComponent({
                   aria-label="Next question"
                   aria-disabled={last.value || undefined}
                   onClick={last.value ? undefined : () => goTo(qi.value + 1)}
+                  tabIndex={last.value ? -1 : 0}
+                  onKeyDown={activationKeys(last.value ? undefined : () => goTo(qi.value + 1))}
                   style={{
                     display: "flex",
                     width: 18,
@@ -689,6 +712,10 @@ export const ApprovalCard = defineComponent({
               onClick={() => {
                 open.value = false
               }}
+              tabIndex={0}
+              onKeyDown={activationKeys(() => {
+                open.value = false
+              })}
               style={{
                 position: "absolute",
                 top: 10,

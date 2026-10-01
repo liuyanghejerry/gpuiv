@@ -37,12 +37,9 @@
  *    remount on every expand, like the original re-adding the animation.
  *  - The root's `min-height` 400ms transition is dropped (motion tweens only
  *    width/height/top/…, not min-height); the constraint swaps instantly.
- *  - Search rows were `<a href target="_blank">` with an `animated-underline`
- *    class. GPUIV cannot open links or underline on hover, so they are plain
- *    rows with the hover wash; `href` stays on `ThinkingRow` for parity.
- *  - The original's `key={variant}` remounts all state when the variant
- *    prop changes. Vue does not remount on a prop change: switching
- *    `variant` mid-run swaps the content but the timeline keeps running.
+ *  - Search rows activate via keyboard or click, calling onSourceClick or
+ *    the renderer's openUrl. Hover underlines remain unavailable.
+ *  - Changing variant restarts the trace and clears manual expansion.
  *  - `tabular-nums` on the add/del counts is dropped (no
  *    font-feature-settings); the mono family already reads tabular.
  *  - `transition-colors` hovers swap instantly (no CSS transitions).
@@ -51,11 +48,13 @@
  */
 
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue"
-import { AnimateHeight, motion, Spinner, useElementBounds, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { AnimateHeight, motion } from "../motion.js"
+import { Spinner, useElementBounds, useGpuix, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { ease, fonts, radius } from "../tokens.js"
 import { useTheme, type Theme } from "../theme.js"
 import { Shimmer } from "../atoms/index.js"
 import { Icon } from "../atoms/Icon.js"
+import { activationKeys } from "../interaction.js"
 
 export type ThinkingStateVariant = "Steps" | "Reasoning" | "Search" | "Coding"
 
@@ -67,7 +66,7 @@ export interface ThinkingRow {
   /** Diff counters on Coding rows; `del` renders only alongside `add`. */
   add?: number
   del?: number
-  /** Kept for parity with the web original; GPUIV cannot open links. */
+  /** URL opened for search results. */
   href?: string
 }
 
@@ -142,6 +141,8 @@ export const ThinkingState = defineComponent({
     active: { type: String, default: undefined },
     /** Override the settled header label. */
     done: { type: String, default: undefined },
+    /** Override URL opening with app-owned navigation. */
+    onSourceClick: { type: Function as PropType<(row: ThinkingRow) => void>, default: undefined },
   },
   emits: {
     /** Fired once, when the scripted trace reaches its settled stage. */
@@ -149,6 +150,11 @@ export const ThinkingState = defineComponent({
   },
   setup(props, { emit, slots }) {
     const theme = useTheme()
+    const { renderer } = useGpuix()
+    const openSource = (row: ThinkingRow) => {
+      if (props.onSourceClick) props.onSourceClick(row)
+      else if (row.href) renderer?.openUrl?.(row.href)
+    }
 
     /* The STAGES script — useSequence from the original. One timeout is in
      * flight at a time; advancing past the last stage leaves none pending. */
@@ -186,6 +192,14 @@ export const ThinkingState = defineComponent({
 
     /* Let embedders sequence content after the trace settles — once only. */
     let settledEmitted = false
+    watch(() => props.variant, () => {
+      if (stageTimer !== undefined) clearTimeout(stageTimer)
+      stage.value = 0
+      manualExpanded.value = null
+      selectedTool.value = null
+      settledEmitted = false
+      advance()
+    })
     watch(working, (isWorking) => {
       if (isWorking || settledEmitted) return
       settledEmitted = true
@@ -254,7 +268,7 @@ export const ThinkingState = defineComponent({
               {i < shown - 1 || !isWorking ? (
                 <Icon name="check" size={14} color={t.ink3} />
               ) : (
-                <Spinner size={3} color={t.ink2} label="Working" />
+                <Spinner phase={theme.reducedMotion.value ? 0 : undefined} size={3} color={t.ink2} label="Working" />
               )}
             </div>
           )}
@@ -294,6 +308,7 @@ export const ThinkingState = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             flexDirection: "column",
             width: "100%",
@@ -308,6 +323,10 @@ export const ThinkingState = defineComponent({
             onClick={() => {
               manualExpanded.value = !(manualExpanded.value ?? autoExpanded.value)
             }}
+            tabIndex={0}
+            onKeyDown={activationKeys(() => {
+              manualExpanded.value = !(manualExpanded.value ?? autoExpanded.value)
+            })}
             style={{
               display: "flex",
               alignItems: "center",
@@ -410,12 +429,22 @@ export const ThinkingState = defineComponent({
                             onClick={() => {
                               selectedTool.value = selectedTool.value === row.primary ? null : row.primary
                             }}
+                            tabIndex={0}
+                            onKeyDown={activationKeys(() => {
+                              selectedTool.value = selectedTool.value === row.primary ? null : row.primary
+                            })}
                             style={rowShell(true, selectedTool.value === row.primary)}
                           >
                             {rowContent(row, i)}
                           </div>
                         ) : (
                           <div
+                            role={row.href ? "link" : undefined}
+                            aria-label={row.href ? row.primary : undefined}
+                            tabIndex={row.href && expanded.value ? 0 : -1}
+                            testId={`thinking-source-${i}`}
+                            onClick={row.href ? () => openSource(row) : undefined}
+                            onKeyDown={row.href ? activationKeys(() => openSource(row)) : undefined}
                             style={rowShell(props.variant === "Search")}
                           >
                             {rowContent(row, i)}

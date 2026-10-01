@@ -1,48 +1,18 @@
-/** LOADING STATE — pixel-grid loader for long-running work.
- *
- *  Ported from beautiful-ui `components/primitives/LoadingState.tsx`.
- *
- *  Variants:
- *    Drive — square cells, chevron wavefront driving right; the 650ms
- *            cycle is shorter than the sweep, so two fronts are always
- *            in flight
- *    Dots  — same wavefront, circular cells
- *    Orbit — a comet lapping the grid perimeter
- *
- *  Platform degradations vs the web original:
- *  - The `Surfer` variant is DROPPED: it pairs the Drive loader with a
- *    `<video>` meme card, and GPUIV has no video element. Passing
- *    `variant="Surfer"` from untyped JS falls back to Drive.
- *  - The `pixel-on` CSS keyframe (`0%/100%: 0.15, 18%/42%: 1, 62%: 0.15`,
- *    `ease-in-out`) is sampled in JS: one `setInterval(100ms)` advances a
- *    shared clock (10fps vs the browser's 60 — the wave is steppy by
- *    design here), and each cell's opacity is the keyframe wave offset by
- *    its per-variant delay. The easing replicates CSS `ease-in-out`
- *    (cubic-bezier(0.42, 0, 0.58, 1)) exactly.
- *  - The label uses the `Shimmer` atom: the original's 1.4s gradient
- *    sweep (`background-clip: text`) cannot clip a gradient to glyphs in
- *    GPUIV, so the atom breathes the label's opacity instead.
- *  - The `pop-in` entrance (opacity + scale, 200ms) becomes a
- *    `motion.div` opacity fade — no scale/transform in GPUIV.
- *  - `tabular-nums` on the elapsed readout is dropped (no
- *    font-feature-settings); the mono family already reads tabular.
- *  - `prefers-reduced-motion` is not wired (no media queries in GPUIV).
- *    Pass `phase` to freeze every animation on a pinned clock instead.
- *
- *  `phase` pins the whole component to one millisecond on the shared
- *  clock (grid wave, shimmer label, elapsed readout) and skips the
- *  entrance fade — for tests and screenshots. The elapsed readout is
- *  also driven by that clock, so a pinned frame shows a deterministic
- *  `0.0s`-style value instead of wall time.
+/** Pixel-grid work indicator, ported from beautiful-ui (MIT).
+ * Drive, Dots, and Orbit sample the source's wavefront at 100ms intervals.
+ * Surfer pairs Drive with an optional frozen image (native has no video
+ * element). `phase` pins the clock; theme.reducedMotion freezes decorative
+ * motion while the elapsed time still advances. Text shimmer uses opacity.
  */
 
 import { defineComponent, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
-import { motion } from "@gpuiv/vue"
+import { motion } from "../motion.js"
+
 import { ease, fonts } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Shimmer } from "../atoms/index.js"
 
-export type LoadingStateVariant = "Drive" | "Dots" | "Orbit"
+export type LoadingStateVariant = "Drive" | "Dots" | "Orbit" | "Surfer"
 
 export interface LoadingStateProps {
   /** Status text between the grid and the timer. Default "Churning". */
@@ -51,6 +21,8 @@ export interface LoadingStateProps {
   variant?: LoadingStateVariant
   /** Pin the shared clock at this many ms instead of ticking (tests). */
   phase?: number
+  /** Frozen frame for the native Surfer context card. */
+  surferImage?: string
 }
 
 const DEFAULT_LABEL = "Churning"
@@ -81,7 +53,7 @@ interface GridPattern {
   round: boolean
 }
 
-const PATTERNS: Record<LoadingStateVariant, GridPattern> = {
+const PATTERNS: Record<Exclude<LoadingStateVariant, "Surfer">, GridPattern> = {
   Drive: { delays: CHEVRON_DELAYS, dur: 650, round: false },
   Dots: { delays: CHEVRON_DELAYS, dur: 650, round: true },
   Orbit: { delays: ORBIT_DELAYS, dur: 950, round: false },
@@ -174,6 +146,7 @@ function loaderGrid(color: string, pattern: GridPattern, now: number) {
 export const LoadingState = defineComponent({
   name: "BuiLoadingState",
   props: {
+    surferImage: { type: String, default: undefined },
     label: { type: String, default: undefined },
     variant: { type: String as PropType<LoadingStateVariant>, default: "Drive" },
     /** Pin the shared clock at this many ms instead of ticking (tests). */
@@ -198,21 +171,24 @@ export const LoadingState = defineComponent({
     return () => {
       const t = theme.tokens.value
       const now = props.phase ?? elapsed.value
-      const pattern = PATTERNS[props.variant] ?? PATTERNS.Drive
+      const pattern = PATTERNS[props.variant === "Surfer" ? "Drive" : props.variant] ?? PATTERNS.Drive
       return (
         <motion.div
           initial={{ opacity: props.phase === undefined ? 0 : 1 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.2, ease: ease.link }}
-          style={{ alignSelf: "flex-start" }}
+          style={{ fontFamily: fonts.sans, alignSelf: "flex-start" }}
         >
           <div role="status" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {loaderGrid(t.ink, pattern, now)}
+            {loaderGrid(t.ink, pattern, theme.reducedMotion.value ? 0 : now)}
             <Shimmer phase={props.phase}>
               <div style={{ fontSize: 13, fontWeight: 500, color: t.ink2 }}>{props.label ?? DEFAULT_LABEL}</div>
             </Shimmer>
             <div style={{ fontFamily: fonts.mono, fontSize: 12, color: t.ink3 }}>{formatElapsed(now)}</div>
           </div>
+          {props.variant === "Surfer" && <div testId="loading-surfer" style={{ marginTop: 8, width: 224, height: 126, overflow: "hidden", borderRadius: 10, backgroundColor: t.inset, ...theme.shadows.value.overlay }}>
+            {props.surferImage ? <img src={props.surferImage} style={{ width: 224, height: 126, objectFit: "cover" }} /> : <div style={{ width: 224, height: 126, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontFamily: fonts.mono, color: t.ink3 }}>Preview unavailable</div>}
+          </div>}
         </motion.div>
       )
     }

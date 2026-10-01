@@ -33,11 +33,8 @@
  *    opacity (300ms ease-out-strong). Here `AnimateHeight` (measured
  *    auto-height tween) plus an opacity tween on its content at the same
  *    timing — the ThinkingState pattern.
- *  - Source chips and rows were `<a href target="_blank">` with an
- *    `animated-underline` hover. GPUIV primitives do not open links (see
- *    ThinkingState), so they are hover-washed rows; `href` stays on
- *    `StreamingSource` for parity, and the underline grow is dropped (no
- *    text-decoration animation in GPUIV).
+ *  - Citations and source rows activate via keyboard or click, calling
+ *    onSourceClick or the renderer's openUrl; hover underlines are dropped.
  *  - The `.source-avatar` ring (a StreamingText-specific block in
  *    globals.css) becomes a zero-blur spread boxShadow — 1px of
  *    `oklch(0.21 0.034 263.436 / 0.1)` light / `oklch(1 0 0 / 0.08)` dark on
@@ -49,16 +46,17 @@
  *    reach it (same trade-off as SearchList).
  *  - `onDone` / `onFollowUp` are the `done` / `followUp` emits, per Vue
  *    convention. The original's unused `variant?: string` prop is dropped.
- *    Changing `content` or `loop` mid-run does not re-arm the timer (the
- *    original re-arms on a `loop` flip; here the timeline keeps its pace).
+ *    Appended tokens and loop changes re-arm the stream after completion.
  */
 
-import { computed, defineComponent, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
-import { AnimateHeight, motion } from "@gpuiv/vue"
+import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType } from "vue"
+import { AnimateHeight, motion } from "../motion.js"
+import { useGpuix } from "@gpuiv/vue"
 import { ease, fonts, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Icon } from "../atoms/Icon.js"
 import type { IconName } from "../icons.js"
+import { activationKeys } from "../interaction.js"
 
 /** One streamed word, or a `cite` placeholder that renders an inline source chip. */
 export interface StreamingToken {
@@ -70,7 +68,7 @@ export interface StreamingToken {
 export interface StreamingSource {
   name: string
   domain: string
-  /** Kept for parity with the web original; GPUIV primitives do not open links. */
+  /** URL opened through the native renderer, unless sourceClick handles it. */
   href: string
   /** Avatar image URL. A `data:` URL paints offline (the default set is inline SVG). */
   image: string
@@ -148,6 +146,8 @@ export const StreamingText = defineComponent({
     loop: { type: Boolean, default: true },
     /** Fill the parent width instead of the gallery's fixed measure. */
     fill: { type: Boolean, default: false },
+    /** Override URL opening, for an app-owned browser or link policy. */
+    onSourceClick: { type: Function as PropType<(source: StreamingSource) => void>, default: undefined },
   },
   emits: {
     /** The stream reached the end and `loop` is off. */
@@ -157,6 +157,7 @@ export const StreamingText = defineComponent({
   },
   setup(props, { emit }) {
     const theme = useTheme()
+    const { renderer } = useGpuix()
     const copy = computed(() => ({ ...DEFAULT_LABELS, ...props.labels }))
     const count = ref(0)
     const sourcesOpen = ref(false)
@@ -166,7 +167,12 @@ export const StreamingText = defineComponent({
      * At the end of the stream: hold, then restart (loop) or settle (done).
      * An empty `content` settles immediately instead of idling on the hold. */
     let timer: ReturnType<typeof setTimeout> | undefined
+    const clearTimer = () => {
+      if (timer !== undefined) clearTimeout(timer)
+      timer = undefined
+    }
     const schedule = () => {
+      clearTimer()
       if (done.value) {
         if (!props.loop) {
           emit("done")
@@ -175,19 +181,23 @@ export const StreamingText = defineComponent({
         if (props.content.length === 0) return
         timer = setTimeout(() => {
           count.value = 0
-          schedule()
         }, HOLD_MS)
         return
       }
       timer = setTimeout(() => {
         count.value += 1
-        schedule()
       }, WORD_MS)
     }
-    onMounted(schedule)
-    onBeforeUnmount(() => {
-      if (timer !== undefined) clearTimeout(timer)
-    })
+    // Match the original effect's count/done/loop dependencies. Appending
+    // tokens after a non-looping completion makes done false and resumes
+    // at the previous count, rather than leaving the stream permanently idle.
+    watch([count, done, () => props.loop], schedule, { immediate: true })
+    onBeforeUnmount(clearTimer)
+
+    const openSource = (source: StreamingSource) => {
+      if (props.onSourceClick) props.onSourceClick(source)
+      else renderer?.openUrl?.(source.href)
+    }
 
     return () => {
       const t = theme.tokens.value
@@ -217,7 +227,7 @@ export const StreamingText = defineComponent({
       )
 
       return (
-        <div style={props.fill ? { width: "100%" } : { width: "100%", maxWidth: 380, minHeight: 248 }}>
+        <div style={{ fontFamily: fonts.sans, ...(props.fill ? { width: "100%" } : { width: "100%", maxWidth: 380, minHeight: 248 }) }}>
           {/* streamed paragraph */}
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", columnGap: 3.5 }}>
             {props.content.slice(0, count.value).map((token, i) =>
@@ -230,6 +240,12 @@ export const StreamingText = defineComponent({
                     transition={{ duration: 0.25, ease: ease.outStrong }}
                   >
                     <div
+                      role="link"
+                      aria-label={chipSource.name}
+                      testId={`streaming-citation-${i}`}
+                      tabIndex={0}
+                      onClick={() => openSource(chipSource)}
+                      onKeyDown={activationKeys(() => openSource(chipSource))}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -310,6 +326,12 @@ export const StreamingText = defineComponent({
                     }
                   : undefined
               }
+              tabIndex={isDone ? 0 : -1}
+              onKeyDown={activationKeys(isDone
+                  ? () => {
+                      sourcesOpen.value = !sourcesOpen.value
+                    }
+                  : undefined)}
               style={{
                 marginLeft: 6,
                 display: "flex",
@@ -351,6 +373,12 @@ export const StreamingText = defineComponent({
                 {props.sources.map((source) => (
                   <div
                     key={source.domain}
+                    role="link"
+                    aria-label={source.name}
+                    testId={`streaming-source-${source.domain}`}
+                    tabIndex={drawerOpen ? 0 : -1}
+                    onClick={drawerOpen ? () => openSource(source) : undefined}
+                    onKeyDown={drawerOpen ? activationKeys(() => openSource(source)) : undefined}
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -397,6 +425,8 @@ export const StreamingText = defineComponent({
                     role="button"
                     testId={`streaming-followup-${i}`}
                     onClick={isDone ? () => emit("followUp", text, i) : undefined}
+                    tabIndex={isDone ? 0 : -1}
+                    onKeyDown={activationKeys(isDone ? () => emit("followUp", text, i) : undefined)}
                     style={{
                       marginLeft: -6,
                       marginRight: -6,

@@ -27,9 +27,11 @@
  *  the original — and emits `select` with the item.
  */
 
+import { activationKeys } from "../interaction.js"
 import { computed, defineComponent, ref, watch, type PropType } from "vue"
-import { motion, type EventPayload } from "@gpuiv/vue"
-import { ease, radius } from "../tokens.js"
+import { motion } from "../motion.js"
+import { type EventPayload } from "@gpuiv/vue"
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { withAlpha } from "../colors.js"
 import { Icon } from "../atoms/Icon.js"
@@ -116,6 +118,7 @@ export const SearchList = defineComponent({
       return (
         <div
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
@@ -173,6 +176,11 @@ export const SearchList = defineComponent({
                     onClick={() => {
                       query.value = ""
                     }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={activationKeys(() => {
+                      query.value = ""
+                    })}
                     aria-label="Clear search"
                     style={{
                       display: "flex",
@@ -240,6 +248,9 @@ export const SearchList = defineComponent({
                     >
                       <div
                         onClick={() => choose(item)}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={activationKeys(() => choose(item))}
                         onMouseEnter={() => {
                           activeIndex.value = i
                         }}

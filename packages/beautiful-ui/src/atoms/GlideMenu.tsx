@@ -44,9 +44,11 @@ import {
   type InjectionKey,
   type Ref,
 } from "vue"
-import { motion, useElementBounds, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
-import { duration, ease, radius } from "../tokens.js"
+import { useElementBounds, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { motion } from "../motion.js"
+import { fonts, duration, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
+import { activationKeys } from "../interaction.js"
 
 interface GlideMenuItemRegistration {
   /** Live template ref to the row's host element; populated by `mounted`. */
@@ -152,6 +154,7 @@ export const GlideMenuRoot = defineComponent({
           {...attrs}
           ref={containerRef}
           style={{
+            fontFamily: fonts.sans,
             position: "relative",
             display: "flex",
             flexDirection: "column",
@@ -198,8 +201,17 @@ export const GlideMenuItem = defineComponent({
       <div
         {...attrs}
         ref={nodeRef}
+        role={(attrs.role as string | undefined) ?? (attrs.onClick ? "button" : undefined)}
+        tabIndex={props.disabled ? -1 : ((attrs.tabIndex as number | undefined) ?? (attrs.onClick ? 0 : -1))}
         aria-disabled={props.disabled || undefined}
+        onClick={props.disabled ? undefined : attrs.onClick}
+        onKeyDown={(event: EventPayload) => {
+          if (props.disabled) return
+          ;(attrs.onKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
+          if (!attrs.onKeyDown && attrs.onClick) activationKeys(() => (attrs.onClick as () => void)())(event)
+        }}
         style={{
+          fontFamily: fonts.sans,
           // Disabled rows keep their content but never pull the highlight;
           // dim them so the state is visible (the web original has no
           // disabled concept — this is a GPUIV addition).

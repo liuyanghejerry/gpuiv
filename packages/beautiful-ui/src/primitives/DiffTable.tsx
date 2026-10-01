@@ -36,9 +36,9 @@
  *    fade (no scale).
  *  - `tabular-nums` on the name cell and the footer summary is dropped (no
  *    font-feature-settings).
- *  - Keyboard activation (`tabIndex` + Enter/Space) and the `focus-visible`
- *    ring are dropped — no DOM accessibility tree in GPUIV. `role`/`aria-*`
- *    attributes stay as inert passthrough.
+ *  - Rows support Enter/Space and leave the tab order after applying.
+ *    Roles and selected state reach GPUI's accessibility tree. Native Button
+ *    actions use outlines; row selection uses the existing painted tint.
  *  - The original's `variant` prop is dropped: the source component accepts
  *    but never reads it.
  *  - The added row's chip dot is hardcoded `bg-green` in the source (the
@@ -54,10 +54,12 @@
  *    collapsed and expanded states read as a single hairline.
  */
 
+import { activationKeys } from "../interaction.js"
+import { AnimateHeight, motion } from "../motion.js"
 import { computed, defineComponent, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
-import { AnimateHeight, motion, type StyleDesc } from "@gpuiv/vue"
+import { type StyleDesc } from "@gpuiv/vue"
 import { mix, withAlpha } from "../colors.js"
-import { ease, radius } from "../tokens.js"
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { Button } from "../atoms/Button.js"
 import { Icon } from "../atoms/Icon.js"
@@ -247,7 +249,7 @@ export const DiffTable = defineComponent({
       const addedIncluded = !!edits.value[props.addedRow.key]
 
       return (
-        <div style={{ display: "flex", flexDirection: "column", width: "100%", maxWidth: 380 }}>
+        <div style={{ fontFamily: fonts.sans, display: "flex", flexDirection: "column", width: "100%", maxWidth: 380 }}>
           <div
             style={{
               position: "relative",
@@ -299,6 +301,8 @@ export const DiffTable = defineComponent({
                   role={row.removed ? "checkbox" : undefined}
                   aria-selected={row.removed ? included : undefined}
                   onClick={interactive ? () => toggleEdit(row.key) : undefined}
+                  tabIndex={interactive ? 0 : -1}
+                  onKeyDown={activationKeys(interactive ? () => toggleEdit(row.key) : undefined)}
                   style={{
                     display: "flex",
                     ...(i === props.rows.length - 1 ? {} : { borderBottomWidth: 1, borderColor: t.line }),
@@ -325,6 +329,8 @@ export const DiffTable = defineComponent({
                   aria-checked={addedIncluded}
                   aria-label={`Include adding ${props.addedRow.id}`}
                   onClick={accepted.value ? undefined : () => toggleEdit(props.addedRow.key)}
+                  tabIndex={settled && !accepted.value ? 0 : -1}
+                  onKeyDown={activationKeys(accepted.value ? undefined : () => toggleEdit(props.addedRow.key))}
                   style={{
                     display: "flex",
                     borderTopWidth: 1,

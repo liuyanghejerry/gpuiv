@@ -87,3 +87,14 @@ pinned in `packages/native/Cargo.lock`.
 | GPUI | Apache-2.0 | https://github.com/zed-industries/zed |
 
 GPUIX itself is licensed under the terms in `LICENSE`.
+
+## Beautiful UI primitives and fonts
+
+`packages/beautiful-ui` ports source from [beautiful-ui](https://github.com/slev12397/beautiful-ui)
+(MIT, Copyright (c) 2026 Shane Levine). The full license is preserved in
+[`packages/beautiful-ui/LICENSE.beautiful-ui`](packages/beautiful-ui/LICENSE.beautiful-ui).
+
+The package bundles Inter (Copyright 2020 The Inter Project Authors) and
+JetBrains Mono, both under SIL Open Font License 1.1. Full notices and licenses
+are included alongside the unmodified font files in `packages/beautiful-ui/fonts/`.
+The fonts come from Google Fonts' `ofl/inter` and `ofl/jetbrainsmono` directories.

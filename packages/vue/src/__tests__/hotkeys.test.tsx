@@ -8,8 +8,6 @@ import { registerGlobalShortcut, unregisterGlobalShortcut } from "../hotkeys.js"
 
 const describeNative = describe.skipIf(!hasNativeTestRenderer)
 
-const macrotask = () => new Promise((resolve) => setTimeout(resolve, 0))
-
 describeNative("global shortcuts", () => {
   it("registers, fires, replaces, and unregisters", async () => {
     const app = createTestApp({ render: () => null })
@@ -21,8 +19,9 @@ describeNative("global shortcuts", () => {
     const onTrigger = vi.fn()
     await registerGlobalShortcut(renderer, "cmd+shift+j", onTrigger)
     renderer.fireGlobalShortcut("cmd+shift+j")
-    await macrotask()
-    expect(onTrigger).toHaveBeenCalledTimes(1)
+    // Native callbacks arrive through a ThreadsafeFunction; one timer turn
+    // does not guarantee delivery when the CI worker is busy.
+    await vi.waitFor(() => expect(onTrigger).toHaveBeenCalledTimes(1))
 
     await unregisterGlobalShortcut(renderer, "cmd+shift+j")
     expect(renderer.hasGlobalShortcut("cmd+shift+j")).toBe(false)

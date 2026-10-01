@@ -6,8 +6,8 @@
  *  here, in JS, before styles cross the FFI.
  *
  *  Inputs may be `oklch(L C H / A)` strings (all design tokens are) or
- *  `#rgb`/`#rrggbb` hex. Mixing happens in the oklch polar space, which is
- *  close enough to the source's srgb mixes at these low chromas.
+ *  hex or rgb()/rgba() colours. Mixing uses premultiplied sRGB, matching
+ *  the source's `color-mix(in srgb, ...)` including translucent endpoints.
  */
 
 interface Oklch {
@@ -56,6 +56,15 @@ function oklchToSrgb({ l, c, h, a }: Oklch): [number, number, number, number] {
 }
 
 export function parseColor(color: string): Oklch {
+  if (color.trim() === "transparent") return { l: 0, c: 0, h: 0, a: 0 }
+  const rgb = /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/.exec(color.trim())
+  if (rgb)
+    return srgbToOklch(
+      Number(rgb[1]) / 255,
+      Number(rgb[2]) / 255,
+      Number(rgb[3]) / 255,
+      rgb[4] === undefined ? 1 : Number(rgb[4]),
+    )
   const oklch = OKLCH_RE.exec(color.trim())
   if (oklch) {
     const alphaRaw = oklch[4]
@@ -65,7 +74,11 @@ export function parseColor(color: string): Oklch {
   const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim())
   if (hex) {
     let body = hex[1]
-    if (body.length === 3) body = body.split("").map((c) => c + c).join("")
+    if (body.length === 3)
+      body = body
+        .split("")
+        .map((c) => c + c)
+        .join("")
     const r = parseInt(body.slice(0, 2), 16) / 255
     const g = parseInt(body.slice(2, 4), 16) / 255
     const b = parseInt(body.slice(4, 6), 16) / 255
@@ -81,27 +94,17 @@ function format({ l, c, h, a }: Oklch): string {
     : `oklch(${round(l)} ${round(c)} ${round(h)} / ${round(a)})`
 }
 
-/** `color-mix(in oklch, a, b p%)` — p is the percentage of `b` (0–100). */
+/** `color-mix(in srgb, a, b p%)` — p is the percentage of `b` (0–100). */
 export function mix(a: string, b: string, p: number): string {
-  const ca = parseColor(a)
-  const cb = parseColor(b)
-  const t = p / 100
-  /* Achromatic endpoints have a powerless hue (CSS Color 5): their parsed
-   * hue (0 for white/black literals) would otherwise pull the shortest arc
-   * the wrong way round the circle — blue + white read as pink. Carry the
-   * chromatic side's hue instead. */
-  const ha = ca.c === 0 ? cb.h : ca.h
-  const hb = cb.c === 0 ? ha : cb.h
-  // Shortest arc around the hue circle.
-  let dh = hb - ha
-  if (dh > 180) dh -= 360
-  if (dh < -180) dh += 360
-  return format({
-    l: ca.l + (cb.l - ca.l) * t,
-    c: ca.c + (cb.c - ca.c) * t,
-    h: (ha + dh * t + 360) % 360,
-    a: ca.a + (cb.a - ca.a) * t,
-  })
+  const ca = oklchToSrgb(parseColor(a))
+  const cb = oklchToSrgb(parseColor(b))
+  const t = Math.max(0, Math.min(1, p / 100))
+  const alpha = ca[3] * (1 - t) + cb[3] * t
+  if (alpha === 0) return "rgba(0, 0, 0, 0)"
+  const channels = [0, 1, 2].map(
+    (i) => Math.round(((ca[i] * ca[3] * (1 - t) + cb[i] * cb[3] * t) / alpha) * 255000) / 1000,
+  )
+  return `rgba(${channels.join(", ")}, ${Math.round(alpha * 1000000) / 1000000})`
 }
 
 /** Same colour with its alpha multiplied by `factor` — `color-mix(x N%, transparent)`. */

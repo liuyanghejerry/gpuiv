@@ -22,8 +22,7 @@
  *    base 20% + surface, border = base 34% + surface; dark: text = base
  *    86% + white, bg/border = base 34% + surface). Reproduced with `mix()`
  *    and the component-specific tag bases from globals.css; mixing happens
- *    in oklch instead of srgb, which is perceptually identical at these
- *    chromas.
+ *    in sRGB, matching the original CSS.
  *  - Chip selected state is component state + a style swap (the original's
  *    `transition-[background-color,box-shadow,color] duration-200`), and
  *    row hover is the native `hover:` style (the original's
@@ -33,14 +32,16 @@
  *    the default figure set.
  *  - The chip counts are derived from `rows`; the original hardcodes counts
  *    that only match its demo data.
- *  - ARIA plumbing (`role="region"`, `aria-pressed`, `tabIndex`, `<button>`)
- *    is dropped — there is no DOM accessibility tree in GPUIV.
+ *  - Filter buttons support keyboard activation and report their pressed
+ *    state through the native accessibility tree.
  */
 
+import { activationKeys } from "../interaction.js"
 import { computed, defineComponent, ref, type PropType } from "vue"
-import { motion } from "@gpuiv/vue"
+import { motion } from "../motion.js"
+
 import { mix } from "../colors.js"
-import { ease, radius } from "../tokens.js"
+import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
 
 export type FilterTableStatus = "todo" | "progress" | "done"
@@ -184,7 +185,7 @@ export const FilterTable = defineComponent({
       )
 
       return (
-        <div style={{ display: "flex", flexDirection: "column", width: "100%", maxWidth: 420 }}>
+        <div style={{ fontFamily: fonts.sans, display: "flex", flexDirection: "column", width: "100%", maxWidth: 420 }}>
           {/* filter chips */}
           <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 4 }}>
             {FILTERS.map((f) => {
@@ -195,6 +196,12 @@ export const FilterTable = defineComponent({
                   onClick={() => {
                     filter.value = f.key
                   }}
+                  role="button"
+                  aria-pressed={active}
+                  tabIndex={0}
+                  onKeyDown={activationKeys(() => {
+                    filter.value = f.key
+                  })}
                   style={{
                     display: "flex",
                     alignItems: "center",

@@ -52,16 +52,16 @@
  *    are linear approximations.
  *  - `<input placeholder>` colour, `tabular-nums` on the invite count, and
  *    the recent rows' `title` tooltips have no GPUIV equivalent and are
- *    dropped; `aria-*`/`tabIndex` reduce to passthroughs (no accessibility
- *    tree), and the original's unused `variant` and `className` props are
+ *    dropped. Roles, state, and tab order use native accessibility; the original's unused `variant` and `className` props are
  *    dropped.
  */
 
+import { activationKeys } from "../interaction.js"
 import { computed, defineComponent, h, onBeforeUnmount, ref, watch, type PropType, type VNode } from "vue"
 import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 
-import { ease, radius } from "../tokens.js"
-import { useTheme } from "../theme.js"
+import { fonts, ease, radius } from "../tokens.js"
+import { useTheme, type Theme } from "../theme.js"
 import { Icon } from "../atoms/Icon.js"
 import { GlideMenuItem, GlideMenuRoot } from "../atoms/GlideMenu.js"
 import type { IconName } from "../icons.js"
@@ -130,7 +130,7 @@ interface RailRowProps {
   onClick?: () => void
 }
 
-const railRow = (props: RailRowProps, t: ReturnType<typeof useTheme>["tokens"]["value"]) =>
+const railRow = (props: RailRowProps, t: Theme["tokens"]["value"], theme: Theme) =>
   h(
     GlideMenuItem,
     {
@@ -162,11 +162,11 @@ const railRow = (props: RailRowProps, t: ReturnType<typeof useTheme>["tokens"]["
         <Icon name={props.icon} size={18} color={props.active ? t.ink : t.ink2} />
       </div>,
       <div
-        motion={{
+        motion={theme.motion({
           initial: false,
           animate: { opacity: props.collapsed ? 0 : 1 },
           transition: COPY_FADE,
-        }}
+        })}
         style={{
           marginLeft: 6,
           minWidth: 0,
@@ -185,11 +185,11 @@ const railRow = (props: RailRowProps, t: ReturnType<typeof useTheme>["tokens"]["
       props.count
         ? (
             <div
-              motion={{
+              motion={theme.motion({
                 initial: false,
                 animate: { opacity: props.collapsed ? 0 : 1 },
                 transition: COPY_FADE,
-              }}
+              })}
               style={{
                 marginRight: 8,
                 flexShrink: 0,
@@ -350,11 +350,11 @@ export const SidebarNav = defineComponent({
         },
         [
           <div
-            motion={{
+            motion={theme.motion({
               initial: { opacity: 0 },
               animate: { opacity: 1 },
               transition: { duration: 0.18, ease: ease.outStrong },
-            }}
+            })}
             style={{ padding: 6 }}
             onMouseDownOutside={() => {
               closeWorkspaceFromOutside()
@@ -494,17 +494,19 @@ export const SidebarNav = defineComponent({
           },
         },
         t,
+        theme,
       )
 
       return (
         <div
-          motion={{
+          motion={theme.motion({
             initial: false,
             animate: { width: isCollapsed ? 52 : 224 },
             transition: SIDEBAR_TRANSITION,
-          }}
+          })}
           testId="sidebar-root"
           style={{
+            fontFamily: fonts.sans,
             position: "relative",
             display: "flex",
             flexShrink: 0,
@@ -528,6 +530,10 @@ export const SidebarNav = defineComponent({
                   onClick={() => {
                     if (!isCollapsed) toggleWorkspace()
                   }}
+                  tabIndex={isCollapsed ? -1 : 0}
+                  onKeyDown={activationKeys(() => {
+                    if (!isCollapsed) toggleWorkspace()
+                  })}
                   style={{
                     display: "flex",
                     width: "100%",
@@ -542,7 +548,7 @@ export const SidebarNav = defineComponent({
                   }}
                 >
                   <div
-                    motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+                    motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
                     style={copyStyle({
                       display: "flex",
                       width: 20,
@@ -555,7 +561,7 @@ export const SidebarNav = defineComponent({
                     <Icon name="popsicle" size={18} color={t.ink} />
                   </div>
                   <div
-                    motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+                    motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
                     style={copyStyle({
                       marginLeft: 6,
                       minWidth: 0,
@@ -571,7 +577,7 @@ export const SidebarNav = defineComponent({
                     {WORKSPACE.name}
                   </div>
                   <div
-                    motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+                    motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
                     style={copyStyle({ marginLeft: 4, display: "flex", flexShrink: 0 })}
                   >
                     <Icon name="chevronDown" size={16} color={t.ink3} />
@@ -582,11 +588,13 @@ export const SidebarNav = defineComponent({
               </div>
 
               <div
-                motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+                motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
                 role="button"
                 aria-label="Collapse sidebar"
                 testId="sidebar-collapse"
-                onClick={collapse}
+                onClick={isCollapsed ? undefined : collapse}
+                tabIndex={isCollapsed ? -1 : 0}
+                onKeyDown={isCollapsed ? undefined : activationKeys(collapse)}
                 style={copyStyle({
                   position: "absolute",
                   right: 8,
@@ -605,13 +613,17 @@ export const SidebarNav = defineComponent({
               </div>
 
               <div
-                motion={{ initial: false, animate: { opacity: isCollapsed ? 1 : 0 }, transition: COPY_FADE }}
+                motion={theme.motion({ initial: false, animate: { opacity: isCollapsed ? 1 : 0 }, transition: COPY_FADE })}
                 role="button"
                 aria-label="Expand sidebar"
                 testId="sidebar-expand"
-                onClick={() => {
+                onClick={isCollapsed ? () => {
                   collapsed.value = false
-                }}
+                } : undefined}
+                tabIndex={isCollapsed ? 0 : -1}
+                onKeyDown={isCollapsed ? activationKeys(() => {
+                  collapsed.value = false
+                }) : undefined}
                 style={{
                   position: "absolute",
                   left: 8,
@@ -633,7 +645,7 @@ export const SidebarNav = defineComponent({
 
             {/* primary rail — New chat + nav items */}
             <div
-              motion={{ initial: false, animate: { width: rowWidth }, transition: ROW_SHRINK }}
+              motion={theme.motion({ initial: false, animate: { width: rowWidth }, transition: ROW_SHRINK })}
               style={{ marginLeft: 8, flexShrink: 0 }}
               onMouseEnter={() => {
                 navHover.value = true
@@ -657,6 +669,7 @@ export const SidebarNav = defineComponent({
                       onClick: () => selectNav(item.key),
                     },
                     t,
+                    theme,
                   ),
                 )}
               </GlideMenuRoot>
@@ -665,7 +678,7 @@ export const SidebarNav = defineComponent({
             {/* chat history — label + search + recents */}
             <div style={{ marginTop: 12, flexGrow: 1, minHeight: 0, overflowY: "scroll" }}>
               <div
-                motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+                motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
                 style={copyStyle({
                   position: "relative",
                   marginLeft: 8,
@@ -677,7 +690,7 @@ export const SidebarNav = defineComponent({
               >
                 {/* Chats label — fades aside while the field takes the row */}
                 <div
-                  motion={{ initial: false, animate: { opacity: isOpen ? 0 : 1 }, transition: SEARCH_TRANSITION }}
+                  motion={theme.motion({ initial: false, animate: { opacity: isOpen ? 0 : 1 }, transition: SEARCH_TRANSITION })}
                   style={{
                     position: "absolute",
                     left: 0,
@@ -700,13 +713,17 @@ export const SidebarNav = defineComponent({
 
                 {/* search reveal button */}
                 <div
-                  motion={{ initial: false, animate: { opacity: isOpen ? 0 : 1 }, transition: SEARCH_TRANSITION }}
+                  motion={theme.motion({ initial: false, animate: { opacity: isOpen ? 0 : 1 }, transition: SEARCH_TRANSITION })}
                   role="button"
                   aria-label="Search chats"
                   testId="sidebar-search-open"
                   onClick={() => {
                     searchOpen.value = true
                   }}
+                  tabIndex={0}
+                  onKeyDown={activationKeys(() => {
+                    searchOpen.value = true
+                  })}
                   style={{
                     position: "absolute",
                     right: 0,
@@ -728,14 +745,14 @@ export const SidebarNav = defineComponent({
                 {/* the field — grows right → left over the row */}
                 <div
                   testId="sidebar-search-field"
-                  motion={{
+                  motion={theme.motion({
                     initial: false,
                     animate: {
                       width: isOpen ? SEARCH_OPEN_WIDTH : SEARCH_CLOSED_WIDTH,
                       opacity: isOpen ? 1 : 0,
                     },
                     transition: SEARCH_TRANSITION,
-                  }}
+                  })}
                   style={{
                     position: "absolute",
                     right: 0,
@@ -789,6 +806,8 @@ export const SidebarNav = defineComponent({
                     aria-label="Close chat search"
                     testId="sidebar-search-close"
                     onClick={closeSearch}
+                    tabIndex={isOpen ? 0 : -1}
+                    onKeyDown={activationKeys(closeSearch)}
                     style={{
                       display: "flex",
                       width: 32,
@@ -808,7 +827,7 @@ export const SidebarNav = defineComponent({
               </div>
 
               <div
-                motion={{ initial: false, animate: { width: rowWidth }, transition: ROW_SHRINK }}
+                motion={theme.motion({ initial: false, animate: { width: rowWidth }, transition: ROW_SHRINK })}
                 style={{ marginLeft: 8 }}
                 onMouseEnter={() => {
                   recentsHover.value = true
@@ -844,7 +863,7 @@ export const SidebarNav = defineComponent({
                       },
                       () => [
                         <div
-                          motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+                          motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
                           style={copyStyle({
                             minWidth: 0,
                             flexGrow: 1,
@@ -863,7 +882,7 @@ export const SidebarNav = defineComponent({
                   )}
                   {query.value && visibleRecents.value.length === 0 ? (
                     <div
-                      motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+                      motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
                       style={copyStyle({
                         paddingLeft: 8,
                         paddingRight: 8,
@@ -882,7 +901,7 @@ export const SidebarNav = defineComponent({
 
             {/* footer call-to-action */}
             <div
-              motion={{ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE }}
+              motion={theme.motion({ initial: false, animate: { opacity: copyOpacity }, transition: COPY_FADE })}
               style={copyStyle({
                 marginLeft: 8,
                 marginTop: 12,
@@ -900,6 +919,11 @@ export const SidebarNav = defineComponent({
                   if (isCollapsed) return
                   ;(props.onFooterClick ?? props.onNewChat)?.()
                 }}
+                tabIndex={0}
+                onKeyDown={activationKeys(() => {
+                  if (isCollapsed) return
+                  ;(props.onFooterClick ?? props.onNewChat)?.()
+                })}
                 style={{
                   display: "flex",
                   height: 32,

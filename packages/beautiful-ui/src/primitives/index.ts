@@ -17,3 +17,6 @@ export { SelectionActions, type SelectionText, type SelectionAction, type Select
 export { InsightCards, type CompareSeries, type AnomalyData, type AllocationSegment, type InsightPage, type InsightProseSegment } from "./InsightCards.js"
 export { PromptBar, type PromptBarBrand, type PromptBarSource, type PromptBarCommand, type PromptBarModel } from "./PromptBar.js"
 export { RecordsTable, type RecordRow, type RecordStrength, INITIAL_ROWS } from "./RecordsTable.js"
+
+export { Flowchart, type StepNode, type FlowchartEdge, type FlowchartOffset } from "./Flowchart.js"
+export { AgentScreen } from "./AgentScreen.js"

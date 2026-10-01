@@ -1,87 +1,19 @@
-/** RECORDS TABLE — an AI spreadsheet grid. Columns are *properties*: click a
- *  header to open its configuration popover (type, tool, grounding, inputs,
- *  prompt, run), add a new AI property from the + header and watch its cells
- *  resolve row-by-row while it calculates, and hover/select rows through a
- *  spreadsheet gutter where row numbers give way to checkboxes.
- *
- *  Ported from beautiful-ui `components/primitives/RecordsTable.tsx`.
- *
- *  Platform degradations and deliberate differences from the web original
- *  (issue #110 asks for the simplified port):
- *
- *  - Column resize handles and contentEditable prompt editing are cut (the
- *    issue #110 simplification). The prompt renders as a static preview with
- *    the @-mention chip; column widths are fixed proportions of the measured
- *    shell width, scaled from the original's pixel defaults.
- *  - The `<table>`/`<colgroup>`/sticky-`thead`/sticky-`tfoot` becomes flex
- *    rows between a fixed header row and a fixed footer row (structural
- *    stickiness) inside one vertical scroller — GPUIV forbids nested scroll
- *    areas, so the original's horizontal scrolling and the sticky Company
- *    column are dropped; text truncation ellipsizes like FilterTable.
- *  - The AI column's scroll-into-view reveal (scrollLeft = scrollWidth)
- *    becomes a `motion` width tween 0 → its share: every AI cell (header,
- *    rows, footer) grows in lockstep while the other columns reflow
- *    instantly; removal tweens back to 0 and the closing reflow lands one
- *    frame later. Its config popover auto-opens ~340ms after the add, once
- *    the reveal has settled (the original opened it after the scroll).
- *  - Popovers are raw `<anchored deferred>` layers (side/fit per the repo's
- *    overlay rules, their own style carrying the surface fill) instead of
- *    `fixed` divs at measured header rects. The document-level `pointerdown`
- *    outside-close becomes `onMouseDownOutside` on each menu body with a
- *    one-tick dismiss guard so a press on the same trigger closes instead of
- *    reopening (the Select dismiss pattern). The original's scroll listener
- *    closes popovers on body scroll; that is dropped — there is no vertical
- *    scroll inside the simplified table, and the popovers anchor to the fixed
- *    header, so they can't drift.
- *  - The type/tool/inputs flyout submenus (`absolute left-full ml-5`) stay
- *    absolute children of their config row inside the popover. mouseDownOutside
- *    is hitbox-rect based, so the listener sits on a transparent wrapper that
- *    widens to cover the open submenu; while a submenu is open, presses in
- *    its empty strip neither dismiss the popover nor reach the table.
- *  - Every `pop-in` (opacity + scale) and `transition-colors` becomes an
- *    opacity-only `motion` fade or an instant `hover:` swap. The sort arrow's
- *    `rotate(180deg)` becomes an arrowDown ↔ arrowUp glyph swap, and the
- *    header-hover arrow reveal (a CSS descendant selector) is tracked with JS
- *    mouseEnter/leave per header.
- *  - The calculating pulse (`records-pulse`: opacity + scale keyframes, 1.1s
- *    infinite — motion has no repeat) is driven by one shared 550ms interval
- *    that retargets a `motion` opacity square wave 0.35 ↔ 1 across every
- *    visible CalcCell; the scale is dropped.
- *  - GPUIV dispatches mouse events through the whole hovered hitbox chain and
- *    the first filled descendant cuts the chain (`hover_hitbox_count`), so
- *    the row hover/selected tints paint on absolute `pointerEvents: "none"`
- *    overlays (the GlideMenu highlight pattern) instead of on the cells — a
- *    direct cell fill would un-hover the row mid-tint and oscillate. Filled
- *    decorative leaves (checkbox box, tag chips, company mark, strength and
- *    pulse dots, switch knob) also carry `pointerEvents: "none"`; they keep
- *    their own hover chrome but never block the row. There is no
- *    stopPropagation, so the select-all checkbox and the sort arrows arm a
- *    one-tick suppress flag that the header click consumes (the original
- *    called stopPropagation in those handlers).
- *  - Tag overflow: the original measures hidden tag copies with a
- *    ResizeObserver; here tag widths are estimated (13px Inter ≈ 6.8px/char +
- *    16px chrome, capped at the original's 115px) and the same greedy fill —
- *    reserving the "+N" chip — runs against the known column width. Estimates
- *    run conservative, so a row can show one tag fewer than the web original.
- *  - MiniSwitch knob `translateX(12px)` becomes a `left` tween; the selected
- *    column's `inset 0 2px accent` shadow becomes an absolute 2px accent bar
- *    (no inset shadows); cell hairlines `color-mix(line 78%)` become
- *    `withAlpha(line, 0.78)`.
- *  - The checkbox is a plain div; the source's hover rule outranks its
- *    checked fill (hovering a checked box blanks the check), which reads as a
- *    bug — here hover restyling applies only to unchecked boxes. Link and
- *    company-name underlines are dropped (no textDecoration); the arrow glyph
- *    + accentInk colour carry the affordance, and `title` tooltips are
- *    dropped.
- *  - `tabular-nums`, `aria-*`/table semantics, and the unused `variant` prop
- *    are dropped (no DOM accessibility tree); the "Go calculate" stagger
- *    (110ms per row) and its disabled-while-running state are kept.
+/** AI spreadsheet grid, ported from beautiful-ui (MIT).
+ * Headers configure properties; prompts are editable native textareas with
+ * styled @mentions. Columns resize by drag or arrow keys. One native scroll
+ * region handles both axes; measured offsets keep the header, footer, and
+ * Company column fixed. Rows outside the viewport are unmounted.
+ * Popovers use deferred anchored surfaces and close on horizontal scroll.
+ * Native limitations: no CSS transforms, inset shadows, or text underline;
+ * tag overflow uses estimated widths. See ../README.md for parity details.
  */
 
+import { activationKeys } from "../interaction.js"
+import { motion } from "../motion.js"
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, type PropType, type VNode } from "vue"
-import { motion, useElementBounds, useGpuix, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { useElementBounds, useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 
-import { ease, radius, type Tokens } from "../tokens.js"
+import { fonts, ease, radius, type Tokens  } from "../tokens.js"
 import { useTheme } from "../theme.js"
 import { mix, withAlpha } from "../colors.js"
 import { Icon } from "../atoms/Icon.js"
@@ -321,7 +253,10 @@ const Checkbox = defineComponent({
           aria-checked={props.mixed ? "mixed" : props.checked}
           testId={props.testId}
           onClick={() => props.onToggle?.()}
+          tabIndex={0}
+          onKeyDown={activationKeys(() => props.onToggle?.())}
           style={{
+            fontFamily: fonts.sans,
             display: "flex",
             width: 24,
             height: 24,
@@ -387,7 +322,10 @@ const MiniSwitch = defineComponent({
           aria-checked={props.on}
           aria-label={props.label}
           onClick={() => props.onToggle?.()}
+          tabIndex={0}
+          onKeyDown={activationKeys(() => props.onToggle?.())}
           style={{
+            fontFamily: fonts.sans,
             position: "relative",
             width: 30,
             height: 18,
@@ -514,6 +452,10 @@ export const RecordsTable = defineComponent({
     rows: { type: Array as PropType<RecordRow[]>, default: () => INITIAL_ROWS },
     /** Stretch to the parent's height instead of capping the scroll area. */
     fill: { type: Boolean, default: false },
+    /** App-owned link navigation; native URL opening is the default. */
+    onWebsiteClick: { type: Function as PropType<(row: RecordRow) => void>, default: undefined },
+    onPromptChange: { type: Function as PropType<(column: string, prompt: string) => void>, default: undefined },
+    onColumnResize: { type: Function as PropType<(column: string, width: number) => void>, default: undefined },
   },
   setup(props) {
     const theme = useTheme()
@@ -522,6 +464,17 @@ export const RecordsTable = defineComponent({
     const selected = ref(new Set<string>())
     const sort = ref<{ key: SortKey; dir: 1 | -1 }>({ key: "name", dir: 1 })
     const columnWidths = ref<Record<ColumnKey, number>>({ ...DEFAULT_COLUMN_WIDTHS })
+    const promptValues = ref<Record<string, string>>({})
+    let resizeDrag: { column: ColumnKey; x: number; width: number } | null = null
+    const resizeColumn = (column: ColumnKey, width: number) => {
+      const next = Math.max(column === "company" ? 180 : 120, Math.round(width))
+      columnWidths.value = { ...columnWidths.value, [column]: next }
+      props.onColumnResize?.(column, next)
+    }
+    const openWebsite = (row: RecordRow) => {
+      if (props.onWebsiteClick) props.onWebsiteClick(row)
+      else if (row.website) renderer?.openUrl?.(/^https?:\/\//i.test(row.website) ? row.website : `https://${row.website}`)
+    }
 
     /* property popover, anchored to the clicked header */
     const prop = ref<string | null>(null)
@@ -564,28 +517,33 @@ export const RecordsTable = defineComponent({
     const rowsScrollRef = ref<HostNode | null>(null)
     const rowsScrollBounds = useElementBounds(rowsScrollRef, { intervalMs: 250 })
     const rowsScrollTop = ref(0)
+    const rowsScrollLeft = ref(0)
     let rowsScrollTimer: ReturnType<typeof setInterval> | undefined
 
     let calcTimer: ReturnType<typeof setTimeout> | undefined
     let pulseTimer: ReturnType<typeof setInterval> | undefined
     let revealTimer: ReturnType<typeof setTimeout> | undefined
     let pendingTimer: ReturnType<typeof setTimeout> | undefined
+    const refreshScroll = () => {
+      const id = rowsScrollRef.value?.id
+      if (id == null) return
+      const offset = renderer?.getScrollOffset?.(id)
+      if (!offset || offset.length < 2) return
+      const next = Math.max(0, -offset[1])
+      const left = Math.max(0, -offset[0])
+      if (left !== rowsScrollLeft.value) {
+        closeMenus()
+        rowsScrollLeft.value = left
+      }
+      if (Math.floor(next / ROW_HEIGHT) !== Math.floor(rowsScrollTop.value / ROW_HEIGHT)) {
+        closeMenus()
+        rowsScrollTop.value = next
+      }
+    }
     onMounted(() => {
-      rowsScrollTimer = setInterval(() => {
-        const id = rowsScrollRef.value?.id
-        if (id == null) return
-        if (visibleRows.value.length * ROW_HEIGHT <= ROW_VIEWPORT_H) return
-        try {
-          const offset = renderer?.getScrollOffset?.(id)
-          if (!offset || offset.length < 2) return
-          const next = Math.max(0, -offset[1])
-          if (Math.floor(next / ROW_HEIGHT) !== Math.floor(rowsScrollTop.value / ROW_HEIGHT)) {
-            rowsScrollTop.value = next
-          }
-        } catch {
-          /* renderer not ready */
-        }
-      }, 120)
+      // Wheel events update promptly; polling also catches command-driven
+      // scrolls and GPUI's offset clamps after resize/data changes.
+      rowsScrollTimer = setInterval(refreshScroll, 120)
     })
     onBeforeUnmount(() => {
       if (calcTimer !== undefined) clearTimeout(calcTimer)
@@ -729,7 +687,7 @@ export const RecordsTable = defineComponent({
       calc.value = { col, resolved: 0 }
       pulseOn.value = false
       pulseTimer = setInterval(() => {
-        pulseOn.value = !pulseOn.value
+        pulseOn.value = theme.reducedMotion.value ? false : !pulseOn.value
       }, 550)
       stepCalc()
     }
@@ -749,7 +707,13 @@ export const RecordsTable = defineComponent({
       if (pendingTimer !== undefined) clearTimeout(pendingTimer)
       pendingTimer = setTimeout(() => {
         pendingTimer = undefined
-        if (aiState.value === "on") openProp(AI_LABEL)
+        if (aiState.value === "on") {
+          const total = Object.values(columnWidths.value).reduce((sum, width) => sum + width, ACTION_WIDTH)
+          const left = Math.max(0, total - (shellWidth.value ?? total) + 2)
+          if (rowsScrollRef.value?.id != null) renderer?.scrollTo?.(rowsScrollRef.value.id, -left, -rowsScrollTop.value)
+          rowsScrollLeft.value = left
+          openProp(AI_LABEL)
+        }
       }, 340)
     }
     const removeAiColumn = () => {
@@ -777,8 +741,8 @@ export const RecordsTable = defineComponent({
       const bases = columnWidths.value
       const baseTotal =
         bases.company + bases.categories + bases.last + bases.strength + bases.links + (aiShown ? bases.ai : 0) + ACTION_WIDTH
-      const contentWidth = Math.max((shellWidth.value ?? baseTotal) - (props.fill ? 0 : 2), 1)
-      const colWidth = (base: number) => (base / baseTotal) * contentWidth
+      const contentWidth = Math.max(baseTotal, (shellWidth.value ?? baseTotal) - (props.fill ? 0 : 2))
+      const colWidth = (base: number) => base
       const wCompany = colWidth(bases.company)
       const wCategories = colWidth(bases.categories)
       const wLast = colWidth(bases.last)
@@ -786,6 +750,33 @@ export const RecordsTable = defineComponent({
       const wLinks = colWidth(bases.links)
       const wAction = colWidth(ACTION_WIDTH)
       const aiW = colWidth(bases.ai)
+      const scrollLeft = Math.min(rowsScrollLeft.value, Math.max(0, contentWidth - ((shellWidth.value ?? contentWidth + 2) - 2)))
+      const resizeHandle = (column: ColumnKey) => (
+        <div
+          role="separator"
+          aria-label={`Resize ${column} column`}
+          aria-orientation="vertical"
+          aria-valuenow={bases[column]}
+          aria-valuemin={column === "company" ? 180 : 120}
+          tabIndex={0}
+          testId={`records-resize-${column}`}
+          onMouseDown={(event: EventPayload) => {
+            if ((event.button ?? 0) !== 0) return
+            resizeDrag = { column, x: event.x ?? 0, width: columnWidths.value[column] }
+          }}
+          onMouseMove={(event: EventPayload) => {
+            if (resizeDrag?.column === column) resizeColumn(column, resizeDrag.width + (event.x ?? resizeDrag.x) - resizeDrag.x)
+          }}
+          onMouseUp={() => { resizeDrag = null }}
+          onClick={armSuppress}
+          onKeyDown={(event: EventPayload) => {
+            if (event.key === "left" || event.key === "right") {
+              resizeColumn(column, columnWidths.value[column] + (event.key === "right" ? 1 : -1) * (event.modifiers?.shift ? 10 : 1))
+            }
+          }}
+          style={{ position: "absolute", top: 0, right: 0, width: 8, height: ROW_HEIGHT, cursor: "col-resize", hover: { backgroundColor: t.accentTint } }}
+        />
+      )
 
       const cellBorder = withAlpha(t.line, 0.78)
 
@@ -970,6 +961,7 @@ export const RecordsTable = defineComponent({
         const col = prop.value
         if (col === null) return <div />
         const meta: ColumnMeta = { ...COLUMN_META[col], ...columnOverrides.value[col] }
+        const promptText = promptValues.value[col] ?? (meta.prompt ? `${meta.prompt.before}${meta.prompt.chip ? `@${meta.prompt.chip}` : ""}${meta.prompt.after ?? ""}` : "")
         const inputsSel = inputSelections.value[col] ?? (meta.inputs ? [meta.inputs] : [])
         const pinned = pinnedColumns.value.has(col)
         const typeIcon = TYPE_ICONS[meta.type] ?? "typeText"
@@ -987,6 +979,12 @@ export const RecordsTable = defineComponent({
               configMenu.value = configMenu.value === menu ? null : menu
               groundingHelpOpen.value = false
             }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={activationKeys(() => {
+              configMenu.value = configMenu.value === menu ? null : menu
+              groundingHelpOpen.value = false
+            })}
             style={{
               display: "flex",
               alignItems: "center",
@@ -1065,6 +1063,11 @@ export const RecordsTable = defineComponent({
               onClick={() => {
                 groundingHelpOpen.value = !groundingHelpOpen.value
               }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={activationKeys(() => {
+                groundingHelpOpen.value = !groundingHelpOpen.value
+              })}
               style={{
                 display: "flex",
                 width: 24,
@@ -1130,11 +1133,11 @@ export const RecordsTable = defineComponent({
              * hitbox-rect based, so its rect must cover the flyout too. */
             <div
               key="prop"
-              motion={{
+              motion={theme.motion({
                 initial: { opacity: 0 },
                 animate: { opacity: 1 },
                 transition: MENU_FADE,
-              }}
+              })}
               onMouseDownOutside={() => {
                 dismissFromOutside()
               }}
@@ -1211,59 +1214,37 @@ export const RecordsTable = defineComponent({
                     : null,
                 )}
 
-                {/* prompt — static preview with the @-mention chip */}
-                <div
-                  style={{
-                    marginTop: 8,
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 4,
-                    alignContent: "flex-start",
-                    alignItems: "center",
-                    minHeight: 88,
-                    borderRadius: 10,
-                    backgroundColor: t.inset,
-                    padding: 12,
-                    ...shadows.hairline,
+                <textarea
+                  testId="records-prompt"
+                  aria-label={`${col} calculation prompt`}
+                  value={promptText}
+                  minRows={3}
+                  maxRows={6}
+                  placeholder="Set a prompt (use @ to mention an input)"
+                  spans={inputsSel.flatMap(input => {
+                    const needle = `@${input}`
+                    const spans = []
+                    let start = promptText.indexOf(needle)
+                    while (start >= 0) {
+                      spans.push({ start, end: start + needle.length, color: t.accentInk, background: t.accentTint })
+                      start = promptText.indexOf(needle, start + needle.length)
+                    }
+                    return spans
+                  })}
+                  onChange={(event: EventPayload) => {
+                    const value = event.value ?? ""
+                    promptValues.value = { ...promptValues.value, [col]: value }
+                    props.onPromptChange?.(col, value)
                   }}
-                >
-                  {meta.prompt ? (
-                    [
-                      <div key="before" style={{ fontSize: 13, lineHeight: 18, color: t.ink }}>
-                        {meta.prompt.before}
-                      </div>,
-                      meta.prompt.chip ? (
-                        <div
-                          key="chip"
-                          style={{
-                            borderRadius: 5,
-                            backgroundColor: t.accentTint,
-                            paddingLeft: 6,
-                            paddingRight: 6,
-                            paddingTop: 2,
-                            paddingBottom: 2,
-                            fontSize: 12,
-                            fontWeight: 500,
-                            color: t.accentInk,
-                          }}
-                        >
-                          {meta.prompt.chip}
-                        </div>
-                      ) : null,
-                      meta.prompt.after ? (
-                        <div key="after" style={{ fontSize: 13, lineHeight: 18, color: t.ink }}>
-                          {meta.prompt.after}
-                        </div>
-                      ) : null,
-                    ]
-                  ) : (
-                    <div style={{ fontSize: 13, color: t.ink3 }}>Set a prompt (press @ to mention an input)</div>
-                  )}
-                </div>
+                  style={{ marginTop: 8, width: "100%", minHeight: 88, borderRadius: 10, backgroundColor: t.inset, padding: 12, fontSize: 13, lineHeight: 18, color: t.ink, ...shadows.hairline }}
+                />
 
                 <div
                   testId="records-go-calculate"
                   onClick={running ? undefined : () => startCalc(col)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={activationKeys(running ? undefined : () => startCalc(col))}
                   style={{
                     display: "flex",
                     marginTop: 10,
@@ -1418,11 +1399,11 @@ export const RecordsTable = defineComponent({
           [
             <div
               key="add"
-              motion={{
+              motion={theme.motion({
                 initial: { opacity: 0 },
                 animate: { opacity: 1 },
                 transition: MENU_FADE,
-              }}
+              })}
               onMouseDownOutside={() => {
                 dismissFromOutside()
               }}
@@ -1489,11 +1470,11 @@ export const RecordsTable = defineComponent({
           [
             <div
               key="table-menu"
-              motion={{
+              motion={theme.motion({
                 initial: { opacity: 0 },
                 animate: { opacity: 1 },
                 transition: MENU_FADE,
-              }}
+              })}
               onMouseDownOutside={() => {
                 dismissFromOutside()
               }}
@@ -1597,8 +1578,13 @@ export const RecordsTable = defineComponent({
           onClick={() => {
             openProp("Company")
           }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={activationKeys(() => {
+            openProp("Company")
+          })}
           style={{
-            position: "relative",
+            position: "absolute", left: scrollLeft, top: 0, backgroundColor: t.surface,
             display: "flex",
             alignItems: "center",
             width: wCompany,
@@ -1619,6 +1605,7 @@ export const RecordsTable = defineComponent({
             Company
           </div>
           {companySelected ? propPopover() : null}
+          {resizeHandle("company")}
         </div>
       )
 
@@ -1645,6 +1632,11 @@ export const RecordsTable = defineComponent({
             onClick={() => {
               openProp(opts.col)
             }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={activationKeys(() => {
+              openProp(opts.col)
+            })}
             style={{
               position: "relative",
               display: "flex",
@@ -1684,6 +1676,11 @@ export const RecordsTable = defineComponent({
                 onClick={() => {
                   toggleSort(opts.sortKey as SortKey)
                 }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={activationKeys(() => {
+                  toggleSort(opts.sortKey as SortKey)
+                })}
                 style={{
                   display: "flex",
                   flexShrink: 0,
@@ -1704,6 +1701,7 @@ export const RecordsTable = defineComponent({
               </div>
             ) : null}
             {sel ? propPopover() : null}
+            {resizeHandle(opts.key as ColumnKey)}
           </div>
         )
       }
@@ -1712,11 +1710,11 @@ export const RecordsTable = defineComponent({
         <div
           key="ai"
           testId="records-header-ai"
-          motion={{
+          motion={theme.motion({
             initial: { width: 0 },
             animate: { width: aiState.value === "on" ? aiW : 0 },
             transition: AI_REVEAL,
-          }}
+          })}
           onMouseEnter={() => {
             headerHover.value = "ai"
           }}
@@ -1726,6 +1724,11 @@ export const RecordsTable = defineComponent({
           onClick={() => {
             openProp(AI_LABEL)
           }}
+          role="button"
+          tabIndex={0}
+          onKeyDown={activationKeys(() => {
+            openProp(AI_LABEL)
+          })}
           style={{
             position: "relative",
             display: "flex",
@@ -1760,6 +1763,7 @@ export const RecordsTable = defineComponent({
             {AI_LABEL}
           </div>
           {prop.value === AI_LABEL ? propPopover() : null}
+          {resizeHandle("ai")}
         </div>
       ) : null
 
@@ -1782,6 +1786,9 @@ export const RecordsTable = defineComponent({
               testId="records-add-property"
               aria-label="New property"
               onClick={toggleAddMenu}
+              role="button"
+              tabIndex={0}
+              onKeyDown={activationKeys(toggleAddMenu)}
               style={{
                 display: "flex",
                 width: 28,
@@ -1802,6 +1809,9 @@ export const RecordsTable = defineComponent({
               testId="records-table-menu"
               aria-label="Table options"
               onClick={toggleTableMenu}
+              role="button"
+              tabIndex={0}
+              onKeyDown={activationKeys(toggleTableMenu)}
               style={{
                 display: "flex",
                 width: 28,
@@ -1881,8 +1891,11 @@ export const RecordsTable = defineComponent({
       let firstRow = 0
       let lastRow = totalRows
       if (totalRows * ROW_HEIGHT > viewportH + ROW_HEIGHT) {
-        firstRow = Math.max(0, Math.floor(rowsScrollTop.value / ROW_HEIGHT) - ROW_OVERSCAN)
-        lastRow = Math.min(totalRows, Math.ceil((rowsScrollTop.value + viewportH) / ROW_HEIGHT) + ROW_OVERSCAN)
+        // A shrinking dataset or viewport can leave the last polled offset
+        // beyond the new scroll extent until GPUI clamps it on the next paint.
+        const scrollTop = Math.min(rowsScrollTop.value, Math.max(0, totalRows * ROW_HEIGHT - viewportH))
+        firstRow = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - ROW_OVERSCAN)
+        lastRow = Math.min(totalRows, Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + ROW_OVERSCAN)
       }
       const rowNodes = visibleRows.value.slice(firstRow, lastRow).map((row, i) => {
         const index = firstRow + i
@@ -1912,74 +1925,10 @@ export const RecordsTable = defineComponent({
             onMouseLeave={() => {
               if (hoveredRow.value === row.id) hoveredRow.value = null
             }}
-            style={{ position: "relative", display: "flex", height: ROW_HEIGHT, flexShrink: 0, borderBottomWidth: 1, borderColor: cellBorder }}
+            style={{ position: "relative", width: contentWidth, display: "flex", height: ROW_HEIGHT, flexShrink: 0, borderBottomWidth: 1, borderColor: cellBorder }}
           >
             {tintOverlay(rowTint)}
-            <div
-              style={{
-                ...cell(wCompany),
-                position: "relative",
-                paddingLeft: 6,
-                gap: 4,
-                overflow: "visible",
-              }}
-            >
-              {tintOverlay(colselTint("Company"))}
-              {hovered || rowSel ? (
-                <Checkbox testId={`records-check-${row.id}`} checked={rowSel} onToggle={() => toggleRow(row.id)} />
-              ) : (
-                <div
-                  style={{
-                    display: "flex",
-                    width: 24,
-                    height: 24,
-                    flexShrink: 0,
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11.5,
-                    fontWeight: 500,
-                    color: t.ink3,
-                  }}
-                >
-                  {index + 1}
-                </div>
-              )}
-              <div
-                style={{
-                  display: "flex",
-                  width: 20,
-                  height: 20,
-                  flexShrink: 0,
-                  alignItems: "center",
-                  justifyContent: "center",
-                  borderRadius: 6,
-                  backgroundColor: t.field,
-                  fontSize: 10,
-                  fontWeight: 500,
-                  color: t.ink2,
-                  pointerEvents: "none",
-                }}
-              >
-                {row.name.slice(0, 1).toUpperCase()}
-              </div>
-              <div
-                testId={`records-name-${row.id}`}
-                style={{
-                  minWidth: 0,
-                  flexGrow: 1,
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  textOverflow: "ellipsis",
-                  fontSize: 13,
-                  fontWeight: 500,
-                  lineHeight: CELL_LINE,
-                  color: t.ink,
-                  ...(row.website ? { cursor: "pointer", hover: { color: t.accentInk } } : {}),
-                }}
-              >
-                {row.name}
-              </div>
-            </div>
+            <div style={{ width: wCompany, height: ROW_HEIGHT, flexShrink: 0 }} />
             <div style={{ ...cell(wCategories), position: "relative" }}>
               {tintOverlay(colselTint("Categories"))}
               {isCalc("Categories", index) ? (
@@ -2048,6 +1997,11 @@ export const RecordsTable = defineComponent({
                 calcCell(t, pulseOn.value)
               ) : row.website ? (
                 <div
+                  role="link"
+                  tabIndex={0}
+                  testId={`records-website-${row.id}`}
+                  onClick={() => openWebsite(row)}
+                  onKeyDown={activationKeys(() => openWebsite(row))}
                   style={{
                     display: "flex",
                     alignItems: "center",
@@ -2102,6 +2056,80 @@ export const RecordsTable = defineComponent({
               </motion.div>
             ) : null}
             <div style={cell(wAction, true)} />
+            <div
+              style={{
+                ...cell(wCompany),
+                position: "absolute",
+                left: scrollLeft,
+                top: 0,
+                backgroundColor: t.surface,
+                pointerEvents: "none",
+                paddingLeft: 6,
+                gap: 4,
+                overflow: "visible",
+              }}
+            >
+              {tintOverlay(rowTint)}
+              {tintOverlay(colselTint("Company"))}
+              {hovered || rowSel ? (
+                <Checkbox testId={`records-check-${row.id}`} checked={rowSel} onToggle={() => toggleRow(row.id)} />
+              ) : (
+                <div
+                  style={{
+                    display: "flex",
+                    width: 24,
+                    height: 24,
+                    flexShrink: 0,
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 11.5,
+                    fontWeight: 500,
+                    color: t.ink3,
+                  }}
+                >
+                  {index + 1}
+                </div>
+              )}
+              <div
+                style={{
+                  display: "flex",
+                  width: 20,
+                  height: 20,
+                  flexShrink: 0,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: 6,
+                  backgroundColor: t.field,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: t.ink2,
+                  pointerEvents: "none",
+                }}
+              >
+                {row.name.slice(0, 1).toUpperCase()}
+              </div>
+              <div
+                testId={`records-name-${row.id}`}
+                role={row.website ? "link" : undefined}
+                tabIndex={row.website ? 0 : -1}
+                onClick={row.website ? () => openWebsite(row) : undefined}
+                onKeyDown={activationKeys(row.website ? () => openWebsite(row) : undefined)}
+                style={{
+                  minWidth: 0,
+                  flexGrow: 1,
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  textOverflow: "ellipsis",
+                  fontSize: 13,
+                  fontWeight: 500,
+                  lineHeight: CELL_LINE,
+                  color: t.ink,
+                  ...(row.website ? { cursor: "pointer", hover: { color: t.accentInk } } : {}),
+                }}
+              >
+                {row.name}
+              </div>
+            </div>
           </div>
         )
       })
@@ -2109,13 +2137,8 @@ export const RecordsTable = defineComponent({
       /* ── footer ───────────────────────────────────────────── */
 
       const footerRow = (
-        <div key="footer" style={{ display: "flex", height: ROW_HEIGHT, flexShrink: 0, backgroundColor: t.inset }}>
-          <div style={{ ...cell(wCompany), paddingLeft: 6, backgroundColor: t.inset }}>
-            <div style={{ display: "flex", alignItems: "baseline" }}>
-              <div style={{ marginRight: 3, fontSize: 14, fontWeight: 500, color: t.ink }}>{props.rows.length}</div>
-              <div style={{ fontSize: 14, fontWeight: 500, color: t.ink2 }}>count</div>
-            </div>
-          </div>
+        <div key="footer" style={{ position: "relative", width: contentWidth, display: "flex", height: ROW_HEIGHT, flexShrink: 0, backgroundColor: t.inset }}>
+          <div style={{ width: wCompany, height: ROW_HEIGHT, flexShrink: 0 }} />
           <div style={{ ...cell(wCategories), backgroundColor: t.inset }}>
             <div
               testId="records-add-calculation"
@@ -2143,11 +2166,11 @@ export const RecordsTable = defineComponent({
           <div style={{ ...cell(wStrength), backgroundColor: t.inset }}>
             <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
               <div style={{ width: 8, height: 8, flexShrink: 0, borderRadius: 4, backgroundColor: t.orange }} />
-              <div style={{ fontSize: 14, fontWeight: 500, color: t.ink2 }}>{avgPercent}% average</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: t.ink2 }}>{`${avgPercent}% average`}</div>
             </div>
           </div>
           <div style={{ ...cell(wLinks), backgroundColor: t.inset }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: t.ink3 }}>{linksCount} links</div>
+            <div style={{ fontSize: 14, fontWeight: 500, color: t.ink3 }}>{`${linksCount} links`}</div>
           </div>
           {aiShown ? (
             <motion.div
@@ -2174,6 +2197,12 @@ export const RecordsTable = defineComponent({
             </motion.div>
           ) : null}
           <div style={{ ...cell(wAction, true), backgroundColor: t.inset }} />
+          <div style={{ ...cell(wCompany), position: "absolute", left: scrollLeft, top: 0, pointerEvents: "none", paddingLeft: 6, backgroundColor: t.inset }}>
+            <div style={{ display: "flex", alignItems: "baseline" }}>
+              <div style={{ marginRight: 3, fontSize: 14, fontWeight: 500, color: t.ink }}>{props.rows.length}</div>
+              <div style={{ fontSize: 14, fontWeight: 500, color: t.ink2 }}>count</div>
+            </div>
+          </div>
         </div>
       )
 
@@ -2182,6 +2211,7 @@ export const RecordsTable = defineComponent({
           testId="records-root"
           ref={shellRef}
           style={{
+            fontFamily: fonts.sans,
             width: "100%",
             minWidth: 0,
             overflow: "hidden",
@@ -2196,53 +2226,63 @@ export const RecordsTable = defineComponent({
                 }),
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              height: ROW_HEIGHT,
-              flexShrink: 0,
-              borderBottomWidth: 1,
-              borderColor: cellBorder,
-              backgroundColor: t.surface,
-            }}
-          >
-            {companyHeader}
-            {headerCell({ key: "categories", col: "Categories", label: "Categories", icon: "typeSelectMulti", width: wCategories })}
-            {headerCell({
-              key: "last",
-              col: "Last interaction",
-              label: "Last interaction",
-              icon: "typeDate",
-              sortKey: "last",
-              width: wLast,
-            })}
-            {headerCell({
-              key: "strength",
-              col: "Connection strength",
-              label: "Connection strength",
-              icon: "typeSelectSingle",
-              sortKey: "strength",
-              width: wStrength,
-            })}
-            {headerCell({ key: "links", col: "Links", label: "Links", icon: "typeUrl", width: wLinks })}
-            {aiHeader}
-            {actionHeader}
+          <div style={{ overflow: "hidden", height: ROW_HEIGHT, flexShrink: 0 }}>
+            <div
+              style={{
+                position: "relative", left: -scrollLeft, width: contentWidth, display: "flex",
+                height: ROW_HEIGHT,
+                flexShrink: 0,
+                borderBottomWidth: 1,
+                borderColor: cellBorder,
+                backgroundColor: t.surface,
+              }}
+            >
+              <div style={{ width: wCompany, height: ROW_HEIGHT, flexShrink: 0 }} />
+              {headerCell({ key: "categories", col: "Categories", label: "Categories", icon: "typeSelectMulti", width: wCategories })}
+              {headerCell({
+                key: "last",
+                col: "Last interaction",
+                label: "Last interaction",
+                icon: "typeDate",
+                sortKey: "last",
+                width: wLast,
+              })}
+              {headerCell({
+                key: "strength",
+                col: "Connection strength",
+                label: "Connection strength",
+                icon: "typeSelectSingle",
+                sortKey: "strength",
+                width: wStrength,
+              })}
+              {headerCell({ key: "links", col: "Links", label: "Links", icon: "typeUrl", width: wLinks })}
+              {aiHeader}
+              {actionHeader}
+              {companyHeader}
+            </div>
           </div>
 
           <div
             ref={rowsScrollRef}
-            aria-label="Companies table. Scroll vertically to view all records."
+            testId="records-scroll"
+            onScroll={refreshScroll}
+            role="grid"
+            aria-label="Companies table. Scroll to view all records and columns."
             style={{
-              overflowY: "scroll",
+              overflow: "scroll",
               ...(props.fill ? { flexGrow: 1, minHeight: 0 } : { maxHeight: ROW_VIEWPORT_H }),
             }}
           >
-            {firstRow > 0 ? <div style={{ width: "100%", height: firstRow * ROW_HEIGHT, flexShrink: 0 }} /> : null}
-            {rowNodes}
-            {lastRow < totalRows ? <div style={{ width: "100%", height: (totalRows - lastRow) * ROW_HEIGHT, flexShrink: 0 }} /> : null}
+            <div style={{ width: contentWidth }}>
+              {firstRow > 0 ? <div style={{ width: "100%", height: firstRow * ROW_HEIGHT, flexShrink: 0 }} /> : null}
+              {rowNodes}
+              {lastRow < totalRows ? <div style={{ width: "100%", height: (totalRows - lastRow) * ROW_HEIGHT, flexShrink: 0 }} /> : null}
+            </div>
           </div>
 
-          {footerRow}
+          <div style={{ overflow: "hidden", height: ROW_HEIGHT, flexShrink: 0 }}>
+            <div style={{ position: "relative", left: -scrollLeft, width: contentWidth }}>{footerRow}</div>
+          </div>
         </div>
       )
     }
