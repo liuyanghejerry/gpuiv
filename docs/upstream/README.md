@@ -144,7 +144,7 @@ upstream commits or change the pinned Zed revision:
 
 | Issue | Local implementation | Relationship to upstream |
 |---|---|---|
-| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | Selectable `AnsiText`, streaming `AnsiLog`, and `parseAnsi` / `createAnsiParser` | Vue components over native text runs and the retained `VirtualList` wrapper; short-list append mounting is fixed in the wrapper |
+| [#50](https://github.com/liuyanghejerry/gpuiv/issues/50) desktop chat gaps | Selectable `AnsiText`, streaming `AnsiLog`, and `parseAnsi` / `createAnsiParser` | [PR #152](https://github.com/liuyanghejerry/gpuiv/pull/152) — Vue components over native text runs and the retained `VirtualList` wrapper; short-list append mounting is fixed in the wrapper |
 
 ## Sync log
 
