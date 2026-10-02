@@ -2298,6 +2298,18 @@ canvas size — a 64×64 brush dab on a 2880×1920 canvas moves ~0.4 MB instead
 of the full ~22 MB, and a flush with nothing pending uploads nothing and
 skips the repaint.
 
+The 2D core tracks dirty bounds separately in each tile, so simultaneous
+strokes far apart do not upload the clean space between them. Changes on a
+tile edge also refresh the neighboring tiles' 1px sampling borders. The
+rasterizer clears only the previous operation's coverage region between
+draws; coverage precision and full-size pixel buffers stay the same.
+
+Run `bun examples/bench-canvas-paint.ts --output tmp/canvas-paint.json`
+against a release native build for large layered painting measurements.
+It covers DPR 1/2, one/three layers and continuous/scattered strokes;
+[`canvas-atlas-partial-write.md`](docs/upstream/canvas-atlas-partial-write.md)
+records the measurements and remaining memory work.
+
 The Vue wrapper is `GpuixCanvas`. A template ref exposes `uploadPixels`,
 `readPixels`, and the host `id`:
 

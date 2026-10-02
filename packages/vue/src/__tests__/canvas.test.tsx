@@ -147,4 +147,37 @@ describeNative("canvas pixel bridge (vue)", () => {
     expect(bytes() - afterStroke).toBe(4 * tile)
     app.unmount()
   })
+
+  it("uploads distant strokes once per changed tile in a single Vue flush", async () => {
+    const canvas = ref<GpuixCanvasInstance | null>(null)
+    const App = defineComponent({
+      setup: () => () => <GpuixCanvas ref={canvas} width={1024} height={1024} style={{ width: 256, height: 256 }} />,
+    })
+    const app = createTestApp(App)
+    try {
+      await app.settle()
+      const ctx = canvas.value!.getContext("2d")!
+      ctx.fillStyle = "#ffffff"
+      ctx.fillRect(0, 0, 1024, 1024)
+      await app.settle()
+      const before = app.renderer.canvasUploadedBytes()
+      ctx.fillStyle = "#ff0000"
+      ctx.fillRect(16, 16, 32, 32)
+      ctx.fillRect(24, 24, 32, 32)
+      ctx.fillStyle = "#0000ff"
+      ctx.fillRect(960, 960, 32, 32)
+      await app.settle()
+      expect(app.renderer.canvasUploadedBytes() - before).toBe(2 * 258 * 258 * 4)
+      const pixels = app.renderer.readCanvasPixels(canvas.value!.id!)!
+      const pixel = (x: number, y: number) => Array.from(pixels.subarray((y * 1024 + x) * 4, (y * 1024 + x) * 4 + 4))
+      expect(pixel(32, 32)).toEqual([255, 0, 0, 255])
+      expect(pixel(976, 976)).toEqual([0, 0, 255, 255])
+      expect(pixel(512, 512)).toEqual([255, 255, 255, 255])
+      const after = app.renderer.canvasUploadedBytes()
+      await app.settle()
+      expect(app.renderer.canvasUploadedBytes()).toBe(after)
+    } finally {
+      app.unmount()
+    }
+  })
 })

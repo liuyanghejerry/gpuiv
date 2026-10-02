@@ -6,9 +6,9 @@
 /// relationship `ImageData` has to a DOM canvas. JS keeps its own copy as
 /// the source of truth; the store below holds the full canvas as a
 /// straight-alpha BGRA mirror and hands GPUI one `RenderImage` per
-/// 256×256 tile. A flush splices only the dirty region into the mirror and
-/// rebuilds only the tiles it intersects, so the bytes pushed to the GPU
-/// atlas scale with the dirty area, not the canvas size. A flush with no
+/// 256×256 tile. A flush splices only dirty tile regions into the mirror and
+/// rebuilds those tiles and any neighboring sampling borders, so GPU atlas
+/// uploads scale with the dirty area, not the canvas size. A flush with no
 /// pending region uploads nothing at all.
 ///
 /// Each tile carries a stable `RenderImage::id` for its lifetime, so a
@@ -33,10 +33,7 @@ use std::sync::{Arc, Mutex};
 
 use gpui::prelude::*;
 
-/// Canvas tiles are 256×256: fine-grained enough that a brush stroke
-/// touches a handful of tiles, large enough that tile bookkeeping stays
-/// cheap for a 4K canvas (a 2880×1920 buffer is a 12×8 grid).
-const CANVAS_TILE: usize = 256;
+use crate::canvas2d::dirty::{DirtyRect, DirtyTiles, CANVAS_TILE};
 
 /// An exclusive pixel rectangle within a canvas buffer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,7 +91,6 @@ struct CanvasSurface {
     /// byte order gpui's atlas expects.
     mirror: Vec<u8>,
     tile_cols: usize,
-    tile_rows: usize,
     /// One `RenderImage` per tile, indexed `row * tile_cols + col`. Each
     /// tile's `RenderImage::id` is stable until the canvas resizes, so
     /// flushes rewrite the same atlas allocation.
@@ -119,7 +115,6 @@ impl CanvasSurface {
             height,
             mirror,
             tile_cols,
-            tile_rows,
             tiles: vec![None; tile_cols * tile_rows],
             pending: Arc::new(Mutex::new(HashMap::new())),
             retired: Vec::new(),
@@ -158,35 +153,44 @@ impl CanvasSurface {
     /// allocation) and queues the new bytes for `Window::update_image` at
     /// its next paint; only a tile that never existed gets a fresh id.
     fn rebuild_tiles(&mut self, rect: Rect, stats: &CanvasStats) {
-        if self.width == 0 || self.height == 0 || rect.is_empty() {
+        if rect.is_empty() { return; }
+        self.rebuild_regions(&[(rect.x0 as usize, rect.y0 as usize, rect.x1 as usize, rect.y1 as usize)], stats);
+    }
+
+    fn rebuild_regions(&mut self, rects: &[DirtyRect], stats: &CanvasStats) {
+        if self.width == 0 || self.height == 0 {
             return;
         }
-        let c0 = rect.x0 as usize / CANVAS_TILE;
-        let c1 = (rect.x1 as usize).div_ceil(CANVAS_TILE);
-        let r0 = rect.y0 as usize / CANVAS_TILE;
-        let r1 = (rect.y1 as usize).div_ceil(CANVAS_TILE);
+        let mut dirty = DirtyTiles::new(self.width as usize, self.height as usize);
+        for &(x0, y0, x1, y1) in rects {
+            if x0 >= x1 || y0 >= y1 { continue; }
+            // build_tile samples a 1px border from neighboring canvas
+            // pixels. Refresh every tile whose border reads a changed pixel,
+            // including diagonal neighbors; deduplicate before rebuilding.
+            dirty.mark((x0.saturating_sub(1), y0.saturating_sub(1), x1.saturating_add(1), y1.saturating_add(1)));
+        }
         let mut pending = self.pending.lock().unwrap();
-        for row in r0..r1.min(self.tile_rows) {
-            for col in c0..c1.min(self.tile_cols) {
-                let index = row * self.tile_cols + col;
-                let x0 = col * CANVAS_TILE;
-                let y0 = row * CANVAS_TILE;
-                let x1 = (x0 + CANVAS_TILE).min(self.width as usize);
-                let y1 = (y0 + CANVAS_TILE).min(self.height as usize);
-                stats.record((x1 - x0 + 2) * (y1 - y0 + 2) * 4);
-                let mut image =
-                    build_tile(&self.mirror, self.width as usize, self.height as usize, x0, y0, x1, y1);
-                let image = match self.tiles[index].take() {
-                    Some(previous) => {
-                        image.id = previous.id;
-                        let image = Arc::new(image);
-                        pending.insert(index, image.clone());
-                        image
-                    }
-                    None => Arc::new(image),
-                };
-                self.tiles[index] = Some(image);
-            }
+        for (x0, y0, _, _) in dirty.take() {
+            let col = x0 / CANVAS_TILE;
+            let row = y0 / CANVAS_TILE;
+            let index = row * self.tile_cols + col;
+            let x0 = col * CANVAS_TILE;
+            let y0 = row * CANVAS_TILE;
+            let x1 = (x0 + CANVAS_TILE).min(self.width as usize);
+            let y1 = (y0 + CANVAS_TILE).min(self.height as usize);
+            stats.record((x1 - x0 + 2) * (y1 - y0 + 2) * 4);
+            let mut image =
+                build_tile(&self.mirror, self.width as usize, self.height as usize, x0, y0, x1, y1);
+            let image = match self.tiles[index].take() {
+                Some(previous) => {
+                    image.id = previous.id;
+                    let image = Arc::new(image);
+                    pending.insert(index, image.clone());
+                    image
+                }
+                None => Arc::new(image),
+            };
+            self.tiles[index] = Some(image);
         }
     }
 }
@@ -300,7 +304,7 @@ impl CanvasStore {
         Ok(())
     }
 
-    /// Pull the pending dirty region out of a 2D context core, splicing it
+    /// Pull pending dirty tile regions out of a 2D context core, splicing them
     /// straight into the mirror — Rust to Rust, no byte round-trip through
     /// JS and no full-canvas conversion. Returns `false` when nothing was
     /// pending, so the caller can skip the repaint too.
@@ -317,12 +321,11 @@ impl CanvasStore {
         if surface.width != width || surface.height != height {
             surface.reinit(width, height);
         }
-        let Some((x0, y0, x1, y1)) = ctx.flush_dirty_bgra(&mut surface.mirror) else {
+        let Some(rects) = ctx.flush_dirty_bgra(&mut surface.mirror) else {
             return Ok(false);
         };
-        let rect = Rect { x0, y0, x1: x1.min(width), y1: y1.min(height) };
         let stats = self.stats.clone();
-        surface.rebuild_tiles(rect, &stats);
+        surface.rebuild_regions(&rects, &stats);
         Ok(true)
     }
 
@@ -764,7 +767,8 @@ mod tests {
             .upload_region(7, width, height, &full, Some((0, 512, 1024, 64)))
             .unwrap();
         let after_strip = store.uploaded_bytes();
-        assert_eq!(after_strip - after_stroke, 4 * tile_bytes(256, 256));
+        // The row above the strip also reads its first row in a 1px border.
+        assert_eq!(after_strip - after_stroke, 8 * tile_bytes(256, 256));
         assert!(after_strip - after_full < after_full);
     }
 
@@ -816,6 +820,78 @@ mod tests {
             store.read(7).as_deref(),
             Some([255, 0, 0, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0].as_slice())
         );
+    }
+
+    #[test]
+    fn distant_core_strokes_rebuild_only_their_own_tiles() {
+        let ctx = crate::canvas2d::context::GpuixCanvas2DCore::new(1024.0, 1024.0);
+        let store = CanvasStore::default();
+        ctx.set_fill_rgba(255.0, 255.0, 255.0, 1.0);
+        ctx.fill_rect(0.0, 0.0, 1024.0, 1024.0);
+        store.upload_from_core(7, &ctx).unwrap();
+        let before = store.uploaded_bytes();
+        ctx.set_fill_rgba(255.0, 0.0, 0.0, 1.0);
+        ctx.fill_rect(8.0, 8.0, 16.0, 16.0);
+        ctx.fill_rect(12.0, 12.0, 16.0, 16.0);
+        ctx.fill_rect(980.0, 980.0, 16.0, 16.0);
+        store.upload_from_core(7, &ctx).unwrap();
+        assert_eq!(store.uploaded_bytes() - before, 2 * tile_bytes(256, 256));
+        let surfaces = store.surfaces.lock().unwrap();
+        let surface = surfaces.get(&7).unwrap();
+        let pending = surface.pending.lock().unwrap();
+        assert_eq!(pending.len(), 2);
+        assert!(pending.contains_key(&0));
+        assert!(pending.contains_key(&15));
+        let center = (512 * 1024 + 512) * 4;
+        assert_eq!(&surface.mirror[center..center + 4], &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn full_canvas_invalidations_clear_previous_sparse_strokes() {
+        let ctx = crate::canvas2d::context::GpuixCanvas2DCore::new(512.0, 512.0);
+        let store = CanvasStore::default();
+        ctx.set_fill_rgba(255.0, 0.0, 0.0, 1.0);
+        ctx.fill_rect(480.0, 480.0, 16.0, 16.0);
+        store.upload_from_core(7, &ctx).unwrap();
+        ctx.set_composite("copy".into());
+        ctx.fill_rect(16.0, 16.0, 16.0, 16.0);
+        let before = store.uploaded_bytes();
+        store.upload_from_core(7, &ctx).unwrap();
+        assert_eq!(store.uploaded_bytes() - before, 4 * tile_bytes(256, 256));
+        let rgba = store.read(7).unwrap();
+        let previous = (480 * 512 + 480) * 4;
+        assert_eq!(&rgba[previous..previous + 4], &[0, 0, 0, 0]);
+        ctx.reset();
+        store.upload_from_core(7, &ctx).unwrap();
+        assert!(store.read(7).unwrap().iter().all(|byte| *byte == 0));
+        ctx.resize(300.0, 300.0);
+        store.upload_from_core(7, &ctx).unwrap();
+        let resized = store.read(7).unwrap();
+        assert_eq!(resized.len(), 300 * 300 * 4);
+        assert!(resized.iter().all(|byte| *byte == 0));
+        assert!(!store.upload_from_core(7, &ctx).unwrap());
+    }
+
+    #[test]
+    fn edge_updates_refresh_neighboring_tile_borders() {
+        let store = CanvasStore::default();
+        let mut pixels = vec![0u8; 512 * 512 * 4];
+        store.upload_region(7, 512, 512, &pixels, None).unwrap();
+        let offset = (255 * 512 + 255) * 4;
+        pixels[offset..offset + 4].copy_from_slice(&[255, 0, 0, 255]);
+        let before = store.uploaded_bytes();
+        store.upload_region(7, 512, 512, &pixels, Some((255, 255, 1, 1))).unwrap();
+        assert_eq!(store.uploaded_bytes() - before, 4 * tile_bytes(256, 256));
+        let surfaces = store.surfaces.lock().unwrap();
+        let surface = surfaces.get(&7).unwrap();
+        // All four tiles sample this pixel: inner corner, left/top borders
+        // and the diagonal tile's top-left border, respectively.
+        for (index, x, y) in [(0, 256, 256), (1, 0, 256), (2, 256, 0), (3, 0, 0)] {
+            let image = surface.tiles[index].as_ref().unwrap();
+            let bytes = image.as_bytes(0).unwrap();
+            let offset = (y * 258 + x) * 4;
+            assert_eq!(&bytes[offset..offset + 4], &[0, 0, 255, 255], "tile {index} border");
+        }
     }
 
     #[test]
