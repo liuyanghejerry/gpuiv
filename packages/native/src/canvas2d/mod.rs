@@ -10,4 +10,5 @@
 //! recorded display list, lazy rasterization, and the composite/gradient
 //! pixel pipeline ported from `context2d.ts`/`gradient.ts`.
 pub mod context;
+pub(crate) mod dirty;
 pub mod geom;
