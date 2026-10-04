@@ -11,6 +11,7 @@ import {
   callWithAsyncErrorHandling,
   createRenderer,
   ErrorCodes,
+  normalizeStyle,
   type Renderer,
   type RendererOptions,
 } from "vue"
@@ -24,11 +25,13 @@ import type {
   ImagePixelsOptions,
   MutationRenderer,
   NativeRenderer,
+  StyleDesc,
   WindowKeyEventHandlers,
 } from "../types.js"
 import { wrapWithBatching } from "./batch-renderer.js"
 import {
   attachRoot,
+  containerForRenderer,
   detachRoot,
   registerEventHandler,
   unregisterEventHandler,
@@ -157,25 +160,29 @@ function camelize(key: string): string {
   return key.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase())
 }
 
+// Rust accepts numeric pixels/scalars for these fields. Vue's CSS parser
+// leaves values as strings, so translate number/px forms before batching.
+const NUMBER_STYLE_PROPS = new Set<keyof StyleDesc>([
+  "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
+  "flexGrow", "flexShrink", "flexBasis", "gap", "rowGap", "columnGap",
+  "gridTemplateColumns", "gridTemplateRows",
+  "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+  "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
+  "top", "right", "bottom", "left", "opacity",
+  "borderWidth", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+  "borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius",
+  "fontSize", "lineHeight", "lineClamp",
+])
+
 /**
  * Convert a Vue style binding (object, array, or CSS string) into a
  * gpuix StyleDesc: kebab-case keys become camelCase, `--custom` properties
- * are dropped, null values are removed.
+ * are dropped, null values are removed, and numeric fields accept numbers
+ * and px strings. Dimension fields also keep percentages and `auto` intact.
  */
 export function toGpuixStyle(style: unknown): Record<string, unknown> {
-  if (style == null) return {}
-  if (typeof style === "string") {
-    const result: Record<string, unknown> = {}
-    for (const part of style.split(";")) {
-      const idx = part.indexOf(":")
-      if (idx <= 0) continue
-      const key = part.slice(0, idx).trim()
-      const value = part.slice(idx + 1).trim()
-      if (!key || key.startsWith("--")) continue
-      result[camelize(key)] = value
-    }
-    return result
-  }
+  // Normalize each array member before merging so camelCase and kebab-case
+  // aliases obey the same last-entry-wins rule.
   if (Array.isArray(style)) {
     const result: Record<string, unknown> = {}
     for (const item of style) {
@@ -183,11 +190,22 @@ export function toGpuixStyle(style: unknown): Record<string, unknown> {
     }
     return result
   }
-  if (typeof style === "object") {
+  // The array form asks Vue to parse a CSS string with its own parser.
+  const normalized = typeof style === "string" ? normalizeStyle([style]) : style
+  if (normalized && typeof normalized === "object") {
     const result: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(style as Record<string, unknown>)) {
+    for (const [key, value] of Object.entries(normalized as Record<string, unknown>)) {
       if (value == null || key.startsWith("--")) continue
-      result[camelize(key)] = value
+      const name = camelize(key)
+      if (name === "hover" || name === "active") {
+        result[name] = toGpuixStyle(value)
+      } else if (NUMBER_STYLE_PROPS.has(name as keyof StyleDesc) && typeof value === "string") {
+        const number = value.trim().match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?)(?:px)?$/i)
+        const parsed = number ? Number(number[1]) : NaN
+        result[name] = Number.isFinite(parsed) ? parsed : value
+      } else {
+        result[name] = value
+      }
     }
     return result
   }
@@ -247,8 +265,8 @@ export interface GpuivRendererHost {
   renderer: MutationRenderer
   /** Flush queued mutations synchronously. */
   flushMutations: () => void
-  /** Release this root's claim on the renderer's event map. Returns whether
-   *  this root was the live one (and so its native listeners must stop). */
+  /** Destroy the native container and release this root's event map after
+   *  Vue unmounts. Returns whether this root owned the renderer. */
   detach: () => boolean
   /** The registry container backing this root. */
   registryContainer: Container
@@ -415,10 +433,17 @@ export function createGpuivRendererHost(
     renderer: host.renderer,
     flushMutations: host.flushMutations,
     registryContainer: container,
-    /** Release this root's claim on the renderer's event map. Call after the
-     *  Vue app unmounted, before another root may mount on the same renderer.
-     *  Returns whether this root was the live one. */
-    detach: () => detachRoot(inner, container),
+    detach: () => {
+      // A stale host must not destroy a replacement root, even when a caller
+      // supplied a fresh allocator that reuses its container id.
+      if (containerForRenderer(inner) !== container) return false
+      if (containerNode.created && containerNode.id != null) {
+        host.renderer.destroyElement(containerNode.id)
+        host.flushMutations()
+        containerNode.created = false
+      }
+      return detachRoot(inner, container)
+    },
   }
 
   // ── Node mutation internals (closure over container) ────────────
@@ -480,11 +505,8 @@ export function createGpuivRendererHost(
       host.renderer.setEventListener(node.id, eventType, false)
       return
     }
-    const raw: (event: EventPayload) => void = Array.isArray(value)
-      ? (payload) => {
-          for (const fn of value) (fn as (p: EventPayload) => void)(payload)
-        }
-      : (value as (event: EventPayload) => void)
+    type Listener = (event: EventPayload) => unknown
+    const raw = value as Listener | Listener[]
     // Web `v-on` wraps every listener in callWithAsyncErrorHandling, so a
     // throw runs the errorCaptured chain and lands in app.config.errorHandler
     // instead of escaping the listener. Mirror that contract: an onErrorCaptured
@@ -494,7 +516,9 @@ export function createGpuivRendererHost(
       ? (payload: EventPayload) => {
           callWithAsyncErrorHandling(raw, instance, ErrorCodes.NATIVE_EVENT_HANDLER, [payload])
         }
-      : raw
+      : (payload: EventPayload) => {
+          for (const fn of Array.isArray(raw) ? raw : [raw]) fn(payload)
+        }
     registerEventHandler(container.eventHandlers, node.id, eventType, handler)
     host.renderer.setEventListener(node.id, eventType, true)
   }

@@ -1,15 +1,15 @@
 /// Headless tests for the Vue custom renderer core.
 ///
-/// These do not need the native addon: a mock NativeRenderer records the op
-/// tuples each `applyBatch` receives, so we can assert on the exact protocol
-/// emitted by mount/update/remove flows.
+/// A mock NativeRenderer records protocol tuples for most cases. The native
+/// style case also checks that Rust accepts and renders normalized bindings.
 
 import { beforeEach, describe, expect, it } from "vitest"
 import { createRequire } from "node:module"
-import { defineComponent, h, ref, nextTick } from "vue"
+import { defineComponent, h, onErrorCaptured, ref, nextTick } from "vue"
 import type { NativeRenderer } from "../types.js"
 import { createGpuivRendererHost, toGpuixStyle } from "../reconciler/vue-renderer.js"
-import { hasNativeTestRenderer } from "../testing.js"
+import { createTestApp, hasNativeTestRenderer } from "../testing.js"
+import { handleGpuixEvent } from "../reconciler/event-registry.js"
 
 type Op = unknown[]
 
@@ -89,10 +89,47 @@ describe("vue renderer core", () => {
       backgroundColor: "#fff",
     })
     expect(toGpuixStyle("padding:12px;color:red")).toEqual({
-      padding: "12px",
+      padding: 12,
       color: "red",
     })
     expect(toGpuixStyle([{ width: 1 }, { height: 2 }])).toEqual({ width: 1, height: 2 })
+  })
+
+  it("normalizes numeric CSS values without coercing dimensions or colors", () => {
+    expect(toGpuixStyle([
+      "padding:12px;opacity:.5;flex-grow:1;font-size:14px;width:100%;height:auto;color:rgb(10, 20, 30)",
+      { padding: "8px", "font-size": "16px", hover: { "border-width": "2px" } },
+    ])).toEqual({
+      padding: 8, opacity: 0.5, flexGrow: 1, fontSize: 16,
+      width: "100%", height: "auto", color: "rgb(10, 20, 30)", hover: { borderWidth: 2 },
+    })
+    expect(toGpuixStyle([{ fontSize: 12 }, "font-size:18px"])).toEqual({ fontSize: 18 })
+  })
+
+  it.each(["sync", "async"])("routes %s errors in listener arrays to the Vue boundary", async (mode) => {
+    const captured: string[] = []
+    const called: string[] = []
+    const fail = () => { throw new Error(`${mode} listener`) }
+    const listener = mode === "async" ? async () => fail() : fail
+    const Child = defineComponent({
+      render: () => h("div", { onClick: [listener, () => called.push("next")] }),
+    })
+    const Boundary = defineComponent({
+      setup() {
+        onErrorCaptured((error) => { captured.push(String(error)); return false })
+        return () => h(Child)
+      },
+    })
+    const { mock, host, app } = mountApp(Boundary)
+    try {
+      handleGpuixEvent({ elementId: host.container.children[0].id!, eventType: "click" } as never, mock)
+      await nextTick()
+      expect(captured).toEqual([`Error: ${mode} listener`])
+      expect(called).toEqual(["next"])
+    } finally {
+      app.unmount()
+      host.detach()
+    }
   })
 
   it("registers events and updates text on state change", async () => {
@@ -204,6 +241,30 @@ describe("vue renderer core", () => {
     expect(kids.get(2)!.length).toBe(3)
     // Spans were created in order id3=item1, id4=item2, id5=item3.
     expect(kids.get(2)).toEqual([4, 5, 3])
+  })
+})
+
+describe.skipIf(!hasNativeTestRenderer)("native style bindings", () => {
+  it("mounts and updates CSS string/array styles through the Rust batch parser", async () => {
+    const style = ref<unknown>("padding:12px;opacity:.5;font-size:14px;width:100px;height:60px")
+    const app = createTestApp(defineComponent({
+      render: () => h("div", { testId: "styled", style: style.value }, [h("text", "styled content")]),
+    }))
+    try {
+      const node = () => app.renderer.findByTestId("styled")!
+      expect(node().style.padding).toBe(12)
+      expect(node().style.opacity).toBe(0.5)
+      expect(node().style.fontSize).toBe(14)
+      expect(app.renderer.getPaintedText()).toContain("styled content")
+      style.value = ["padding:8px;font-size:16px", { opacity: "0.75", hover: { borderWidth: "2px" } }]
+      await app.settle()
+      expect(node().style.padding).toBe(8)
+      expect(node().style.fontSize).toBe(16)
+      expect(node().style.opacity).toBe(0.75)
+      expect(node().style.hover?.borderWidth).toBe(2)
+    } finally {
+      app.unmount()
+    }
   })
 })
 

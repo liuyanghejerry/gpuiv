@@ -682,9 +682,13 @@ error message, the stack, and a **Reload** button that remounts the last tree.
 Under automation the pieces carry the test ids `runtime-error-overlay`,
 `runtime-error-stack`, and `runtime-error-reload`.
 
+Each window uses its own `onRuntimeError`, `errorOverlay`, and Reload target.
+A failure in a `createWindow()` app leaves the main window's tree and state
+intact. Process-level errors with no window identity use the main window.
+
 - Every path funnels into one scheduler: the Vue `app.config.errorHandler`, the
-  frame-loop tick catch, and the `process` handlers all route to the same
-  overlay. Event handlers are wrapped like web `v-on`: a throw runs the
+  frame-loop tick catch, and the `process` handlers route to the owning window's
+  overlay. Event handlers, including arrays, are wrapped like web `v-on`: a throw runs the
   `onErrorCaptured` chain first and only what survives reaches the overlay.
 - The overlay is scheduled on a microtask keyed to the failing mount. If a
   newer remount already happened (a `bun --hot` save, a Reload), the stale
@@ -2526,6 +2530,10 @@ CSS-like styling via the `style` prop:
 
 Style objects follow the standard Vue shape: plain camelCase objects, kebab-case
 keys are camelized, and CSS strings and arrays of objects are accepted too.
+Supported numeric properties accept number strings and `px` values, so
+`style="padding:12px;opacity:0.5;width:100px"` also works. Sizing properties
+retain percentage values and `auto`; the supported properties below still
+apply to every binding form.
 
 > **GPUIV styles look like CSS but are not CSS.** A few differences trip
 > everyone up on the first project:
