@@ -452,6 +452,8 @@ export const RecordsTable = defineComponent({
     rows: { type: Array as PropType<RecordRow[]>, default: () => INITIAL_ROWS },
     /** Stretch to the parent's height instead of capping the scroll area. */
     fill: { type: Boolean, default: false },
+    /** Disable vertical scrolling when the surrounding page owns it. */
+    scrollY: { type: Boolean, default: true },
     /** App-owned link navigation; native URL opening is the default. */
     onWebsiteClick: { type: Function as PropType<(row: RecordRow) => void>, default: undefined },
     onPromptChange: { type: Function as PropType<(column: string, prompt: string) => void>, default: undefined },
@@ -1890,7 +1892,7 @@ export const RecordsTable = defineComponent({
       const viewportH = props.fill ? rowsScrollBounds.bounds.value?.height ?? ROW_VIEWPORT_H : ROW_VIEWPORT_H
       let firstRow = 0
       let lastRow = totalRows
-      if (totalRows * ROW_HEIGHT > viewportH + ROW_HEIGHT) {
+      if (props.scrollY && totalRows * ROW_HEIGHT > viewportH + ROW_HEIGHT) {
         // A shrinking dataset or viewport can leave the last polled offset
         // beyond the new scroll extent until GPUI clamps it on the next paint.
         const scrollTop = Math.min(rowsScrollTop.value, Math.max(0, totalRows * ROW_HEIGHT - viewportH))
@@ -2267,10 +2269,11 @@ export const RecordsTable = defineComponent({
             testId="records-scroll"
             onScroll={refreshScroll}
             role="grid"
-            aria-label="Companies table. Scroll to view all records and columns."
+            aria-label={props.scrollY ? "Companies table. Scroll to view all records and columns." : "Companies table. Scroll horizontally to view all columns."}
             style={{
-              overflow: "scroll",
-              ...(props.fill ? { flexGrow: 1, minHeight: 0 } : { maxHeight: ROW_VIEWPORT_H }),
+              ...(props.scrollY
+                ? { overflow: "scroll" as const, ...(props.fill ? { flexGrow: 1, minHeight: 0 } : { maxHeight: ROW_VIEWPORT_H }) }
+                : { overflowX: "scroll" as const }),
             }}
           >
             <div style={{ width: contentWidth }}>

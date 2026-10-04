@@ -34,6 +34,10 @@ stops; clocks, streamed text, and work progress continue.
   for both axes. Header, footer, and Company stay fixed. Resize handles support
   dragging or Left/Right (Shift changes by ten pixels). Small fill viewports and
   shrinking data update the mounted row range. `onColumnResize` reports widths.
+  Set `scrollY={false}` for a small table inside a scrolling page: all rows
+  mount, the page handles vertical gestures, and columns still pan horizontally.
+  Give the page `overflow: "scroll"` so GPUI keeps horizontal wheels on X
+  instead of remapping them onto a Y-only page scroller.
 - Property prompts use an editable native textarea with styled `@Input` spans.
   Edits persist for each property and emit `onPromptChange(column, prompt)`.
   The web contentEditable mention picker is represented by the existing Inputs
@@ -44,6 +48,40 @@ stops; clocks, streamed text, and work progress continue.
 - AgentScreen expands into a deferred native dialog. Teach/End controls emit
   `onTeachTask` and `onEndTask(seconds)`; recording continues after collapse.
   `onOpenChange` reports viewer state, and Escape collapses the viewer.
+
+## Performance checks
+
+For a repeatable smoothness audit, run from `examples/`:
+
+```bash
+NODE_ENV=production bun profile-beautiful-ui.ts
+NODE_ENV=production bun run test beautiful-ui.perf.test.tsx
+CI=true bun run test:perf
+```
+
+The audit opens a background window, measures animation and two-way page
+scrolling, then exits. JSON and PNG output go to `tmp/beautiful-ui-perf/`.
+`drawsPerSecond` counts completed GPUI draws, not display presentations;
+draw p90/p99 report CPU frame cost. `MOUNT_ONLY=1` uses the test renderer and
+exits after mount, for `bun --cpu-prof` analysis.
+
+The `beautiful-ui-performance` CI job runs separately on macOS using the release
+Metal binding. It gates animation update/draw, scrolled-gallery draw, wheel
+dispatch/draw, clicks and hover at p95 < 25.05ms, and a 12-step scrub drag at
+< 150ms. Local budgets are 16.7ms and 100ms; CI has a fixed 1.5× allowance for
+runner variance. Each repeated measurement excludes warmup samples. Cadence,
+shared batching, pinned/reduced-motion timers, offscreen section reclamation and
+wheel ownership have deterministic assertions as well.
+
+`test:perf` requires the native macOS test renderer and rejects `THROTTLE`; a
+missing renderer fails instead of skipping the gate. Every CI run uploads
+`metrics.json` (all samples, budgets and machine metadata) and `tests.json`,
+including on test failure, and adds a table to the Actions job summary. The
+gate also blocks package publishing. To make it mandatory for merging, add
+`beautiful-ui-performance` to the repository's required status checks; changing
+the workflow alone does not change branch protection. Do not raise budgets
+automatically from the preceding commit; investigate failures with these
+artifacts and the live audit before recalibrating them.
 
 ## Native adaptations
 

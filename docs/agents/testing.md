@@ -17,6 +17,9 @@ cd examples && bun run test
 # Chat draw / chrome regression (same suite, file filter)
 cd examples && bun run test chat.perf.test.tsx
 
+# Beautiful UI CI gate (macOS release native binding required)
+cd examples && CI=true bun run test:perf
+
 # macOS CPU clamp. E-cores, not Chrome 6x. Do not set in CI.
 THROTTLE=utility bun run test chat.perf.test.tsx
 ```
@@ -26,6 +29,15 @@ the wrong runner.
 
 `examples/chat.perf.test.tsx` is the automated profile. It uses `createTestApp()`,
 not the live window. Assert **p95 draw / flush ms**, not a per-frame FPS floor.
+
+`beautiful-ui-performance` is a separate CI job using the release macOS binding.
+Its fixed p95 budgets and deterministic cadence/scroll assertions live in
+`examples/beautiful-ui.perf.test.tsx`; `vitest.perf.config.ts` makes a missing
+native renderer or `THROTTLE` a failure. Raw measurements and the Vitest report
+go to `tmp/beautiful-ui-perf-gate/` and upload even when a test fails. The job
+blocks publishing; add its status check to branch protection to require it
+before merging. See [Beautiful UI performance checks](../../packages/beautiful-ui/README.md#performance-checks)
+for budgets and the live audit.
 
 `packages/vue/src/__tests__/canvas-wpt.test.ts` runs a vendored subset of the
 W3C web-platform-tests canvas suite (593 cases: 452 run, 141 skipped with the

@@ -7,12 +7,12 @@
  *  Pass `phase` (ms into the cycle) to pin the frame in tests.
  */
 
-import { defineComponent, onBeforeUnmount, ref, watch } from "vue"
+import { defineComponent } from "vue"
+import { useAnimationClock } from "../animation-clock.js"
 import { useTheme } from "../theme.js"
 import { fonts } from "../tokens.js"
 
 const PERIOD = 1800
-const TICK_MS = 40
 
 export const Shimmer = defineComponent({
   name: "BuiShimmer",
@@ -22,20 +22,10 @@ export const Shimmer = defineComponent({
   },
   setup(props, { slots }) {
     const theme = useTheme()
-    const elapsed = ref(0)
-    let timer: ReturnType<typeof setInterval> | undefined
-    watch([() => props.phase, theme.reducedMotion], () => {
-      if (timer !== undefined) clearInterval(timer)
-      timer = undefined
-      if (props.phase !== undefined || theme.reducedMotion.value) return
-      const start = Date.now()
-      timer = setInterval(() => {
-        elapsed.value = Date.now() - start
-      }, TICK_MS)
-    }, { immediate: true })
-    onBeforeUnmount(() => {
-      if (timer !== undefined) clearInterval(timer)
-    })
+    const elapsed = useAnimationClock(
+      () => props.phase,
+      () => theme.reducedMotion.value ? false : 16,
+    )
     return () => {
       const t = theme.tokens.value
       const phase = props.phase ?? elapsed.value

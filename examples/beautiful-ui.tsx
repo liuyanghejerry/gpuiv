@@ -6,8 +6,8 @@
  * light/dark toggle that flips the whole token map live.
  */
 
-import { defineComponent, inject, onBeforeUnmount, onMounted, provide, ref, watch, type InjectionKey, type Ref } from "vue"
-import { createApp, useElementBounds, useGpuix, type HostNode, type ShallowRef, type ElementBounds } from "@gpuiv/vue"
+import { defineComponent, inject, onBeforeUnmount, onMounted, provide, ref, watch, type InjectionKey, type Ref, type ShallowRef } from "vue"
+import { createApp, useElementBounds, useGpuix, type HostNode, type ElementBounds } from "@gpuiv/vue"
 import {
   AgentScreen,
   Flowchart,
@@ -60,8 +60,6 @@ interface GalleryViewport {
   bounds: ShallowRef<ElementBounds | null>
   /** Live scroll offset of the gallery body: [x, y], y negative scrolled down (GPUI convention). */
   offset: Ref<[number, number] | null>
-  /** True while the offset is still moving (350ms idle debounce). */
-  scrolling: Ref<boolean>
 }
 const ViewportKey: InjectionKey<GalleryViewport> = Symbol("gallery-viewport")
 
@@ -101,14 +99,15 @@ const Section = defineComponent({
          * when scrolling gesture by gesture. A wide band means a section is
          * mounted once and stays put through back-and-forth scrolling, so
          * the batches mostly happen while the user is far away; the cost is
-         * a larger mounted set, i.e. a slightly more expensive frame. */
+         * a larger mounted set, i.e. a slightly more expensive frame.
+         * Reclaim distant sections in the same offset update as new mounts;
+         * deferring until idle grows the tree for the whole gesture. */
         const windowY = contentY + offset[1]
         const bottom = windowY + reserve.value
         const hi = vp0.y + vp0.h
         const within = (m: number) => bottom >= vp0.y - m && windowY <= hi + m
         const near = mounted.value ? within(vp0.h * 3) : within(vp0.h * 1.5)
         if (near === mounted.value) return
-        if (!near && viewport.scrolling.value) return // defer unmounts to scroll idle
         mounted.value = near
       },
     )
@@ -202,14 +201,6 @@ export const App = defineComponent({
     /* The live scroll offset — the one scroll signal that stays correct
      * after the container scrolls. Polled lightly; sections react to it. */
     const offset = ref<[number, number] | null>(null)
-    /* True while the offset is still moving. Sections mount on approach as
-     * usual, but UNMOUNT only once this drops — every mount/unmount batch
-     * mutates layout and forces a full-tree Taffy relayout, which is the
-     * scroll path's dominant cost (measured: 48% of a core in applyBatch,
-     * most of it compute_root_layout). Deferring the unmounts halves the
-     * batches on the scroll path; they land when the user pauses. */
-    const scrolling = ref(false)
-    let scrollIdleTimer: ReturnType<typeof setTimeout> | undefined
     let offsetTimer: ReturnType<typeof setInterval> | undefined
     onMounted(() => {
       offsetTimer = setInterval(() => {
@@ -221,12 +212,6 @@ export const App = defineComponent({
           const prev = offset.value
           if (prev === null || prev[0] !== value[0] || prev[1] !== value[1]) {
             offset.value = [value[0], value[1]]
-            scrolling.value = true
-            if (scrollIdleTimer !== undefined) clearTimeout(scrollIdleTimer)
-            scrollIdleTimer = setTimeout(() => {
-              scrollIdleTimer = undefined
-              scrolling.value = false
-            }, 350)
           }
         } catch {
           /* renderer not ready yet */
@@ -235,9 +220,8 @@ export const App = defineComponent({
     })
     onBeforeUnmount(() => {
       if (offsetTimer !== undefined) clearInterval(offsetTimer)
-      if (scrollIdleTimer !== undefined) clearTimeout(scrollIdleTimer)
     })
-    provide(ViewportKey, { bounds: viewport.bounds, offset, scrolling })
+    provide(ViewportKey, { bounds: viewport.bounds, offset })
     return () => {
       const t = theme.tokens.value
       return (
@@ -276,7 +260,9 @@ export const App = defineComponent({
           </div>
 
           {/* gallery body */}
-          <div ref={scrollHost} testId="gallery-scroll" style={{ flexGrow: 1, minHeight: 0, overflowY: "scroll" }}>
+          {/* GPUI remaps horizontal wheels to Y on a Y-only scroller. Both
+              axes keep table column gestures horizontal; this page fits X. */}
+          <div ref={scrollHost} testId="gallery-scroll" style={{ flexGrow: 1, minHeight: 0, overflow: "scroll" }}>
             <div
               style={{
                 display: "flex",
@@ -374,12 +360,9 @@ export const App = defineComponent({
               <Section title="Flowchart"><Flowchart /></Section>
               <Section title="AgentScreen"><AgentScreen /></Section>
               <Section title="RecordsTable (Phase 3)">
-                {/* 10 of the 60 demo rows — the full set lives in the
-                    component's default; the gallery keeps its idle frame
-                    cost down (each mutation flush rebuilds every mounted
-                    element). The table virtualizes beyond its own viewport,
-                    so this only bounds its mounted element count. */}
-                <RecordsTable rows={INITIAL_ROWS.slice(0, 10)} />
+                {/* The page owns vertical scrolling; the ten-row preview
+                    keeps the table small while columns still pan sideways. */}
+                <RecordsTable rows={INITIAL_ROWS.slice(0, 10)} scrollY={false} />
               </Section>
             </div>
           </div>
