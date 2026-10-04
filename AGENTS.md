@@ -1,6 +1,6 @@
 # AGENTS.md - GPUIV Codebase Guide
 
-**Read [README.md](./README.md) first** to understand what GPUIV is, the architecture, mutation API, event flow, supported elements/events/styles, and the test renderer.
+**Read [README.md](./README.md) first** to understand what GPUIV is and how to run an app. Then read [the architecture](./docs/architecture.md) for the mutation API and event flow, and [the API reference](./docs/reference.md) for supported elements/events/styles and the test renderer.
 
 > **GPUIV is a self-maintained fork of GPUIX**
 > ([`remorses/gpuix`](https://github.com/remorses/gpuix), the React binding),
@@ -63,8 +63,8 @@ layout, Metal/Vulkan paint). GPUI is **immediate-mode** — it rebuilds the tree
 every frame — and the mutation protocol embraces that instead of fighting it.
 Only changed elements cross the FFI boundary.
 
-Full diagrams and explanation: [README Architecture](./README.md#architecture),
-[Why This Works](./README.md#why-this-works), [Event Flow](./README.md#event-flow).
+Full diagrams and explanation: [Architecture](./docs/architecture.md#architecture),
+[Why This Works](./docs/architecture.md#why-this-works), [Event Flow](./docs/architecture.md#event-flow).
 
 ## Package Structure
 
@@ -129,7 +129,7 @@ GPUI fires a listener on the element → the Rust closure calls
 (`eventHandlers.get(id)?.get(type)`) runs the Vue handler → the state update
 schedules a patch and mutations flow back to Rust. Rust only knows **whether** an
 element has a listener (via `setEventListener`), never the closure — handlers live
-in JS. Step-by-step diagram: [README Event Flow](./README.md#event-flow).
+in JS. Step-by-step diagram: [Event Flow](./docs/architecture.md#event-flow).
 
 ### Mouse capture is armed by the press
 
@@ -344,7 +344,7 @@ it. Do not add this block to Zed PRs.
 
 ## Current Status
 
-Completed features are tracked in the [README **Status** section](./README.md#status);
+Completed features are tracked in the [feature status checklist](./docs/status.md#status);
 user-facing APIs belong there. This list is only the remaining engineering work.
 
 ### TODO
@@ -407,7 +407,7 @@ session after a screenshot. With `examples/bunfig.toml` preloading
 without the preload it is the classic full remount.
 
 **Do not use `usecomputer`, `screencapture`, or desktop clicks** — use the
-Playwright-like automation API (README **Automation** section). Mark targets with
+Playwright-like [automation API](./docs/reference.md#automation). Mark targets with
 `testId`; `connectTest(app.renderer, app.settle)` in vitest, or
 `launch({ command, args })` against a child process.
 

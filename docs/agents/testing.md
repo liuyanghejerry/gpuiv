@@ -71,8 +71,8 @@ Use tuistory for the long-running process. Do not use `tsx` or raw `tmux`.
 ### Drive the live window
 
 **Do not use `usecomputer`, `screencapture`, or desktop clicks.** GPUIV has a
-Playwright-like automation API. Full docs are in the README **Automation**
-section.
+Playwright-like automation API. Full docs are in the
+[API reference](../reference.md#automation).
 
 Mark targets with `testId`. Then either:
 
@@ -100,4 +100,3 @@ typing-heavy checks — it opens no window at all.
 `click()` hits the last painted bounds. `clock.pause` / `set` / `fastForward`
 freeze native motion. `captureFrames` writes one PNG per timestamp. That is how
 you record a sidebar open/close, not a screen recorder.
-
