@@ -3057,6 +3057,21 @@ const text = app.renderer.getAllText()
 updates flush on a microtask, so without it the Rust tree still has the old
 state. `unmount()` tears the app down.
 
+For repeated lifecycle tests, `renderer.getResourceStats()` reads native
+resource ownership (nodes, focus/subscriptions, scroll/motion/list state,
+highlight caches, custom elements, live images, Canvas surfaces/tiles and
+bounded caches) plus JS event-handler counts. It does not paint or collect.
+Counts for resources owned by the tested subtree should return to the initial
+empty-root baseline after removal and empty frames.
+
+`renderer.captureEntityLeakBaseline()` captures GPUI's entity snapshot before
+mounting tested content; `renderer.assertNoNewEntityLeaks()` throws if new
+entities still have handles after cleanup. Both use the currently active native
+test context, replaced when another test renderer is created. Set
+`LEAK_BACKTRACE=1` before launching for allocation traces when available.
+See the [memory gate](agents/testing.md#memory-resource-gate) for cache limits,
+test scenarios and the distinction between enforced ownership and observed bytes.
+
 ### Testing native elements
 
 `getAllText()` only sees `<text>` nodes in the retained tree. `<code>`, `<diff>`

@@ -1,5 +1,5 @@
 import { applyMacCpuThrottleFromEnv } from '@gpuiv/vue'
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 
 applyMacCpuThrottleFromEnv()
 
@@ -10,5 +10,6 @@ applyMacCpuThrottleFromEnv()
 export default defineConfig({
   test: {
     fileParallelism: false,
+    exclude: [...configDefaults.exclude, 'memory-leak.test.ts'],
   },
 })

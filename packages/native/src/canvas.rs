@@ -264,6 +264,23 @@ pub struct CanvasStore {
 }
 
 impl CanvasStore {
+    /// Owned surfaces, live tiles, and images awaiting the next render's
+    /// `Window::drop_image`. These are ownership counts, not GPU byte usage.
+    #[cfg(feature = "test-support")]
+    pub(crate) fn resource_counts(&self) -> (usize, usize, usize) {
+        let surfaces = self.surfaces.lock().unwrap();
+        let tiles = surfaces
+            .values()
+            .map(|surface| surface.tiles.iter().flatten().count())
+            .sum();
+        let retired = surfaces
+            .values()
+            .map(|surface| surface.retired.len())
+            .sum::<usize>()
+            + self.orphaned.lock().unwrap().len();
+        (surfaces.len(), tiles, retired)
+    }
+
     /// Upload `rgba` (a full `width * height * 4` straight-alpha RGBA
     /// buffer) over `rect` only — `None` means the whole canvas. GPU-side,
     /// only the tiles intersecting the rect are rebuilt.

@@ -449,6 +449,18 @@ export declare class TestGpuixRenderer {
    * removal actually freed it.
    */
   getRetainedElementCount(): number
+  /** Read ownership counts without painting or reclaiming resources. */
+  getResourceStats(): TestResourceStats
+  /**
+   * Capture GPUI's native entity baseline for repeated mount/unmount tests.
+   * A new TestGpuixRenderer starts a new context and invalidates this baseline.
+   */
+  captureEntityLeakBaseline(): void
+  /**
+   * Use GPUI's leak detector, including allocation traces with LEAK_BACKTRACE.
+   * Translate its assertion into a JS error rather than unwinding through FFI.
+   */
+  assertNoNewEntityLeaks(): void
   /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
@@ -1400,6 +1412,24 @@ export interface SystemNotificationResponseJs {
    * itself was activated.
    */
   actionId?: string
+}
+
+export interface TestResourceStats {
+  retainedElements: number
+  internedStyles: number
+  focusHandles: number
+  focusSubscriptions: number
+  scrollHandles: number
+  motionStates: number
+  virtualLists: number
+  highlightEntries: number
+  customElements: number
+  liveImages: number
+  canvasSurfaces: number
+  canvasTiles: number
+  retiredCanvasImages: number
+  syntaxDocuments: number
+  syntaxRetainedBytes: number
 }
 
 export interface TrayDesc {

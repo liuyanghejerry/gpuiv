@@ -57,6 +57,7 @@ For a repeatable smoothness audit, run from `examples/`:
 NODE_ENV=production bun profile-beautiful-ui.ts
 NODE_ENV=production bun run test beautiful-ui.perf.test.tsx
 CI=true bun run test:perf
+CI=true bun run test:memory
 ```
 
 The audit opens a background window, measures animation and two-way page
@@ -64,6 +65,11 @@ scrolling, then exits. JSON and PNG output go to `tmp/beautiful-ui-perf/`.
 `drawsPerSecond` counts completed GPUI draws, not display presentations;
 draw p90/p99 report CPU frame cost. `MOUNT_ONLY=1` uses the test renderer and
 exits after mount, for `bun --cpu-prof` analysis.
+
+The separate `memory-leak` gate repeats loader/gallery/menu/dialog and native
+resource lifecycles on one renderer. Ownership, event handlers, timers,
+animation subscriptions and GPUI entity leaks are enforced; post-GC JS heap and
+RSS are reported for calibration. See [the memory gate guide](../../docs/agents/testing.md#memory-resource-gate).
 
 The `beautiful-ui-performance` CI job runs separately on macOS using the release
 Metal binding. It gates animation update/draw, scrolled-gallery draw, wheel
