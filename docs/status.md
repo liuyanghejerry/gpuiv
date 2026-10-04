@@ -1,0 +1,76 @@
+# Feature status
+
+[Project overview](../README.md) · [API reference](reference.md) · [Remaining engineering work](../AGENTS.md#todo)
+
+## Status
+
+- [x] Vue 3 custom renderer (`createRenderer` from `vue`) with mutation-based protocol
+- [x] napi-rs FFI bindings (one atomic `applyBatch` mutation call)
+- [x] RetainedTree (Rust-side element storage)
+- [x] Style mapping (CSS properties → GPUI style methods)
+- [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)
+- [x] Click outside (`onMouseDownOutside`)
+- [x] Scroll wheel events with delta and touch phase
+- [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
+- [x] Accessibility: `role` + `aria-*` props onto the AccessKit tree (macOS AX / Windows UIA / Linux AT-SPI), with per-element default roles and `getA11yTree()` test dumps
+- [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `scrollIntoView`, `getScrollOffset`)
+- [x] Cancellable smooth-scroll controllers (`createScrollController`, `useScrollController`) with stable-offset completion
+- [x] Native titlebar drag regions (`windowDragRegion`) and zoom/maximize-restore (`zoomWindow`)
+- [x] Keyboard events (keyDown, keyUp) with focus management
+- [x] Focus/blur events with automatic FocusHandle creation
+- [x] GPU-backed test renderer with screenshot capture
+- [x] Standalone build (pinned GPUI platform dependencies)
+- [x] Native text input and multiline textarea
+- [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block drag selection with markdown copy/paste, ⌘F search decorations, full-height source mode, anchor jumps; heading-specific spacing and rules, padded code blocks, single-width table borders, and muted completed tasks. The partial `theme` prop includes `border`, `codeBlockBackground`, and `tableHeaderBackground` colors; styled spans / decorations / programmatic selection / `selectionChange` / `selectionDrag` / clipboard interception props on `<input>`/`<textarea>`
+- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` (RGBA or BGRA) on `<img>` refs
+- [x] Virtual lists (`<virtual-list>`), with sticky section headers on the `<VirtualList>` wrapper (`stickyIndices` + `renderStickyHeader`, pinned overlay above the rows) and item-geometry queries (`getVirtualListGeometry`)
+- [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, interactive task-list checkboxes with `onTaskToggle` source offsets, inline and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth; inline formulas ride the text baseline — and ` ```mermaid ` fences rendered from an app-supplied `mermaid` map with a labelled-code-card fallback)
+- [x] Inline-styled text (`<text runs={…}>`: per-segment colour, weight, italic, family, underline/strikethrough, background)
+- [x] Selectable ANSI output (`AnsiText`, virtualized streaming `AnsiLog`, `parseAnsi` / `createAnsiParser`)
+- [x] `outline` style (focus rings that take no layout space)
+- [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
+- [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
+- [x] Streaming markdown parsing (appends re-parse from the last stable block boundary; full parity with a full parse)
+- [x] Streaming diff parsing (hunk-level checkpoints; completed files are never re-parsed)
+- [x] IME composition events (`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd`)
+- [x] Spinner loading primitive (`Spinner`, dots and pulse variants)
+- [x] Element bounds queries (`getElementBounds`, `useElementBounds`)
+- [x] Auto-height transitions (`<AnimateHeight>`)
+- [x] Headless Collapsible (`Collapsible`, `CollapsibleTrigger`, `CollapsiblePanel`; controlled state, keyboard, focus restoration and retained panels)
+- [x] Custom font loading (`loadFont`, `loadFontBytes`)
+- [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, keyboard controls, editable/resizable records grid, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](../packages/beautiful-ui/README.md)
+- [x] Cross-element text selection
+- [x] Headless Select, Combobox and Tooltip
+- [x] Native `hover` and `active` styles
+- [x] Window title (`setWindowTitle`)
+- [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
+- [x] Wayland layer-shell surfaces (`layerShell` window option: panels, docks, wallpapers; Linux/Wayland only)
+- [x] Background launch (`focus`, `show`, `activateWindow`)
+- [x] Runtime window controls (`toggleFullscreen`, `isFullscreen`, `minimizeWindow`, `closeWindow`, `resizeWindow`)
+- [x] Window position (`getWindowBounds()`; `x`/`y` window options restore a saved position)
+- [x] Window close interception (`onWindowShouldClose` vetoes and observes; `closeWindow()` confirms)
+- [x] Dock relaunch observer (`onReopen`, macOS)
+- [x] Single-instance election and authenticated launch forwarding (`acquireSingleInstance`, startup queue, cwd preservation and crash recovery)
+- [x] Runtime menu bars (`setMenus`; macOS)
+- [x] File dialogs (`promptForPaths`, `promptForNewPath`)
+- [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
+- [x] Clipboard text (`writeClipboardText`, `readClipboardText`)
+- [x] Opening external URLs (`openUrl`)
+- [x] Deep links (`onOpenUrls`, `registerUrlScheme`)
+- [x] Startup-safe file/deep-link batches (`onOpenRequests`, `parseOpenRequest`, disposable subscriptions); macOS document/UTI declarations in the packager
+- [x] System notifications (`showSystemNotification`, `dismissSystemNotification`, `onSystemNotificationResponse`; `setAppIdentity` for toast attribution. macOS delivers only from a packaged `.app`)
+- [x] Last window close quits the process
+- [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
+- [x] Canvas element (`<canvas>` / `GpuixCanvas`, JS→Rust pixel bridge)
+- [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. all W3C blend modes, image data — text APIs throw `NotSupported`)
+- [x] Canvas PNG export (`toDataURL`, `toBlob`, renderer `canvasToPng`)
+- [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
+- [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
+- [x] Multiple windows (`createWindow()`: one renderer per window, ids/events/selection/automation stay per-window; on Windows/Linux later windows open on the process's single UI thread)
+- [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
+- [x] Vue Fast Refresh during `bun --hot` (HMR preload: edited components reload in place, the rest of the tree keeps `ref` state)
+- [x] Vue DevTools (`connectVueDevtools()` + the standalone devtools server: component tree and `setup()` state)
+- [ ] Hot reload of the native `.node` addon. `bun run dev` rebuilds and restarts. Native modules cannot unload.
+- [x] Native `motion.div` transitions with deterministic frame capture
+- [x] `AnimatePresence` exit animations (`exit`, `onMotionComplete`, `usePresence`)
+

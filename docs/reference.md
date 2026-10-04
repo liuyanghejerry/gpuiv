@@ -1,0 +1,3086 @@
+# API reference
+
+[Project overview](../README.md) · [Examples](../README.md#examples) · [Architecture](architecture.md) · [Feature status](status.md)
+
+The complete API guide, organized by what you want to build. Start with the
+[quick start](../README.md#quick-start) for a minimal runnable app.
+
+| Task | Read |
+|---|---|
+| Create an app | [App options](#usage), [hot reload](#hot-reload), [runtime errors](#runtime-errors) |
+| Integrate with the desktop | [Windows](#window-controls), [multiple windows](#multiple-windows), [tray](#tray), [shortcuts](#global-shortcuts), [file dialogs](#file-dialogs), [clipboard](#clipboard) |
+| Build an interactive UI | [Animation](#native-animations), [scrolling](#scrolling), [virtual lists](#virtual-lists), [text input](#text-input), [headless controls](#headless-controls) |
+| Work with content | [Native text](#native-text-components), [search](#text-search), [selection](#text-selection), [images and SVG](#images-and-icons), [canvas](#canvas) |
+| Look up supported props | [Elements](#supported-elements), [events](#supported-events), [styles](#supported-styles), [accessibility](#accessibility), [keyboard navigation](#focus-and-keyboard-navigation) |
+| Test and debug | [Automation](#automation), [GPU-backed testing](#testing), [Vue DevTools](#vue-devtools), [frame timings](#debug-frame-overlay) |
+| Ship an app | [Single instance](#single-instance-apps), [packaging](#packaging), [file associations](#file-opening-and-macos-document-associations), [auto-update](#auto-update-s3-backed) |
+
+## Usage
+
+```tsx
+import { defineComponent, ref } from 'vue'
+import { createApp } from '@gpuiv/vue'
+
+const App = defineComponent({
+  setup() {
+    const count = ref(0)
+    return () => (
+      <div style={{ display: 'flex', gap: 8, padding: 16 }}>
+        <div
+          style={{ backgroundColor: '#3b82f6', borderRadius: 8, padding: 12, cursor: 'pointer' }}
+          onClick={() => count.value++}
+        >
+          <div style={{ color: '#ffffff' }}>Count: {count.value}</div>
+        </div>
+      </div>
+    )
+  },
+})
+
+createApp(App, {
+  title: 'My App',
+  width: 800,
+  height: 600,
+  titlebarTransparent: true,
+  windowBackground: 'blurred',
+  trafficLightX: 16,
+  trafficLightY: 17,
+})
+```
+
+`createApp()` creates the native window, mounts the Vue app, and starts the frame loop.
+The red traffic-light button quits the process. Start the app again from the
+terminal.
+
+| Option | Values | Purpose |
+|---|---|---|
+| `title` | string | Window title |
+| `width` / `height` | pixels | Initial window size (default 800×600) |
+| `minWidth` / `minHeight` | pixels | Minimum window size |
+| `resizable` | boolean (default `true`) | Allow the window to be resized |
+| `fullscreen` | boolean | Start fullscreen |
+| `transparent` | boolean | Plain alpha transparency. Prefer `windowBackground` when you need blur |
+| `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |
+| `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
+| `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. Waku uses `(16, 17)` |
+| `appName` | string | Name inside the macOS application menu, in `Hide X` and `Quit X`. Defaults to `title` |
+| `appId` | string | Wayland `app_id` / X11 `WM_CLASS`, used by desktop environments for grouping and window rules |
+| `layerShell` | object | Open as a Wayland `wlr-layer-shell` surface instead of a normal window (see below). Linux/Wayland only; ignored elsewhere |
+| `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
+| `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
+| `debugFrameOverlay` | `"hidden"` \| `"minimal"` \| `"full"` | Frame-time overlay (see below) |
+
+#### Layer-shell surfaces
+
+On Linux/Wayland, `layerShell` turns the window into a compositor-anchored
+surface — a panel, dock, notification shade or wallpaper. The surface has no
+native titlebar and is placed by the compositor from its `anchor`, not by the
+window origin; `width` / `height` only constrain the axis the surface is not
+stretched along.
+
+```tsx
+render(<Bar />, {
+  appId: 'my-panel',
+  height: 34,
+  focus: false,
+  layerShell: {
+    namespace: 'my-panel',
+    layer: 'top',                              // background | bottom | top | overlay
+    anchor: ['top', 'left', 'right'],          // opposite edges stretch that axis
+    exclusiveZone: 34,                         // keep tiled windows clear of the bar
+    keyboardInteractivity: 'none',             // none | on-demand | exclusive
+  },
+})
+```
+
+`exclusiveEdge` picks where the exclusive zone applies when the anchor does not
+make it obvious; `margin` is the gap to each anchor edge in CSS order
+`[top, right, bottom, left]`. Defaults: `layer: 'top'`, a top-bar anchor, no
+keyboard interactivity.
+
+### The macOS menu bar
+
+GPUIV installs the application menu bar for you, so a fresh app already answers
+`⌘Q`, `⌘H`, `⌥⌘H`, `⌘M`, and `⌘W`. Without it `NSApp.mainMenu` is nil, macOS
+paints an empty menu bar, and those shortcuts do not exist at all: AppKit only
+provides them through menu items.
+
+```
+Apple    <appName>                Window
+         ├ Services               ├ (AppKit window tiling)
+         ├ Hide <appName>   ⌘H    ├ Minimize          ⌘M
+         ├ Hide Others     ⌥⌘H    ├ Zoom
+         ├ Show All               ├ Close Window      ⌘W
+         └ Quit <appName>   ⌘Q    └ (open windows)
+```
+
+The **title of the application menu comes from the executable**, not from
+`appName`. macOS reads it from the running binary, so `bun app.tsx` shows `bun`
+during development and a `bun build --compile` binary shows its own file name.
+Only a real `.app` bundle can change it. The items inside the menu do use
+`appName`.
+
+There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
+AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
+would take the keystroke away from text selection and from `<input>`.
+
+#### Runtime menus
+
+`setMenus(menus, onAction)` replaces the whole bar at runtime — the settings
+menu with `⌘,`, a model switcher, anything the app owns. Items fire their
+`id` back to `onAction`; `system` items keep built-in behaviors so a replaced
+bar can still quit; `keystroke` items display their key equivalent. macOS
+only — the menu bar is a macOS concept in GPUI.
+
+```tsx
+import { setMenus, useGpuixRequired } from '@gpuiv/vue'
+
+function installMenus() {
+  const renderer = useGpuixRequired()
+  setMenus(
+    renderer,
+    [
+      {
+        name: 'Chat',
+        items: [
+          { label: 'About Chat', id: 'about' },
+          { separator: true },
+          { label: 'Settings…', id: 'settings', keystroke: 'cmd-,' },
+          { separator: true },
+          { label: 'Quit Chat', system: 'quit', keystroke: 'cmd-q' },
+        ],
+      },
+      { name: 'Window', items: [{ label: 'Minimize', system: 'minimizeWindow' }] },
+    ],
+    (error, id) => {
+      if (id === 'settings') openSettings()
+    }
+  )
+}
+```
+
+The menu named exactly `Window` receives the open-window list, like the
+default bar. Submenus nest through `items` on an item. Re-binding the same
+`id` with a different `keystroke` keeps the first binding displayed — set
+the final keystrokes in one `setMenus` call.
+
+### Background launch
+
+`focus: false` opens the window **without taking focus**. The app you were
+typing in keeps the caret and the active titlebar. `show: false` goes further
+and opens no window at all, so the process runs with a live Vue tree and
+nothing on screen.
+
+```tsx
+createApp(App, { title: 'Notes', focus: false })
+```
+
+**Turn this on whenever a coding agent runs your app.** An agent that starts
+the app to check its work will otherwise yank the window in front of whatever
+you are doing, mid-sentence, once per iteration. With `focus: false` the agent
+still gets a real GPU-rendered window it can screenshot and click, and you keep
+your editor. See [Let an agent drive the app](#let-an-agent-drive-the-app).
+
+`activateWindow()` brings the window forward and focuses it. It is the only way
+to reveal a `show: false` window. Reach it from any component with
+`useGpuixRequired()`:
+
+```tsx
+import { useGpuixRequired } from '@gpuiv/vue'
+
+function Reveal() {
+  const renderer = useGpuixRequired()
+  return <div onClick={() => renderer.activateWindow?.()}>Show</div>
+}
+```
+
+Outside a component, call it on the renderer that `createNativeRenderer()`
+returned.
+
+| Platform | `focus: false` | `show: false` |
+|---|---|---|
+| macOS | window orders in front without becoming key, like `open -g` | honored |
+| Windows | `SW_SHOWNOACTIVATE` | honored |
+| Linux | **ignored**, the window opens focused | **ignored** |
+
+The process still gets a **Dock icon** on macOS. GPUI sets the regular
+activation policy, so there is no menu-bar-agent mode yet. For a real
+background daemon, run the app from a `launchd` agent in
+`~/Library/LaunchAgents/`; launchd never activates the process.
+
+`createApp()` also accepts `{ renderer }` to mount on an existing renderer and
+`{ onEvent }` to observe every event before the handler registry runs. The
+returned handle exposes `{ app, container, renderer, unmount }`.
+
+Call it again after a save and it remounts the tree on the same window.
+
+Use **`createApp()`**, not `createNativeRenderer()` plus `renderer.init()`, in
+the app entry. `bun --hot` re-runs the whole file on save.
+`createNativeRenderer()` plus `init()` would then build a second host.
+`createApp()` is idempotent: the first call owns the window, later calls only
+remount the Vue app.
+
+`createNativeRenderer()`, `resetApp()`, and `startFrameLoop()` stay public for
+tests and custom hosts. Pass `{ renderer }` into `createApp()` when you already
+have one.
+
+**One renderer drives one root.** A renderer owns one window, one native root
+id, and one event map, so mounting a second root on a renderer that already has
+one throws. `createApp()` unmounts the previous tree before remounting, so only
+code that builds its own host with `createGpuivRendererHost()` can hit this.
+
+## Window controls
+
+`toggleFullscreen()`, `isFullscreen()`, `minimizeWindow()`, `zoomWindow()`, and `resizeWindow()` drive the
+window at runtime — the same commands the traffic-light and taskbar chrome
+use. They are renderer commands (`useGpuixRequired()` reaches them):
+
+```tsx
+const renderer = useGpuixRequired()
+<div onClick={() => renderer.toggleFullscreen?.()}>Fullscreen</div>
+```
+
+`minimizeWindow()` complements the built-in `⌘M` menu item for custom
+chrome. `zoomWindow()` toggles macOS zoom or Windows/Linux maximize/restore;
+it is not fullscreen. `resizeWindow(width, height)` requests a content-viewport
+size in logical pixels, excluding the titlebar, on this renderer's window.
+Dimensions must be positive, finite numbers. GPUI and the OS own size constraints
+and apply the request asynchronously; `getWindowSize()` / `useWindowSize()` report
+the resulting viewport. Runtime window positioning remains unavailable.
+
+## Multiple windows
+
+`createWindow()` mounts a component in a **new native window** (macOS).
+`createApp()` must have run first — the first window owns the process's GPUI
+application and the macOS menu bar:
+
+```tsx
+import { createApp, createWindow } from '@gpuiv/vue'
+
+createApp(MainWindow, { title: 'Main', width: 800, height: 600 })
+
+const second = createWindow(SecondWindow, {
+  title: 'Settings',
+  width: 420,
+  height: 300,
+  onWindowShouldClose: () => saveAndClose(),
+})
+second.close() // unmount the tree, close the OS window, drop the frame-loop slot
+```
+
+Each window gets its own renderer, so element ids, events, focus, selection,
+scroll state and automation queries stay per-window — two windows never see
+each other's elements even though ids restart from 1 in each. The options are
+the same as `createApp`'s (`RenderOptions`). The returned handle adds `close()`;
+closing through the OS close button also works, but `close()` from JS is the
+tidy path — it drops the renderer from the frame loop instead of leaving an
+empty one ticking until the process exits. Automation addresses any window
+through `app.window(index)`.
+
+## Tray
+
+`setTray` / `clearTray` manage the process tray (macOS status item, Windows
+notify icon). One tray per process — a second `setTray` replaces the first —
+and the third argument fires on a tray click:
+
+```tsx
+import { setTray, clearTray } from '@gpuiv/vue'
+
+await setTray(renderer, { iconPath: trayPng, tooltip: 'Chat', template: true }, () => {
+  showMainWindow()
+})
+await clearTray(renderer)
+```
+
+`template: true` renders the icon as a monochrome macOS menu-bar template.
+Windows loads `.ico` (other formats best-effort). Linux reports unsupported —
+StatusNotifierItem over DBus is not implemented. A tray menu is not offered
+yet; clicks are the whole surface.
+
+## Global shortcuts
+
+`registerGlobalShortcut` / `unregisterGlobalShortcut` arm system-wide hotkeys
+that work with any app focused. Registering an accelerator again replaces it:
+
+```tsx
+import { registerGlobalShortcut, unregisterGlobalShortcut } from '@gpuiv/vue'
+
+await registerGlobalShortcut(renderer, 'cmd+shift+j', () => focusComposer())
+await unregisterGlobalShortcut(renderer, 'cmd+shift+j')
+```
+
+Accelerators are `'+'`-separated modifiers — `ctrl`, `alt`/`option`, `shift`,
+`cmd`/`win`/`super` — then one key: `a`–`z`, `0`–`9`, `f1`–`f12`. macOS uses
+Carbon `RegisterEventHotKey` (no accessibility permission needed); Windows
+uses `RegisterHotKey` (a combination another app already claimed fails).
+Linux reports unsupported — X11 `XGrabKey` does not survive Wayland.
+
+Use `windowDragRegion` on a dedicated title/spacer `<div>` to hand dragging
+to the OS, without a JS mouse handler. Keep buttons and inputs **beside**
+that region, not inside it: this is not CSS `app-region` inheritance or a
+`no-drag` exclusion system. Use `userSelect: "none"` on the title surface.
+Windows uses GPUI's non-client hit testing (including native snapping);
+macOS/Linux call GPUI during the native press. Double-click uses the macOS
+titlebar preference or maximize/restore on Windows/Linux. Desktop only.
+
+```tsx
+<div style={{ display: 'flex', height: 40 }}>
+  <div windowDragRegion style={{ flexGrow: 1, userSelect: 'none' }}>
+    <text>My app</text>
+  </div>
+  <div onClick={() => renderer.zoomWindow?.()}>Zoom</div>
+</div>
+```
+
+See [`examples/window-shell.tsx`](../examples/window-shell.tsx) for a complete
+shell with keyboard-accessible buttons and one scroll parent.
+The remaining ColaMD P1 gaps and acceptance criteria are tracked in
+[`docs/p1-framework-capabilities.md`](p1-framework-capabilities.md).
+
+### Cancellable smooth scrolling
+
+`useScrollController()` is component-scoped; `createScrollController(renderer)`
+works outside Vue. Both expose `scrollTo(id, options)`, `cancel(id?)`, and
+`dispose()`. A new request replaces the old request for the same element;
+other elements remain independent. Unmount disposes the composable.
+
+```tsx
+const scrolling = useScrollController()
+// IDs and offsets refer to an already mounted/painted scroll container.
+const result = await scrolling.scrollTo(paneId, {
+  y: -900, behavior: 'smooth', duration: 240, signal: abortController.signal,
+})
+if (result.status === 'finished') flashTarget()
+// On the scroll owner: onScroll / onMouseDown => scrolling.cancel(paneId)
+```
+
+Offsets use GPUI coordinates (down/right = negative); omitted axes are
+preserved. Default behavior is `instant`; duration 0 supports app-owned
+reduced-motion preferences. Results are `finished`, `cancelled`,
+`unavailable` (missing capability/container), or `timeout`, plus the last
+observed native offset. Invalid values throw; renderer errors reject.
+Completion samples native offsets for three stable 16ms intervals after the
+final command, allowing GPUI to clamp at content boundaries, with a 1s
+settling limit. This is a programmatic completion heuristic, **not a native
+`scrollend` event or a paint fence**. Wheel/momentum scrolling is not observed
+automatically; wire cancellation on user input. Use `app.settle()` in GPU
+tests before pixel assertions. No additional/nested scroll container is added.
+
+### Close interception
+
+`createApp(App, { onWindowShouldClose })` switches closing into an
+Electron-style veto: the red button and `⌘W` path are cancelled and reported
+to JS instead, and the app decides what happens next. `closeWindow()` is the
+confirmed close — it bypasses the veto, and closing the last window still
+quits the process.
+
+```tsx
+createApp(App, {
+  onWindowShouldClose: () => {
+    if (hasUnsavedWork()) showConfirmDialog()  // calls closeWindow() on Yes
+    else renderer.closeWindow?.()
+  },
+})
+```
+
+`onReopen` observes a Dock-icon relaunch of the running process (macOS
+`applicationShouldHandleReopen`) — focus the window, open a new document,
+whatever the app wants. Both observers ride the same render-level wiring as
+`onKeyDown`/`onKeyUp` and disarm on unmount.
+
+## Opening URLs
+
+`openUrl(url)` hands a URL to the user's default handler — the system browser
+for `https://`, the registered app for custom schemes. It is a renderer
+command (`useGpuixRequired()` reaches it), for links that must leave the app
+such as OAuth callbacks or payment pages.
+
+```tsx
+const renderer = useGpuixRequired()
+<div onClick={() => renderer.openUrl?.('https://gpuiv.dev/docs')}>Docs</div>
+```
+
+## File dialogs
+
+`promptForPaths` opens the platform's file-selection panel and
+`promptForNewPath` the save panel. Both resolve with `null` when the user
+cancels — the DOM's `showOpenFilePicker()` shape, not a modal return value.
+
+```tsx
+import { promptForNewPath, promptForPaths, useGpuixRequired } from '@gpuiv/vue'
+
+function Toolbar() {
+  const renderer = useGpuixRequired()
+  const open = async () => {
+    const paths = await promptForPaths(renderer, {
+      files: true,
+      directories: false,
+      multiple: true,
+      prompt: 'Open drawings',
+    })
+    if (paths) console.log(paths)
+  }
+  const saveAs = async () => {
+    const path = await promptForNewPath(renderer, {
+      directory: '/tmp',
+      suggestedName: 'drawing.png',
+    })
+    if (path) console.log(path)
+  }
+  return (
+    <div>
+      <div testId="open" onClick={open}>Open…</div>
+      <div testId="save" onClick={saveAs}>Save as…</div>
+    </div>
+  )
+}
+```
+
+`promptForNewPath` defaults `directory` to the process working directory. The
+panels run asynchronously — the dialog answer arrives through a callback on the
+Node event loop, so nothing blocks while the panel is open.
+
+## Clipboard
+
+`writeClipboardText(text)` / `readClipboardText()` move plain text;
+`writeClipboardImage(data, width, height)` puts straight-alpha RGBA pixels on
+the system clipboard as PNG, and `readClipboardImage()` reads an image back,
+decoded to the same RGBA layout, or `null` when the clipboard holds no image.
+All are renderer commands — reach the renderer with `useGpuixRequired()`:
+
+```tsx
+import { useGpuixRequired } from '@gpuiv/vue'
+
+function CopyButton() {
+  const renderer = useGpuixRequired()
+  const copy = () => {
+    const rgba = new Uint8Array([255, 0, 0, 255])
+    renderer.writeClipboardImage?.(rgba, 1, 1)
+  }
+  return <div testId="copy" onClick={copy}>Copy pixel</div>
+}
+```
+
+The test platform keeps a real in-memory clipboard, so both round trips are
+testable end-to-end through `TestRenderer`.
+
+## Debug frame overlay
+
+GPUI paints frame-time stats into the window after layout. The overlay is not
+a Vue element. A Vue FPS label would update every frame and cause more work.
+
+```tsx
+createApp(App, { title: 'My App', debugFrameOverlay: 'full' })
+```
+
+| Mode | What you see |
+|---|---|
+| `hidden` | nothing (default) |
+| `minimal` | last draw time, e.g. `8.3 MS` |
+| `full` | `CUR`, `1%`, `10%`, `MAX`, `FRAMES` |
+
+Or call the renderer:
+
+```ts
+renderer.setDebugFrameOverlay('full')
+renderer.cycleDebugFrameOverlay()
+renderer.resetDebugFrameOverlayStats()
+renderer.getDebugFrameOverlay() // 'hidden' | 'minimal' | 'full'
+renderer.getDebugFrameOverlayStats()
+// { currentMs, p90Ms, p99Ms, maxMs, frames, samples }
+```
+
+`p90Ms` is the overlay **10%** line. `p99Ms` is the **1%** line. Those are the slow tail.
+
+The overlay shows **draw time**, not FPS. `8.3 MS` is about 120 Hz.
+
+The chat example has a regression test for this: `examples/chat.perf.test.tsx`. It times mount, wheel draw, and sidebar clicks. It asserts p95, not every frame.
+
+On macOS, `THROTTLE=utility` restarts the process under `taskpolicy -c utility`. That pins work to E-cores. It is an **M1/M2 Air CPU** proxy, not Chrome 6x. GPU and RAM stay fast. `THROTTLE=background` is slower.
+
+```bash
+cd examples
+THROTTLE=utility bun run test chat.perf.test.tsx
+THROTTLE=utility bun --hot chat.tsx
+```
+
+## Runtime errors
+
+A throw in a component render, in an event handler, in a frame-loop `tick()`,
+or a process-level `uncaughtException` / `unhandledRejection` does not kill the
+window. The process stays alive and the tree is replaced by an overlay with the
+error message, the stack, and a **Reload** button that remounts the last tree.
+Under automation the pieces carry the test ids `runtime-error-overlay`,
+`runtime-error-stack`, and `runtime-error-reload`.
+
+Each window uses its own `onRuntimeError`, `errorOverlay`, and Reload target.
+A failure in a `createWindow()` app leaves the main window's tree and state
+intact. Process-level errors with no window identity use the main window.
+
+- Every path funnels into one scheduler: the Vue `app.config.errorHandler`, the
+  frame-loop tick catch, and the `process` handlers route to the owning window's
+  overlay. Event handlers, including arrays, are wrapped like web `v-on`: a throw runs the
+  `onErrorCaptured` chain first and only what survives reaches the overlay.
+- The overlay is scheduled on a microtask keyed to the failing mount. If a
+  newer remount already happened (a `bun --hot` save, a Reload), the stale
+  overlay is dropped instead of painted over the new tree.
+- The first error paints the overlay; further errors while it is up only log.
+- Saving a file under `bun --hot` still remounts — overlay state never
+  outlives a remount.
+- Errors with no mounted app (before `createApp()`, or in scripts that only
+  use `startFrameLoop()`) keep the process alive and log to the console.
+- `resetApp()` uninstalls the process-level handlers.
+
+### Observing and disabling
+
+`createApp()` options mirror the roles the Vue community splits between
+`errorHandler` and the dev-server overlay:
+
+```ts
+createApp(App, {
+  // Report every routed error — render, event handlers, frame-loop ticks,
+  // process-level throws — in parallel with the overlay. `info` names the
+  // source ("render function", "native event handler", ...). The
+  // Sentry-style integration point.
+  onRuntimeError: (error, info) => report(error, info),
+  // Turn the overlay off; errors still log and still reach onRuntimeError.
+  errorOverlay: process.env.NODE_ENV === 'production',
+})
+```
+
+### Local fallback instead of the global overlay
+
+Any ancestor component can swallow errors from a subtree the way the official
+Vue error-boundary pattern does: `onErrorCaptured` returning `false` stops
+propagation, so the overlay never fires for that subtree. This covers render
+errors **and** event-handler throws. Note the boundary only sees **descendant
+components** — a throw from the boundary's own inline template sails past it,
+so keep the risky markup in a child component (slots and wrappers do this
+naturally).
+
+```tsx
+const Boundary = defineComponent({
+  setup(_, { slots }) {
+    const failed = ref(false)
+    onErrorCaptured((error) => {
+      report(error)
+      failed.value = true
+      return false
+    })
+    return () => (failed.value ? <text>Something went wrong</text> : slots.default!())
+  },
+})
+```
+
+A runnable tour of all of this — the overlay + Reload, the boundary, and an
+`onRuntimeError` log — lives in `examples/error-handling.tsx`
+(`bun run error-handling` in `examples/`).
+
+## Hot reload
+
+### 1. End the file with `createApp()`
+
+```tsx
+import { defineComponent } from 'vue'
+import { createApp } from '@gpuiv/vue'
+
+const App = defineComponent({
+  setup() {
+    return () => <div style={{ padding: 16 }}>hello</div>
+  },
+})
+
+createApp(App, { title: 'My App', width: 800, height: 600 })
+```
+
+Do **not** call `createNativeRenderer()` or `init()` in this file. `bun --hot`
+re-runs the whole entry on save. A second `init()` would open a second window.
+
+### 2. Start the app with `bun --hot`
+
+Prefer **`bun --hot`** over a plain `bun` or `tsx` run. Without `--hot`, a
+save starts a second process. With it, `createApp()` remounts Vue on the same
+window.
+
+```bash
+bun --hot app.tsx
+cd examples && bun --hot chat.tsx
+```
+
+### 3. Save the file — Fast Refresh
+
+Register the HMR preload once per app (`bunfig.toml` next to the entry):
+
+```toml
+preload = ["./node_modules/@gpuiv/vue/hmr-preload.js"]
+```
+
+Then a save does Vue Fast Refresh instead of a full remount:
+
+```
+save .tsx  ►  bun re-evaluates the entry  ►  edited components reload in place
+                     │
+                     ▼
+              GpuixRenderer, window, GPU stay; createApp() keeps the live tree
+```
+
+The preload injects a registration call after every top-level
+`const X = defineComponent(...)`. On a save, each re-registered component is
+compared by source hash and reloaded through Vue's HMR runtime. Vue's reload
+remounts the **edited component** in place — its local `ref` state resets —
+while its ancestors, siblings, and their subtrees keep theirs. A change to
+module-level code around the components (constants, helpers, imports) reloads
+every component in that file. `createApp()` then keeps the live tree instead
+of remounting.
+
+**Stays:** window, GPU device, native `.node` addon, GPUI scroll physics,
+and every unedited component's `ref` state.
+
+**Resets:** the edited component's local state (Vue reload semantics), or
+everything when a save has no reloadable component change (the classic
+remount path).
+
+Constraints:
+
+- Only top-level `const X = defineComponent(...)` statements get an HMR id.
+  Components created inside factories remount with their parent.
+- `createApp(...)` option edits do not apply on a hot turn — restart for
+  window option changes.
+- The transform is a source scanner, not a full parser; a file it cannot
+  scan cleanly falls back to the classic remount. Files with no top-level
+  component (`theme.ts`, `utils.ts`, a `.json`) load unchanged.
+- A statement tail the injected registration cannot follow — `as T`,
+  `satisfies T`, `, B = …`, a ternary — leaves that file on the classic
+  remount instead of emitting a module that cannot parse.
+- Bun 1.3.x does not watch files a plugin served through `onLoad`
+  ([oven-sh/bun#4689](https://github.com/oven-sh/bun/issues/4689), the open
+  `watchFiles`/`watchDirs` gap), and the preload serves every matched
+  `.ts`/`.tsx`. A save only re-evaluates when the edited file is the entry —
+  the one file Bun always watches — or a file the preload does not match (a
+  `.json` import). Saving another component module is a no-op; save the
+  entry to pick the edit up, or restart.
+- Production builds are unaffected: `Bun.build` does not run the preload,
+  and the injected calls no-op without Vue's dev HMR runtime.
+
+Without the preload, a save is the classic remount: the entry re-evaluates
+and `createApp()` mounts a fresh app on the same native host (window, GPU,
+and `.node` stay; all `ref` state resets).
+
+Native `.node` edits still need a rebuild. See [Developing the Rust side](development.md#developing-the-rust-side).
+
+On **macOS**, `startFrameLoop` calls `renderer.tick()` at a fixed rate (~125fps by
+default). Each tick drains only ready AppKit events and Core Foundation sources,
+then returns without waiting for the next native wake. Bun timers, sockets, promises,
+and PTY callbacks can run between ticks. Pass `{ frameMs }` to change the rate, and
+call `.stop()` on the returned handle to end it.
+
+On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
+dedicated Rust UI thread. `renderer.tick()` only reports whether that loop is
+still running, so `startFrameLoop` polls it at the same rate and returns once
+the last window closes — `createApp()` then exits the process. Windows DPI
+awareness (Per-Monitor V2) is set from inside the `.node`, since node.exe and
+bun.exe carry no manifest to declare it.
+All platforms use GPUI's native platform, window, renderer, input, scroll,
+clipboard, keyboard, and IME implementations. The embedded macOS run-loop
+extension comes from the pinned GPUI fork. CI runs the full Vue and example
+test suites through DirectX on Windows.
+
+> [!IMPORTANT]
+> On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of
+> ticks per second and burns **73% CPU on a completely idle app**, versus **1%** when
+> paced.
+
+## Native animations
+
+Use **`motion.div`** to animate from an initial style to a target style. Vue
+sends the target once. Rust calculates intermediate values and requests GPUI
+frames until the transition finishes, without a Vue render or N-API call for
+each frame.
+
+For loading states, **`Spinner`** is the ready-made primitive: three pulsing
+dots by default, an indeterminate sliding bar with `variant="pulse"`. It
+animates plain opacity/position styles over the mutation protocol, exposes
+`size`, `color`, and `width`, announces itself through the `status` a11y
+role, and accepts a `phase` prop that pins the animation for deterministic
+screenshots.
+
+```tsx
+import { Spinner } from '@gpuiv/vue'
+
+const Thinking = () => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 12 }}>
+    <Spinner label="Thinking" />
+    <text style={{ color: '#8b8fa3' }}>Thinking…</text>
+  </div>
+)
+```
+
+### Animate a target
+
+```tsx
+import { motion } from '@gpuiv/vue'
+
+const WelcomeCard = defineComponent({
+  setup() {
+    return () => (
+      <motion.div
+        initial={{ width: 0, opacity: 0 }}
+        animate={{ width: 320, opacity: 1 }}
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        style={{ overflow: 'hidden' }}
+      >
+        <text style={{ color: '#ffffff' }}>Welcome</text>
+      </motion.div>
+    )
+  },
+})
+```
+
+Set **`initial={false}`** when the element must mount at its first `animate`
+target. Later `animate` changes still transition normally. If a target changes
+while motion is active, the next transition starts from the current visible
+value, so reversing an animation does not jump.
+
+### Targets and timing
+
+Motion currently accepts these **numeric targets**:
+
+| Target | Range or unit |
+|---|---|
+| `width`, `height` | pixels, zero or greater |
+| `top`, `right`, `bottom`, `left` | pixels |
+| `opacity` | `0` through `1` |
+| `borderRadius` | pixels, zero or greater |
+
+The **transition** uses seconds, like Motion for Vue:
+
+| Option | Default | Values |
+|---|---:|---|
+| `duration` | `0.3` | Non-negative seconds |
+| `delay` | `0` | Non-negative seconds |
+| `ease` | `"easeOut"` | `"linear"`, `"ease"`, `"easeIn"`, `"easeOut"`, `"easeInOut"`, or `[x1, y1, x2, y2]` |
+
+Springs, keyframes, variants, and shared layout animations are not available
+yet. **Exit** uses `AnimatePresence`, like Motion for React.
+
+### Animate a sidebar
+
+Animate an **outer clipping container** and keep the inner sidebar at a fixed
+width. This reveals or hides the content without reflowing its text on every
+frame.
+
+```tsx
+import { motion } from '@gpuiv/vue'
+
+const SidebarFrame = defineComponent({
+  props: { collapsed: { type: Boolean, required: true } },
+  setup(props, { slots }) {
+    const sidebarWidth = 252
+    const dividerWidth = 1
+
+    return () => (
+      <motion.div
+        initial={false}
+        animate={{ width: props.collapsed ? 0 : sidebarWidth + dividerWidth }}
+        transition={{ duration: 0.2, ease: 'easeOut' }}
+        style={{
+          display: 'flex',
+          flexDirection: 'row',
+          height: '100%',
+          flexShrink: 0,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ width: sidebarWidth, height: '100%', flexShrink: 0 }}>
+          {slots.default?.()}
+        </div>
+        <div style={{ width: dividerWidth, height: '100%', flexShrink: 0 }} />
+      </motion.div>
+    )
+  },
+})
+```
+
+The **chat example** uses this pattern. The sidebar remains mounted while its
+outer width moves between `253` and `0` pixels.
+
+### Animate unmount
+
+A `motion.div` with **`exit`** only leaves after that target finishes, and only
+when it is a child of **`AnimatePresence`**. Without `AnimatePresence`, Vue
+destroys the node on the same flush.
+
+```tsx
+import { AnimatePresence, motion } from '@gpuiv/vue'
+
+const Toast = defineComponent({
+  props: { show: { type: Boolean, required: true } },
+  setup(props) {
+    return () => (
+      <AnimatePresence>
+        {props.show ? (
+          <motion.div
+            key="toast"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2, ease: 'easeOut' }}
+          >
+            <text>Saved</text>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    )
+  },
+})
+```
+
+Give every child a **unique `key`** when more than one child can leave. Set
+**`initial={false}`** on `AnimatePresence` to skip enter on the first paint.
+A child with no `exit` is removed without a tween.
+
+`motion.div` also takes **`onMotionComplete`**, and the payload's
+**`motionGeneration`** names the logical target that settled — a completion
+queued for a previous target never unmounts a node that retargeted. Custom
+components join the same contract through **`usePresence()`** (call the
+returned `safeToRemove` when your exit work is done) or read state without
+participating via **`useIsPresent()`**.
+
+### Animate to a natural height
+
+`<AnimateHeight height={open ? 'auto' : 0}>` is the drawer/accordion
+primitive — the answer to the web's `grid-template-rows: 0fr → 1fr` trick.
+The content always lays out at its natural height; the component reads that
+height back through `useElementBounds` and tweens the outer box between `0`
+and the measured value. Content that grows while open is followed
+automatically, since measurement polls continuously.
+
+```tsx
+import { AnimateHeight } from '@gpuiv/vue'
+
+<AnimateHeight height={open ? 'auto' : 0} duration={0.3}>
+  <DrawerBody />
+</AnimateHeight>
+```
+
+For direct access, `useElementBounds(ref)` polls an element's last painted
+window-space bounds (`renderer.getElementBounds` underneath).
+Set `initialHeight={0}` to animate newly mounted content from a closed height.
+`AnimateHeight` delivers completion handlers only for the current height target.
+
+### Capture exact frames
+
+The [automation API](#automation) can freeze the native motion clock and render
+specific timestamps. This avoids timer sleeps and gives CI the same frames on
+every run.
+
+```tsx
+import { connectTest } from '@gpuiv/vue/automation'
+import { createTestApp } from '@gpuiv/vue/testing'
+import { ChatApp } from './chat'
+
+const app = createTestApp(ChatApp)
+const automation = await connectTest(app.renderer, app.settle)
+
+const startedAt = await automation.clock.pause()
+await automation.getByTestId('sidebar-collapse').click()
+
+await automation.captureFrames('review/sidebar', [
+  startedAt,
+  startedAt + 50,
+  startedAt + 100,
+  startedAt + 150,
+  startedAt + 200,
+])
+
+await automation.clock.resume()
+```
+
+## Scrolling
+
+Containers with `overflow: "scroll"` become natively scrollable. GPUI handles scroll physics, clipping, and offset persistence automatically.
+
+Plain scroll containers still build every child. Use `<virtual-list>` below when the collection can grow large.
+
+> [!IMPORTANT]
+> **Nested scrolling is not supported.** One parent may scroll. An inner
+> `overflow: "scroll"`, `<virtual-list>`, or `<diff>` must not. GPUI gives both
+> hitboxes the same wheel event, so the inner list steals the gesture.
+>
+> Keep long inner content in that parent. Collapse it behind an **expandable**
+> (preview plus Show more) instead of giving the child its own viewport.
+>
+> Horizontal overflow is the exception. `overflowX: "scroll"` on a wide child
+> (a code row, a table) does not steal the vertical wheel. GPUIV lays that
+> scroller out as a flex viewport with `minWidth: 0`. The wide child must not
+> shrink: set `flexShrink: 0` or a definite width. Swipe on **X** to pan.
+> A vertical wheel stays on the parent.
+
+```tsx
+const Expandable = defineComponent({
+  props: { preview: { type: String, default: undefined } },
+  setup(props, { slots }) {
+    const open = ref(false)
+    return () => (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {open.value ? slots.default?.() : props.preview}
+        {!open.value && <div onClick={() => (open.value = true)}>Show more</div>}
+      </div>
+    )
+  },
+})
+```
+
+```tsx
+const ScrollableList = defineComponent({
+  setup() {
+    return () => (
+      <div style={{ height: 300, overflow: 'scroll' }}>
+        {items.map((item, i) => (
+          <div key={i} style={{ height: 60, padding: 12 }}>
+            {item.name}
+          </div>
+        ))}
+      </div>
+    )
+  },
+})
+```
+
+Per-axis scrolling: use `overflowX: "scroll"` or `overflowY: "scroll"`.
+
+For programmatic scroll, prefer the host ref: `scrollIntoView()` walks to the
+element's nearest scroll parent (an `overflow: "scroll"` div or a
+`<virtual-list>`) and scrolls until the element is visible. The renderer's
+`scrollTo` and `scrollToItem` still exist when you already have an id:
+
+```tsx
+const ProgrammaticScroll = defineComponent({
+  setup() {
+    const lastItem = ref<{ scrollIntoView(): void } | null>(null)
+
+    return () => (
+      <>
+        <div style={{ height: 200, overflow: 'scroll' }}>
+          {items.map((item, i) => (
+            <div key={i} ref={i === items.length - 1 ? lastItem : undefined}>
+              {item}
+            </div>
+          ))}
+        </div>
+        <div onClick={() => lastItem.value?.scrollIntoView()}>Jump to last</div>
+      </>
+    )
+  },
+})
+```
+
+A `ref` on a host element (`div`, `virtual-list`) receives the host node itself,
+whose `id` is the element ID and whose `scrollIntoView()` reveals it in the
+nearest scroller. Plain components are not ref-forwarded to host ids;
+`<VirtualList>` is the exception — it exposes its element `id` plus scroll
+methods through its ref (see [Programmatic scrolling](#programmatic-scrolling)).
+
+```ts
+// Available scroll methods on the renderer:
+renderer.scrollTo?(elementId, x, y)                          // set offset directly
+renderer.scrollToItem?(elementId, index, offsetInItem?)      // scroll child into view; px offset, may be negative on a virtual list
+renderer.scrollIntoView?(elementId)                          // nearest scroll parent
+renderer.getScrollOffset?(elementId)                         // returns [x, y] or null
+renderer.getListScrollTop?(elementId)                        // virtual-list logical anchor [itemIndex, offsetInItemPx, viewportHeightPx] or null
+```
+
+## Virtual lists
+
+Use `<virtual-list>` for **long, variable-height collections** such as message lists. Vue and Rust retain every row, but GPUI only builds, lays out, and paints rows near the viewport.
+
+```tsx
+const MessageList = defineComponent({
+  props: { messages: { type: Array as () => Message[], required: true } },
+  setup(props) {
+    return () => (
+      <virtual-list
+        alignment="bottom"
+        followTail
+        estimatedItemHeight={180}
+        style={{ flexGrow: 1, minHeight: 0 }}
+      >
+        {props.messages.map((message) => (
+          <Message key={message.id} message={message} />
+        ))}
+      </virtual-list>
+    )
+  },
+})
+```
+
+The list needs a **bounded height** or bounded flex space. Its direct children are rows and can contain any GPUIV host or custom element.
+
+| Prop | Default | Purpose |
+|---|---:|---|
+| `alignment` | `"top"` | Use `"bottom"` for chat-style initial positioning |
+| `followTail` | `false` | Follow appended rows until the user scrolls away |
+| `overdraw` | `512` | Extra pixels built outside the viewport |
+| `estimatedItemHeight` | none | Gives unmeasured rows an initial height estimate |
+
+### How virtualization works
+
+**Vue reconciliation stays normal.** The complete keyed child list crosses the mutation protocol and remains in Rust's retained tree. GPUIV defers only the expensive GPUI element construction, layout, and paint work.
+
+```text
+Vue vnode diff + Rust RetainedTree     all row IDs, props, text, and events
+                 │
+                 ▼
+          GPUI ListState          row count and measured height cache
+                 │
+                 ▼ visible indexes plus overdraw
+          cx.processor            re-enters GpuixView after root render
+                 │
+                 ▼
+          fresh BuildCtx          builds only the requested subtree
+                 │
+                 ▼
+       GPUI layout and paint      visible rows only
+```
+
+GPUI measures a row when it enters the viewport. `estimatedItemHeight` gives unseen rows an approximate height so the scrollbar is useful before every row has been visited. The measured height replaces the estimate automatically.
+
+When a retained descendant changes, GPUIV marks its direct row for remeasurement. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
+
+### Row boundaries
+
+Each **direct host child** is one virtual row. Give every row a stable key and one host root:
+
+```tsx
+<virtual-list style={{ height: 500 }}>
+  {messages.map((message) => (
+    <div key={message.id} style={{ paddingBottom: 24 }}>
+      <Message message={message} />
+    </div>
+  ))}
+</virtual-list>
+```
+
+A row can contain nested `<div>`, `<text>`, `<markdown>`, `<code>`, `<diff>`, `<input>`, and `<textarea>` elements. Focusable rows stay active when they move offscreen, so keyboard input and native editor state are preserved. Those children must not scroll. Nested scrolling is not supported; see [Scrolling](#scrolling).
+
+### Chat tail behavior
+
+Combine `alignment="bottom"` and `followTail` for a chat thread:
+
+```tsx
+<virtual-list
+  alignment="bottom"
+  followTail
+  estimatedItemHeight={220}
+  style={{ flexGrow: 1, minHeight: 0 }}
+>
+  {turns.map((turn) => (
+    <ChatTurn key={turn.id} turn={turn} />
+  ))}
+</virtual-list>
+```
+
+The list follows new rows while the user is at the bottom. Scrolling upward pauses tail following. Returning to the bottom enables it again. A streaming final row is remeasured as its content grows.
+
+### Scroll anchoring
+
+The list is anchored on a **row index**, not on a pixel offset. In children mode Vue reconciles by key, so that index still lands on the same row after a prepend: the rows already on screen stay exactly where they are. A browser does the same, and calls it scroll anchoring.
+
+One exception, also copied from the browser: a top-aligned list that is scrolled to the **very top** stays at the top, so a prepended row is visible.
+
+```text
+scrolled down                          pinned to the top
+┌──────────────────┐                   ┌──────────────────┐
+│ new row  (above) │  ◄── inserted     │ new row          │  ◄── inserted, visible
+├──────────────────┤                   ├──────────────────┤
+│ ░░ viewport ░░░░ │  stays put        │ ░░ viewport ░░░░ │  follows the insert
+│ ░░░░░░░░░░░░░░░░ │                   │ ░░░░░░░░░░░░░░░░ │
+└──────────────────┘                   └──────────────────┘
+```
+
+That is what a todo list or a feed wants: putting the fresh row in front of the array puts it on screen. A history pane that loads older pages while the user reads should use `alignment="bottom"` instead, so a page load never moves the text.
+
+**With `itemCount` (raw host usage), the app owns the correction.** There is no key to reconcile against, so the index is all there is. Prepending shifts every row down one slot, and the anchor keeps pointing at the old number, so the content slides by exactly the number of rows you inserted. Move `windowStart` by the same amount:
+
+```tsx
+const prepend = (fresh: Row) => {
+  rows.value = [fresh, ...rows.value]
+  // The anchor is an index. One new row above the window means every existing
+  // row moved down one, so the window has to move with it.
+  windowStart.value = windowStart.value === 0 ? 0 : windowStart.value + 1
+}
+```
+
+Leave `windowStart` at `0` alone; the list is pinned to the top there and the new row should be visible. The `VirtualList` wrapper computes its window from `visibleRange` events, so it needs no manual correction.
+
+### Programmatic scrolling
+
+`<VirtualList>` exposes imperative methods through a template ref. The wrapper owns its host element id and widens the mounted window before a far scroll lands:
+
+```tsx
+import { VirtualList, type VirtualListInstance } from "@gpuiv/vue"
+
+const Results = defineComponent({
+  props: { rows: { type: Array as () => Result[], required: true } },
+  setup(props) {
+    const list = ref<VirtualListInstance | null>(null)
+
+    const reveal = (index: number) => {
+      list.value?.scrollToItem(index)
+    }
+
+    return () => (
+      <>
+        <VirtualList ref={list} style={{ height: 400 }} itemCount={props.rows.length} estimatedItemHeight={64} renderItem={(index) => <ResultRow key={props.rows[index]!.id} row={props.rows[index]!} />} />
+        <div onClick={() => reveal(props.rows.length - 1)}>Reveal latest</div>
+      </>
+    )
+  },
+})
+```
+
+- `scrollToItem(index, offsetInItem?)` — `offsetInItem` is in pixels and **may be negative**, which anchors the viewport top above the row. The next layout resolves it against real measured heights: that is the pixel-stable restore primitive for infinite-scroll history (read `getListScrollTop` first, commit the fetched page, then re-anchor on the message that was under the loading row).
+- `getListScrollTop()` — the list's logical anchor as `{ itemIndex, offsetInItem, viewportHeight, atEnd }`, or null before mount. It is exact even while row heights are still estimates, because it is the anchor gpui itself scrolls by. `atEnd` decodes gpui's at-end sentinel (`itemIndex == itemCount`, a bottom-aligned list resting at its very end); converting that sentinel to pixels is app knowledge (it depends on the trailing edge height).
+- `id` — the host element id, for direct `renderer` calls on surfaces the wrapper does not cover.
+
+Virtual-list `scrollToItem` calls are applied on the **next render, after that frame's child splice**, so an index computed against a just-committed child list is never shifted twice. On the renderer the same pair exists element-id-addressed — `renderer.scrollToItem(id, index, offsetInItem?)` and `renderer.getListScrollTop(id)` returning the raw `[itemIndex, offsetInItemPx, viewportHeightPx]` tuple — and `scrollTo`, `scrollToItem`, and `getScrollOffset` all support virtual lists.
+
+### Row heights
+
+**Rows do not need equal heights, and you do not need to know them.** GPUI measures a row when it enters the viewport. `estimatedItemHeight` is a **hint for rows nothing has measured yet**, not a size contract.
+
+```text
+index:     0        1        2        3        4        5        6        7
+       ┌────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+       │  hint  │  hint  │measured│measured│measured│  hint  │  hint  │  hint  │
+       │  220px │  220px │  184px │  512px │   96px │  220px │  220px │  220px │
+       └────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+           ▲                          ▲                          ▲
+           │                          │                          │
+     estimate only         real, variable heights          estimate only
+                          (viewport plus overdraw)
+```
+
+The sum of that height cache is the scroll length, so a rough estimate only affects **scrollbar accuracy** before a row is visited. The measured height replaces the estimate automatically, and the scrollbar converges as you scroll.
+
+When a retained descendant changes, GPUIV marks its direct row for remeasurement, so a streaming row grows correctly. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
+
+`estimatedItemHeight` is optional in children mode, where every row exists and can be measured. It is **required** with `itemCount`, because Vue never mounts the rows outside the window and native has no element to measure. Those indexes render as an empty box of the estimated height until Vue mounts the real row.
+
+### Performance model
+
+| Work | Plain scroll container | `<virtual-list>` children | `VirtualList` + `itemCount` |
+|---|---|---|---|
+| Vue subtree | All rows | All rows | Visible window |
+| Rust retained nodes | All rows | All rows | Visible window |
+| GPUI row construction | All rows | Visible rows plus overdraw | Visible rows plus overdraw |
+| Layout and paint | All rows | Visible rows plus overdraw | Visible rows plus overdraw |
+| Height metadata | None | One lightweight entry per row | One lightweight entry per logical row |
+
+`VirtualList` with `itemCount` and `renderItem` mounts only the visible window. Use that for long transcripts. A 10,000-row `turns.map` still creates every child. Collections with millions of rows still need application-level paging or a data-owning native element.
+
+### Keep scroll fast
+
+A wheel event notifies the window view. GPUI then rebuilds the **visible**
+rows and Taffy lays them out again. Draw time is the cost of those rows, not
+the length of the list.
+
+Put a long list on `<virtual-list>`. Keep `overdraw` near one extra
+viewport. Put fat content in one native node (`<markdown>`, `<code>`, `<diff>`),
+not a tree of Vue components.
+
+The host `<virtual-list>` still retains every child. Pass `itemCount`
+and `renderItem` through `VirtualList` so mount only creates the window.
+
+```tsx
+import { VirtualList } from '@gpuiv/vue'
+
+const Transcript = defineComponent({
+  props: { turns: { type: Array as () => Turn[], required: true } },
+  setup(props) {
+    return () => (
+      <VirtualList
+        itemCount={props.turns.length}
+        estimatedItemHeight={220}
+        style={{ flexGrow: 1, minHeight: 0 }}
+        renderItem={(index) => <ChatTurn key={props.turns[index]!.id} turn={props.turns[index]!} />}
+      />
+    )
+  },
+})
+```
+
+`turns` is a new array only when a message arrives. Sidebar and draft updates
+leave that reference alone, so the component's prop comparison skips the map —
+exactly what `memo` did in the React binding. The chat example uses
+this pattern.
+
+`overflowX: "scroll"` on a wide child must not steal the vertical wheel.
+GPUIV sets `restrict_scroll_to_axis` on that path. Native
+`overflow_x_scroll()` must call the same method.
+
+Turn on `debugFrameOverlay: 'full'` while you scroll. The overlay is **draw
+time**. `8.3 MS` is about 120 Hz.
+
+## Text input
+
+`<input>` and `<textarea>` use GPUI's platform input handler. They support a
+native caret, text selection, IME composition, clipboard actions, undo/redo,
+grapheme-safe deletion and mouse positioning.
+
+IME composition is observable: `onCompositionStart` fires once when marking
+begins, `onCompositionUpdate` on every candidate change, and
+`onCompositionEnd` when the composition commits or cancels — the DOM's
+lifecycle, so an app can suppress shortcuts while a pinyin candidate is open.
+
+```tsx
+const Composer = defineComponent({
+  setup() {
+    const draft = ref('')
+    return () => (
+      <textarea
+        value={draft.value}
+        placeholder="Ask anything"
+        minRows={1}
+        maxRows={8}
+        onChange={(event) => (draft.value = event.value ?? '')}
+        onSubmit={send}
+      />
+    )
+  },
+})
+```
+
+`Enter` inserts a newline in a `<textarea>`. Pass **`onSubmit`** to emit that
+event on Enter instead; `Shift+Enter` still inserts a newline. An `<input>`
+always emits `onSubmit` on Enter. The editor updates natively first, then
+reports the complete value to Vue.
+The editor updates natively first, then reports the complete value to Vue.
+`value` changes can replace the native content, but keeping the same prop value
+does not reject an edit like a browser-controlled input.
+
+> **`v-model` is not supported on host elements.** `modelValue` is a reserved
+> prop and never reaches Rust. Use `:value` + `@change` (`value` + `onChange`
+> in TSX). `onInput` is accepted as an alias for `change`.
+
+The focused caret stays solid during edits and then blinks every 500ms while
+idle. It stops scheduling repaint frames on blur or while the window is
+inactive. Override its colour through the shared native theme:
+
+```tsx
+<input theme={{ caret: '#22c55e' }} />
+```
+
+When the clipboard has no text, `Cmd+V` or `Ctrl+V` continues to `onKeyDown`
+instead of disappearing inside the editor. Applications can then handle an
+image-only or file-only clipboard themselves. Copied files also propagate even
+when the operating system includes their paths as fallback text. Mixed text and
+image clipboard content still pastes its text.
+
+### Input in a search pill
+
+`<input>` has **no default inner padding** and paints text at the top of its
+box. A single-line input vertically centers its text when given extra height.
+Set `padding` on the input style or on a parent wrapper. When the input has
+`borderRadius`, text clips to the rounded shape automatically.
+
+```tsx
+<div style={{
+  display: 'flex',
+  flexDirection: 'row',
+  alignItems: 'center',
+  height: 32,
+  paddingLeft: 10,
+  paddingRight: 4,
+  borderRadius: 16,
+  backgroundColor: '#1a1a22',
+  borderWidth: 1,
+  borderColor: '#ffffff14',
+}}>
+  <input
+    value={query}
+    onChange={(e) => (query = e.value ?? '')}
+    style={{ flexGrow: 1, minWidth: 0, fontSize: 13, color: '#e8e8ed' }}
+  />
+</div>
+```
+
+## Accessibility
+
+GPUI talks to the **macOS AX tree**, Windows UIA, and Linux AT-SPI through
+AccessKit. GPUIV maps Vue props onto that API. A node is in the tree only
+when it has **both** a GPUI id (always set) and a **role**.
+
+Prop names match the DOM. Role **values** are ARIA tokens, not AccessKit
+PascalCase. `"none"` and `"presentation"` produce no node.
+
+```tsx
+<div
+  role="button"
+  aria-label="Delete note"
+  aria-description="Removes this note"
+  aria-id="notes.delete"
+  onClick={remove}
+>
+  Delete
+</div>
+```
+
+| Prop               | GPUI / AccessKit                          |
+| ------------------ | ----------------------------------------- |
+| `role`             | `.role(Role::…)`                          |
+| `aria-label`       | accessible name                           |
+| `aria-description` | extra description after name, role, value |
+| `aria-id`          | `AXIdentifier` / UIA AutomationId         |
+| `aria-expanded`    | expanded state                            |
+| `aria-selected`    | selected state                            |
+| `aria-valuetext`   | string value                              |
+| `aria-level`       | heading level                             |
+
+Native defaults, so common elements are not silent:
+
+| Element       | Default role            | Name / value                         |
+| ------------- | ----------------------- | ------------------------------------ |
+| `<text>`      | `Label`                 | content as `aria-valuetext`          |
+| `<input>`     | `TextInput`             | `value` and `placeholder`            |
+| `<textarea>`  | `MultilineTextInput`    | `value` and `placeholder`            |
+| `<img>`       | `Image`                 | `alt` as `aria-label`                |
+
+An explicit `role` wins over those defaults. A clickable `div` is **not** a
+button until you set `role="button"`. `onClick` registers AccessKit `Click`,
+so VoiceOver Press fires the same JS `click` handler.
+
+Tests can dump the tree with `renderer.getA11yTree()` on the test renderer;
+it activates the accessibility tree at construct so no screen reader is
+needed.
+
+## Focus and keyboard navigation
+
+Focus is a **native GPUI concept**. GPUIV connects stable element IDs to
+persistent `gpui::FocusHandle` values, so focus survives Vue re-renders:
+
+```text
+<div tabIndex={0}>
+        │
+        ▼
+Retained element ID ► persistent gpui::FocusHandle ► keyboard/action dispatch
+        ▲
+        │
+  Vue re-renders
+```
+
+Inputs and textareas join the normal tab order automatically. Add `tabIndex` to
+a `div` when it should receive keyboard focus:
+
+```tsx
+<div
+  tabIndex={0}
+  onFocus={() => (active.value = true)}
+  onBlur={() => (active.value = false)}
+  onKeyDown={(event) => {
+    if (event.key === 'enter') submit()
+  }}
+>
+  Submit
+</div>
+```
+
+| Prop | Behavior |
+|---|---|
+| `tabIndex={0}` | Joins the normal tab order |
+| `tabIndex={n}` | Uses `n` as its GPUI tab-order index |
+| `tabIndex={-1}` | Skipped by traversal, but focusable by click or renderer API |
+| `autoFocus` | Takes focus once, when its native focus handle is created |
+
+**Applications own the Tab key.** GPUIV installs no process-wide Tab /
+Shift+Tab bindings, so editors and terminals receive the raw key events. For
+classic traversal, call the direct GPUI wrappers from the render-level
+`onKeyDown`:
+
+```tsx
+createApp(App, {
+  onKeyDown(event) {
+    if (event.key !== 'tab') return
+    if (event.modifiers?.shift) app.renderer.focusPrevious?.()
+    else app.renderer.focusNext?.()
+  },
+})
+```
+
+`focusNext()` / `focusPrevious()` map straight onto GPUI's
+`window.focus_next()` / `window.focus_prev()` — the navigation stays in Rust
+and does not interrupt element key handlers.
+
+`createApp` (and `createTestApp`) accept `onKeyDown` and `onKeyUp` observers
+that see every window-level key event after element handlers had their chance.
+Each mounted root owns a key-event generation, so a queued event from a
+previous tree cannot enter its replacement after `bun --hot` remounts.
+
+Use a ref for imperative focus:
+
+```tsx
+const buttonRef = ref<{ id: number } | null>(null)
+
+function focusButton() {
+  if (buttonRef.value) renderer.focusElement?.(buttonRef.value.id)
+}
+
+<div ref={buttonRef} tabIndex={-1}>Focused on demand</div>
+```
+
+Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
+handle. Add `tabIndex` as well when the element must be reachable with Tab.
+Removing `tabIndex` removes the element from the tab order.
+
+A `focusElement()` call that arrives before its element has a native focus
+handle — say from a mount effect ahead of the first frame — is queued and
+applied by the first render that creates the handle. If several requests
+arrive before that render, the latest request wins, and an explicit request
+beats `autoFocus`.
+
+## Headless controls
+
+The built-in controls are **unstyled primitives**, not a fixed component
+library. Wrap and style them in a local file, then import those local components
+throughout the app.
+
+```text
+@gpuiv/vue ► components/ui/*.tsx ► application screens
+ native behavior   local styles/variants   product-specific use
+```
+
+All control components come from the main package:
+
+| Import | Main parts |
+|---|---|
+| `@gpuiv/vue` | `Select` (Root), `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, plus `SelectGroup`, `SelectLabel`, `SelectSeparator`, `SelectScrollUpButton`, `SelectScrollDownButton` |
+| `@gpuiv/vue` | `FloatingLayer` — the positioned layer behind `SelectContent`, usable directly |
+| `@gpuiv/vue` | `Collapsible` (Root), `CollapsibleTrigger`, `CollapsiblePanel` |
+
+`Combobox` and `Tooltip` also use the Root / children split. Style the primitives
+and compose them in your application.
+
+### Collapsible panels
+
+`Collapsible` owns the open state. Use `defaultOpen` for local state, or `open`
+with `onOpenChange` / `onUpdate:open` for a controlled binding. `disabled`
+prevents trigger activation; the trigger supports clicks, Enter and Space and
+reports `aria-expanded`.
+
+```tsx
+import { Collapsible, CollapsibleTrigger, CollapsiblePanel } from '@gpuiv/vue'
+
+<Collapsible defaultOpen>
+  <CollapsibleTrigger style={{ padding: 12 }}>
+    <text>Connection details</text>
+  </CollapsibleTrigger>
+  <CollapsiblePanel keepMounted duration={0.2}>
+    <input placeholder="Server address" />
+  </CollapsiblePanel>
+</Collapsible>
+```
+
+The panel animates its natural height and unmounts after closing. `keepMounted`
+preserves child state; fully closed content does not paint or enter Tab order.
+Closing a focused panel restores focus to its own trigger. `duration={0}`
+changes layout immediately. `CollapsibleTrigger asChild` decorates one child
+without an extra host element, merging its ref and event handlers.
+
+Root, Trigger and Panel accept a style function and a scoped slot receiving
+`{ open, disabled }`, so application components can style their own states.
+
+### Build a local Select
+
+Create `components/ui/model-picker.tsx`. This file is application code, so it can be
+copied and changed without waiting for GPUIV to add a theme option:
+
+```tsx
+import { defineComponent, type PropType } from 'vue'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  type SelectItemState,
+  type SelectTriggerState,
+} from '@gpuiv/vue'
+
+const MODELS = [
+  { id: 'sonnet', label: 'Sonnet' },
+  { id: 'opus', label: 'Opus' },
+]
+
+export const ModelPicker = defineComponent({
+  props: {
+    value: { type: String, required: true },
+    onChange: { type: Function as PropType<(next: string) => void>, required: true },
+  },
+  setup(props) {
+    return () => (
+      <Select
+        items={MODELS.map((model) => ({ value: model.id, label: model.label }))}
+        value={props.value}
+        onValueChange={props.onChange}
+      >
+        <div style={{ position: 'relative', display: 'flex' }}>
+          <SelectTrigger
+            style={(state: SelectTriggerState) => ({
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              width: 220,
+              height: 36,
+              padding: 8,
+              borderRadius: 8,
+              backgroundColor: state.open ? '#334155' : '#1e293b',
+              hover: { backgroundColor: '#334155' },
+            })}
+          >
+            <SelectValue placeholder="Select a model" />
+          </SelectTrigger>
+          <SelectContent
+            side="top"
+            sideOffset={6}
+            style={{
+              width: 220,
+              maxHeight: 240,
+              overflowY: 'scroll',
+              padding: 4,
+              backgroundColor: '#0f172a',
+              borderRadius: 8,
+            }}
+          >
+            <SelectGroup>
+              {MODELS.map((model) => (
+                <SelectItem
+                  key={model.id}
+                  value={model.id}
+                  style={(state: SelectItemState) => ({
+                    borderRadius: 6,
+                    backgroundColor: state.highlighted
+                      ? '#334155'
+                      : state.selected
+                        ? '#1e3a5f'
+                        : '#0f172a',
+                    cursor: 'pointer',
+                  })}
+                >
+                  <div style={{ padding: 8, pointerEvents: 'none' }}>
+                    <text style={{ fontSize: 13, color: '#cdd6f4' }}>{model.label}</text>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </div>
+      </Select>
+    )
+  },
+})
+```
+
+`SelectTrigger` and `SelectItem` take a **style function** of their current
+state (`open`, `selected`, `highlighted`, `disabled`, `placeholder`), and
+`SelectItem`'s default slot is a render function of the same state. Pass
+**`items`** on `Select` (the Root) when `SelectValue` should show a label while
+the menu is closed — it is only a label lookup. Keyboard nav and clicks read
+the mounted `SelectItem` children through a registration registry, so a styled
+wrapper around `SelectItem` is fine. Without `items`, `SelectValue` shows the
+raw value. Use the styled local file with the familiar compound shape:
+
+Put the row's fill **on the item's style**, not on a `div` inside it. GPUI
+paints a flat hit list and does not bubble clicks: a filled child paints its
+own hitbox on top of the item and the pick never runs. Custom row content
+inside the item should be pointer-transparent (`pointerEvents: 'none'`).
+
+When a custom row should own its own root element, use **`asChild`** instead:
+the item then renders no wrapper — its handlers, state style, and remaining
+props merge onto the single child element via `cloneVNode`, so the row
+itself is the item and its fill is the item's own hit target. A component
+child receives those props through Vue's fallthrough attrs and must render a
+single root element. Filled descendants inside the row — an `<svg>` icon,
+say — still need `pointerEvents: 'none'`, because their hitboxes would cover
+the row's.
+
+```tsx
+<ModelPicker
+  value={model.value}
+  onChange={(next) => (model.value = next)}
+/>
+```
+
+The trigger participates in normal tab navigation. Opening the Select focuses
+its content. `Up`, `Down`, `Ctrl+P`, `Ctrl+N`, `Enter`, and `Escape` control the
+menu. Closing it restores focus to the trigger. Disabled items are skipped.
+
+### Overlay menus
+
+Menus, tooltips, and dialogs must use **`SelectContent`**, **`FloatingLayer`**,
+or `<anchored deferred>`. Those paint in a later pass, on top of
+`<virtual-list>` and the rest of the page.
+
+A `position: "absolute"` card that overflows out of the composer sits **under**
+the virtual list. The list paints after the composer, so you still see the
+markdown through the menu, and clicks hit the text behind it.
+
+```tsx
+<Select
+  items={[{ value: 'flash', label: 'DeepSeek V4 Flash' }]}
+  value={model.value}
+  onValueChange={setModel}
+>
+  <div style={{ position: 'relative' }}>
+    <SelectTrigger>
+      <SelectValue />
+    </SelectTrigger>
+    <SelectContent side="top" sideOffset={4} style={{ backgroundColor: '#232323' }}>
+      <SelectItem value="flash">DeepSeek V4 Flash</SelectItem>
+    </SelectContent>
+  </div>
+</Select>
+```
+
+Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
+`FloatingLayer` defaults to `#1A1A1A`. Item rows should use the same solid
+color, or a solid hover color. A `#00000000` child on a blurred window punches
+through Metal to the desktop.
+
+`FloatingLayer` copies uniform and per-corner border radii to its anchored
+surface, so rounded Select, Combobox, and Tooltip content does not show square
+corners behind it. It also puts `visibility` and `opacity` on that outer surface
+so the fallback fill follows them without multiplying nested opacity.
+`pointerEvents: "none"` disables the anchored occluder. Backgrounds, borders,
+shadows, overflow, and layout remain on the inner content to avoid double paint
+or changed popup geometry.
+
+A filled in-flow `div` blocks clicks and hovers behind it. The parent
+scroller still gets the wheel. `position: "absolute"` / `"fixed"` or
+`pointerEvents: "auto"` also steals the wheel. Set `pointerEvents: "none"`
+to pass hits through.
+
+## Text search
+
+`highlight` paints a wash under every match in a subtree, like browser find.
+Declare it on any element — the nearest declaration wins, nested declarations
+are skipped — and `onHighlight` reports the match count after the build that
+resolved it.
+
+### A find bar
+
+`useTextSearch` owns the cursor and the count. Spread its `props` onto the
+container to search; `next` and `previous` move the cursor.
+
+```tsx
+import { useTextSearch } from '@gpuiv/vue'
+
+function Find() {
+  const query = ref('')
+  const search = useTextSearch({ query: query.value })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input value={query.value} onChange={(e) => (query.value = e.value ?? '')} />
+        <text>{search.total.value === 0 ? 'No results' : `${search.active.value + 1}/${search.total.value}`}</text>
+        <div onClick={search.previous}><text>↑</text></div>
+        <div onClick={search.next}><text>↓</text></div>
+      </div>
+
+      <div {...search.props.value} style={{ flex: 1 }}>
+        <Transcript />
+      </div>
+    </div>
+  )
+}
+```
+
+A match never crosses a line. It does cross the host nodes the renderer makes
+for one interpolated line, so `<text>Hello {name}!</text>` matches
+`Hello Tommy`. Matches are numbered in **paint order**, so `activeIndex` means
+"the nth match in the document" no matter which kind of element painted it —
+`<text>` and `<code>` interleave correctly.
+
+### Explicit ranges
+
+When you already have offsets, from an LSP range or your own model, pass them
+instead of a query. They are `[start, end)` in **UTF-16 code units**, the units
+`indexOf` and `RegExp.exec` return.
+
+```tsx
+<div highlight={{ ranges: [[6, 11]], color: '#f43f5e55' }}>
+  <text>Hello {name}!</text>
+</div>
+```
+
+### Virtualized content
+
+A `<virtual-list>` mounts a window of its rows, so native can only count and
+number that window. Tell it the rest yourself, with `findRanges` — the same
+matcher, in JS:
+
+```tsx
+import { findRanges, useTextSearch } from '@gpuiv/vue'
+
+// One entry per row, so a prefix sum gives both numbers.
+const perRow = computed(() => rows.value.map((row) => findRanges({ text: row.text, query }).length))
+const before = (index: number) => perRow.value.slice(0, index).reduce((a, b) => a + b, 0)
+const total = perRow.value.reduce((a, b) => a + b, 0)
+
+const search = useTextSearch({ query, matches: { total, indexOffset: before(windowStart) } })
+```
+
+`total` and `indexOffset` travel together because supplying one without the
+other is always wrong: the count native reports covers the window only, and
+`next()` needs the offset to land on the right row.
+
+## Text selection
+
+Every text GPUIV paints is **selectable and copyable**, including text inside
+`<code>`, `<diff>` and `<markdown>`. A drag that starts in a heading and ends
+inside a fenced code block selects everything between; Cmd+C copies it joined in
+document order.
+
+There is nothing to opt into. A tap does not select. Only a drag does.
+To opt *out* — toolbars, buttons, line-number gutters — set
+`userSelect: "none"`, which inherits like the CSS property:
+
+```tsx
+<div style={{ userSelect: 'none' }}>
+  <text>toolbar label, never selected</text>
+</div>
+```
+
+![Text selected across markdown blocks](images/selection.png)
+
+Read the selection from the renderer, or react when it changes:
+
+```tsx
+createApp(App, {
+  onSelectionChange(event) {
+    lastSelected.value = event.value ?? ''
+  },
+})
+
+renderer.getSelectedText?.()   // joined text, or null
+renderer.clearSelection?.()
+```
+
+`onSelectionChange` is a **window-level** callback on `createApp()`, the same
+attachment as `onKeyDown`. Text selection is app-wide, not per element.
+It fires once when the selected ranges change, including a clear to empty
+(`value` is then omitted). An unchanged frame does not fire.
+
+Selection works because each painted text element registers itself into a
+per-frame registry in **paint order**, which is document order. A drag anchored
+in one element resolves against that registry into per-element spans: partial in
+the anchor and head, whole for everything between.
+
+<details>
+<summary>Why not one big text element, like Zed?</summary>
+
+Zed's markdown selects continuously because its whole document is a single
+element over one text model. GPUIV renders a *tree* of text elements, so it
+rebuilds that continuity at paint time instead. The mechanism is ported from
+[Comet](https://github.com/zeronsh/comet) (MIT), which faced the same problem.
+</details>
+
+## Native text components
+
+Three elements render text with Syntect syntax highlighting computed in
+Rust. Colours come from a theme prop, so a late-arriving highlight recolours runs
+without ever changing layout.
+
+### ANSI output
+
+`AnsiText` turns a short ANSI string into selectable native text runs without
+adding a scroll container. `AnsiLog` owns one virtual list for long output:
+
+```tsx
+import { AnsiText, AnsiLog, createAnsiParser } from '@gpuiv/vue'
+
+<AnsiText source={'\x1b[32mConnected\x1b[0m'} />
+<AnsiLog source={output.value} style={{ height: 300 }} lineHeight={20} />
+
+// For an application-owned stream, preserve control state across chunks.
+const parser = createAnsiParser()
+const runs = parser.write(chunk)
+```
+
+Appending to `source` decodes only the new suffix, including escape sequences
+split across updates. Replacing the source or changing `options` resets decoding.
+`options` supplies default `foreground` / `background` colours or a sixteen-colour
+`palette`. Supported SGR attributes include normal/bright, 256-colour and RGB
+colours, bold, italic, underline, strikethrough, inverse and concealed text.
+Other terminal commands and OSC/DCS payloads are discarded; this is a log
+viewer, with CR/CRLF normalized to newlines and fixed-height, unwrapped rows.
+
+`AnsiLog` follows the tail by default; scrolling away preserves the reading
+position. Set `followTail={false}` to start at the top. A template ref exposes
+the same `id`, `scrollToItem` and `getListScrollTop` methods as `VirtualList`.
+Keep it as the only scroll parent. `parseAnsi` handles a complete string;
+`createAnsiParser` returns a reusable `write` / `reset` parser, and both return
+the existing `TextRun[]` protocol. Selection copies plain output without escapes.
+
+### `<code>`
+
+A syntax-highlighted code block. One row per line at an exact line height, so the
+block's height is known before highlighting runs.
+
+It paints **no surface of its own**: no fill, border, radius, padding or language
+header. `style` is the surface, so the card look is yours.
+
+```tsx
+<code
+  code={source}
+  language="typescript"        // or path="src/app.ts" to detect from extension
+  showLineNumbers
+  style={{
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ffffff1f',
+    backgroundColor: '#ffffff09',
+  }}
+/>
+```
+
+![A syntax-highlighted code block](images/code.png)
+
+`fontFamily`, `fontSize`, `fontWeight`, `lineHeight` and `color` in `style` beat
+the theme. Rows are a fixed height, so `fontSize` alone scales that height by the
+theme's ratio; pass `lineHeight` to set it exactly.
+
+Two things stay owned by the element: lines **never wrap**, and the block is its
+own horizontal scroller. A long line pans on a horizontal wheel inside it, so
+`whiteSpace` and `overflowX` in `style` do nothing.
+
+For a language header, or any other chrome, wrap it in a `<div>` you own:
+
+```tsx
+<div style={{ display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden' }}>
+  <div style={{ padding: 6, backgroundColor: '#ffffff09' }}>
+    <text style={{ fontSize: 12, color: '#a3a3a3' }}>{language}</text>
+  </div>
+  <code code={source} language={language} style={{ padding: 12, minWidth: 0 }} />
+</div>
+```
+
+`<markdown>` is different: it keeps its own fenced-block card, because a document
+renderer owns its layout. Tune that card with the `mdCode*` metrics.
+
+### `<diff>`
+
+A unified diff viewer. It **flows** with its parent by default, so a parent
+list can be the only scroller. Collapsing a file removes its rows rather than hiding
+them, so a collapsed 10k-line file costs one row.
+
+Use `maxLines` to keep a long patch short. Show more fires `onShowMore`. Clear
+`maxLines` in that handler to reveal the rest.
+
+Pass `scroll` and a **bounded height** only for a dedicated full-window viewer.
+That path uses GPUI's `list()` and virtualizes. Do not nest it inside another
+scroller. See [Scrolling](#scrolling).
+
+```tsx
+<diff
+  patch={unifiedPatch}
+  wordDiff                     // highlight only the tokens that changed
+  maxLines={open ? undefined : 24}
+  collapsedPaths={['pnpm-lock.yaml']}
+  onShowMore={() => setOpen(true)}
+  onToggleFile={(e) => toggle(e.value)}
+  onLineClick={(e) => console.log(e.oldLine, e.newLine, e.value)}
+/>
+```
+
+![A unified diff with word-level highlights](images/diff.png)
+
+### `<markdown>`
+
+GitHub-flavoured markdown: headings, lists, tables, block quotes, fenced code,
+strikethrough, task lists, and autolinked bare URLs. Task items render as real
+checkboxes; clicking one fires `onTaskToggle` with the marker's rendered state
+and its byte offsets in `source`, so the app flips `[ ]`↔`[x]` itself.
+` ```mermaid ` fences render from the `mermaid` map (app-supplied images keyed
+by the fence source; GPUIV ships no diagram renderer) and degrade to a
+labelled code card when unmapped. Mapped inline `$x^2$` formulas paint as
+SVG images riding the text baseline (the map's `depth` offsets the bottom
+below it); copying a mapped formula copies its placeholder spaces, not the
+TeX — the same loss an inline image copies in the DOM.
+
+```tsx
+<markdown source={readme} onLinkClick={(e) => open(e.value)} />
+```
+
+A paragraph holding nothing but `![alt](url)` images renders them as image
+blocks — data URLs decode inline, `http(s)` sources load through the same
+pipeline as `<img>`, and local paths read from disk. Painted height is capped
+by the `mdImageMaxHeight` metric (default 320) so one screenshot cannot
+swallow the column; an unloadable image falls back to its alt text. An image
+among other inline content stays text: its alt renders with link styling.
+
+Fenced code streams well: when the `source` grows by appends — token-by-token
+LLM output — highlighting resumes from a stable-prefix checkpoint and only
+re-parses the new tail, so long streams stay proportional to the chunk size.
+
+![Markdown with headings, lists, a table and a code fence](images/markdown.png)
+
+### Theming
+
+All three take the same optional `theme` prop. Every field layers on top of the
+built-in dark theme, so overriding one token leaves the rest alone.
+
+```tsx
+<code
+  code={source}
+  language="rust"
+  theme={{
+    appearance: 'dark',        // or 'light'
+    accent: '#7c86ff',
+    syntax: { keyword: '#f38ba8', string: '#a6e3a1' },
+  }}
+/>
+```
+
+**Layout numbers live in the theme too**, under `metrics`. Row heights, gutter
+widths, paddings and the heading scale are props, not Rust constants, so tuning
+the design is a Vue re-render and never a native rebuild.
+
+```tsx
+<diff
+  patch={patch}
+  theme={{
+    metrics: {
+      diffLineHeight: 26,
+      diffGutterWidth: 48,
+      mdHeadingSizes: [24, 19, 16, 14],
+    },
+  }}
+/>
+```
+
+When `scroll` is on, `<diff>` virtualizes from these numbers without measuring,
+so changing `diffLineHeight` also re-sizes the scroll model.
+
+The same three components, retuned entirely from `metrics` with no rebuild:
+
+![The components with enlarged metrics](images/metrics.png)
+
+Languages bundled: Rust, TypeScript, TSX, JavaScript, JSX, Python, Go, JSON,
+Bash, TOML, YAML, Markdown, HTML, CSS, C.
+
+## Supported Elements
+
+| Element         | Description                                      |
+|-----------------|--------------------------------------------------|
+| `div`           | Container with flexbox layout                    |
+| `text`          | Text content, selectable                         |
+| `code`          | Syntax-highlighted code block                    |
+| `diff`          | Unified diff viewer. Flows by default            |
+| `markdown`      | GitHub-flavoured markdown                        |
+| `input`         | Native single-line text editor                   |
+| `textarea`      | Native multiline, auto-growing text editor       |
+| `virtual-list`  | Long collections; only visible rows are built    |
+| `img`           | Local, data URL, or http(s) raster or SVG images |
+| `svg`           | Tintable monochrome SVG icons from local files   |
+| `anchored`      | Positioned overlay                               |
+| `canvas`        | 2D context rasterized natively, painted as a GPU texture |
+
+## Images and icons
+
+Both elements take a **filesystem path, a `data:` URL, or (for `<img>`) an
+http(s) URL**. Resolve local files with `fileURLToPath` or `path.join` and pass
+that string as `src`, encode in-memory bytes as a base64 data URL, or pass a
+remote URL and let GPUI fetch it.
+
+### `<img>`
+
+`<img>` paints through GPUI's image element. It loads **PNG, JPEG, WebP, GIF,
+SVG, BMP, TIFF, ICO, and Netpbm** from disk, data URLs, or http(s). SVG here is
+a full-colour image, not a tintable icon.
+
+```tsx
+<img
+  src={fileURLToPath(new URL('./photo.png', import.meta.url))}
+  objectFit="cover"
+  style={{ width: 240, height: 140, borderRadius: 12 }}
+/>
+
+// Same decoder, straight from memory:
+const src = `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`
+```
+
+```tsx
+<img
+  src="https://example.com/avatar.png"
+  objectFit="cover"
+  style={{ width: 48, height: 48, borderRadius: 24 }}
+/>
+```
+
+Set **both** `width` and `height` on a remote image. GPUI fetches and decodes
+on a background task; the tree does not wait. Without a definite size the box
+is empty until decode, then jumps to the bitmap size.
+
+Data URLs accept base64 and percent-encoded payloads in every image format
+listed above. Remote URLs use the same GPUI image cache as disk files and are
+not written to a temp file.
+
+`objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
+`"scaleDown"`, or `"none"`. An empty `src` or a failed load shows a fallback
+placeholder instead of crashing. A URL that is still loading paints an empty
+box of the declared size.
+
+### Live images from a buffer
+
+A data URL still works, but it base64-encodes the bytes into the mutation JSON.
+For a waveform, a canvas dump, or any frame you already have in memory, push
+**raw bytes** through the `<img>` ref. That call skips JSON.
+
+`setImage` takes encoded **PNG, JPEG, WebP, GIF, SVG, BMP, TIFF, ICO, or
+Netpbm**. `setImagePixels` takes packed **RGBA** by default, or **BGRA** with
+`{ format: 'bgra' }`. BGRA matches GPUI's image byte order and skips the
+per-pixel channel swap on the UI thread. Prefer pixels for a live waveform.
+There is no PNG encode, and no JSON.
+
+Call either from `onMounted` / `watchEffect` after mount. A later `src` change
+overwrites the pixels.
+
+There is **no density argument**. `width` and `height` on `setImagePixels` are
+bitmap pixels. `style.width` and `style.height` are the layout box. On a retina
+display, upload **2x** (or `devicePixelRatio`) the box size so GPUI does not
+stretch one logical pixel into four screen pixels.
+
+```tsx
+import { createCanvas } from 'canvas'
+
+const Waveform = defineComponent({
+  props: { samples: { type: Array as PropType<Float32Array>, required: true } },
+  setup(props) {
+    const img = ref<ImgHostNode | null>(null)
+
+    watchEffect(() => {
+      const canvas = createCanvas(800, 80)
+      const ctx = canvas.getContext('2d')
+      ctx.fillStyle = '#1a1a2e'
+      ctx.fillRect(0, 0, 800, 80)
+      ctx.strokeStyle = '#5ca9ff'
+      ctx.beginPath()
+      for (let x = 0; x < props.samples.length; x++) {
+        const y = 40 - props.samples[x]! * 36
+        if (x === 0) ctx.moveTo(x, y)
+        else ctx.lineTo(x, y)
+      }
+      ctx.stroke()
+      img.value?.setImage?.(canvas.toBuffer('image/png'))
+    })
+
+    return () => <img ref={img} objectFit="fill" style={{ width: 800, height: 80 }} />
+  },
+})
+```
+
+A live waveform that already has RGBA should skip PNG:
+
+```tsx
+img.value?.setImagePixels?.(1600, 160, rgbaBytes)
+img.value?.setImagePixels?.(1600, 160, bgraBytes, { format: 'bgra' })
+```
+
+Both buffers are **1600x160**. The layout box stays `800x80`. Alpha is straight,
+not premultiplied. ffmpeg (`-pix_fmt bgra`) and VideoToolbox can produce BGRA
+directly. node-canvas `toBuffer('raw')` also produces BGRA, but its alpha is
+premultiplied, so use that raw buffer only for opaque canvases.
+
+### `<svg>`
+
+`<svg>` uses GPUI's **monochrome icon renderer**. The file is drawn as a single
+shape and tinted with `style.color`. Use this for toolbar icons, not for
+full-colour artwork.
+
+`src` is a filesystem path **or** a `data:image/svg+xml,…` URL. Vitest and some
+Bun `import … with { type: 'file' }` bindings emit the data URL. GPUIV decodes
+both.
+
+`style.color` is required. Without it the icon does not paint. Prefer
+`fill="#000"` or `stroke="#000"` in the file. `currentColor` in the SVG is not
+the same as `style.color`.
+
+```tsx
+<svg
+  src={fileURLToPath(new URL('./assets/icons/search.svg', import.meta.url))}
+  style={{ width: 16, height: 16, color: '#b4b4b4' }}
+/>
+```
+
+The chat example builds every sidebar and composer icon this way.
+
+## Canvas
+
+`<canvas>` is a pixel buffer GPUI paints as GPU textures every frame. The
+buffer lives in the native core — exactly like a DOM canvas owns its backing
+store — and uploads go Rust to Rust, so pixel bytes never cross the FFI
+boundary and never travel through the mutation JSON (a canvas repaint moves
+megabytes; the batch would escape and re-parse every byte).
+
+Uploads are **dirty-rect**: the store keeps a CPU mirror of the canvas and
+paints it as a grid of 256×256 texture tiles. A flush splices only the
+region the ops touched into the mirror and re-uploads only the tiles that
+region intersects, so upload cost scales with the dirty area, not the
+canvas size — a 64×64 brush dab on a 2880×1920 canvas moves ~0.4 MB instead
+of the full ~22 MB, and a flush with nothing pending uploads nothing and
+skips the repaint.
+
+The 2D core tracks dirty bounds separately in each tile, so simultaneous
+strokes far apart do not upload the clean space between them. Changes on a
+tile edge also refresh the neighboring tiles' 1px sampling borders. The
+rasterizer clears only the previous operation's coverage region between
+draws; coverage precision and full-size pixel buffers stay the same.
+
+Run `bun examples/bench-canvas-paint.ts --output tmp/canvas-paint.json`
+against a release native build for large layered painting measurements.
+It covers DPR 1/2, one/three layers and continuous/scattered strokes;
+[`canvas-atlas-partial-write.md`](upstream/canvas-atlas-partial-write.md)
+records the measurements and remaining memory work.
+
+The Vue wrapper is `GpuixCanvas`. A template ref exposes `uploadPixels`,
+`readPixels`, and the host `id`:
+
+```tsx
+const canvas = ref<GpuixCanvasInstance | null>(null)
+
+<GpuixCanvas ref={canvas} width={800} height={600}
+             style={{ width: 800, height: 600 }} />
+
+// RGBA, row-major, 4 bytes per pixel — ImageData.data works as-is.
+canvas.value?.uploadPixels(imageData.data)
+```
+
+- `width`/`height` are the **buffer** size; size the element box with `style`.
+  The buffer stretches to the box (`objectFit` defaults to `"fill"`). Multiply
+  by `devicePixelRatio` yourself for sharp output.
+- Before the first upload the element paints a placeholder box but still
+  receives every event and records its bounds, so it is clickable on mount.
+- `renderer.uploadCanvasPixels(elementId, width, height, pixels, dirty?)` and
+  `renderer.readCanvasPixels(elementId)` are available without the wrapper
+  for manual buffer control; pass `dirty` as `[x, y, w, h]` in buffer pixels
+  to restrict the upload to that rect. The 2D context flushes itself through
+  `renderer.uploadCanvasFromContext(elementId, ctx)`, which tracks its own
+  dirty region. `readCanvasPixels` returns the **last upload**, not a GPU
+  readback.
+
+### The 2D context
+
+`getContext("2d")` returns a `CanvasRenderingContext2D`: a TypeScript
+WebIDL facade over a Rust rasterization core (`GpuixCanvas2DCore` in
+`@gpuiv/native`, no third-party dependencies). Every draw call records one
+op — with a snapshot of the state it must draw under — into a native
+display list; the rasterizer replays it **once** per flush (the upload
+microtask, or a pixel read like `getImageData`). Pixel buffers never enter
+JS in either direction, and everything a JS task paints still reaches the
+GPU in **one** upload on the following microtask.
+
+```tsx
+const canvas = ref<GpuixCanvasInstance | null>(null)
+
+<GpuixCanvas ref={canvas} width={560} height={400}
+             style={{ width: 560, height: 400 }} />
+
+const ctx = canvas.value!.getContext("2d")!
+const sky = ctx.createLinearGradient(0, 0, 560, 400)
+sky.addColorStop(0, "#1e1e2e")
+sky.addColorStop(1, "#3b2f63")
+ctx.fillStyle = sky
+ctx.fillRect(0, 0, 560, 400)
+ctx.strokeStyle = "#89dceb"
+ctx.lineWidth = 3
+ctx.setLineDash([10, 6])
+ctx.beginPath()
+ctx.roundRect(40, 40, 480, 320, 24)
+ctx.stroke()
+```
+
+Supported: the path vocabulary (`moveTo` … `roundRect`, arcs, béziers),
+`fill`/`stroke`/`clip`/`isPointInPath` with both fill rules, the transform
+stack (`save`/`restore`/`translate`/`rotate`/`scale`/`setTransform`…,
+`reset`), linear and radial gradients, line styles including dashes and miter
+joins, anti-aliased rasterization, `globalAlpha`, every composite operation
+the rasterizer implements — the Porter-Duff modes plus the eleven separable
+blend modes (`multiply`, `screen`, `overlay`, `darken`, `lighten`,
+`color-dodge`, `color-burn`, `hard-light`, `soft-light`, `difference`,
+`exclusion`), blended in straight colour space and composited over the
+premultiplied buffer per the W3C *Compositing and Blending* spec — `clearRect`,
+`getImageData`/`putImageData`/`createImageData` plus the `ImageData`
+constructor, and `drawImage` with another `GpuixCanvas` as the source
+(nearest or bilinear sampling via `imageSmoothingEnabled`).
+
+The context is pinned by a vendored subset of the **W3C web-platform-tests**
+canvas suite — 593 declarative cases in `packages/vue/wpt/yaml/`, of which
+452 run green and 141 are skipped with the missing API named in the test
+title (`Path2D`, `createPattern`, text, shadows, …). Regenerate the case
+table after updating the YAML with `bun scripts/convert-canvas-wpt.ts`.
+
+Deliberately not implemented:
+
+- `fillText` / `strokeText` / `measureText` — they **throw**. Glyph
+  rasterization needs a font pipeline that does not exist JS-side yet.
+- Shadows, `filter`, `createPattern`, `Path2D`,
+  conic gradients, WebGL, and `HTMLImageElement` as a `drawImage` source (JS
+  never sees decoded `<img>` pixels).
+
+Changing the `width`/`height` props resets the bitmap and the context
+state, like setting those properties on a DOM canvas.
+
+### PNG export
+
+`toDataURL()` and `toBlob(callback)` on the canvas instance encode the last
+uploaded buffer as PNG (`canvasToPng(elementId)` on the renderer, encoded by
+Rust's `image` crate). Any requested `type` falls back to PNG — the DOM's
+unsupported-type behavior — and `quality` is accepted but ignored, as on the
+DOM for PNG. Before the first upload both return `null` / call back with
+`null` (the DOM would encode a transparent bitmap; there is no GPU-side
+surface to encode yet):
+
+```tsx
+const url = canvas.value!.toDataURL()          // data:image/png;base64,…
+canvas.value!.toBlob((blob) => {
+  if (blob) saveBlob(blob)                     // image/png Blob
+})
+```
+
+`examples/canvas-paint.tsx` is a small drawing pad built on the context.
+`examples/paint.tsx` is a full drawing app — brush/eraser/line/rect/ellipse
+tools, live shape previews, undo/redo, a grid toggle, and a toolbar floating
+over a window-sized canvas. Same coordinate trick as the pad: the canvas sits
+at the window origin, so window pointer coordinates are canvas coordinates
+until `EventPayload` grows `offsetX`/`offsetY`.
+
+### Wheel zoom over a canvas
+
+The FFI boundary is async, so JS cannot `preventDefault()` a wheel event the
+way a browser handler would. Give any element `stopWheelPropagation` and GPUIX
+stops the wheel there: ancestor scrollers never see the gesture, which is what
+wheel-zoom needs over a canvas inside a scroller.
+
+```tsx
+<div style={{ width: 600, height: 400, overflow: "scroll" }}>
+  <div stopWheelPropagation onScroll={(e) => zoom(e.deltaY)}
+       style={{ width: 400, height: 300 }} />
+</div>
+```
+
+### Pinch to zoom
+
+Trackpad and touchscreen pinches arrive as `onPinch` (GPUI's `PinchEvent`).
+Each step carries a `zoomDelta` — 0.1 is a 10% zoom-in — so a handler
+accumulates it into a scale the way a browser zoom does. `touchPhase` brackets
+the gesture: `"started"`, several `"moved"`, then `"ended"` (or
+`"cancelled"`).
+
+```tsx
+let scale = 1
+<div onPinch={(e) => { scale *= 1 + (e.zoomDelta ?? 0) }} />
+```
+
+In tests and automation, `app.mouse.pinch(target, delta, { phase, modifiers })`
+dispatches synthetic pinch steps through the GPUI input pipeline.
+
+## Pointer capture
+
+`renderer.setPointerCapture(elementId)` arms GPUI pointer capture on the
+element from its next press on: mouse move and up keep targeting it after the
+pointer leaves its bounds, like HTML `setPointerCapture`. Capture releases on
+mouse up, when the element stops painting, or via
+`renderer.releasePointerCapture()`. An element that listens for both
+`onMouseDown` and `onMouseMove` captures automatically, without the call.
+
+`contextMenu` fires on right-button **release**, like macOS (right-button
+presses also reach `onMouseDown` with `button: 2`):
+
+```tsx
+<div onContextMenu={(e) => openMenu(e.x, e.y)}>{children}</div>
+```
+
+Pen pressure and tilt are not wired yet — the zed submodule drops
+`NSEvent.pressure`; see
+[`docs/upstream/tablet-input.md`](upstream/tablet-input.md) for the
+tracking.
+
+## Supported Events
+
+| Event | Props | Payload fields |
+|-------|-------|----------------|
+| Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` |
+| Aux click | `onAuxClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` |
+| Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
+| Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
+| Mouse enter | `onMouseEnter` | `hovered` |
+| Mouse leave | `onMouseLeave` | `hovered` |
+| Mouse move | `onMouseMove` | `x`, `y`, `pressedButton`, `modifiers` |
+| Click outside | `onMouseDownOutside` | `x`, `y`, `button`, `modifiers` |
+| Context menu | `onContextMenu` | `x`, `y`, `button`, `modifiers` — fires on right-button release |
+| Key down | `onKeyDown` | `key`, `keyChar`, `isHeld`, `modifiers` |
+| Key up | `onKeyUp` | `key`, `keyChar`, `modifiers` |
+| Focus | `onFocus` | — |
+| Blur | `onBlur` | — |
+| Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
+| Pinch | `onPinch` | `x`, `y`, `zoomDelta`, `touchPhase`, `modifiers` — one step per event; accumulate `zoomDelta` into a scale |
+| File drop | `onFileDrop` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS; desktop only |
+| Change | `onChange` | `value` — `<input>` and `<textarea>` only |
+| Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
+| Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
+| Show more | `onShowMore` | `value` (hidden line count) — `<diff>` only |
+| Line click | `onLineClick` | `value`, `oldLine`, `newLine` — `<diff>` only |
+| Link click | `onLinkClick` | `value` (URL) — `<markdown>` only |
+| Selection change | `onSelectionChange` | `value` (joined selected text) — window-level on `createApp()`, not an element prop |
+
+Keyboard and focus listeners create a persistent GPUI `FocusHandle`
+automatically. A listener alone does not put a `div` in the Tab order; add
+`tabIndex={0}` for that. Inputs and textareas already use tab index `0`.
+
+## Supported Styles
+
+CSS-like styling via the `style` prop:
+
+```tsx
+<div style={{
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 8,
+  padding: 16,
+  backgroundColor: '#3b82f6',
+  borderRadius: 8,
+}}>
+  <div style={{ color: '#ffffff', fontSize: 18 }}>
+    Hello GPUI!
+  </div>
+</div>
+```
+
+Style objects follow the standard Vue shape: plain camelCase objects, kebab-case
+keys are camelized, and CSS strings and arrays of objects are accepted too.
+Supported numeric properties accept number strings and `px` values, so
+`style="padding:12px;opacity:0.5;width:100px"` also works. Sizing properties
+retain percentage values and `auto`; the supported properties below still
+apply to every binding form.
+
+> **GPUIV styles look like CSS but are not CSS.** A few differences trip
+> everyone up on the first project:
+>
+> - **`div` is block, not flex.** Set `display: "flex"` before using
+>   `flexDirection`, `gap`, `alignItems`, or `alignSelf`. Without it those
+>   props are silently ignored.
+> - **A flex child that must shrink needs `minWidth: 0`.** Same rule as CSS,
+>   but easier to miss because there is no browser DevTools to inspect.
+> - **No shorthand values.** `padding`, `margin`, and `border` take numbers.
+>   CSS strings like `"0 16px"`, `"1px solid #fff"`, or `calc()` are ignored.
+> - **`boxShadow` is a structured object**, not a CSS string. See below.
+> - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
+> - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
+>   into one line. A `<text>` child of another `<text>` is a nested div.
+> - **`<input>` has no default inner padding.** Set `padding` on the input
+>   style, or pad the parent wrapper. The input clips to its own
+>   `borderRadius` automatically.
+
+**Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
+
+**Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
+
+**Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
+
+**Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
+
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+
+### Cursor
+
+`cursor` accepts the CSS keywords GPUI can show: `default` (and `auto`),
+`pointer`, `text`, `vertical-text`, `crosshair`, `grab`, `grabbing`, `move`,
+`all-scroll`, `context-menu`, `not-allowed` (and `no-drop`), `alias`, `copy`,
+`col-resize`, `row-resize`, the double-headed `ew-resize` / `ns-resize` /
+`nesw-resize` / `nwse-resize`, and the directional `n` / `e` / `s` / `w` /
+`ne` / `nw` / `se` / `sw` resize keywords (diagonals share the matching
+double-headed cursor).
+
+`none`, `url(..)`, `wait`, `progress`, `help`, `cell`, `zoom-in`, and
+`zoom-out` have no GPUI counterpart yet: they log a one-time dev warning and
+are ignored.
+
+### Colors
+
+Every color-bearing style field accepts the same string grammar. GPUIV native
+uses `csscolorparser` 0.8.3 and accepts:
+
+- named colors and `transparent`;
+- 3/4/6/8-digit hex, with or without `#`;
+- `rgb()` / `rgba()`, `hsl()` / `hsla()`, `hwb()` / `hwba()`, and
+  `hsv()` / `hsva()`;
+- `lab()`, `lch()`, `oklab()`, and `oklch()`;
+- `none` components and the parser's limited relative-color `from` / `calc()`
+  forms.
+
+Standard comma and modern space/slash alpha forms work. Values are converted
+to hard-clipped sRGB before GPUI paints them. Invalid strings are ignored for
+that property; they do not reject the full style object.
+
+### Linear gradients
+
+`background` accepts GPUI's native **two-stop linear gradient**. Angles follow
+CSS: `0` points up and values increase clockwise. Stop positions use `0` to `1`.
+
+```tsx
+<div
+  style={{
+    background: {
+      type: 'linear-gradient',
+      angle: 90,
+      stops: [
+        { color: '#7c3aed', position: 0 },
+        { color: '#06b6d4', position: 1 },
+      ],
+      colorSpace: 'oklab',
+    },
+    borderRadius: 12,
+  }}
+/>
+```
+
+`colorSpace` is optional and defaults to `"srgb"`. GPUI also supports
+`"oklab"`. It does not support radial, conic, repeating, or gradients with
+more than two stops.
+
+`hsv()`, `hsva()`, and `hwba()` are parser extensions rather than CSS Color 4
+standard functions. `color()`, platform/dynamic colors, and numeric color
+integers are not accepted.
+
+Theme values can use the same modern grammar:
+
+```tsx
+const theme = {
+  surface: 'oklch(18% 0.02 260)',
+  accent: 'oklch(67.3% 0.182 276.935)',
+  text: 'oklch(96% 0 0)',
+}
+
+<div style={{ backgroundColor: theme.surface, borderColor: theme.accent }}>
+  <text style={{ color: theme.text }}>Hello GPUIV!</text>
+</div>
+```
+
+Limited relative-color forms can derive a new color from a base value:
+
+```tsx
+<div
+  style={{
+    backgroundColor: '#bad455',
+    borderColor: 'oklch(from #bad455 calc(l - 0.15) calc(c * 0.7) h)',
+  }}
+/>
+```
+
+`boxShadow` accepts one structured shadow. Its fields are `offsetX`, `offsetY`,
+`blurRadius`, `spreadRadius`, and `color`:
+
+```tsx
+<div
+  style={{
+    boxShadow: {
+      offsetX: 0,
+      offsetY: 4,
+      blurRadius: 8,
+      spreadRadius: 0,
+      color: '#00000033',
+    },
+  }}
+/>
+```
+
+**Overflow:** `overflow`, `overflowX`, `overflowY` — `"hidden"` clips content, `"scroll"` creates a native scrollable container with persistent scroll state
+
+**Text:** `fontSize`, `fontFamily`, `fontWeight`, `textAlign`, `lineHeight`, `whiteSpace`, `textOverflow`, `lineClamp`
+
+**Selection:** `userSelect` (`"text"` | `"none"`), `selectionColor` — both inherit down the tree
+
+### Hover and active
+
+`hover` and `active` are **nested style objects**. GPUI applies them natively
+when the pointer is over the element or the mouse is down. There is no
+JavaScript round trip.
+
+```tsx
+<div
+  style={{
+    backgroundColor: '#313244',
+    borderRadius: 8,
+    padding: 12,
+    hover: { backgroundColor: '#45475a' },
+    active: { backgroundColor: '#585b70' },
+  }}
+>
+  Press
+</div>
+```
+
+Nesting is one level deep. A `hover` object cannot contain another `hover` or
+`active`.
+
+They work on **every** element, including `<text>`, `<code>`, `<markdown>`,
+`<diff>`, `<img>`, `<svg>` and the editors. The one exception is
+`<virtual-list>`, whose `style` type rejects them: gpui's list has no
+interactive identity to hold a hovered or pressed state, so put them on a
+wrapping `<div>`.
+
+> **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in your component and render each line as a separate `<text>` element in a flex column:
+>
+> ```tsx
+> <div style={{ display: 'flex', flexDirection: 'column', fontFamily: 'Menlo' }}>
+>   {code.split('\n').map((line, i) => (
+>     <text key={i} style={{ whiteSpace: 'nowrap' }}>{line}</text>
+>   ))}
+> </div>
+> ```
+
+> **Note: GPUI defaults text color to black, not white.** Unlike CSS, GPUI does not inherit `color` from parent elements. Every `<text>` element that doesn't set an explicit `color` style will render as black — invisible on dark backgrounds. Always set `color` on your text elements or on a parent `<div>` (which applies `text_color` to all children in that subtree via GPUI's `Styled` trait).
+
+## Automation
+
+Mark elements with **`testId`**, then drive them like Playwright. The same
+client works in vitest and against a child process.
+
+```tsx
+<div testId="sidebar-collapse" onClick={onCollapse}>‹</div>
+<textarea testId="composer" value={draft.value} onChange={...} />
+<div testId="send" onClick={onSend}>↑</div>
+```
+
+```ts
+import { createTestApp } from '@gpuiv/vue/testing'
+import { connectTest } from '@gpuiv/vue/automation'
+import { ChatApp } from './chat'
+
+const app = createTestApp(ChatApp)
+const automation = await connectTest(app.renderer, app.settle)
+
+await automation.screenshot({ path: 'open.png' })
+
+await automation.clock.pause()
+await automation.getByTestId('sidebar-collapse').click()
+await automation.clock.fastForward(200)
+await automation.screenshot({ path: 'collapsed.png' })
+
+await automation.getByTestId('composer').fill('hello gpuix')
+await automation.getByTestId('send').click()
+await automation.screenshot({ path: 'sent.png' })
+```
+
+Locator actions settle internally (`connectTest` receives `app.settle`, so every
+click, fill, and keystroke awaits the flush). When you call the renderer's
+`nativeSimulate*` methods directly, await `app.settle()` yourself after each —
+Vue updates are microtask-based, so the tree is not current until it flushes.
+
+That is the chat example. The real test lives in
+[`examples/chat.test.tsx`](../examples/chat.test.tsx).
+
+```
+createTestApp()              launch({ command, args })
+       │                              │
+       ▼                              ▼
+ connectTest(renderer, settle)  child stdin / stdout
+       │                              │
+       └────────── App / Locator ─────┘
+                  click, fill, screenshot
+```
+
+### Locators
+
+| Call | Matches |
+|---|---|
+| `app.getByTestId('send')` | The `testId` prop |
+| `app.getByText('New chat')` | A node's own text |
+| `app.getByType('textarea')` | The host element type |
+| `locator.getByText('...')` | A descendant of another locator |
+
+`click()` hits the center of the last painted bounds. `fill(text)` replaces the
+focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
+exactly one match exists.
+
+### Addressing another window
+
+Every window created with `createWindow()` answers on the same automation
+session — no second bus. `app.window(index)` returns a view whose locators
+address that window's tree; window 0 is the main window (the default for every
+unqualified locator), and `createWindow` windows follow in creation order. An
+index that never opened fails fast with `NotFound`:
+
+```ts
+await app.getByTestId('open-settings').click()
+const settings = app.window(1)
+await settings.getByTestId('theme-select').click()
+```
+
+In-process sessions (`connectTest`) drive one renderer and ignore the index.
+
+Every element that accepts `testId` records painted bounds, including `<img>`,
+`<svg>` and `<anchored>`. An `<anchored>` reports the box of the overlay itself,
+not of the trigger it is anchored to, so `click()` lands on the menu even when
+it is deferred and snapped back inside the window.
+
+`<virtual-list>` is the exception, and it takes no `testId`. gpui's list is not
+an interactive element, so it has nothing to record a box against. Put the
+locator on a wrapping `<div>`.
+
+### Drag, hover, wheel, and modifiers
+
+```ts
+await app.getByTestId('clip-7').dragBy(120, 0, { steps: 6 })
+await app.getByTestId('clip-7-trim-end').dragTo(app.getByTestId('clip-8'))
+await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
+await app.getByTestId('row-3').hover()
+
+await app.mouse.drag({ x: 240, y: 500 }, { x: 700, y: 620 })
+await app.mouse.wheel({ x: 700, y: 600 }, -140, 0)
+await app.mouse.down({ x: 100, y: 100 }, { button: 2 })
+```
+
+| Call | What it does |
+|---|---|
+| `locator.hover()` | Moves the pointer to the center, so hover styles and tooltips fire |
+| `locator.wheel(dx, dy)` | One wheel event over the center |
+| `locator.dragBy(dx, dy)` / `locator.dragTo(target)` | Press, travel, release |
+| `locator.center()` | The center of the last painted bounds |
+| `app.mouse.move / down / up / click / wheel / drag` | Raw pointer input in window coordinates |
+
+A drag sends **interpolated moves**, not one jump, because snapping, live
+previews, and per-move commits only appear when the pointer travels. Pass
+`steps` to control how many, and `offset` to press away from the center.
+
+Every mouse call takes **`modifiers`** in the same hyphenated syntax as
+`press('cmd-a')`, so cmd-wheel zoom, shift-click range selection, and alt-drag
+duplication become testable.
+
+### Screenshots and clock
+
+`app.screenshot({ path })` writes the current GPU frame as a PNG.
+
+`app.clock.pause()`, `set(ms)`, and `fastForward(ms)` freeze native motion time.
+Use that to capture a sidebar animation at known timestamps:
+
+```ts
+const startedAt = await automation.clock.pause()
+await automation.getByTestId('sidebar-collapse').click()
+await automation.captureFrames('review/sidebar', [
+  startedAt,
+  startedAt + 100,
+  startedAt + 200,
+])
+```
+
+### Live apps
+
+`launch({ command, args })` starts the app and speaks the same commands
+over stdin as SSE `data:` lines. The app listens only when stdin is a **pipe**,
+so a normal terminal run is unchanged. Lines without a `data:` prefix are
+ignored; `console.log` cannot break a message.
+
+```ts
+import { launch } from '@gpuiv/vue/automation'
+
+const app = await launch({
+  command: 'bun',
+  args: ['examples/chat.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
+await app.getByTestId('composer').fill('hello')
+await app.getByTestId('composer').press('enter')
+await app.getByText('hello').waitFor()
+await app.screenshot({ path: 'live.png' })
+await app.close()
+```
+
+Every live-app check should set `GPUIX_BACKGROUND=1`, and the app entry should
+map that flag to `focus: false`. On macOS and Windows, automation uses the
+real window input and paint pipelines without making the window active, so
+taking the user's keyboard has no test benefit. Linux currently ignores
+`focus`.
+
+`fill()` and `press()` dispatch through the live GPUI window input pipeline, so
+native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
+handling instead of a test-only input path. They work without activating the
+window. Prefer `createTestApp()` for typing-heavy checks — it opens no window
+at all.
+
+### Let an agent drive the app
+
+Make focus opt-in through the environment, so a human run behaves normally and
+an agent run stays out of the way:
+
+```tsx
+createApp(App, {
+  title: 'Notes',
+  focus: process.env.GPUIX_BACKGROUND !== '1',
+})
+```
+
+```bash
+bun app.tsx                      # you: window comes to the front
+GPUIX_BACKGROUND=1 bun app.tsx   # agent: window opens behind your editor
+```
+
+`launch()` passes `env` straight through, so an agent script sets it once and
+every screenshot, click, and assertion runs on a window that never interrupts
+you:
+
+```ts
+import { launch } from '@gpuiv/vue/automation'
+
+const app = await launch({
+  command: 'bun',
+  args: ['app.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
+
+await app.getByTestId('bump').waitFor()
+await app.getByTestId('bump').click()
+await app.screenshot({ path: 'tmp/after-click.png' })
+await app.close()
+```
+
+Focus is the only thing that changes. **Automation does not need focus.**
+`click()` hits the last painted bounds and `screenshot()` reads the GPU
+surface, so both work while the window sits behind your editor, and even on a
+`show: false` window that is not on screen at all. `fill()` and `press()` use
+the live GPUI window input pipeline and work without activating the desktop
+window. **Linux ignores `focus`**, so an agent there still gets a focused
+window.
+
+Prefer `createTestApp()` when you can. It opens **no window at all**, so
+nothing can steal focus and keyboard input works. Reach for `launch()` plus
+`focus: false` when the check needs a real window, real GPU paint, or a real
+process.
+
+### Component state
+
+The protocol can also see **through** the host element tree into the Vue
+components that rendered it — the DevTools component inspector, for agents.
+`getComponentTree` lists every component with its name, source file, props,
+and `setup()` state; `getComponentState` takes an automation element id and
+returns the component that rendered it. Live apps attach the inspector
+automatically; in vitest, pass one to `connectTest`:
+
+```ts
+import { connectTest, createComponentInspector } from '@gpuiv/vue/automation'
+
+const automation = await connectTest(
+  app.renderer,
+  app.settle,
+  createComponentInspector(app.app)
+)
+
+const [root] = await automation.components.tree()
+// { name: 'Root', state: { sidebarOpen: true }, hostIds: [2], children: [...] }
+
+const node = await automation.getByTestId('composer').element()
+const owner = await automation.components.state(node.id)
+// { name: 'Composer', props: { draft: '…' }, state: { draft: '…' }, … }
+```
+
+`state` reads refs unwrapped and runs with dependency tracking paused, so a
+debug read never subscribes the caller to the component's state. Output is
+bounded (depth 4, 50 keys/items, 500-char strings) and JSON-safe; functions
+serialize as `ƒ name()`, cycles as `[circular]`. State kept in a `setup()`
+closure (returning the render function directly) is invisible, exactly as in
+Vue DevTools — return an object from `setup()` to make it inspectable. A
+session opened without an inspector rejects these methods with
+`Unsupported`; when Vue's internals shift under a future version, the walker
+answers `null` instead of failing the session.
+
+## Vue DevTools
+
+The standalone [Vue DevTools](https://devtools.vuejs.org/) app inspects a
+running GPUIV app: component tree, props, and `setup()` state. Those are
+framework-level features, so they work without a browser DOM. Features that
+need one (element highlight, select-element, scroll-into-view,
+open-in-editor) stay inert.
+
+1. Add `@vue/devtools` as a dev dependency and start its server (an Electron
+   shell hosting the devtools UI plus a middleware socket):
+
+   ```sh
+   bun x vue-devtools
+   ```
+
+2. Connect the app before `createApp()`, so the devtools hook is installed
+   in time:
+
+   ```ts
+   import { connectVueDevtools, createApp } from '@gpuiv/vue'
+
+   if (process.env.GPUIV_DEVTOOLS === '1') await connectVueDevtools()
+   createApp(App)
+   ```
+
+   `connectVueDevtools({ host, port })` defaults to `http://localhost:8098`
+   (the `PORT` env of the `vue-devtools` CLI). It is safe under `bun --hot` —
+   repeated calls after a reload no-op — and returns `false` with a console
+   hint when `@vue/devtools` is not installed or the client cannot start.
+   `examples/chat.tsx` wires it behind `GPUIV_DEVTOOLS=1`.
+
+Because there is no browser, the integration shims `window`/`document` for
+the devtools client before connecting (`window` **is** globalThis, so the
+devtools hook lands where Vue reads it; the DOM-only calls become no-ops).
+They exist only for that client: a connect that fails removes them again, so
+the rest of the process never sees a browser that is not there.
+
+## Single-instance apps
+
+`acquireSingleInstance` elects one process per app/profile before any window is
+created. Later launches forward `{ argv, cwd }` to the primary, which queues them
+until the application is ready. Import from `@gpuiv/vue/single-instance` to avoid
+loading the native renderer in secondary processes.
+
+```ts
+import { acquireSingleInstance } from '@gpuiv/vue/single-instance'
+
+const instance = await acquireSingleInstance({
+  appId: 'dev.example.notes',
+  directory: userDataDirectory,
+  launch: { argv: process.argv.slice(2), cwd: process.cwd() },
+})
+if (!instance.isPrimary) process.exit(0)
+// Now createApp(...). Consume later launches with await instance.nextRequest().
+```
+
+The OS releases ownership when the primary exits or crashes. Local forwarding
+is authenticated; port conflicts, timeouts and queue overload reject instead
+of silently starting a second UI. Applications own CLI parsing, tabs, saves and
+window activation. See [the contract and limits](single-instance.md) and
+[`examples/single-instance.tsx`](../examples/single-instance.tsx). OS file
+associations and multiple windows are separate capabilities.
+
+## Packaging
+
+`@gpuiv/packager` turns an app into a double-clickable product: one
+executable containing the JS bundle, every asset, and the native binding
+(extracted to a temp file on first run). Describe the product in
+`gpuiv.package.ts` next to the app entry:
+
+```ts
+import type { PackageConfig } from '@gpuiv/packager'
+
+export default {
+  entry: './chat.tsx',
+  productName: 'GPUIX Chat',   // executable name — also the macOS menu title
+  bundleId: 'dev.gpuiv.chat',
+  version: '0.1.0',
+  icon: { darwin: './dist/app-icon.icns', win32: './dist/app-icon.ico' },
+  targets: ['darwin-arm64', 'darwin-x64', 'win32-x64'],
+} satisfies PackageConfig
+```
+
+Then:
+
+```bash
+bun run icons    # once, on a dev machine: SVG → .icns/.ico (examples/icons.ts)
+bun run package  # host target by default, or --target darwin-x64 …
+```
+
+What comes out of `dist/package/`:
+
+- **macOS** — `Foo.app` (plist, icon, ad-hoc codesign) and a `ditto` zip.
+  Release signing/notarization is a CI step (P1).
+- **Windows** — a portable `Foo/` folder with a GUI-subsystem `Foo.exe`
+  (icon + version info) and a zip. Windows products must be built on a
+  Windows host — the icon/metadata flags call Windows APIs — so they build
+  in the `package-windows` CI job, never cross from macOS.
+
+Two guarantees the packager enforces:
+
+- **One binding per product.** The generated napi loader picks the binary at
+  runtime through a chain of try/catch requires, which a bundler cannot
+  embed. The packager stages a shim with a single literal require of the
+  chosen `.node`, so exactly one binary is embedded.
+- **The product proves it runs.** Every build launches the packaged
+  executable through the automation protocol with `GPUIX_BACKGROUND=1`,
+  waits for the root `testId` (`app-root` by default, configurable via
+  `smokeTestId`), and captures a screenshot (`smoke-<target>.png`). A
+  packaging failure surfaces here, not on a user's machine.
+
+Inside a packaged app:
+
+- `isPackaged()` — true inside a compiled product (`bun build --compile`).
+- `resourcesPath()` — the `extraResources` directory (`Contents/Resources`
+  on macOS, `resources/` beside the exe elsewhere); read-only shipped data,
+  not user state.
+- Assets imported `with { type: 'file' }` work unchanged out of the
+  executable's embedded filesystem.
+
+The design record — including the Bun findings that constrain it (no
+universal macOS target, Windows metadata needs a Windows host, bytecode
+limitations) — is in [docs/packaging-plan.md](packaging-plan.md).
+
+### File opening and macOS document associations
+
+`onOpenRequests(renderer, handler)` delivers `{ paths, urls, errors }` in one
+callback, so file opening and deep links share ownership. Files become decoded
+absolute paths; other URLs keep their original spelling. Malformed file URLs
+appear in `errors` without discarding valid siblings. It does not read files or
+choose tabs, windows, extensions, save queues, or document state.
+
+```ts
+import { onOpenRequests } from '@gpuiv/vue'
+
+const dispose = onOpenRequests(app.renderer, ({ paths, urls, errors }) => {
+  for (const path of paths) openDocument(path)
+  for (const url of urls) handleDeepLink(url)
+  for (const { url, error } of errors) reportOpenError(url, error)
+})
+// Before application teardown (or onBeforeUnmount inside a component):
+// dispose()
+```
+
+Native deliveries received before registration queue and replay in batch order.
+`onOpenUrls` remains the raw URL API and now also returns a disposer. Both
+helpers replace the same process-wide handler; use one renderer and one of
+these helpers, and avoid mixing them with direct native registrations. Disposing
+an old subscription cannot clear its replacement. After disposal, new native
+deliveries queue for the next registration; callbacks already queued on Node
+are ignored if there is no active subscription. `parseOpenRequest(urls)` exposes
+the same decoding for an app's own URL inputs. CLI argument parsing and
+single-instance IPC remain app-owned; raw CLI paths are not file URLs.
+
+On macOS, GPUI forwards Finder/Dock document opens through its existing URL
+delegate. Declare supported document types in `gpuiv.package.ts`:
+
+```ts
+mac: {
+  documentTypes: [{
+    name: 'Markdown document',
+    contentTypes: ['net.daringfireball.markdown'],
+    role: 'Editor',       // default
+    rank: 'Alternate',    // default; eligibility does not force a default app
+  }],
+  typeDeclarations: [{
+    identifier: 'net.daringfireball.markdown',
+    conformsTo: ['public.plain-text'],
+    extensions: ['md', 'markdown'],
+    mimeTypes: ['text/markdown'],
+  }],
+}
+```
+
+`typeDeclarations` imports existing formats by default; set `exported: true`
+only for formats your app owns. System UTIs such as `public.plain-text` need no
+new declaration. `mac.plist` supports nested dictionaries/arrays for advanced
+keys (including `CFBundleURLTypes`) and overrides generated keys.
+
+Try `cd examples && bun run package --config ./open-files.package.ts`, then
+open Markdown files with the resulting `.app`.
+
+Windows and Linux register per-user at run time — no installer, no admin. In
+`gpuiv.package.ts`:
+
+```ts
+win: { fileAssociations: [{ extensions: ['md', 'markdown'], name: 'Markdown document' }] },
+linux: { fileAssociations: [{ extensions: ['md', 'markdown'], mimeTypes: ['text/markdown'] }] },
+```
+
+Then, on the target machine, `gpuiv-packager register --config gpuiv.package.ts`
+(`/path/to/product` defaults to the config's `outDir`; `--dry-run` prints the
+plan). Windows writes `HKCU\Software\Classes` ProgIds plus per-extension
+`OpenWithProgids` — the app appears in Explorer's Open-with list, and claiming
+the *default* handler is the user's one click (Microsoft hash-protects
+`UserChoice` against programmatic writes). Linux installs
+`~/.local/share/applications/<bundleId>.desktop` and refreshes the desktop
+databases; `xdg-mime` marks the app the default for the declared MIME types.
+macOS needs nothing — the declarations ship in the bundle.
+
+The macOS acceptance script `bun scripts/test-file-associations.ts` builds an
+isolated app and checks real cold/warm Launch Services delivery in the
+background; it removes the test app afterward. See the
+[P1 capability ledger](p1-framework-capabilities.md).
+
+### Auto-update (S3-backed)
+
+Products can update themselves from any S3-compatible bucket
+([docs/auto-update-plan.md](auto-update-plan.md)). Trust is an
+ed25519 key pair: `gpuiv-packager keygen` makes it, the public key is
+pinned in `gpuiv.package.ts` (`updatePublicKeys`) and baked into every
+build, the private key stays in CI secrets. `gpuiv-packager publish`
+uploads signed immutable release objects for the targets it built,
+`gpuiv-packager promote` is the single writer that merges the platform
+fragments and flips `stable.json` — so concurrent macOS/Windows CI jobs
+never race the feed.
+
+Inside the app, `createUpdater()` (feed URL, channel and public keys are
+define-injected at package time) exposes `checkForUpdates()` /
+`downloadUpdate()` / `applyAndRelaunch()` with progress events; apply is a
+per-platform two-phase swap (`.app` rename dance on macOS, running-exe
+rename on Windows) that never leaves a half-written product on disk. The
+chat example ships a reference update banner; the engine is inert under
+`bun --hot`.
+
+## Testing
+
+The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).
+It runs the same `GpuixView`, `build_element()`, `apply_styles()`, and event
+handlers as production. Test windows are positioned offscreen and rendered by
+Metal on macOS or DirectX on Windows. The methods below are the lower-level API
+when a locator is not enough.
+
+| Platform | Test renderer | PNG capture |
+|---|---|---|
+| macOS | Metal | Yes |
+| Windows | DirectX | Yes |
+| Linux | Not yet | Waiting for GPUI's wgpu headless renderer |
+
+```ts
+import { createTestApp } from '@gpuiv/vue/testing'
+
+const app = createTestApp(MyComponent)
+app.renderer.flush()  // triggers GpuixView::render() on the native GPU
+
+// Simulate events through GPUI's native input pipeline
+app.renderer.nativeSimulateClick(50, 50)
+app.renderer.nativeSimulateKeystrokes('enter')
+await app.settle()    // flush Vue's scheduler + mutations + repaint
+
+// Inspect results
+const events = app.renderer.drainEvents()
+app.renderer.captureScreenshot('/tmp/test.png')
+const text = app.renderer.getAllText()
+```
+
+`createTestApp()` returns `{ app, container, renderer, settle, unmount }`.
+**`settle()` is required after any input simulation you drive yourself**: Vue
+updates flush on a microtask, so without it the Rust tree still has the old
+state. `unmount()` tears the app down.
+
+### Testing native elements
+
+`getAllText()` only sees `<text>` nodes in the retained tree. `<code>`, `<diff>`
+and `<markdown>` paint their text inside GPUI, so use `getPaintedText()`, which
+returns every string painted in the last frame in paint order:
+
+```ts
+const app = createTestApp(CodeCase)
+expect(app.renderer.getPaintedText()).toEqual(['a', 'b'])
+```
+
+Selection has its own helper. Listeners are registered during **paint**, so
+`dragSelect` flushes between every step; calling `simulateMouseDown` / `Move` /
+`Up` by hand without those flushes selects nothing:
+
+```ts
+expect(app.renderer.dragSelect(20, 30, 900, 300)).toBe('first line\nsecond line')
+```
+
+Screenshots land in `packages/vue/screenshots/` and `examples/screenshots/`,
+both gitignored, so they can be inspected after a run without adding a binary
+diff to every commit. The curated set the README links to lives in
+`docs/images/` and is regenerated with:
+
+```bash
+bun scripts/screenshots.ts
+```

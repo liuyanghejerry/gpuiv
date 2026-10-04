@@ -18,6 +18,10 @@ const OUT = path.join(ROOT, 'docs', 'images')
 
 /** `[source screenshot, committed name]`, relative to the repo root. */
 const CURATED: [string, string][] = [
+  ['examples/screenshots/readme-chat.png', 'readme-chat.png'],
+  ['examples/screenshots/readme-editor.png', 'readme-editor.png'],
+  ['examples/screenshots/readme-gallery.png', 'readme-gallery.png'],
+  ['examples/screenshots/readme-canvas.png', 'readme-canvas.png'],
   ['examples/screenshots/chat-top.png', 'chat-app.png'],
   ['examples/screenshots/chat-model-picker.png', 'chat-model-picker.png'],
   ['examples/screenshots/chat-sidebar-collapsed.png', 'chat-sidebar-collapsed.png'],
@@ -38,6 +42,7 @@ function run(command: string, args: string[], cwd: string) {
 console.log('[screenshots] rendering visual tests')
 run('bun', ['run', 'test', 'showcase'], path.join(ROOT, 'packages', 'vue'))
 run('bun', ['run', 'test', 'chat'], path.join(ROOT, 'examples'))
+run('bun', ['readme-screenshots.ts'], path.join(ROOT, 'examples'))
 
 fs.mkdirSync(OUT, { recursive: true })
 for (const [from, name] of CURATED) {
@@ -47,11 +52,11 @@ for (const [from, name] of CURATED) {
     process.exit(1)
   }
   const target = path.join(OUT, name)
-  // A 256-colour palette is lossless in practice for flat dark UI (no
-  // gradients to band) and cuts the committed size by about two thirds.
+  // Keep the capture's full colors and gradients. PNG compression and
+  // metadata stripping reduce size without quantizing the rendered UI.
   const shrunk = spawnSync(
     'magick',
-    [source, '-strip', '-colors', '256', '-define', 'png:compression-level=9', target],
+    [source, '-strip', '-define', 'png:compression-level=9', target],
     { stdio: 'inherit' }
   )
   if (shrunk.status !== 0) {
