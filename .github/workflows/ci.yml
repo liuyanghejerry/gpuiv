@@ -173,8 +173,64 @@ jobs:
         working-directory: packages/beautiful-ui
 
       - name: Run example tests
-        run: bun run test
+        run: bun run test --exclude beautiful-ui.perf.test.tsx
         working-directory: examples
+
+  # Reuse the release Metal binding. Run budgets separately from correctness
+  # suites so another test window cannot contend for this runner's CPU/GPU.
+  beautiful-ui-performance:
+    name: beautiful-ui-performance
+    needs: build
+    # Required checks accept a skipped conclusion. Report a failure when the
+    # release build fails so the performance gate cannot pass by dependency skip.
+    if: always()
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - name: Require successful release builds
+        env:
+          RELEASE_BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          if [ "$RELEASE_BUILD_RESULT" != success ]; then
+            echo '::error::Release bindings did not build successfully; performance cannot be validated.'
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Download release macOS arm64 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-aarch64-apple-darwin
+          path: packages/native/
+
+      - name: Build Vue package
+        run: bun run build
+        working-directory: packages/vue
+
+      - name: Build beautiful-ui package
+        run: bun run build
+        working-directory: packages/beautiful-ui
+
+      - name: Gate beautiful-ui performance
+        run: bun run test:perf
+        working-directory: examples
+        timeout-minutes: 3
+
+      - name: Upload performance measurements and test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: beautiful-ui-performance
+          path: tmp/beautiful-ui-perf-gate/
+          if-no-files-found: error
+          retention-days: 30
 
   test-windows:
     name: test-windows
@@ -226,7 +282,7 @@ jobs:
         working-directory: packages/beautiful-ui
 
       - name: Run example tests
-        run: bun run test
+        run: bun run test --exclude beautiful-ui.perf.test.tsx
         working-directory: examples
 
   # Desktop products for the chat example, built through @gpuiv/packager.
@@ -236,7 +292,7 @@ jobs:
   # anything is uploaded. Signing/notarization hooks are P1.
   package-macos:
     name: package-macos
-    needs: build
+    needs: [build, beautiful-ui-performance]
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     env:
@@ -298,7 +354,7 @@ jobs:
 
   package-windows:
     name: package-windows
-    needs: build
+    needs: [build, beautiful-ui-performance]
     if: github.event_name == 'workflow_dispatch'
     runs-on: windows-latest
     env:
@@ -360,7 +416,7 @@ jobs:
   # step — update support for linux targets is P2.
   package-linux:
     name: package-linux
-    needs: build
+    needs: [build, beautiful-ui-performance]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -495,6 +551,7 @@ jobs:
       - build
       - test
       - test-windows
+      - beautiful-ui-performance
     strategy:
       fail-fast: false
       matrix:

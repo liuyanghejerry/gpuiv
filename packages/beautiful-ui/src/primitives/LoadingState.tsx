@@ -1,11 +1,12 @@
 /** Pixel-grid work indicator, ported from beautiful-ui (MIT).
- * Drive, Dots, and Orbit sample the source's wavefront at 100ms intervals.
+ * Drive, Dots, and Orbit sample the source's wavefront on a shared 60Hz clock.
  * Surfer pairs Drive with an optional frozen image (native has no video
  * element). `phase` pins the clock; theme.reducedMotion freezes decorative
  * motion while the elapsed time still advances. Text shimmer uses opacity.
  */
 
-import { defineComponent, onBeforeUnmount, onMounted, ref, type PropType } from "vue"
+import { defineComponent, h, type PropType } from "vue"
+import { useAnimationClock } from "../animation-clock.js"
 import { motion } from "../motion.js"
 
 import { ease, fonts } from "../tokens.js"
@@ -26,9 +27,6 @@ export interface LoadingStateProps {
 }
 
 const DEFAULT_LABEL = "Churning"
-
-/** Shared clock cadence — also the elapsed readout's refresh rate. */
-const TICK_MS = 100
 
 /* Per-cell animation delays (ms), 3×3 grid indexed row-major. Both tables
  * are the source's formulas verbatim. */
@@ -154,43 +152,34 @@ export const LoadingState = defineComponent({
   },
   setup(props) {
     const theme = useTheme()
-    // One timer drives both the pixel wave and the elapsed readout.
-    const elapsed = ref(0)
-    let timer: ReturnType<typeof setInterval> | undefined
-    onMounted(() => {
-      if (props.phase !== undefined) return
-      const start = Date.now()
-      timer = setInterval(() => {
-        elapsed.value = Date.now() - start
-      }, TICK_MS)
-    })
-    onBeforeUnmount(() => {
-      if (timer !== undefined) clearInterval(timer)
-    })
+    // Grid and labels share ticks with the other mounted loaders/shimmers.
+    // Reduced motion keeps only the elapsed readout's 10Hz updates.
+    const elapsed = useAnimationClock(
+      () => props.phase,
+      () => theme.reducedMotion.value ? 100 : 16,
+    )
 
     return () => {
       const t = theme.tokens.value
       const now = props.phase ?? elapsed.value
       const pattern = PATTERNS[props.variant === "Surfer" ? "Drive" : props.variant] ?? PATTERNS.Drive
-      return (
-        <motion.div
-          initial={{ opacity: props.phase === undefined ? 0 : 1 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.2, ease: ease.link }}
-          style={{ fontFamily: fonts.sans, alignSelf: "flex-start" }}
-        >
+      return h(motion.div, {
+        initial: { opacity: props.phase === undefined ? 0 : 1 },
+        animate: { opacity: 1 },
+        transition: { duration: 0.2, ease: ease.link },
+        style: { fontFamily: fonts.sans, alignSelf: "flex-start" },
+      }, { default: () => [
           <div role="status" style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {loaderGrid(t.ink, pattern, theme.reducedMotion.value ? 0 : now)}
-            <Shimmer phase={props.phase}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: t.ink2 }}>{props.label ?? DEFAULT_LABEL}</div>
-            </Shimmer>
+            {h(Shimmer, { phase: props.phase }, { default: () =>
+              <div style={{ fontSize: 13, fontWeight: 500, color: t.ink2 }}>{props.label ?? DEFAULT_LABEL}</div>,
+            })}
             <div style={{ fontFamily: fonts.mono, fontSize: 12, color: t.ink3 }}>{formatElapsed(now)}</div>
-          </div>
-          {props.variant === "Surfer" && <div testId="loading-surfer" style={{ marginTop: 8, width: 224, height: 126, overflow: "hidden", borderRadius: 10, backgroundColor: t.inset, ...theme.shadows.value.overlay }}>
+          </div>,
+          props.variant === "Surfer" && <div testId="loading-surfer" style={{ marginTop: 8, width: 224, height: 126, overflow: "hidden", borderRadius: 10, backgroundColor: t.inset, ...theme.shadows.value.overlay }}>
             {props.surferImage ? <img src={props.surferImage} style={{ width: 224, height: 126, objectFit: "cover" }} /> : <div style={{ width: 224, height: 126, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontFamily: fonts.mono, color: t.ink3 }}>Preview unavailable</div>}
-          </div>}
-        </motion.div>
-      )
+          </div>,
+      ] })
     }
   },
 })

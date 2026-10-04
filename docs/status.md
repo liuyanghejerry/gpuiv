@@ -38,7 +38,7 @@
 - [x] Auto-height transitions (`<AnimateHeight>`)
 - [x] Headless Collapsible (`Collapsible`, `CollapsibleTrigger`, `CollapsiblePanel`; controlled state, keyboard, focus restoration and retained panels)
 - [x] Custom font loading (`loadFont`, `loadFontBytes`)
-- [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, keyboard controls, editable/resizable records grid, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](../packages/beautiful-ui/README.md)
+- [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, shared 60Hz loading/shimmer clock, keyboard controls, editable/resizable records grid with page-scroll previews, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](../packages/beautiful-ui/README.md)
 - [x] Cross-element text selection
 - [x] Headless Select, Combobox and Tooltip
 - [x] Native `hover` and `active` styles
