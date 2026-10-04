@@ -91,6 +91,31 @@ describeNative("runtime error overlay (vue)", () => {
     expect(process.listenerCount("unhandledRejection")).toBe(before)
   })
 
+  it("does not overlay a replacement app when an old listener rejects later", async () => {
+    const renderer = new TestRenderer()
+    const freshErrors: string[] = []
+    let reject!: (error: Error) => void
+    const pending = new Promise<void>((_resolve, fail) => { reject = fail })
+    try {
+      const Old = defineComponent({
+        render: () => h("div", { style: { width: 100, height: 100 }, onClick: () => pending }, [h("text", "old")]),
+      })
+      createApp(Old, { renderer })
+      renderer.flush()
+      renderer.nativeSimulateClick(10, 10)
+      createApp(defineComponent({ render: () => h("text", "fresh") }), {
+        renderer, onRuntimeError: (error) => freshErrors.push(String(error)),
+      })
+      reject(new Error("late listener error"))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      renderer.flush()
+      expect(freshErrors).toEqual([])
+      expect(renderer.getAllText()).toEqual(["fresh"])
+    } finally {
+      resetApp()
+    }
+  })
+
   it("routes a throwing native event handler through onErrorCaptured", async () => {
     const renderer = new TestRenderer()
     try {

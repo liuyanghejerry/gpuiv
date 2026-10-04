@@ -83,7 +83,7 @@ export function createNativeRenderer(): GpuixRenderer {
       try {
         handleGpuixEvent(event, renderer)
       } catch (error) {
-        scheduleRuntimeError(error, "native event handler")
+        scheduleRuntimeError(error, "native event handler", undefined, renderer)
       }
     }
   })
@@ -176,7 +176,7 @@ export function startFrameLoop(
       try {
         if (current.tick() === false) running = false
       } catch (error) {
-        scheduleRuntimeError(error, "frame loop tick")
+        scheduleRuntimeError(error, "frame loop tick", undefined, current)
       }
     }
     if (!running) {
@@ -193,6 +193,16 @@ export function startFrameLoop(
 }
 
 const RENDER_HOST_KEY = "__gpuivRenderHost"
+const WINDOW_MOUNTS_KEY = Symbol.for("@gpuiv/vue/window-mounts")
+// Native callbacks survive bun --hot module re-evaluation with their window.
+// Keep their ownership lookup in the same reload-proof lifetime.
+const windowMounts: WeakMap<object, WindowMount> = (() => {
+  const existing = Reflect.get(globalThis, WINDOW_MOUNTS_KEY)
+  if (existing) return existing
+  const created = new WeakMap<object, WindowMount>()
+  Reflect.set(globalThis, WINDOW_MOUNTS_KEY, created)
+  return created
+})()
 
 export interface GpuivAppHandle {
   app: App<HostNode>
@@ -207,22 +217,24 @@ export interface GpuivWindowHandle extends GpuivAppHandle {
   close: () => void
 }
 
-type RenderSlot = {
+interface WindowMount {
   renderer?: NativeRenderer
   handle?: GpuivAppHandle
-  loop?: FrameLoop
-  /** Windows opened through `createWindow`, newest last. */
-  extraWindows?: GpuivWindowHandle[]
   /** Last non-overlay root — the Reload button remounts it with lastOptions. */
   rootComponent?: Component
   lastOptions?: RenderOptions
   overlayShown?: boolean
+  /** A pending overlay must belong to the same mounted tree. */
+  mountSerial?: number
+}
+
+type RenderSlot = WindowMount & {
+  loop?: FrameLoop
+  /** Windows opened through `createWindow`, newest last. */
+  extraWindows?: GpuivWindowHandle[]
   /** Watermark of the HMR reload counter at the last createApp call. */
   hmrReloadsSeen?: number
   hmrDuplicatesSeen?: number
-  /** Bumped on every mount. A pending overlay microtask keys on it, so an
-   *  error scheduled against an older tree cannot paint over a newer one. */
-  mountSerial?: number
 }
 
 function thrownToError(thrown: unknown): Error | string {
@@ -280,50 +292,57 @@ function componentChainOf(
 function scheduleRuntimeError(
   error: unknown,
   info?: string,
-  componentChain?: string
+  componentChain?: string,
+  renderer?: object
 ): void {
-  const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
+  // Process-level errors have no window identity and use the main window.
+  // Window callbacks must never fall back to a different window after close.
+  const mount = renderer
+    ? windowMounts.get(renderer)
+    : Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
+  const failedSerial = mount?.mountSerial
   const thrown = thrownToError(error)
-  if (info !== undefined && slot?.lastOptions?.onRuntimeError) {
+  if (info !== undefined && mount?.lastOptions?.onRuntimeError) {
     try {
-      slot.lastOptions.onRuntimeError(thrown, info)
+      mount.lastOptions.onRuntimeError(thrown, info)
     } catch (observerError) {
       console.error("[gpuiv] onRuntimeError:", observerError)
     }
   }
-  if (!slot || slot.mountSerial === undefined) {
+  if (!mount || failedSerial === undefined) {
     console.error("[gpuiv] runtime error:", thrown)
     return
   }
-  const failedSerial = slot.mountSerial
   queueMicrotask(() => {
-    const current = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
-    if (!current?.handle || current.mountSerial !== failedSerial) return
-    showRuntimeError(thrown, [info, componentChain].filter(Boolean).join("\n") || undefined)
+    if (!mount.handle || mount.mountSerial !== failedSerial) return
+    showRuntimeError(mount, thrown, [info, componentChain].filter(Boolean).join("\n") || undefined)
   })
 }
 
-function showRuntimeError(thrown: Error | string, errorContext?: string): void {
-  const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
-  if (!slot) return
+function showRuntimeError(mount: WindowMount, thrown: Error | string, errorContext?: string): void {
   const formatted = formatRuntimeError(thrown, errorContext)
   console.error("[gpuiv] runtime error:", formatted.stack)
-  if (slot.lastOptions?.errorOverlay === false) return
-  if (slot.overlayShown) return
-  slot.overlayShown = true
+  if (mount.lastOptions?.errorOverlay === false) return
+  if (mount.overlayShown) return
+  mount.overlayShown = true
   try {
-    const host = slot.renderer
+    const host = mount.renderer
     if (!host) return
-    mountTree(slot, host, runtimeErrorOverlay(formatted, () => reloadApp(slot)), slot.lastOptions ?? {})
+    mountTree(mount, host, runtimeErrorOverlay(formatted, () => reloadApp(mount)), mount.lastOptions ?? {})
   } catch (overlayError) {
-    slot.overlayShown = false
+    mount.overlayShown = false
     console.error("[gpuiv] failed to show runtime error overlay:", overlayError)
   }
 }
 
-function reloadApp(slot: RenderSlot): void {
-  if (slot.rootComponent === undefined) return
-  createApp(slot.rootComponent, slot.lastOptions ?? {})
+function reloadApp(mount: WindowMount): void {
+  if (mount.rootComponent === undefined || !mount.renderer) return
+  if (mount === Reflect.get(globalThis, RENDER_HOST_KEY)) {
+    createApp(mount.rootComponent, mount.lastOptions ?? {})
+  } else {
+    mount.overlayShown = false
+    mountTree(mount, mount.renderer, mount.rootComponent, mount.lastOptions ?? {})
+  }
 }
 
 const OVERLAY_MONO =
@@ -582,13 +601,6 @@ export function createApp(
   return mountTree(slot, host, rootComponent, options)
 }
 
-/** Where `mountTree` records the live handle of one window. The main slot is
- *  one; every `createWindow` mount gets its own. */
-interface WindowMount {
-  handle?: GpuivAppHandle
-  mountSerial?: number
-}
-
 /** Mount `rootComponent` on `host`, replacing any live tree on that renderer.
  *  Shared by createApp, createWindow, the runtime error overlay, and its
  *  Reload button — each mount is a fresh app instance with the errorHandler
@@ -611,6 +623,8 @@ function mountTree(
   // schedules against the old serial and is dropped, while an error in the
   // new mount schedules against this one.
   mount.mountSerial = (mount.mountSerial ?? 0) + 1
+  mount.renderer = host
+  windowMounts.set(host, mount)
 
   const windowKeyEventId = nextWindowKeyEventId(host)
   const windowSelectionEventId = nextWindowSelectionEventId(host)
@@ -632,11 +646,19 @@ function mountTree(
     host.setWindowSelectionChange?.(Boolean(onSelectionChange), windowSelectionEventId)
   } catch (error) {
     gpuivHost.detach()
+    windowMounts.delete(host)
     throw error
   }
   const app = gpuivHost.vue.createApp(rootComponent)
+  const mountedSerial = mount.mountSerial
   app.config.errorHandler = (err, instance, info) => {
-    scheduleRuntimeError(err, info, componentChainOf(instance))
+    // A listener's promise can reject after its app unmounts. Its old error
+    // handler must not attribute that rejection to a replacement tree.
+    if (mount.mountSerial !== mountedSerial || windowMounts.get(host) !== mount) {
+      console.error("[gpuiv] runtime error from an unmounted app:", thrownToError(err))
+      return
+    }
+    scheduleRuntimeError(err, info, componentChainOf(instance), host)
   }
   // App code only ever sees application commands (scroll, window, debug) —
   // never the commit facade — so provide the raw renderer.
@@ -657,14 +679,15 @@ function mountTree(
     renderer: host,
     unmount: () => {
       app.unmount()
-      gpuivHost.flushMutations()
       // Only the live root may turn its window listeners off; a stale
       // unmount must not disable the replacement's.
       if (gpuivHost.detach()) {
         host.setWindowKeyEvents?.(false, false, windowKeyEventId)
         host.setWindowObservers?.(false, false, windowKeyEventId)
         host.setWindowSelectionChange?.(false, windowSelectionEventId)
+        windowMounts.delete(host)
       }
+      if (mount.handle === handle) mount.handle = undefined
     },
   }
   mount.handle = handle
@@ -714,16 +737,24 @@ export function createWindow(
   installRuntimeErrorHandlers()
   slot.loop?.addRenderer(renderer)
 
-  const mount: WindowMount = {}
+  const mount: WindowMount = { renderer, rootComponent, lastOptions: options }
   const handle = mountTree(mount, renderer, rootComponent, options)
+  let closed = false
   const window: GpuivWindowHandle = {
-    ...handle,
+    // An error overlay and Reload replace the mounted app on this window.
+    // Keep the public handle and close() attached to that current tree.
+    get app() { return mount.handle?.app ?? handle.app },
+    get container() { return mount.handle?.container ?? handle.container },
+    renderer,
+    unmount: () => mount.handle?.unmount(),
     close: () => {
-      handle.unmount()
+      if (closed) return
+      closed = true
+      mount.handle?.unmount()
       try {
         renderer.closeWindow?.()
       } catch (error) {
-        scheduleRuntimeError(error, "window close")
+        scheduleRuntimeError(error, "window close", undefined, renderer)
       }
       slot.loop?.removeRenderer(renderer)
       slot.extraWindows = slot.extraWindows?.filter((open) => open !== window)

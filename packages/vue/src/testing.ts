@@ -1295,11 +1295,11 @@ export function createTestApp(
     flushMutations: gpuivHost.flushMutations,
     unmount: () => {
       app.unmount()
-      gpuivHost.flushMutations()
       // Only the live root may turn its window listeners off.
       if (gpuivHost.detach()) {
         renderer.setWindowKeyEvents(false, false, windowKeyEventId)
         renderer.setWindowObservers(false, false, windowKeyEventId)
+        renderer.setWindowSelectionChange(false, windowSelectionEventId)
       }
       renderer.flush()
     },

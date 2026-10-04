@@ -26,6 +26,32 @@ import { createApp, resetApp } from "../renderer.js"
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("mutation lifecycle", () => {
+  it("destroys host containers across remounts, stale unmounts and reset", () => {
+    const renderer = new TestRenderer()
+    const Root = defineComponent({ render: () => <text>root</text> })
+    try {
+      const first = createApp(Root, { renderer })
+      for (let i = 0; i < 6; i++) {
+        createApp(Root, { renderer })
+        expect(renderer.getRetainedElementCount()).toBe(3)
+      }
+      // An old handle cannot destroy the current container or its listeners.
+      first.unmount()
+      expect(renderer.getRetainedElementCount()).toBe(3)
+      expect(renderer.getAllText()).toEqual(["root"])
+      resetApp()
+      expect(renderer.getRetainedElementCount()).toBe(0)
+    } finally {
+      resetApp()
+    }
+  })
+
+  it("frees a test app's container on unmount", () => {
+    const app = createTestApp(defineComponent({ render: () => <text>test root</text> }))
+    app.unmount()
+    expect(app.renderer.getRetainedElementCount()).toBe(0)
+  })
+
   it("keeps unchanged event handlers registered across renders", async () => {
     const onClick = vi.fn()
     const tick = ref(0)
