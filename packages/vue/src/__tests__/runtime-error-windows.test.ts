@@ -60,10 +60,9 @@ describe.skipIf(!hasNativeTestRenderer)("runtime errors across windows", () => {
       'await nextTick(); await new Promise(resolve => setTimeout(resolve, 0))',
       'const reloadedText = child.renderer.getAllText()',
       'fail.value = true; await nextTick(); await new Promise(resolve => setTimeout(resolve, 0))',
-      'let closedTree; const nativeClose = child.renderer.closeWindow.bind(child.renderer)',
-      'child.renderer.closeWindow = () => { closedTree = JSON.parse(child.renderer.getAutomationTree()); nativeClose() }',
+      'let closedUnmounts = 0; child.app.onUnmount(() => { closedUnmounts++ })',
       'child.close(); child.close()',
-      'console.log("RESULT", JSON.stringify({ mainErrors, childErrors, mainMounts, childMounts, mainText: main.renderer.getAllText(), overlayText, reloadedText, closedTree }))',
+      'console.log("RESULT", JSON.stringify({ mainErrors, childErrors, mainMounts, childMounts, mainText: main.renderer.getAllText(), overlayText, reloadedText, closedUnmounts }))',
     ])
     expect(result.mainErrors).toEqual([])
     expect(result.childErrors).toEqual(["Error: secondary boom", "Error: secondary boom"])
@@ -73,6 +72,6 @@ describe.skipIf(!hasNativeTestRenderer)("runtime errors across windows", () => {
     expect(result.overlayText).toContain("secondary boom")
     expect(result.overlayText).toContain("Reload")
     expect(result.reloadedText).toEqual(["child"])
-    expect(result.closedTree).toBeNull()
+    expect(result.closedUnmounts).toBe(1)
   })
 })
