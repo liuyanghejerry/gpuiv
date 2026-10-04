@@ -10,6 +10,7 @@
     "error-handling": "bun --hot error-handling.tsx",
     "test": "vitest run",
     "test:perf": "NODE_ENV=production vitest run --config vitest.perf.config.ts",
+    "test:memory": "NODE_ENV=production vitest run --config vitest.memory.config.ts",
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
     "infinite-chat": "bun --hot infinite-chat.tsx",

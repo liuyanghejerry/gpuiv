@@ -319,6 +319,17 @@ pub struct CustomElementRegistry {
 }
 
 impl CustomElementRegistry {
+    #[cfg(feature = "test-support")]
+    pub(crate) fn resource_counts(&self) -> (usize, usize) {
+        (
+            self.instances.len(),
+            self.instances
+                .values()
+                .filter(|entry| entry.element.live_image().is_some())
+                .count(),
+        )
+    }
+
     pub fn new() -> Self {
         Self {
             factories: HashMap::new(),

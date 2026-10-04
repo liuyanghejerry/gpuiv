@@ -5621,6 +5621,54 @@ struct HighlightCacheEntry {
     reported: Option<u64>,
 }
 
+#[cfg(feature = "test-support")]
+#[napi(object)]
+pub struct TestResourceStats {
+    pub retained_elements: u32,
+    pub interned_styles: u32,
+    pub focus_handles: u32,
+    pub focus_subscriptions: u32,
+    pub scroll_handles: u32,
+    pub motion_states: u32,
+    pub virtual_lists: u32,
+    pub highlight_entries: u32,
+    pub custom_elements: u32,
+    pub live_images: u32,
+    pub canvas_surfaces: u32,
+    pub canvas_tiles: u32,
+    pub retired_canvas_images: u32,
+    pub syntax_documents: u32,
+    pub syntax_retained_bytes: f64,
+}
+
+#[cfg(feature = "test-support")]
+impl GpuixView {
+    pub(crate) fn resource_stats(&self) -> TestResourceStats {
+        let tree = self.tree.lock().unwrap();
+        let (custom_elements, live_images) = self.custom_registry.resource_counts();
+        let (canvas_surfaces, canvas_tiles, retired_canvas_images) =
+            self.canvas_surfaces.resource_counts();
+        let syntax = crate::syntax::cache::stats();
+        TestResourceStats {
+            retained_elements: tree.elements.len() as u32,
+            interned_styles: tree.styles.len() as u32,
+            focus_handles: self.focus_handles.len() as u32,
+            focus_subscriptions: self.focus_subscriptions.len() as u32,
+            scroll_handles: self.scroll_handles.len() as u32,
+            motion_states: self.motion_states.len() as u32,
+            virtual_lists: self.virtual_lists.len() as u32,
+            highlight_entries: self.highlights.len() as u32,
+            custom_elements: custom_elements as u32,
+            live_images: live_images as u32,
+            canvas_surfaces: canvas_surfaces as u32,
+            canvas_tiles: canvas_tiles as u32,
+            retired_canvas_images: retired_canvas_images as u32,
+            syntax_documents: syntax.documents as u32,
+            syntax_retained_bytes: syntax.retained_bytes as f64,
+        }
+    }
+}
+
 fn emit_highlight_events(callback: &Option<EventCallback>, events: &[(u64, usize)]) {
     for &(id, total) in events {
         emit_event_full(callback, id, "highlight", |payload| {
@@ -6621,6 +6669,13 @@ impl gpui::Render for GpuixView {
             .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
             .retain(|id, _| tree.elements.contains_key(id));
+        // Highlight entries own joined text and matches. Removing a subtree
+        // (or its declaration) must release those along with its host nodes.
+        self.highlights.retain(|id, _| {
+            tree.elements
+                .get(id)
+                .is_some_and(|element| element.custom_props.contains_key("highlight"))
+        });
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
         // are different fields of self, so Rust allows borrowing all simultaneously.

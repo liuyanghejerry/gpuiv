@@ -20,6 +20,9 @@ cd examples && bun run test chat.perf.test.tsx
 # Beautiful UI CI gate (macOS release native binding required)
 cd examples && CI=true bun run test:perf
 
+# Resource reclamation gate + production-Bun memory trends (macOS release)
+cd examples && CI=true bun run test:memory
+
 # macOS CPU clamp. E-cores, not Chrome 6x. Do not set in CI.
 THROTTLE=utility bun run test chat.perf.test.tsx
 ```
@@ -38,6 +41,48 @@ go to `tmp/beautiful-ui-perf-gate/` and upload even when a test fails. The job
 blocks publishing; add its status check to branch protection to require it
 before merging. See [Beautiful UI performance checks](../../packages/beautiful-ui/README.md#performance-checks)
 for budgets and the live audit.
+
+### Memory resource gate
+
+`memory-leak` reuses the release macOS binding and pins Bun 1.3.14. Run
+`cd examples && bun run test:memory` after building native, Vue and Beautiful UI.
+Vitest launches a separate production-Bun process for each scenario, so its own
+reporter, mock history and module loader do not contaminate heap measurements.
+The ordinary example suite excludes this dedicated gate.
+
+Each scenario keeps one renderer/window alive for 30 mount/exercise/unmount
+cycles: loaders, gallery scrolling, menus/dialogs, and native input, text
+highlighting, virtual lists, images and Canvas resize. After empty frames and
+deferred work, every per-node ownership count must return to its initial
+empty-root baseline; final root unmount must leave zero. GPUI's entity snapshot
+assertion also rejects new surviving entities. No resource-counter query
+performs cleanup. Timer and shared-animation subscriber counts must be zero.
+The native scenario verifies that each resource family was actually exercised.
+
+Interned styles intentionally retain up to the 64-entry sweep floor on an
+empty tree; syntax caching keeps at most 96 documents / 24 MiB of estimated
+retained data. These caches have capacity assertions rather than zero assertions.
+
+Ten cycles warm the runtime; synchronous Bun GC runs between event-loop turns
+every five later cycles. JS heap, off-heap JS data and RSS are **reported only**
+until hosted-runner data supports fixed byte budgets. They do not measure all
+Rust allocations or GPU memory, so passing this gate is not proof of absence of
+every possible leak. Do not silently enable a moving or per-commit budget.
+
+Three deliberately retained resources (timer, unreachable native node, and an
+event closure capturing a buffer) must each fail in a subprocess. Missing native
+bindings, missing reports, skipped scenarios, timeouts and failed release builds
+fail the gate. Raw per-cycle ownership, GC samples, runtime metadata, worker logs
+and Vitest JSON go to `tmp/memory-leak-gate/` and upload on failure too.
+The gate blocks publishing and packaging; require its `memory-leak` check in
+branch protection. Keep runtime upgrades explicit so calibration is comparable.
+
+`TestRenderer.getResourceStats()` reads ownership counts and JS event handlers.
+Capture `captureEntityLeakBaseline()` on an empty root before mounting tested
+content; after unmount and empty paints, call `assertNoNewEntityLeaks()`.
+Set `LEAK_BACKTRACE=1` before launch for GPUI allocation traces when available.
+These methods use the currently active native test context; creating another
+test renderer replaces that context and its entity baseline.
 
 `packages/vue/src/__tests__/canvas-wpt.test.ts` runs a vendored subset of the
 W3C web-platform-tests canvas suite (593 cases: 452 run, 141 skipped with the

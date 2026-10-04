@@ -3,6 +3,11 @@ import { onBeforeUnmount, onMounted, ref, watch } from "vue"
 type Subscriber = (now: number) => void
 const clocks = new Map<number, { timer: ReturnType<typeof setInterval>; subscribers: Set<Subscriber> }>()
 
+/** Internal test diagnostic; does not change clock ownership or cadence. */
+export function getAnimationClockStatsForTests() {
+  return { clocks: clocks.size, subscribers: [...clocks.values()].reduce((sum, clock) => sum + clock.subscribers.size, 0) }
+}
+
 function subscribe(intervalMs: number, sample: Subscriber): () => void {
   let clock = clocks.get(intervalMs)
   if (!clock) {

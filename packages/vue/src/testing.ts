@@ -16,7 +16,7 @@ import { spawnSync } from "node:child_process"
 import type { Component } from "vue"
 import type { App } from "vue"
 import { nextTick } from "vue"
-import type { EventPayload, HighlightMatch, InputDecorationInfo, InputRunInfo } from "@gpuiv/native"
+import type { EventPayload, HighlightMatch, InputDecorationInfo, InputRunInfo, TestResourceStats as NativeTestResourceStats } from "@gpuiv/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
@@ -36,6 +36,7 @@ export type { ElementBounds }
 import { createGpuivRendererHost } from "./reconciler/vue-renderer.js"
 import {
   handleGpuixEvent,
+  containerForRenderer,
   idAllocatorFor,
   nextWindowKeyEventId,
   nextWindowSelectionEventId,
@@ -82,6 +83,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAutomationTree(): string
   getElementBounds(elementId: number): ElementBounds | null
   getRetainedElementCount(): number
+  getResourceStats(): NativeTestResourceStats
+  captureEntityLeakBaseline(): void
+  assertNoNewEntityLeaks(): void
   scrollIntoView(elementId: number): void
   setImage(elementId: number, bytes: Uint8Array): void
   setImagePixels(
@@ -282,6 +286,13 @@ export interface TestRendererOptions {
 }
 
 export type TestWindowOptions = TestRendererOptions & WindowKeyEventHandlers
+
+/** Live ownership counts. Interned styles and syntax documents are bounded
+ * caches; other counts should return to the empty-root baseline after paint. */
+export interface TestResourceStats extends NativeTestResourceStats {
+  eventHandlerNodes: number
+  eventHandlers: number
+}
 
 export class TestRenderer implements NativeRenderer {
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
@@ -706,6 +717,27 @@ export class TestRenderer implements NativeRenderer {
    *  not — the only way a test can prove a removal actually freed a node. */
   getRetainedElementCount(): number {
     return this.native.getRetainedElementCount()
+  }
+
+  /** Inspect native ownership and JS handlers without flushing or cleanup. */
+  getResourceStats(): TestResourceStats {
+    const handlers = containerForRenderer(this)?.eventHandlers
+    return {
+      ...this.native.getResourceStats(),
+      eventHandlerNodes: handlers?.size ?? 0,
+      eventHandlers: handlers ? [...handlers.values()].reduce((sum, node) => sum + node.size, 0) : 0,
+    }
+  }
+
+  /** Capture before mounting the tested subtree on this renderer. */
+  captureEntityLeakBaseline(): void {
+    this.native.captureEntityLeakBaseline()
+  }
+
+  /** Check after empty frames release input handlers and deferred entities.
+   * Set LEAK_BACKTRACE=1 before launch to include GPUI allocation traces. */
+  assertNoNewEntityLeaks(): void {
+    this.native.assertNoNewEntityLeaks()
   }
 
   clockPause(): number {

@@ -87,6 +87,7 @@ struct VisualTestState {
     view: gpui::Entity<GpuixView>,
     window: gpui::AnyWindowHandle,
     cx: gpui::VisualTestAppContext,
+    leak_baseline: Option<gpui::LeakDetectorSnapshot>,
 }
 
 thread_local! {
@@ -365,7 +366,12 @@ impl TestGpuixRenderer {
 
         // Store !Send types on the JS main thread.
         TEST_STATE.with(|cell| {
-            *cell.borrow_mut() = Some(VisualTestState { cx, window, view });
+            *cell.borrow_mut() = Some(VisualTestState {
+                cx,
+                window,
+                view,
+                leak_baseline: None,
+            });
         });
 
         Ok(Self {
@@ -407,6 +413,53 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_retained_element_count(&self) -> u32 {
         self.tree.lock().unwrap().elements.len() as u32
+    }
+
+    /// Read ownership counts without painting or reclaiming resources.
+    #[napi]
+    pub fn get_resource_stats(&self) -> Result<crate::renderer::TestResourceStats> {
+        with_test_state(|cx, _, view| Ok(cx.update(|cx| view.read(cx).resource_stats())))
+    }
+
+    /// Capture GPUI's native entity baseline for repeated mount/unmount tests.
+    /// A new TestGpuixRenderer starts a new context and invalidates this baseline.
+    #[napi]
+    pub fn capture_entity_leak_baseline(&self) -> Result<()> {
+        TEST_STATE.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            let state = borrow
+                .as_mut()
+                .ok_or_else(|| Error::from_reason("TestGpuixRenderer not initialized"))?;
+            state.leak_baseline = Some(state.cx.update(|cx| cx.leak_detector_snapshot()));
+            Ok(())
+        })
+    }
+
+    /// Use GPUI's leak detector, including allocation traces with LEAK_BACKTRACE.
+    /// Translate its assertion into a JS error rather than unwinding through FFI.
+    #[napi]
+    pub fn assert_no_new_entity_leaks(&self) -> Result<()> {
+        TEST_STATE.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            let state = borrow
+                .as_mut()
+                .ok_or_else(|| Error::from_reason("TestGpuixRenderer not initialized"))?;
+            let baseline = state
+                .leak_baseline
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("Capture an entity leak baseline first"))?;
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                state.cx.update(|cx| cx.assert_no_new_leaks(baseline));
+            }))
+            .map_err(|panic| {
+                let message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                    .unwrap_or("GPUI entity leak assertion failed");
+                Error::from_reason(message.to_owned())
+            })
+        })
     }
 
     /// Apply a batch of mutations in a single FFI call.
