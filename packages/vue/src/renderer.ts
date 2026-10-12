@@ -104,11 +104,12 @@ export function createNativeRenderer(): GpuixRenderer {
 
 const automationBackends = new WeakMap<NativeRenderer, InProcessBackend>()
 
-/** ~60fps. The tick loop also performs the coalesced repaint for everything
- *  the last batch of mutations marked dirty (macOS), so this doubles as the
- *  paint rate cap: an 8ms tick drew at ~125fps, which multiplied the frame
- *  cost of a large mounted tree into a pinned core while scrolling. */
-const DEFAULT_FRAME_MS = 16
+/** AppKit input and display-link callbacks share this pump. A 16ms interval
+ *  limits trackpad input to ~60Hz even when drawing takes only a few ms, and
+ *  can miss a display deadline before delivering the queued input. Pump at
+ *  8ms on macOS; GPUI still draws only dirty frames. Other platforms own
+ *  their input loop and only need the slower shutdown poll. */
+const DEFAULT_FRAME_MS = process.platform === "darwin" ? 8 : 16
 
 type Tickable = Pick<GpuixRenderer, "requiresTick" | "tick">
 
