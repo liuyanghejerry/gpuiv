@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
 import { defineComponent, ref } from "vue"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type { EventPayload } from "@gpuiv/native"
 import { createTestApp, hasNativeTestRenderer, TestRenderer } from "../testing.js"
 import { motion } from "../index.js"
@@ -14,6 +14,37 @@ import { createApp, installRuntimeErrorHandlers, resetApp, startFrameLoop } from
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describe("frame loop (vue)", () => {
+  it.skipIf(process.platform !== "darwin")("drains 120Hz input without accumulating a second event", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] })
+    let pending = 0
+    const batches: number[] = []
+    const input = setInterval(() => { pending += 1 }, 1000 / 120)
+    const loop = startFrameLoop({
+      requiresTick: () => true,
+      tick: () => {
+        batches.push(pending)
+        pending = 0
+        // Include realistic draw cost: it must consume the pump budget,
+        // not get added to a fixed sleep after every frame.
+        vi.advanceTimersByTime(3)
+        return true
+      },
+    })
+    try {
+      vi.advanceTimersByTime(100)
+      expect(batches.filter(n => n > 0).length).toBeGreaterThanOrEqual(11)
+      expect(Math.max(...batches)).toBe(1)
+      loop.stop()
+      const ticks = batches.length
+      vi.advanceTimersByTime(30)
+      expect(batches).toHaveLength(ticks)
+    } finally {
+      loop.stop()
+      clearInterval(input)
+      vi.useRealTimers()
+    }
+  })
+
   // The embedded AppKit pump must drain only ready events and return, never
   // wait for a display-link wake — otherwise Bun timers and sockets starve
   // between frames. Runs in a child process because it needs the real
