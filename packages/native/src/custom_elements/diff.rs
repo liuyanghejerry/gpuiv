@@ -35,9 +35,6 @@ use crate::text::runs::runs_for_spans;
 use crate::text::{range_rects, SharedSelection};
 use crate::theme::{Theme, ThemeFonts};
 
-/// How far past the viewport the list pre-builds rows.
-const OVERDRAW: f32 = 1024.0;
-
 // ── Factory ──────────────────────────────────────────────────────────
 
 pub struct DiffFactory;
@@ -120,7 +117,7 @@ pub struct DiffElement {
     stream_word_diff: Option<bool>,
     /// Parsed data for the current patch. Rebuilt only when the props change.
     data: Option<Rc<DiffData>>,
-    fingerprint: Option<u64>,
+    data_dirty: bool,
     /// Persists across frames so the scroll position survives a re-render.
     list_state: Option<gpui::ListState>,
     /// Metrics hash the list state was last sized for. Row heights come from
@@ -133,9 +130,8 @@ impl DiffElement {
     /// Returns the data plus whether it was rebuilt, so the caller knows the
     /// list state's cached row measurements are now stale.
     fn rebuild_if_needed(&mut self) -> (Rc<DiffData>, bool) {
-        let fingerprint = self.fingerprint_props();
-        if let (Some(data), Some(previous)) = (&self.data, self.fingerprint) {
-            if previous == fingerprint {
+        if let Some(data) = &self.data {
+            if !self.data_dirty {
                 return (data.clone(), false);
             }
         }
@@ -168,24 +164,9 @@ impl DiffElement {
             highlights,
             show_word_diff: self.show_word_diff,
         });
-        self.fingerprint = Some(fingerprint);
+        self.data_dirty = false;
         self.data = Some(data.clone());
         (data, true)
-    }
-
-    /// Fingerprint of everything that changes the PARSED data. The theme is
-    /// deliberately absent: it only affects paint, so a theme change must not
-    /// throw away the parse.
-    fn fingerprint_props(&self) -> u64 {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.patch.hash(&mut hasher);
-        self.show_word_diff.hash(&mut hasher);
-        self.max_lines.hash(&mut hasher);
-        let mut paths: Vec<&String> = self.collapsed.iter().collect();
-        paths.sort();
-        paths.hash(&mut hasher);
-        hasher.finish()
     }
 }
 
@@ -311,7 +292,14 @@ impl CustomElement for DiffElement {
             let state = self
                 .list_state
                 .get_or_insert_with(|| {
-                    gpui::ListState::new(data.rows.len(), gpui::ListAlignment::Top, px(OVERDRAW))
+                    // GPUI measures unvisited overdraw rows while scrolling.
+                    // Four rows cover the viewport edge without measuring an
+                    // extra 1024px on BOTH sides of a short code viewport.
+                    gpui::ListState::new(
+                        data.rows.len(),
+                        gpui::ListAlignment::Top,
+                        px(metrics.diff_line_height * 4.0),
+                    )
                 })
                 .clone();
             let metrics_hash = {
@@ -405,14 +393,26 @@ impl CustomElement for DiffElement {
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
         match key {
-            "patch" => self.patch = value.as_str().unwrap_or("").to_string(),
-            "wordDiff" => self.show_word_diff = value.as_bool().unwrap_or(false),
+            "patch" => {
+                let patch = value.as_str().unwrap_or("");
+                if self.patch != patch {
+                    self.patch = patch.to_string();
+                    self.data_dirty = true;
+                }
+            }
+            "wordDiff" => {
+                let show = value.as_bool().unwrap_or(false);
+                self.data_dirty |= show != self.show_word_diff;
+                self.show_word_diff = show;
+            }
             "scroll" => self.scroll = value.as_bool().unwrap_or(false),
             "maxLines" => {
-                self.max_lines = value.as_u64().map(|n| n as usize);
+                let max_lines = value.as_u64().map(|n| n as usize);
+                self.data_dirty |= max_lines != self.max_lines;
+                self.max_lines = max_lines;
             }
             "collapsedPaths" => {
-                self.collapsed = value
+                let collapsed = value
                     .as_array()
                     .map(|items| {
                         items
@@ -420,7 +420,9 @@ impl CustomElement for DiffElement {
                             .filter_map(|item| item.as_str().map(str::to_string))
                             .collect()
                     })
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                self.data_dirty |= self.collapsed != collapsed;
+                self.collapsed = collapsed;
             }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
             _ => {}
@@ -922,6 +924,33 @@ fn diff_line_row(
 fn opacity(mut color: Hsla, alpha: f32) -> Hsla {
     color.a *= alpha;
     color
+}
+
+#[cfg(test)]
+mod props_tests {
+    use super::*;
+
+    #[test]
+    fn changed_props_replace_same_size_patch_and_rebuild_visible_rows() {
+        let mut element = DiffElement::default();
+        let patch = "diff --git a/Pay.m b/Pay.m\n--- a/Pay.m\n+++ b/Pay.m\n@@ -1 +1 @@\n-old()\n+new()\n";
+        element.set_prop("patch", serde_json::json!(patch));
+        element.set_prop("wordDiff", serde_json::json!(true));
+        let (first, _) = element.rebuild_if_needed();
+        assert!(!first.files[0].hunks[0].lines[0].word_ranges.is_empty());
+        element.set_prop("patch", serde_json::json!(patch.replace("new()", "pay()")));
+        let (changed, _) = element.rebuild_if_needed();
+        assert_eq!(changed.files[0].hunks[0].lines[1].text, "pay()");
+        element.set_prop("wordDiff", serde_json::json!(false));
+        let (plain, _) = element.rebuild_if_needed();
+        assert!(plain.files[0].hunks[0].lines[0].word_ranges.is_empty());
+        element.set_prop("collapsedPaths", serde_json::json!(["Pay.m"]));
+        let (collapsed, _) = element.rebuild_if_needed();
+        assert!(!collapsed.rows.iter().any(|r| matches!(r, DiffRow::Line { .. })));
+        element.set_prop("collapsedPaths", serde_json::Value::Null);
+        let (expanded, _) = element.rebuild_if_needed();
+        assert!(expanded.rows.iter().any(|r| matches!(r, DiffRow::Line { .. })));
+    }
 }
 
 /// Translucent white on dark, translucent black on light.
