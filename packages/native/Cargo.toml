@@ -95,6 +95,11 @@ name = "hello"
 path = "examples/hello.rs"
 
 [[example]]
+name = "capture_present"
+path = "examples/capture_present.rs"
+required-features = ["test-support"]
+
+[[example]]
 name = "bench_serde"
 path = "examples/bench_serde.rs"
 
