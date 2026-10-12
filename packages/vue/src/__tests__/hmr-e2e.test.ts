@@ -63,6 +63,7 @@ function entrySource(
 import { defineComponent, h, ref } from "vue"
 ${imports}${imports ? "\n" : ""}import { TestRenderer } from ${JSON.stringify(join(srcDir, "testing.ts"))}
 import { createApp } from ${JSON.stringify(join(srcDir, "renderer.ts"))}
+import { useGpuixRequired } from ${JSON.stringify(join(srcDir, "hooks", "use-gpuix.ts"))}
 
 const slot = globalThis as Record<string, unknown>
 slot.__e2eEvals = ((slot.__e2eEvals as number) ?? 0) + 1
@@ -72,6 +73,7 @@ const renderer = slot.__e2eRenderer as TestRenderer
 
 const Child = defineComponent({
   setup() {
+    if (useGpuixRequired() !== renderer) throw new Error("Renderer context changed across hot reload")
     const count = ref(0)
     return () =>
       h(
@@ -158,7 +160,7 @@ function collectOutput(child: ReturnType<typeof spawn>) {
 }
 
 describeNative("vue fast refresh (bun --hot e2e)", () => {
-  it("keeps unedited components' state across a save", async () => {
+  it("keeps renderer context and unedited components' state across a save", async () => {
     // The entry must live under packages/vue so bun resolves the workspace's
     // node_modules (see hot-reload.test.ts).
     const dir = join(srcDir, "tmp-hmr-e2e")

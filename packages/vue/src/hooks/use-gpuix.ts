@@ -6,7 +6,9 @@ export interface GpuixContextValue {
   renderer: NativeRenderer | null
 }
 
-export const GPUIV_CONTEXT: InjectionKey<GpuixContextValue> = Symbol("gpuiv")
+// Bun re-evaluates modules during --hot while Vue keeps the mounted provider.
+// A fresh Symbol would make a reloaded consumer lose that provider's renderer.
+export const GPUIV_CONTEXT: InjectionKey<GpuixContextValue> = Symbol.for("@gpuiv/vue/context")
 
 /**
  * Access the GPUIX renderer from within a component (via provide/inject).
