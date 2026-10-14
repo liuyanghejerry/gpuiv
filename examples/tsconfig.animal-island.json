@@ -6,6 +6,8 @@
     "animal-island-demo-pages.tsx",
     "animal-island.test.tsx",
     "animal-island.production.test.ts",
+    "animal-island-react.production.test.ts",
+    "fixtures/animal-island-react.ts",
     "bounds-query.production.test.ts",
     "image-events.production.test.ts",
     "image-completion-burst.production.test.ts",

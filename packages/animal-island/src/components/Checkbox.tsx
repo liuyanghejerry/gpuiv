@@ -11,8 +11,8 @@
  *  - ✓ 描边生长动画（`stroke-dasharray`/`stroke-dashoffset` 0.3s transition
  *    + 0.2s delay）→ 砍掉（GPUIV 无路径动画/transition）：同一 path 烘焙成
  *    data URL `<img>` 静态出现（白 / 禁用灰 #c4b89e 两份）。
- *  - `animal-cbx-splash` 六向墨点 keyframes（多层 box-shadow 扩散）→ 砍掉
- *    （GPUIV 无 CSS 动画，boxShadow 只支持单个结构化阴影）。
+ *  - React `animal-cbx-splash` 六向墨点 keyframes → 六个原生 motion 圆点，
+ *    用位置、大小和透明度数值模拟 0.6s 扩散；不使用逐帧 JS 定时器。
  *  - `indeterminate` 是移植扩展（源码没有）：option 级布尔，展示 primary
  *    填充 + 白色横杠，`aria-checked="mixed"`；纯展示态，由调用方经 options
  *    控制，不参与值逻辑。
@@ -24,17 +24,19 @@
  *    （Enter/Space）。
  */
 
-import { computed, defineComponent, ref, type PropType } from "vue"
+import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue"
 import type { StyleDesc } from "@gpuiv/vue"
 import { borderWidth, colors, fontSize, fonts, spacing } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { SelectionSplash } from "./selection-motion.js"
+import { contentLabel, renderContent } from "./content.js"
 
 export type CheckboxSize = "small" | "middle" | "large"
 export type CheckboxValue = string | number
 
 export interface CheckboxOption {
   /** 选项标签 */
-  label: string | number
+  label: VNodeChild
   /** 选项值 */
   value: CheckboxValue
   /** 是否禁用该选项 */
@@ -147,6 +149,7 @@ export const Checkbox = defineComponent({
             }
 
             const boxStyle: StyleDesc = {
+              position: "relative",
               // This painted circle is decoration; the row owns click/focus.
               // Filled descendants otherwise cover that row in GPUI's flat hit list.
               pointerEvents: "none",
@@ -169,7 +172,7 @@ export const Checkbox = defineComponent({
                 role="checkbox"
                 aria-checked={indeterminate ? "mixed" : checked}
                 aria-disabled={rowDisabled || undefined}
-                aria-label={String(opt.label)}
+                aria-label={contentLabel(opt.label)}
                 tabIndex={rowDisabled ? -1 : 0}
                 onClick={rowDisabled ? undefined : () => toggle(opt)}
                 onKeyDown={rowDisabled ? undefined : activationKeys(() => toggle(opt))}
@@ -178,6 +181,7 @@ export const Checkbox = defineComponent({
                 style={rowStyle}
               >
                 <div style={boxStyle}>
+                  {checked && !rowDisabled ? <SelectionSplash size={g.box - borderWidth * 2} color={c.primary} testId={props.testId ? `${props.testId}-splash-${opt.value}` : undefined} /> : null}
                   {indeterminate ? (
                     <div
                       style={{
@@ -195,7 +199,7 @@ export const Checkbox = defineComponent({
                     />
                   ) : null}
                 </div>
-                <text>{String(opt.label)}</text>
+                <div style={{ display: "flex", alignItems: "center" }}>{renderContent(opt.label)}</div>
               </div>
             )
           })}
@@ -206,3 +210,6 @@ export const Checkbox = defineComponent({
 })
 
 export default Checkbox
+
+/** Public native props inferred from the group component. */
+export type CheckboxProps = Omit<InstanceType<typeof Checkbox>["$props"], "style"> & { style?: StyleDesc }

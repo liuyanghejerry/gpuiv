@@ -1,23 +1,51 @@
-/** Button — GPUIV port of animal-island-vue's `Button.vue`.
+/** Button — GPUIV port of Animal Island's Vue and React buttons (MIT).
  *
  *  Fidelity notes (see issue #164):
- *  - The signature 3D press (`box-shadow: 0 5px 0` + `translateY(2px)` on
- *    active) keeps the hard-shadow swap; the translate is dropped (GPUIV has
- *    no transforms).
- *  - `dashed` renders a solid border (no border styles in GPUIV).
- *  - `loading` drops the animated repeating-gradient stripes; it keeps the
- *    teal fill + 4px border and shows pulsing dots via the native Spinner.
+ *  - Native relative-position motion preserves the React hover lift and
+ *    hard-shadow press without changing siblings' layout.
+ *  - Dashed outlines are measured SVG strokes over a transparent layout border.
+ *  - Loading uses the React Donut artwork and counterclockwise 2.5s rotation
+ *    baked into SVG frames; there is no native transform style.
  */
 
-import { defineComponent, inject, ref, type PropType } from "vue"
-import { Spinner, type EventPayload, type StyleDesc } from "@gpuiv/vue"
-import { borderWidth, colors, fontSize, fonts, height, radius, shadows, spacing } from "../tokens.js"
+import { cloneVNode, defineComponent, h, inject, isVNode, ref, watch, type PropType, type VNodeChild } from "vue"
+import { motion, type EventPayload, type StyleDesc } from "@gpuiv/vue"
+import { borderWidth, colors, duration, ease, fontSize, fonts, height, radius, shadows, spacing } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { FormContextKey } from "../form/context.js"
+import { ButtonLoadingIcon } from "./button-loading.js"
+import { DashedBorderSurface } from "./border-decoration.js"
 
 export type ButtonType = "primary" | "default" | "dashed" | "text" | "link"
 export type ButtonSize = "small" | "middle" | "large"
 export type ButtonHTMLType = "submit" | "reset" | "button"
+
+export interface ButtonProps {
+  type?: ButtonType
+  size?: ButtonSize
+  danger?: boolean
+  ghost?: boolean
+  block?: boolean
+  loading?: boolean
+  disabled?: boolean
+  htmlType?: ButtonHTMLType
+  icon?: VNodeChild
+  onClick?: (event: EventPayload) => void
+  testId?: string
+  style?: StyleDesc
+}
+
+function forward(handler: unknown, event: EventPayload) {
+  if (Array.isArray(handler)) handler.forEach(fn => forward(fn, event))
+  else if (typeof handler === "function") handler(event)
+}
+
+function renderIcon(value: VNodeChild): VNodeChild {
+  if (Array.isArray(value)) return value.map(renderIcon)
+  if (isVNode(value)) return cloneVNode(value, { style: { ...value.props?.style, pointerEvents: "none" } })
+  if (typeof value === "string" || typeof value === "number") return <text style={{ pointerEvents: "none" }}>{value}</text>
+  return null
+}
 
 const sizeStyle: Record<ButtonSize, StyleDesc> = {
   small: { height: height.sm, paddingLeft: spacing.lg, paddingRight: spacing.lg, fontSize: fontSize.sm, borderRadius: radius.sm },
@@ -37,12 +65,17 @@ export const Button = defineComponent({
     loading: { type: Boolean, default: false },
     disabled: { type: Boolean, default: false },
     htmlType: { type: String as PropType<ButtonHTMLType>, default: "button" },
-    icon: { type: String, default: undefined },
+    icon: { type: [String, Number, Boolean, Object, Array] as PropType<VNodeChild>, default: undefined },
     onClick: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
     testId: { type: String, default: undefined },
   },
   setup(props, { attrs, slots }) {
     const focused = ref(false)
+    const hovered = ref(false)
+    const pressed = ref(false)
+    watch(() => props.disabled || props.loading, inactive => {
+      if (inactive) { hovered.value = false; pressed.value = false }
+    })
     const formContext = inject(FormContextKey, undefined)
     const activate = (e: EventPayload) => {
       if (props.disabled || props.loading) return
@@ -135,6 +168,7 @@ export const Button = defineComponent({
       }
 
       const style: StyleDesc = {
+        position: "relative",
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
@@ -156,7 +190,7 @@ export const Button = defineComponent({
       }
 
       if (props.loading) {
-        // Striped-motion approximation: solid teal + thick light border.
+        // Original React loading palette, with a rotating Donut below.
         style.backgroundColor = "#0ec4b6"
         style.borderColor = "#4de2da"
         style.borderWidth = 4
@@ -173,23 +207,53 @@ export const Button = defineComponent({
       }
       if (inactive) style.pointerEvents = "none"
 
-      return (
-        <div
-          {...attrs}
-          role="button"
-          tabIndex={props.disabled ? -1 : ((attrs.tabIndex as number | undefined) ?? 0)}
-          aria-disabled={props.disabled || undefined}
-          testId={props.testId}
-          onFocus={() => (focused.value = true)}
-          onBlur={() => (focused.value = false)}
-          onClick={inactive ? undefined : activate}
-          onKeyDown={inactive ? undefined : activationKeys(activate)}
-          style={{ ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style }}
-        >
-          {props.loading ? <Spinner size={14} color="#ffffff" /> : props.icon ? <text>{props.icon}</text> : slots.icon?.()}
-          {slots.default?.()}
-        </div>
-      )
+      const lifts = props.type === "primary" || props.type === "default" || props.type === "dashed"
+      const offset = inactive || !lifts ? 0 : pressed.value ? (props.type === "primary" ? 2 : 0) : hovered.value ? -1 : 0
+      // Vue style bindings may carry pixel strings before host normalization.
+      // Derive the lift from that value and leave other units to the host.
+      const authoredTop: unknown = style.top
+      const top = typeof authoredTop === "number" ? authoredTop
+        : authoredTop === undefined ? 0
+        : typeof authoredTop === "string" && /^[+-]?(?:\d+\.?\d*|\.\d+)(?:px)?$/.test(authoredTop.trim())
+          ? Number.parseFloat(authoredTop) : null
+      const keyboardActivate = activationKeys(activate)
+      const dashed = props.type === "dashed" && !props.loading
+      const borderInk = (pressed.value ? style.active?.borderColor : hovered.value ? style.hover?.borderColor : undefined) ?? style.borderColor ?? "transparent"
+      if (dashed) {
+        style.borderColor = "transparent"
+        if (style.hover) style.hover = { ...style.hover, borderColor: "transparent" }
+        if (style.active) style.active = { ...style.active, borderColor: "transparent" }
+      }
+
+      return h(motion.div, {
+          ...attrs,
+          role: "button",
+          tabIndex: props.disabled ? -1 : ((attrs.tabIndex as number | undefined) ?? 0),
+          "aria-disabled": inactive || undefined,
+          testId: props.testId,
+          onFocus: (event: EventPayload) => { focused.value = true; forward(attrs.onFocus, event) },
+          onBlur: (event: EventPayload) => { focused.value = false; pressed.value = false; forward(attrs.onBlur, event) },
+          onMouseEnter: (event: EventPayload) => { if (!inactive) hovered.value = true; forward(attrs.onMouseEnter, event) },
+          onMouseLeave: (event: EventPayload) => { hovered.value = false; pressed.value = false; forward(attrs.onMouseLeave, event) },
+          onMouseDown: (event: EventPayload) => { if (!inactive && (event.button === undefined || event.button === 0)) pressed.value = true; forward(attrs.onMouseDown, event) },
+          onMouseUp: (event: EventPayload) => { pressed.value = false; forward(attrs.onMouseUp, event) },
+          onClick: inactive ? undefined : activate,
+          onKeyDown: (event: EventPayload) => {
+            forward(attrs.onKeyDown, event)
+            if (inactive) return
+            if (event.key === "enter" || event.key === "space") pressed.value = true
+            keyboardActivate(event)
+          },
+          onKeyUp: (event: EventPayload) => { if (event.key === "enter" || event.key === "space") pressed.value = false; forward(attrs.onKeyUp, event) },
+          initial: false,
+          animate: top === null ? {} : { top: top + offset },
+          transition: { duration: duration.base, ease },
+          style: { ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style },
+        }, { default: () => [
+          dashed ? h(DashedBorderSurface, { color: borderInk, width: typeof style.borderWidth === "number" ? style.borderWidth : borderWidth, radius: typeof style.borderRadius === "number" ? style.borderRadius : radius.pill }) : null,
+          props.loading ? h(ButtonLoadingIcon, { testId: props.testId ? `${props.testId}-loading-icon` : undefined }) : renderIcon(props.icon ?? slots.icon?.()),
+          slots.default?.(),
+        ] })
     }
   },
 })

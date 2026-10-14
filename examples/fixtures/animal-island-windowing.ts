@@ -74,7 +74,7 @@ try {
   const initial = await snapshot('button')
   assert(find('btn-default') && !find('animal-table'), 'Only the default Button example is mounted')
   const navEntries = all().filter(node => String(node.props.testId).startsWith('nav-'))
-  assert.equal(navEntries.length, 39, 'Every original component family must have a navigation entry')
+  assert.equal(navEntries.length, 40, 'Every React component family plus the retained icon gallery must have a navigation entry')
 
   await choose('icon')
   assert(!find('btn-default') && textContent(find('gallery-showcase')!).includes('Airplane'), 'Switching mounts Icon and removes Button')

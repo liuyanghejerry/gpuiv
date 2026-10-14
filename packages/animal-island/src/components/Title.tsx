@@ -129,4 +129,6 @@ export const Title = defineComponent({
   },
 })
 
+export type TitleProps = Omit<InstanceType<typeof Title>["$props"], "style"> & { style?: StyleDesc }
+
 export default Title

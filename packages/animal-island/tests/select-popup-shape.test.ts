@@ -13,8 +13,12 @@ describe("Select popup silhouette", () => {
     })))
     try {
       await host.fire("shape", "click")
-      const panel = host.find("shape-popup").props.style as StyleDesc
-      expect(panel.backgroundColor).toBe("#ffeea0")
+      const content = host.find("shape-popup")
+      const panel = content.props.style as StyleDesc
+      const surface = content.parent!.props.style as StyleDesc
+      expect(surface.backgroundColor).toBe("#ffeea0")
+      expect(surface.borderRadius).toBe(28)
+      expect(panel.backgroundColor).toBeUndefined()
       expect(panel.borderRadius).toBe(28)
       expect(panel.paddingTop).toBe(12)
       expect(panel.paddingBottom).toBe(12)

@@ -297,12 +297,13 @@ impl CustomElement for AnchoredElement {
         }
         content = crate::accessibility::apply_accessibility(content, ctx.props, None);
         content = super::wire_standard_events(content, &ctx);
-        // Deferred overlays paint over the window blur. A missing fill lets the
-        // page show through the card. Force an opaque surface when JS omitted one.
+        // Deferred overlays need a default surface only when JS omitted its
+        // fill. GPUI supports explicit transparent backgrounds; preserve them
+        // so SVG silhouettes and other nonrectangular panels show the page.
         let has_fill = ctx
             .style
             .and_then(crate::style::StyleDesc::resolved_background)
-            .is_some_and(|background| !background.is_transparent());
+            .is_some();
         if !has_fill {
             content = content.bg(gpui::rgb(0x1A1A1A));
         }

@@ -9,7 +9,7 @@ export const GALLERY_NAV_GROUPS = [
   { label: "基础组件", ids: ["title", "button", "divider", "icon", "tag", "cursor", "code-block", "background", "footer"] },
   { label: "表单组件", ids: ["input", "switch", "select", "date-picker", "time-picker", "checkbox", "radio", "rate", "form", "upload"] },
   { label: "反馈组件", ids: ["notification", "modal", "drawer", "loading", "tooltip", "progress", "skeleton", "back-top"] },
-  { label: "数据展示", ids: ["card", "avatar", "badge", "collapse", "tabs", "table", "pagination", "typewriter", "image", "carousel", "time", "countdown"] },
+  { label: "数据展示", ids: ["card", "avatar", "badge", "collapse", "tabs", "table", "pagination", "typewriter", "image", "carousel", "time", "countdown", "count-up"] },
 ] as const
 
 const titlePalette: TitleColor[] = ["lime-green", "default", "app-pink", "purple", "app-blue", "app-yellow", "app-orange", "app-red", "yellow-green", "brown", "warm-peach-pink"]
@@ -55,7 +55,7 @@ export const App = defineComponent({
               <Icon name="Bear" size={28} />
               <text style={{ fontSize: 20, fontWeight: 900, color: "#794f27" }}>Animal Island</text>
             </div>
-            <text style={{ fontSize: 12, color: "#a0936e" }}>原生组件展示 · 39 个组件</text>
+            <text style={{ fontSize: 12, color: "#a0936e" }}>{`原生组件展示 · ${pages.length} 个组件`}</text>
           </div>
           <div testId="gallery-nav-scroll" role="navigation" aria-label="组件导航" style={{ flexGrow: 1, flexBasis: 0, minHeight: 0, overflow: "scroll" }}>
             <div style={{ paddingBottom: 12 }}>

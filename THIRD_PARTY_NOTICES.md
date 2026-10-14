@@ -42,6 +42,14 @@ Design tokens (`src/tokens.ts`) are mapped from the original
 `assets/scene/*.svg` are copied data/assets; every component file carries a
 header naming its original `.vue` source and listing the native adaptations.
 
+The React parity pass also ports behavior, artwork and CountUp from
+[animal-island-ui](https://github.com/guokaigdg/animal-island-ui) at commit
+`c696d16167d01370f822f95db22340b05d837555` (MIT, Copyright (c) 2026 guokaigdg).
+Its licence is included in
+[`LICENSE.animal-island-ui`](packages/animal-island/LICENSE.animal-island-ui).
+The added `forest-grove.svg` and `starry-camp.svg` are the original Progress
+scene assets; `REACT_PARITY.md` records the behavior and native adaptations.
+
 The port bundles six modified TrueType faces from the original demo's Nunito
 500/700/900 and Noto Sans SC 400/500/700 web fonts, under SIL Open Font License
 1.1. Copyright 2014 The Nunito Project Authors and Copyright 2014–2021 Adobe

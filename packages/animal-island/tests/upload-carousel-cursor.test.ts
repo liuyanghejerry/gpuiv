@@ -333,8 +333,8 @@ describe("Carousel navigation, slots and lifecycle", () => {
     expect(firstClick).toHaveBeenCalledOnce()
     await host.fire("second-control", "keyDown", { key: "enter" })
     expect(secondClick).toHaveBeenCalledOnce()
-    expect((host.find("carousel-slide-1").props.motion as { initial: unknown; animate: unknown }).initial).toEqual({ opacity: 0 })
-    expect((host.find("carousel-slide-1").props.motion as { animate: unknown }).animate).toEqual({ opacity: 1 })
+    expect((host.find("carousel-slide-1").props.motion as { initial: unknown; animate: unknown }).initial).toEqual({ opacity: 0, left: 18 })
+    expect((host.find("carousel-slide-1").props.motion as { animate: unknown }).animate).toEqual({ opacity: 1, left: 0 })
   })
 
   it("autoplay loops, pauses on hover and focus, and can explicitly resume", async () => {

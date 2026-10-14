@@ -126,3 +126,6 @@ export const Time = defineComponent({
 })
 
 export default Time
+
+/** Clock attributes use native styles; component options stay optional. */
+export type TimeProps = InstanceType<typeof Time>["$props"] & { style?: StyleDesc }

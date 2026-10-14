@@ -8,16 +8,15 @@
  *    transforms, so the port uses fixed negative offsets (medium −10px,
  *    small −8px, dot −5px) — exact for circles, slightly tighter than the
  *    original for wide capsules (whose 50%-of-width shift it cannot measure).
- *  - The zoom-in entrance animation is dropped (no CSS animations in GPUIV);
- *    the indicator appears statically.
+ *  - The entrance uses native opacity motion; scale remains unsupported.
  *  - The native `title` tooltip is dropped (GPUIV divs have no tooltips), as
  *    is `z-index` (later children paint on top).
  *  - Colours reuse `cardSolid` from the tokens — the palette is identical to
  *    the original's `animal-badge--color-*` classes.
  */
 
-import { computed, defineComponent, type PropType } from "vue"
-import type { StyleDesc } from "@gpuiv/vue"
+import { computed, defineComponent, type PropType, type VNodeChild } from "vue"
+import { motion, type StyleDesc } from "@gpuiv/vue"
 import { cardSolid, colors, fonts, shadows } from "../tokens.js"
 
 export type BadgeSize = "small" | "medium"
@@ -30,13 +29,13 @@ const FULLWIDTH = /[\u2E80-\u9FFF\uF900-\uFAFF\uFF00-\uFFEF]/
 const CIRCLE_MAX_LENGTH = 2
 
 /** 纯数字或纯数字字符串才参与封顶换算，其余内容原样展示 */
-const toNumeric = (value: string | number | undefined): number | null => {
+const toNumeric = (value: VNodeChild): number | null => {
   if (typeof value === "number") return value
   if (typeof value === "string" && value.trim() !== "" && !Number.isNaN(Number(value))) return Number(value)
   return null
 }
 
-const fitsCircle = (value: string | number | undefined): boolean => {
+const fitsCircle = (value: VNodeChild): boolean => {
   // 数字按其显示文本量长度，这样 100 / 1000 自动落回胶囊，与字符串走同一套判定
   const text = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : null
   if (text === null || text.length === 0 || text.length > CIRCLE_MAX_LENGTH) return false
@@ -55,7 +54,7 @@ export const Badge = defineComponent({
   name: "AnimalBadge",
   inheritAttrs: false,
   props: {
-    count: { type: [String, Number] as PropType<string | number>, default: undefined },
+    count: { type: null as unknown as PropType<VNodeChild>, default: undefined },
     overflowCount: { type: Number, default: 99 },
     showZero: { type: Boolean, default: false },
     dot: { type: Boolean, default: false },
@@ -73,7 +72,7 @@ export const Badge = defineComponent({
     const showAsDot = computed(() => props.dot && !isZero.value)
     // 空字符串（含纯空白）与 null / undefined 一样视为无内容，避免渲染出空心胶囊
     const isEmpty = computed(
-      () => props.count === undefined || (typeof props.count === "string" && props.count.trim() === ""),
+      () => props.count === undefined || props.count === null || (typeof props.count === "string" && props.count.trim() === ""),
     )
     // #count 插槽自带内容，不参与空值判断
     const hasCountSlot = computed(() => Boolean(slots.count))
@@ -136,9 +135,9 @@ export const Badge = defineComponent({
         >
           {slots.default?.()}
           {isHidden.value ? null : (
-            <div style={indicatorStyle}>
-              {showAsDot.value ? null : (slots.count?.() ?? <text>{String(displayCount.value ?? "")}</text>)}
-            </div>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .2, ease: "easeOut" }} style={indicatorStyle}>
+              {() => showAsDot.value ? null : slots.count?.() ?? (typeof displayCount.value === "string" || typeof displayCount.value === "number" ? <text>{String(displayCount.value)}</text> : displayCount.value)}
+            </motion.div>
           )}
         </div>
       )
@@ -147,3 +146,6 @@ export const Badge = defineComponent({
 })
 
 export default Badge
+
+/** Native public props support strings, numbers, VNodes and count slots. */
+export type BadgeProps = InstanceType<typeof Badge>["$props"] & { style?: StyleDesc }

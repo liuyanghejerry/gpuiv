@@ -7,10 +7,11 @@
  *    shows the `#c4b89e` outline only (`fill-opacity: 0`); checked fills
  *    `#f5c31c` with a `#dba90e` stroke and visible eyes — the exact Less
  *    overrides on the icon.
- *  - Commit animations (`animal-rate-pop` scale keyframes + six-dot
- *    box-shadow splash) → dropped: GPUIV has no transforms or multi-shadows.
- *    The state colour swap is instant.
- *  - Hover lift (`transform: translateY(-1px)`) → dropped (no transforms);
+ *  - React commit animations retain 60ms stagger, 0.55→1.15→1 pop geometry
+ *    and a six-dot splash using native width/height/position/opacity targets.
+ *    Two native motion stages replace CSS scale keyframes; state colours
+ *    change immediately. No JS frame timer is used.
+ *  - Hover lift keeps the original -1px offset via native `top` motion;
  *    the hover fill preview (`hoverValue`) is kept.
  *  - Native radio inputs → each star is a `role="radio"` div with the same
  *    roving tabindex and Arrow/Home/End keyboard model; focus moves through
@@ -23,6 +24,7 @@
 import { computed, defineComponent, ref, type PropType } from "vue"
 import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, fonts } from "../tokens.js"
+import { RatingStarMotion, SelectionSplash } from "./selection-motion.js"
 
 export type RateSize = "small" | "middle" | "large"
 
@@ -75,6 +77,7 @@ export const Rate = defineComponent({
     const hoverValue = ref(0)
     const focusedIndex = ref(0)
     const itemIds: Array<number | null> = []
+    const burst = ref({ from: 0, to: 0, sequence: 0 })
 
     // 受控判断：`value` 与 `modelValue` 均可作为受控值，value 优先
     const isControlled = computed(() => props.value !== undefined || props.modelValue !== undefined)
@@ -92,6 +95,7 @@ export const Rate = defineComponent({
 
     function commit(next: number) {
       if (props.readonly || next === rateValue.value) return
+      burst.value = { from: checkedValue.value, to: next, sequence: burst.value.sequence + 1 }
       if (!isControlled.value) innerValue.value = next
       // 清空后鼠标仍停在原处，重置预览才能立刻看到「已清空」
       if (next === 0) hoverValue.value = 0
@@ -171,7 +175,10 @@ export const Rate = defineComponent({
         >
           {Array.from({ length: props.count }, (_, i) => i + 1).map((index) => {
             const active = index <= filledCount.value
+            const bursting = burst.value.to > burst.value.from && index > burst.value.from && index <= burst.value.to
+            const splash = burst.value.to > burst.value.from && index === burst.value.to
             const itemStyle: StyleDesc = {
+              position: "relative",
               width: g.star,
               height: g.star,
               flexShrink: 0,
@@ -198,10 +205,11 @@ export const Rate = defineComponent({
                 onBlur={() => (focusedIndex.value = 0)}
                 style={itemStyle}
               >
-                <img
-                  src={active ? starUrl.active : starUrl.inactive}
-                  style={{ width: g.star, height: g.star, pointerEvents: "none" }}
-                />
+                {splash && !props.readonly ? <SelectionSplash key={`splash-${burst.value.sequence}`} size={g.star} color={colors.warning} testId={props.testId ? `${props.testId}-splash-${index}` : undefined} /> : null}
+                <RatingStarMotion key={bursting ? `star-${burst.value.sequence}` : "star"} size={g.star}
+                  src={active ? starUrl.active : starUrl.inactive} burst={bursting && !props.readonly}
+                  hovered={!props.readonly && hoverValue.value === index} delay={(index - 1 - burst.value.from) * 0.06}
+                  testId={props.testId ? `${props.testId}-star-${index}` : undefined} />
               </div>
             )
           })}
@@ -212,3 +220,6 @@ export const Rate = defineComponent({
 })
 
 export default Rate
+
+/** Public native props inferred from the rating component. */
+export type RateProps = Omit<InstanceType<typeof Rate>["$props"], "style"> & { style?: StyleDesc }

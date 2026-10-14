@@ -1,50 +1,26 @@
-/** Tooltip — GPUIV port of animal-island-vue's `Tooltip.vue`.
- *  ported from animal-island-vue (https://github.com/guokaigdg/animal-island-vue, MIT)
- *
- *  Fidelity notes (see issue #164), 原版做法 → 移植近似:
- *  - 结构与定位: 原版用相对定位的绝对气泡 + z-index → 平台 headless Tooltip 族
- *    (`Tooltip`/`TooltipTrigger`/`TooltipContent` from '@gpuiv/vue'，deferred
- *    anchored 层，永远画在最上)。`trigger: 'click'` 原版是点击开关，headless
- *    不支持（它的 click 是“关闭”）→ 该模式改用受控 open + `FloatingLayer` 手动实现。
- *  - 气泡配色: 原版 Less 是奶油底 rgb(247,243,223) + 暖棕文字 #725d42 + 沙色
- *    2px 描边 #c4b89e（任务建议的“深棕底 #794f27 + 奶油字”与原版相反；按
- *    “视觉保真优先用 Less 精确数值”保留原版奶油底）。
- *  - 箭头: 原版 `::after` 是旋转 45° 的 8px 方块（GPUIV 无 transform）→
- *    `<svg>` 单色 tint 三角（data URL，12×6 / 6×12，45° 斜边）。带边框时两层
- *    三角堆叠：外层描边色满幅、内层奶油色向气泡方向偏移 ~2.5px（≈ borderWidth /
- *    sin45°），露出两条斜边描边，同时盖住气泡边缘的接缝（CSS 里箭头顶角也是
- *    描边色，效果一致）。island + borderless 的 14px 圆形 tail 原版就是圆 →
- *    用 `borderRadius: pill` 的 div 精确还原；island + bordered 的菱形 tail →
- *    三角近似。箭头装在气泡内一条 absolute 全宽/全高的 strip 里（超出气泡 4px、
- *    重叠 2px 遮接缝），居中对齐用 flex justifyContent，start/end 按原版
- *    Less 的 16px（上下）/ 12px（左右）、island 的 20px / 16px 内缩。
- *  - 12 种 placement → headless side/align 映射；气泡到触发器的 10px 间距 =
- *    anchored gap 6 + 箭头 4px 悬伸。
- *  - 入场/出场: 原版 opacity + translateY(4px) 0.25s 过渡 → 砍掉（deferred 层的
- *    强制不透明底衬无法随气泡一起淡出；headless 行为本就是即显即隐）。
- *  - hide 延迟 100ms → headless scheduleClose 80ms；hover 打开原本无延迟，新增
- *    `delay` prop（任务要求）透传 headless `delayDuration`。
- *  - `variant: 'island'` 的 clip-path 有机外形 → 大圆角矩形（GPUIV 无 clip-path）；
- *    `filter: drop-shadow(0 4px 14px rgba(121,79,39,0.14))` → 同参数结构化
- *    boxShadow（GPUIV 无 filter，但单阴影可表达）。
- *  - `white-space: pre-line` → <text> 直接排 `\n`（GPUIV whiteSpace 仅
- *    normal/nowrap）；`word-break: break-word` 与 `letter-spacing: 0.01em` 砍掉。
- *  - `trigger: 'hover' | 'focus'` → headless 同时挂 hover+focus 双通道（比原版
- *    单通道略宽：hover 模式下键盘聚焦也会弹出，视为可访问性增强）。
+/** Tooltip — aligned with animal-island-ui's React Tooltip (MIT).
+ * Twelve placements use deferred FloatingLayer. Hover, focus and click each
+ * have their own trigger callbacks, composed onto the actual child because
+ * native input does not bubble. Dismissal keeps React's 100ms grace period.
+ * Island bubbles draw the original normalized SVG outline; their native
+ * content is not clipped to that outline. The deferred layer uses rectangular
+ * occlusion; native opacity/top/left tween the complete surface over 0.25s.
+ * The 4px entrance offset follows the side, toward the trigger. Arrow triangles stand
+ * in for rotated CSS squares; borderless island tails remain circles.
  */
 
-import { defineComponent, h, ref, type PropType, type VNode } from "vue"
+import { cloneVNode, defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNode, type VNodeChild } from "vue"
 import {
   FloatingLayer,
-  Tooltip as HeadlessTooltip,
-  TooltipContent,
-  TooltipTrigger,
   floatingRootStyle,
+  type EventPayload,
   type FloatingAlign,
   type FloatingSide,
   type StyleDesc,
 } from "@gpuiv/vue"
-import { borderWidth, colors, fontSize, fonts, radius, shadows } from "../tokens.js"
+import { borderWidth, colors, ease, fontSize, fonts, radius, shadows } from "../tokens.js"
+import { contentLabel, renderContent } from "./content.js"
+import { OrganicSurface } from "./organic-surface.js"
 import { activationKeys } from "../interaction.js"
 
 export type TooltipPlacement =
@@ -62,6 +38,8 @@ export type TooltipPlacement =
   | "right-end"
 
 export type TooltipTriggerMode = "hover" | "focus" | "click"
+/** Current React name; the prior native TooltipTriggerMode alias is retained. */
+export type TooltipTrigger = TooltipTriggerMode
 
 /** default 标准矩形；island 不规则有机气泡 */
 export type TooltipVariant = "default" | "island"
@@ -214,9 +192,9 @@ function bubbleStyle(variant: TooltipVariant, bordered: boolean): StyleDesc {
       paddingBottom: 12,
       paddingLeft: 20,
       paddingRight: 20,
-      backgroundColor: BUBBLE_BG,
-      borderRadius: 20, // organic clip-path blob → generous rounded rect
-      borderWidth: bordered ? borderWidth : 0,
+      backgroundColor: "transparent",
+      borderRadius: 0,
+      borderWidth: 0,
       borderColor: BUBBLE_BORDER,
       boxShadow: ISLAND_SHADOW,
       color: colors.warmSoft,
@@ -251,9 +229,9 @@ export const Tooltip = defineComponent({
   inheritAttrs: false,
   props: {
     /** 提示内容，`\n` 换行；title 插槽可提供更丰富的内容（插槽优先） */
-    title: { type: String, default: undefined },
+    title: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** title 的别名（title 优先），对齐 antd 系命名 */
-    content: { type: String, default: undefined },
+    content: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 位置 */
     placement: { type: String as PropType<TooltipPlacement>, default: "top" },
     /** 触发方式 */
@@ -267,60 +245,91 @@ export const Tooltip = defineComponent({
     testId: { type: String, default: undefined },
   },
   setup(props, { attrs, slots }) {
-    // `trigger: 'click'` state — the headless Tooltip closes on click instead
-    // of toggling, so this mode drives a FloatingLayer by hand.
-    const clickOpen = ref(false)
-    const toggleClick = () => { clickOpen.value = !clickOpen.value }
-
-    // The bubble visuals ride on the floating layer's own `style`: the inner
-    // content div defaults to an opaque #1A1A1A fill, so styling a child div
-    // instead would leave dark square corners peeking behind the rounded
-    // bubble. The layer also mirrors borderRadius onto the anchored surface.
+    const open = ref(false)
+    let showTimer: ReturnType<typeof setTimeout> | undefined
+    let hideTimer: ReturnType<typeof setTimeout> | undefined
+    function cancelTimers() { clearTimeout(showTimer); clearTimeout(hideTimer) }
+    function show() {
+      cancelTimers()
+      if (props.trigger === "hover" && props.delay > 0) showTimer = setTimeout(() => { open.value = true }, props.delay)
+      else open.value = true
+    }
+    function hide() {
+      clearTimeout(showTimer)
+      clearTimeout(hideTimer)
+      hideTimer = setTimeout(() => { open.value = false }, 100)
+    }
+    function toggle() { cancelTimers(); open.value = !open.value }
+    onBeforeUnmount(cancelTimers)
+    watch(() => props.trigger, () => { cancelTimers(); open.value = false })
     const bubbleChildren = () => [
-      slots.title ? slots.title() : <text>{props.title ?? props.content ?? ""}</text>,
-      arrowStrip({
-        side: parsePlacement(props.placement).side,
-        align: parsePlacement(props.placement).align,
-        bordered: props.bordered,
-        variant: props.variant,
-      }),
+      props.variant === "island" ? <OrganicSurface color={BUBBLE_BG} borderColor={props.bordered ? BUBBLE_BORDER : undefined} /> : null,
+      slots.title ? slots.title() : renderContent(props.title ?? props.content ?? ""),
+      arrowStrip({ side: parsePlacement(props.placement).side, align: parsePlacement(props.placement).align, bordered: props.bordered, variant: props.variant }),
     ]
+    function invoke(callbacks: unknown, event: EventPayload) {
+      for (const callback of Array.isArray(callbacks) ? callbacks : [callbacks]) if (typeof callback === "function") callback(event)
+    }
 
     return () => {
       const { side, align } = parsePlacement(props.placement)
-      // 6px anchored gap + 4px arrow overhang = the original 10px tooltip-gap.
-      const sideOffset = 6
-      const style = bubbleStyle(props.variant, props.bordered)
-
-      if (props.trigger === "click") {
-        return (
-          <div {...attrs} testId={props.testId} style={floatingRootStyle(attrs.style as StyleDesc | undefined)}>
-            <div role="button" aria-label={props.title ?? props.content} tabIndex={0} onClick={toggleClick} onKeyDown={activationKeys(toggleClick)}
-              testId={props.testId ? `${props.testId}-trigger` : undefined}>
-              {slots.default?.()}
-            </div>
-            {clickOpen.value ? (
-              <FloatingLayer {...{ role: "tooltip", testId: props.testId ? `${props.testId}-content` : undefined }} side={side} align={align} sideOffset={sideOffset} style={style}>
-                {{ default: bubbleChildren }}
-              </FloatingLayer>
-            ) : null}
-          </div>
-        )
+      // React moves the hidden bubble 4px toward its trigger. Animate the
+      // complete deferred surface, including its fill and tail, without
+      // changing anchored placement or the trigger's layout.
+      const horizontal = side === "left" || side === "right"
+      const offset = side === "top" || side === "left" ? 4 : -4
+      const entrance = {
+        initial: { opacity: 0, ...(horizontal ? { left: offset } : { top: offset }) },
+        animate: { opacity: 1, ...(horizontal ? { left: 0 } : { top: 0 }) },
+        transition: { duration: 0.25, ease },
       }
-
-      // h() rather than JSX: TooltipContent declares no props (everything is
-      // attrs), so TSX rejects side/align/sideOffset; the platform's own
-      // tooltip.tsx reaches for h(FloatingLayer, …) for the same reason.
-      return h(
-        HeadlessTooltip,
-        { ...(attrs as Record<string, unknown>), testId: props.testId, delayDuration: props.delay },
-        [
-          h(TooltipTrigger, null, slots.default),
-          h(TooltipContent, { side, align, sideOffset, style }, bubbleChildren),
-        ]
-      )
+      const handlers: Record<string, (event: EventPayload) => void> = props.trigger === "hover"
+        ? { onMouseEnter: show, onMouseLeave: hide }
+        : props.trigger === "focus" ? { onFocus: show, onBlur: hide }
+        : { onClick: toggle, onKeyDown: activationKeys(toggle) }
+      handlers.onKeyDown = props.trigger === "click" ? (event) => {
+        if (event.key === "escape") { cancelTimers(); open.value = false }
+        else activationKeys(toggle)(event)
+      } : (event) => { if (event.key === "escape") { cancelTimers(); open.value = false } }
+      const children = slots.default?.() ?? []
+      // Native events do not bubble through a button's hitbox. Attach trigger
+      // callbacks to the actual child, like React.cloneElement, and compose its
+      // existing handlers. The wrapper handles plain text / multi-node slots.
+      const child = children.length === 1 ? children[0] : null
+      const renderedChildren = child ? [(() => {
+        const extra: Record<string, unknown> = {}
+        for (const [name, handler] of Object.entries(handlers)) extra[name] = (event: EventPayload) => {
+          // Button-like components dispatch onClick for Enter/Space themselves.
+          // Their keyboard callback must only add Escape dismissal.
+          if (name === "onKeyDown" && props.trigger === "click" && typeof child.type !== "string") {
+            if (event.key === "escape") { cancelTimers(); open.value = false }
+          } else handler(event)
+          invoke(child.props?.[name], event)
+        }
+        const clone = cloneVNode(child, extra)
+        // cloneVNode merges listener arrays; the composed callback above has
+        // already included the original, so keep one callable per event prop.
+        Object.assign(clone.props!, extra)
+        return clone
+      })()] : children
+      const label = props.title ?? props.content
+      return <div {...attrs} testId={props.testId} style={floatingRootStyle(attrs.style as StyleDesc | undefined)}>
+        <div role={props.trigger === "click" ? "button" : undefined}
+          tabIndex={props.trigger === "focus" || props.trigger === "click" ? 0 : undefined}
+          aria-label={contentLabel(label)}
+          testId={props.testId ? `${props.testId}-trigger` : undefined} {...handlers}>
+          {renderedChildren}
+        </div>
+        {open.value ? <FloatingLayer {...{ role: "tooltip", testId: props.testId ? `${props.testId}-content` : undefined,
+          motion: entrance, ...(props.trigger === "hover" ? { onMouseEnter: show, onMouseLeave: hide } : {}) }}
+          side={side} align={align} sideOffset={6} style={bubbleStyle(props.variant, props.bordered)}>
+          {{ default: bubbleChildren }}
+        </FloatingLayer> : null}
+      </div>
     }
   },
 })
+
+export type TooltipProps = Omit<InstanceType<typeof Tooltip>["$props"], "style"> & { style?: StyleDesc }
 
 export default Tooltip

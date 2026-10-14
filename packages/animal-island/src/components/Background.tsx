@@ -30,6 +30,7 @@ export type BackgroundType =
   | "dots-yellow-green"
   | "dots-brown"
   | "dots-warm-peach-pink"
+  | "dots-gray"
 
 /** 与原版 types.ts 的 BackgroundProps 对齐（children 经默认插槽传入）。 */
 export interface BackgroundProps {
@@ -56,6 +57,7 @@ const BASE_BG: Record<BackgroundType, string> = {
   "dots-yellow-green": "#fffde8",
   "dots-brown": "#f5f0e0",
   "dots-warm-peach-pink": "#fff0e8",
+  "dots-gray": "#ffffff",
 }
 
 /** 场景类型 → 场景图 fs 路径（原版 backgroundImage 由 JS 注入，对齐 React 版）。 */

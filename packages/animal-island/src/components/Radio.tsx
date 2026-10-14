@@ -8,9 +8,9 @@
  *  - 选中标记在源码里与 Checkbox 是同一个 ✓ svg path（圆圈内白色对勾，
  *    `viewBox 0 0 15 14` stroke-width 3），不是内实心圆点 —— 按源码保真；
  *    圆形外圈 18/22/28px、2px 描边、奶油底/primary 填充等数值取自 Less。
- *  - ✓ 描边生长动画（`stroke-dashoffset` transition）+ `animal-radio-splash`
- *    六向墨点 keyframes → 砍掉（GPUIV 无路径动画/CSS 动画/多阴影），
- *    对勾静态出现。
+ *  - ✓ 描边生长动画（`stroke-dashoffset` transition）仍是静态 path；React
+ *    `animal-radio-splash` 六向墨点则通过原生 motion 的位置/大小/透明度
+ *    模拟 0.6s 扩散，不使用逐帧 JS 定时器。
  *  - roving tabindex + Arrow/Home/End 漫游选择保留：GPUIV 键盘事件不冒泡，
  *    handler 放在每一行（同 Rate.tsx），选中后通过 `renderer.focusElement`
  *    把焦点移到新行；Enter/Space 经 activationKeys 激活当前行（原生 radio
@@ -22,17 +22,19 @@
  *    （#ffcc00 = Less @focus-yellow，offset 2，同 Switch.tsx 做法）。
  */
 
-import { computed, defineComponent, ref, watch, type PropType } from "vue"
+import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue"
 import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { borderWidth, colors, fontSize, fonts, spacing } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { SelectionSplash } from "./selection-motion.js"
+import { contentLabel, renderContent } from "./content.js"
 
 export type RadioSize = "small" | "middle" | "large"
 export type RadioValue = string | number
 
 export interface RadioOption {
   /** 选项标签 */
-  label: string | number
+  label: VNodeChild
   /** 选项值 */
   value: RadioValue
   /** 是否禁用该选项 */
@@ -193,6 +195,7 @@ export const Radio = defineComponent({
             }
 
             const boxStyle: StyleDesc = {
+              position: "relative",
               // The row owns interaction; the painted circle must not cover it.
               pointerEvents: "none",
               width: g.box,
@@ -217,7 +220,7 @@ export const Radio = defineComponent({
                 role="radio"
                 aria-checked={checked}
                 aria-disabled={rowDisabled || undefined}
-                aria-label={String(opt.label)}
+                aria-label={contentLabel(opt.label)}
                 tabIndex={!rowDisabled && idx === focusedIndex.value ? 0 : -1}
                 onClick={rowDisabled ? undefined : () => select(opt)}
                 onKeyDown={rowDisabled ? undefined : (e: EventPayload) => handleKeyDown(e, opt, idx)}
@@ -230,6 +233,7 @@ export const Radio = defineComponent({
                 style={rowStyle}
               >
                 <div style={boxStyle}>
+                  {checked && !rowDisabled ? <SelectionSplash size={g.box - borderWidth * 2} color={c.primary} testId={props.testId ? `${props.testId}-splash-${opt.value}` : undefined} /> : null}
                   {checked ? (
                     <img
                       src={rowDisabled ? checkUrl.disabled : checkUrl.active}
@@ -237,7 +241,7 @@ export const Radio = defineComponent({
                     />
                   ) : null}
                 </div>
-                <text>{String(opt.label)}</text>
+                <div style={{ display: "flex", alignItems: "center" }}>{renderContent(opt.label)}</div>
               </div>
             )
           })}
@@ -248,3 +252,6 @@ export const Radio = defineComponent({
 })
 
 export default Radio
+
+/** Public native props inferred from the group component. */
+export type RadioProps = Omit<InstanceType<typeof Radio>["$props"], "style"> & { style?: StyleDesc }

@@ -15,7 +15,7 @@ export type DatePickerSize = PickerSize
 export type DatePickerStatus = PickerStatus
 export type DatePickerValue = string | [string, string] | null
 export interface DatePickerProps {
-  range?: boolean; picker?: "date" | "month"; modelValue?: DatePickerValue
+  range?: boolean; picker?: "date" | "month"; value?: DatePickerValue; modelValue?: DatePickerValue
   defaultValue?: string | [string, string]; placeholder?: string; disabled?: boolean
   allowClear?: boolean; size?: DatePickerSize; status?: DatePickerStatus; format?: string
   disabledDate?: (date: Date) => boolean; open?: boolean; showToday?: boolean
@@ -52,6 +52,7 @@ export const DatePicker = defineComponent({
   name: "AnimalDatePicker", inheritAttrs: false,
   props: {
     range: { type: Boolean, default: false }, picker: { type: String as PropType<"date" | "month">, default: "date" },
+    value: { type: [String, Array] as PropType<DatePickerValue>, default: undefined },
     modelValue: { type: [String, Array] as PropType<DatePickerValue>, default: undefined },
     defaultValue: { type: [String, Array] as PropType<string | [string, string]>, default: undefined },
     placeholder: { type: String, default: "请选择日期" }, disabled: { type: Boolean, default: false },
@@ -65,7 +66,7 @@ export const DatePicker = defineComponent({
   emits: ["update:modelValue", "change", "update:open", "openChange"],
   setup(props, { attrs, emit }) {
     const innerValue = ref<DatePickerValue>(props.defaultValue ?? null)
-    const current = computed(() => props.modelValue !== undefined ? props.modelValue : innerValue.value)
+    const current = computed(() => props.value !== undefined ? props.value : props.modelValue !== undefined ? props.modelValue : innerValue.value)
     const selected = computed(() => typeof current.value === "string" ? parseDate(current.value) : null)
     const selectedRange = computed(() => props.range ? parseRange(current.value) : null)
     const format = computed(() => props.format ?? (props.picker === "month" ? "YYYY-MM" : "YYYY-MM-DD"))
@@ -82,7 +83,7 @@ export const DatePicker = defineComponent({
     })
     function resetSelection() { pending.value = null; rangeStart.value = null; rangeEnd.value = null; hovered.value = null }
     function commit(value: DatePickerValue) {
-      if (props.modelValue === undefined) innerValue.value = value
+      if (props.value === undefined && props.modelValue === undefined) innerValue.value = value
       emit("update:modelValue", value); emit("change", value)
     }
     function disabled(date: Date) { return props.disabled || props.disabledDate?.(date) === true }

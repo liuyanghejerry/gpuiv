@@ -7,7 +7,7 @@
  * native focus correction; close and unmount restore the saved focus.
  */
 
-import { defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNode } from "vue"
+import { defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNodeChild } from "vue"
 import {
   AnimatePresence,
   motion,
@@ -21,19 +21,20 @@ import {
 } from "@gpuiv/vue"
 import { fonts, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { contentLabel, renderContent } from "./content.js"
 import { WindowLayer } from "./window-layer.js"
 
 export type DrawerPlacement = "left" | "right" | "top" | "bottom"
 
 export interface DrawerProps {
   open?: boolean
-  title?: string
+  title?: VNodeChild
   placement?: DrawerPlacement
   width?: number | string
   height?: number | string
   maskClosable?: boolean
   pushBackground?: boolean
-  footer?: string | VNode | null
+  footer?: VNodeChild
   maskStyle?: StyleDesc
   onClose?: () => void
   testId?: string
@@ -78,7 +79,7 @@ export const Drawer = defineComponent({
     /** 是否可见（受控；配合 v-model:open / onUpdate:open 使用） */
     open: { type: Boolean, default: false },
     /** 标题 */
-    title: { type: String, default: undefined },
+    title: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 弹出位置 */
     placement: { type: String as PropType<DrawerPlacement>, default: "right" },
     /** 宽度（left / right 时生效；数字 px，字符串限 px/% 形式，见文件头） */
@@ -90,7 +91,7 @@ export const Drawer = defineComponent({
     /** Inert：背景下沉景深效果无法移植（GPUIV 无 transform/filter，见文件头） */
     pushBackground: { type: Boolean, default: true },
     /** 底部区域：string 渲染为文本，VNode 直接渲染，null/undefined 不渲染 */
-    footer: { type: [String, Object] as PropType<string | VNode | null>, default: undefined },
+    footer: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 遮罩层自定义样式 */
     maskStyle: { type: Object as PropType<StyleDesc>, default: undefined },
     /** 遮罩点击 / Esc / 关闭按钮触发（随后还会触发 onUpdate:open） */
@@ -263,7 +264,7 @@ export const Drawer = defineComponent({
                 <div
                   ref={panel}
                   role="dialog"
-                  aria-label={props.title}
+                  aria-label={attrs["aria-label"] as string | undefined ?? contentLabel(props.title)}
                   tabIndex={0}
                   autoFocus
                   onKeyDown={onPanelKeyDown}
@@ -283,7 +284,7 @@ export const Drawer = defineComponent({
                       }}
                     >
                       <div style={{ fontSize: 28, fontWeight: 700, color: "rgba(114, 93, 66, 1)" }}>
-                        {slots.title ? slots.title() : <text>{props.title}</text>}
+                        {slots.title ? slots.title() : renderContent(props.title)}
                       </div>
                       <div
                         role="button"
@@ -339,13 +340,7 @@ export const Drawer = defineComponent({
                         flexShrink: 0,
                       }}
                     >
-                      {slots.footer ? (
-                        slots.footer()
-                      ) : typeof props.footer === "string" ? (
-                        <text>{props.footer}</text>
-                      ) : (
-                        (props.footer as VNode)
-                      )}
+                      {slots.footer ? slots.footer() : renderContent(props.footer)}
                     </div>
                   ) : null}
                 </div>

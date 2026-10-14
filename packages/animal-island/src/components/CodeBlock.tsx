@@ -8,7 +8,7 @@
  *    number/tag(jsx)/function/property/operator/constructor(component)/
  *    functionBuiltin(react hooks)。Syntect 按 TextMate scope 着色，无法逐 token
  *    复刻原版的正则分类，配色为近似；默认文字色 #e8d5bc 与原 pre 一致。
- *  - 新增 props: `language`（默认 "tsx"，原版无此 prop、tokenizer 写死）与
+ *  - 新增 props: `language`（未指定时用 React 原样命令识别选择 bash/tsx）与
  *    `showLineNumbers`（原生能力，默认 false 保持原版外观）。
  *  - 卡片: 深暖棕底 #2b2118、1px 边 #3d3028、radius 20、padding 20/24、
  *    fontSize 14、fontWeight 600、文字 #e8d5bc —— 全部取原版 Less 精确值。
@@ -23,8 +23,8 @@
  *    保留；copied 文案按任务要求加 ✓（原版为"已复制"）。
  *  - 复制按钮: absolute top 12 right 12、min-width 62、height 32、padding 0 12、
  *    1px 边 rgba(232,213,188,0.3)、radius 50px→radius.pill、
- *    底 rgba(61,48,40,0.94)、hover 底 #4b3b31（原版 hover 的 translateY(-1px)
- *    砍掉——GPUIV 无 transform）、focus-visible `outline: 2px solid #19c8b9
+ *    底 rgba(61,48,40,0.94)、hover 底 #4b3b31 与 top 12→11 原生补间；
+ *    active 恢复到 12。focus-visible `outline: 2px solid #19c8b9
  *    offset 2` → GPUIV 结构化 outline（用本地 focused 状态模拟 :focus-visible）。
  *  - style 拆分: 原版把 width/minWidth/maxWidth/margin* 分到外层 wrapper、其余
  *    分到 pre 的规则原样保留；"pre" 一侧在移植中作用到 `<code>` 的 style
@@ -39,9 +39,9 @@
  *    class，一并剥除）。
  */
 
-import { defineComponent, onBeforeUnmount, ref, type PropType } from "vue"
-import { useGpuix, type EventPayload, type GpuixTheme, type StyleDesc } from "@gpuiv/vue"
-import { colors, fontSize, fonts, radius } from "../tokens.js"
+import { defineComponent, h, onBeforeUnmount, ref, type PropType } from "vue"
+import { motion, useGpuix, type EventPayload, type GpuixTheme, type StyleDesc } from "@gpuiv/vue"
+import { colors, duration, ease, fontSize, fonts, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 
 export interface CodeBlockProps {
@@ -49,7 +49,7 @@ export interface CodeBlockProps {
   code: string
   /** 是否显示复制按钮，默认 true */
   copyable?: boolean
-  /** Syntect 语言（新增 prop；原版 tokenizer 写死 JS/TS/JSX） */
+  /** 显式 Syntect 语言；未传时按 React 原命令检测选择 bash / tsx。 */
   language?: string
   /** 行号（原生能力；默认 false 保持原版外观） */
   showLineNumbers?: boolean
@@ -67,6 +67,9 @@ const CARD_TEXT = "#e8d5bc"
 
 /** 原版行高 1.7 × fontSize 14（GPUIV lineHeight 为 px）。 */
 const CODE_LINE_HEIGHT = 23.8
+
+/** React CodeBlock's exact command detection; explicit language wins. */
+const looksLikeShell = (code: string): boolean => /^\s*(npm|yarn|pnpm|npx|node|git|cd|ls|mkdir|rm|cp|mv)\b/m.test(code)
 
 /** 原版手写 tokenizer 的 11 色 → 原生 syntax capture 的最近映射（见文件头）。 */
 const CODE_THEME: GpuixTheme = {
@@ -150,7 +153,7 @@ export const CodeBlock = defineComponent({
   props: {
     code: { type: String, required: true },
     copyable: { type: Boolean, default: true },
-    language: { type: String, default: "tsx" },
+    language: { type: String, default: undefined },
     showLineNumbers: { type: Boolean, default: false },
     onCopy: { type: Function as PropType<(code: string) => void>, default: undefined },
     testId: { type: String, default: undefined },
@@ -159,6 +162,7 @@ export const CodeBlock = defineComponent({
     const { renderer } = useGpuix()
     const copyStatus = ref<CodeBlockCopyStatus>("idle")
     const focused = ref(false)
+    const hovered = ref(false), pressed = ref(false)
     let resetTimer: ReturnType<typeof setTimeout> | undefined
 
     onBeforeUnmount(() => clearTimeout(resetTimer))
@@ -240,7 +244,6 @@ export const CodeBlock = defineComponent({
         fontWeight: 700,
         cursor: "pointer",
         userSelect: "none",
-        // 原版 hover 的 translateY(-1px) 砍掉（无 transform），保留底色变化。
         hover: { backgroundColor: "#4b3b31" },
         ...(focused.value ? { outline: { width: 2, color: colors.primary, offset: 2 } } : {}),
       }
@@ -249,24 +252,26 @@ export const CodeBlock = defineComponent({
         <div {...restAttrs} testId={props.testId} style={wrapperStyle}>
           <code
             code={props.code}
-            language={props.language}
+            language={props.language ?? (looksLikeShell(props.code) ? "bash" : "tsx")}
             showLineNumbers={props.showLineNumbers}
             theme={CODE_THEME}
             style={codeStyle}
           />
           {props.copyable ? (
-            <div
-              role="button"
-              tabIndex={0}
-              aria-label={statusContent.label}
-              onClick={() => handleCopy()}
-              onKeyDown={activationKeys(() => handleCopy())}
-              onFocus={() => (focused.value = true)}
-              onBlur={() => (focused.value = false)}
-              style={copyButtonStyle}
-            >
-              <text>{statusContent.text}</text>
-            </div>
+            h(motion.div, {
+              role: "button", tabIndex: 0, "aria-label": statusContent.label,
+              testId: props.testId ? `${props.testId}-copy` : undefined,
+              initial: false, animate: { top: hovered.value && !pressed.value ? 11 : 12 },
+              transition: { duration: duration.base, ease },
+              onMouseEnter: () => { hovered.value = true },
+              onMouseLeave: () => { hovered.value = false; pressed.value = false },
+              onMouseDown: () => { pressed.value = true },
+              onMouseUp: () => { pressed.value = false },
+              onClick: () => handleCopy(), onKeyDown: activationKeys(() => handleCopy()),
+              onFocus: () => { focused.value = true },
+              onBlur: () => { focused.value = false; pressed.value = false },
+              style: copyButtonStyle,
+            }, { default: () => <text>{statusContent.text}</text> })
           ) : null}
         </div>
       )

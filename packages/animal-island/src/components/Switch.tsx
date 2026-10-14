@@ -18,10 +18,11 @@
  *  - Label `text-shadow` and `letter-spacing` are dropped (unsupported).
  */
 
-import { computed, defineComponent, ref, type PropType } from "vue"
+import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue"
 import { Spinner, motion, type StyleDesc } from "@gpuiv/vue"
 import { colors, duration, ease, fonts, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { contentLabel, renderContent } from "./content.js"
 
 export type SwitchSize = "small" | "default"
 
@@ -62,8 +63,8 @@ export const Switch = defineComponent({
     size: { type: String as PropType<SwitchSize>, default: "default" },
     disabled: { type: Boolean, default: false },
     loading: { type: Boolean, default: false },
-    checkedChildren: { type: [String, Number], default: undefined },
-    unCheckedChildren: { type: [String, Number], default: undefined },
+    checkedChildren: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
+    unCheckedChildren: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     onChange: { type: Function as PropType<(value: boolean) => void>, default: undefined },
     testId: { type: String, default: undefined },
   },
@@ -95,7 +96,7 @@ export const Switch = defineComponent({
       const { "onUpdate:modelValue": _vModelListener, ...forwardAttrs } = attrs
 
       const label = checked ? props.checkedChildren : props.unCheckedChildren
-      const labelText = label !== undefined ? String(label) : undefined
+      const labelText = contentLabel(label)
       const trackWidth =
         labelText === undefined
           ? g.width
@@ -147,9 +148,7 @@ export const Switch = defineComponent({
           onKeyDown={inactive ? undefined : activationKeys(() => toggle())}
           style={{ ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style }}
         >
-          {labelText !== undefined ? (
-            <text>{labelText}</text>
-          ) : checked ? (
+          {label !== undefined ? renderContent(label) : checked ? (
             slots.checked?.()
           ) : (
             slots.unchecked?.()
@@ -185,3 +184,6 @@ export const Switch = defineComponent({
 })
 
 export default Switch
+
+/** Public native props; rich state content can also be supplied through slots. */
+export type SwitchProps = Omit<InstanceType<typeof Switch>["$props"], "style"> & { style?: StyleDesc }

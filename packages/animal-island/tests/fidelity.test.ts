@@ -122,7 +122,8 @@ describe("original animal-island contracts", () => {
     expect(app.find(node => node.type === "img").props.src).toContain("data:image/svg+xml;base64,")
     const dots = Buffer.from(patternDataUrl("dots-pink", 200, 100).split(",")[1], "base64").toString()
     expect(dots).toContain('width="28" height="28"')
-    expect(dots).toContain("rgba(248, 166, 178, 0.18)")
+    expect(dots).toContain("rgba(248, 166, 178, 0.26)")
+    expect(dots).toContain("rgba(255, 200, 210, 0.18)")
   })
 
   it("renders pagination ghost buttons and performs page changes", async () => {

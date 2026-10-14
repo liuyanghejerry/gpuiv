@@ -8,18 +8,19 @@
  * component did not implement it either). Mount a y-scrolling Table outside
  * another scroll parent. Classes are metadata; customize with native StyleDesc.
  */
-import { computed, defineComponent, isVNode, ref, type PropType, type VNode, type VNodeChild } from 'vue';
+import { computed, defineComponent, isVNode, ref, type PropType, type VNodeChild } from 'vue';
 import { Spinner, type EventPayload, type StyleDesc } from '@gpuiv/vue';
 import { Pagination, type PaginationProps } from './Pagination.js';
 import { activationKeys } from '../interaction.js';
 import { colors, fonts } from '../tokens.js';
+import { renderContent } from './content.js';
 
 export type TableRecord = Record<string, unknown>;
 const SEPARATOR_SVG = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1" viewBox="0 0 960 1"><path d="M0 .5H960" fill="none" stroke="black" stroke-dasharray="6 6" /></svg>')}`;
 export interface TableColumn<T extends TableRecord = TableRecord> {
-    title: VNode | string | (() => VNode | string);
+    title: VNodeChild | (() => VNodeChild);
     dataIndex?: string | (string | number)[];
-    render?: (value: unknown, record: T, index: number) => VNode | string | number | null;
+    render?: (value: unknown, record: T, index: number) => VNodeChild;
     width?: number | string;
     align?: 'left' | 'center' | 'right';
     /** Unsupported: GPUIV has no sticky cells; this column scrolls normally. */
@@ -44,7 +45,7 @@ export interface TableProps<T extends TableRecord = TableRecord> {
     rowClassName?: string | ((record: T, index: number) => string);
     onRow?: (record: T, index: number) => TableRowAttributes;
     loading?: boolean;
-    emptyText?: string | VNode;
+    emptyText?: VNodeChild;
     scroll?: { x?: number | string; y?: number | string };
     pagination?: false | TablePagination;
     className?: string;
@@ -62,9 +63,9 @@ function fieldValue(record: TableRecord, path?: string | (string | number)[]): u
 }
 
 function painted(value: VNodeChild | unknown): VNodeChild {
-    if (isVNode(value)) return value;
-    if (Array.isArray(value)) return value.map(painted);
-    if (value === null || value === undefined || typeof value === 'boolean') return null;
+    if (isVNode(value) || Array.isArray(value) || value == null || ['string', 'number', 'boolean'].includes(typeof value)) return renderContent(value as VNodeChild);
+    // Preserve formatting of ordinary non-node record values. Rich Vue nodes
+    // and lists always follow renderContent and are never stringified.
     return <text>{String(value)}</text>;
 }
 
@@ -80,7 +81,7 @@ export const Table = defineComponent({
         rowClassName: { type: [String, Function] as PropType<TableProps['rowClassName']>, default: undefined },
         onRow: { type: Function as PropType<TableProps['onRow']>, default: undefined },
         loading: { type: Boolean, default: false },
-        emptyText: { type: [String, Object] as PropType<string | VNode>, default: '暂无数据' },
+        emptyText: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: '暂无数据' },
         scroll: { type: Object as PropType<TableProps['scroll']>, default: undefined },
         pagination: { type: [Boolean, Object] as PropType<false | TablePagination>, default: undefined },
         className: { type: String, default: undefined },
@@ -100,6 +101,7 @@ export const Table = defineComponent({
         function change(next: number, size: number) {
             if (config.value.current === undefined) innerPage.value = next;
             if (config.value.pageSize === undefined) innerSize.value = size;
+            config.value.onChange?.(next, size);
             emit('change', next, size);
         }
         function cellStyle(col: TableColumn, header: boolean): StyleDesc {

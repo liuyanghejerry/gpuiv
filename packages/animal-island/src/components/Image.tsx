@@ -16,11 +16,10 @@
  *  - variant=bordered: 白底（或 color 调色板底色）+ padding 12 + 圆角 8 +
  *    柔和阴影 `0 8px 14px 0 rgba(0,0,0,0.08)` 原样（原版注释叫「边框」但
  *    border: none，移植同样无边框）。
- *  - variant=stamp: 齿孔（mask-composite 四边 radial-gradient 交集）→ 砍掉
- *    （GPUIV 无 mask），`filter: drop-shadow(...)` 双阴影 → 砍掉（无 filter），
- *    照片 `saturate/contrast` 滤镜 → 砍掉，::after 圆点纸纹（radial-gradient
- *    background-image）→ 砍掉；保留奶油底纸 #fbfaf5、padding 14、直角、右上角
- *    年份字（letter-spacing 与 text-shadow 砍掉）。
+ *  - variant=stamp: 四边半圆齿孔使用测量尺寸的 SVG luminance mask；孔半径
+ *    5px、间距 16px 随窗口/宽高比变化保持不变。照片上的 4px 半色调纸纹也由
+ *    SVG 绘制。底纸 #fbfaf5、padding 14、直角、年份字保留；照片 saturate/
+ *    contrast 滤镜、两重 drop-shadow、年份字距/文字阴影仍未表达。
  *  - color 调色板: 原版 variant='bordered' 和 error 态生效，色值同
  *    tokens.cardPattern。
  *  - 加载/失败: 原生 img 解码事件驱动 opacity 0→1 和原版错误图标/文字；
@@ -61,6 +60,7 @@ import { cardPattern, ease, fonts, type CardColor } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { WindowLayer } from "./window-layer.js"
 import { imageEventMatches, readImageEvent } from "./image-events.js"
+import { StampSurface } from "./image-stamp-decoration.js"
 
 export type ImageColor = "white" | CardColor
 export type ImageVariant = "default" | "bordered" | "stamp"
@@ -143,7 +143,7 @@ export const Image = defineComponent({
     color: { type: String as PropType<ImageColor>, default: "white" },
     /** Inert：GPUIV <img> 始终立即加载（见文件头） */
     lazy: { type: Boolean, default: false },
-    /** 相框类型：default 卡片大阴影+大圆角，bordered 衬板柔和阴影+小圆角，stamp 邮票（齿孔砍掉） */
+    /** 相框类型：default 卡片大阴影+大圆角，bordered 衬板柔和阴影+小圆角，stamp 邮票齿孔 */
     variant: { type: String as PropType<ImageVariant>, default: "default" },
     /** 邮票类型下的发行年份，印在右上角照片上；留空不显示 */
     stampYear: { type: String, default: undefined },
@@ -245,10 +245,10 @@ export const Image = defineComponent({
           break
         }
         case "stamp":
-          // 齿孔 / drop-shadow / 纸纹全砍（见文件头），保留底纸 + 内缩 + 直角。
+          // SVG 底纸绘制真实透明齿孔；原生背景保持透明，照片内缩 14px。
           variantStyle = {
             padding: 14,
-            backgroundColor: "#fbfaf5",
+            backgroundColor: "transparent",
             borderRadius: 0,
           }
           break
@@ -326,6 +326,7 @@ export const Image = defineComponent({
           onKeyDown={interactive ? activationKeys(openPreview) : undefined}
           style={{ ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...frameStyle }}
         >
+          {!failed.value && props.variant === "stamp" ? <StampSurface /> : null}
           {failed.value ? <div key="image-error" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, pointerEvents: "none" }}>
             <img src={ERROR_MARK_URL} alt="" style={{ width: 32, height: 32, pointerEvents: "none" }} />
             <text style={{ pointerEvents: "none" }}>图片加载失败</text>
@@ -334,6 +335,7 @@ export const Image = defineComponent({
             onLoad={handleLoad} onError={handleError}
             motion={{ initial: { opacity: 0 }, animate: { opacity: loaded.value ? 1 : 0 }, transition: { duration: 0.25, ease: "ease" } }}
             style={{ ...imgSize, pointerEvents: props.preview ? "none" : undefined }} />}
+          {!failed.value && props.variant === "stamp" ? <StampSurface texture /> : null}
           {!failed.value && props.variant === "stamp" && props.stampYear ? (
             <div
               style={{

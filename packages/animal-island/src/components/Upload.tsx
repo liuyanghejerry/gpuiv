@@ -11,11 +11,12 @@
  * The built-in image preview uses a full-window deferred anchored layer.
  */
 import { Blob, File } from "node:buffer"
-import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType } from "vue"
+import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNodeChild } from "vue"
 import { promptForPaths, Spinner, useGpuix, useWindowSize, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, fonts, radius, shadows } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { Icon } from "./Icon.js"
+import { renderContent } from "./content.js"
 import { matchUploadAccept, readUploadPaths, type UploadNativeFile } from "./upload-files.js"
 
 export type { UploadNativeFile } from "./upload-files.js"
@@ -41,6 +42,7 @@ export interface UploadCustomRequestOptions {
   onError(error?: unknown): void
 }
 export interface UploadChangeParam { file: UploadFile; fileList: UploadFile[] }
+export type UploadOnChange = (info: UploadChangeParam) => void
 export interface UploadShowUploadList { showPreviewIcon?: boolean; showRemoveIcon?: boolean }
 export interface UploadProps {
   accept?: string
@@ -49,11 +51,12 @@ export interface UploadProps {
   disabled?: boolean
   directory?: boolean
   modelValue?: UploadFile[]
+  fileList?: UploadFile[]
   defaultFileList?: UploadFile[]
   listType?: UploadListType
   showUploadList?: boolean | UploadShowUploadList
   drag?: boolean
-  tip?: string
+  tip?: VNodeChild
   ariaLabel?: string
   beforeUpload?: (file: UploadNativeFile, files: UploadNativeFile[]) => boolean | UploadNativeFile | Promise<boolean | UploadNativeFile>
   /** Returning an abort handle is a native extension for request cleanup. */
@@ -65,6 +68,11 @@ export interface UploadProps {
   name?: string
   withCredentials?: boolean
   onRemove?: (file: UploadFile) => boolean | void | Promise<boolean | void>
+  onChange?: UploadOnChange
+  onPreview?: (file: UploadFile) => void
+  onExceed?: (files: UploadNativeFile[], fileList: UploadFile[]) => void
+  onSelectionError?: (error: unknown) => void
+  style?: StyleDesc
   testId?: string
 }
 export interface UploadExpose {
@@ -91,11 +99,12 @@ export const Upload = defineComponent({
     disabled: { type: Boolean, default: false },
     directory: { type: Boolean, default: false },
     modelValue: { type: Array as PropType<UploadFile[]>, default: undefined },
+    fileList: { type: Array as PropType<UploadFile[]>, default: undefined },
     defaultFileList: { type: Array as PropType<UploadFile[]>, default: () => [] },
     listType: { type: String as PropType<UploadListType>, default: "text" },
     showUploadList: { type: [Boolean, Object] as PropType<boolean | UploadShowUploadList>, default: true },
     drag: { type: Boolean, default: false },
-    tip: { type: String, default: undefined },
+    tip: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     ariaLabel: { type: String, default: "上传文件" },
     beforeUpload: { type: Function as PropType<UploadProps["beforeUpload"]>, default: undefined },
     customRequest: { type: Function as PropType<UploadProps["customRequest"]>, default: undefined },
@@ -106,19 +115,19 @@ export const Upload = defineComponent({
     name: { type: String, default: "file" },
     withCredentials: { type: Boolean, default: false },
     onRemove: { type: Function as PropType<UploadProps["onRemove"]>, default: undefined },
-    onChange: { type: Function as PropType<(info: UploadChangeParam) => void>, default: undefined },
-    onPreview: { type: Function as PropType<(file: UploadFile) => void>, default: undefined },
-    onExceed: { type: Function as PropType<(files: UploadNativeFile[], fileList: UploadFile[]) => void>, default: undefined },
+    onChange: { type: Function as PropType<UploadOnChange>, default: undefined },
+    onPreview: { type: Function as PropType<UploadProps["onPreview"]>, default: undefined },
+    onExceed: { type: Function as PropType<UploadProps["onExceed"]>, default: undefined },
     /** Failed desktop dialog/filesystem reads are surfaced to the application. */
-    onSelectionError: { type: Function as PropType<(error: unknown) => void>, default: undefined },
+    onSelectionError: { type: Function as PropType<UploadProps["onSelectionError"]>, default: undefined },
     testId: { type: String, default: undefined },
   },
   setup(props, { attrs, slots, expose }) {
     const { renderer } = useGpuix()
     const windowSize = useWindowSize()
     const innerList = ref<UploadFile[]>([...props.defaultFileList])
-    const controlled = computed(() => props.modelValue !== undefined)
-    const list = computed(() => props.modelValue ?? innerList.value)
+    const controlled = computed(() => props.fileList !== undefined || props.modelValue !== undefined)
+    const list = computed(() => props.fileList ?? props.modelValue ?? innerList.value)
     let listRef: UploadFile[] = list.value
     const focus = ref<string | null>(null)
     const preview = ref<UploadFile | null>(null)
@@ -348,7 +357,7 @@ export const Upload = defineComponent({
         style={{ display: "flex", flexDirection: "column", gap: 10, color: colors.text, ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...(props.disabled ? { opacity: 0.55 } : {}), ...(attrs.style as StyleDesc | undefined) }}>
         {pictureCard ? <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>{props.showUploadList !== false ? list.value.map((file) => fileItem(file, true)) : null}
           {control("trigger", props.ariaLabel, openFilePicker, triggerChildren, triggerStyle)}</div> : control("trigger", props.ariaLabel, openFilePicker, triggerChildren, triggerStyle)}
-        {props.tip ? <text style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 19.2 }}>{props.tip}</text> : null}
+        {props.tip ? <div style={{ fontSize: 12, color: colors.textSecondary, lineHeight: 19.2 }}>{renderContent(props.tip)}</div> : null}
         {!pictureCard && props.showUploadList !== false && list.value.length ? <div role="list" style={{ display: "flex", flexDirection: "column", gap: 6 }}>{list.value.map((file) => fileItem(file, false))}</div> : null}
         {preview.value ? <anchored position={{ x: 0, y: 0 }} anchor="topLeft" fit="snap" snapMargin={0} deferred priority={2} occlude
           style={{ width: windowSize.value.width, height: windowSize.value.height, backgroundColor: "rgba(15,12,8,0.75)" }}>

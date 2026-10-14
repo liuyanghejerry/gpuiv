@@ -1,12 +1,12 @@
-/** Modal — ported from animal-island-vue Modal.vue (MIT), tracked in #164.
- * Retains palette, variant padding, footer and Typewriter; the game clip-path
- * becomes a 22px rounded rectangle. Scale entry becomes opacity animation.
- * A window-sized deferred anchored layer replaces DOM Teleport. The mask
- * shows directly. Native Tab runs before JS focus correction, so trapping
- * is approximate. Width supports native numeric/percentage/auto dimensions.
+/** Modal — aligned with animal-island-ui's React Modal (MIT).
+ * Preserves node-valued titles/footers, palettes, variant padding and Typewriter.
+ * Game panels draw the original organic SVG outline below native content;
+ * arbitrary child painting is not clipped to that shape. Native opacity
+ * replaces scale entry. WindowLayer replaces DOM Portal. Tab trapping uses
+ * native focus correction, and px/percent/auto widths use native layout.
  */
 
-import { defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNode } from "vue"
+import { defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNodeChild } from "vue"
 import {
   AnimatePresence,
   motion,
@@ -20,6 +20,8 @@ import { colors, ease, fonts } from "../tokens.js"
 import { Button } from "./Button.js"
 import { Typewriter } from "./Typewriter.js"
 import { WindowLayer } from "./window-layer.js"
+import { contentLabel, renderContent } from "./content.js"
+import { OrganicSurface } from "./organic-surface.js"
 
 export type ModalVariant = "default" | "game"
 
@@ -41,13 +43,13 @@ export const Modal = defineComponent({
     /** 弹窗类型: default 常规圆角矩形, game 异形自然外框（GPUIV 统一圆角矩形，见文件头） */
     variant: { type: String as PropType<ModalVariant>, default: "game" },
     /** 标题 */
-    title: { type: String, default: undefined },
+    title: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 宽度（数字 px；字符串限 GPUIV 的 px/%/auto 形式） */
     width: { type: [Number, String] as PropType<number | string>, default: 520 },
     /** 点击遮罩关闭 */
     maskClosable: { type: Boolean, default: true },
     /** 底部区域：string 渲染为文本，VNode 直接渲染，null 不渲染；省略时按 showFooter */
-    footer: { type: [String, Object] as PropType<string | VNode | null>, default: undefined },
+    footer: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 是否展示默认底部按钮（footer 未提供时的便捷开关） */
     showFooter: { type: Boolean, default: true },
     /** 按原版默认开启逐字打出 */
@@ -79,7 +81,7 @@ export const Modal = defineComponent({
     const footerVisible = () => {
       if (props.footer === null) return false
       if (slots.footer) return true
-      if (props.footer) return true
+      if (props.footer !== undefined) return true
       return props.showFooter
     }
 
@@ -165,8 +167,8 @@ export const Modal = defineComponent({
         paddingLeft: props.variant === "game" ? 48 : 35,
         paddingRight: props.variant === "game" ? 48 : 35,
         paddingBottom: props.variant === "game" ? 32 : 25,
-        backgroundColor: PANEL_BG,
-        borderRadius: 22,
+        backgroundColor: props.variant === "game" ? "transparent" : PANEL_BG,
+        borderRadius: props.variant === "game" ? 0 : 22,
         boxShadow: props.variant === "game" ? undefined : {
           offsetX: 0, offsetY: 18, blurRadius: 50, spreadRadius: -12, color: "rgba(0, 0, 0, 0.25)",
         },
@@ -182,15 +184,7 @@ export const Modal = defineComponent({
         </Button>,
       ]
 
-      const footerContent = slots.footer ? (
-        slots.footer()
-      ) : typeof props.footer === "string" ? (
-        <text>{props.footer}</text>
-      ) : props.footer ? (
-        (props.footer as VNode)
-      ) : (
-        defaultFooter
-      )
+      const footerContent = slots.footer ? slots.footer() : props.footer !== undefined ? renderContent(props.footer) : defaultFooter
 
       return (
         <AnimatePresence>
@@ -217,12 +211,13 @@ export const Modal = defineComponent({
                 <div
                   ref={panel}
                   role="dialog"
-                  aria-label={props.title}
+                  aria-label={attrs["aria-label"] as string | undefined ?? contentLabel(props.title)}
                   tabIndex={0}
                   autoFocus
                   onKeyDown={onPanelKeyDown}
                   style={panelStyle}
                 >
+                  {props.variant === "game" ? <OrganicSurface color={PANEL_BG} /> : null}
                   {slots.title || props.title ? (
                     <div
                       style={{
@@ -233,7 +228,7 @@ export const Modal = defineComponent({
                       }}
                     >
                       <div style={{ fontSize: 28, fontWeight: 700, color: colors.warmSoft }}>
-                        {slots.title ? slots.title() : <text>{props.title}</text>}
+                        {slots.title ? slots.title() : renderContent(props.title)}
                       </div>
                     </div>
                   ) : null}
@@ -276,5 +271,7 @@ export const Modal = defineComponent({
     }
   },
 })
+
+export type ModalProps = Omit<InstanceType<typeof Modal>["$props"], "style"> & { style?: StyleDesc }
 
 export default Modal

@@ -1,5 +1,5 @@
 /** Ported from animal-island-vue Form/types.ts (MIT). Native layout uses StyleDesc. */
-import type { VNode } from 'vue';
+import type { VNodeChild } from 'vue';
 import type { EventPayload, StyleDesc } from '@gpuiv/vue';
 
 // ============================================
@@ -228,8 +228,8 @@ export type ValidateStatus = 'success' | 'warning' | 'error' | 'validating' | ''
 export interface FormItemProps {
     /** 字段名，必传（无 name 的 FormItem 仅作展示） */
     name?: NamePath;
-    /** label 文本（React 端为 ReactNode，Vue 端兼容 string | VNode） */
-    label?: string | VNode;
+    /** React node-valued label, expressed with native Vue children. */
+    label?: VNodeChild;
     /** 校验规则 */
     rules?: Rules;
     /** 是否必填（仅显示星号，校验仍以 rules.required 为准） */
@@ -251,7 +251,7 @@ export interface FormItemProps {
     /** 手动指定校验状态（覆盖 rules 推断） */
     validateStatus?: ValidateStatus;
     /** 帮助文本（错误时显示错误，否则显示 help） */
-    help?: string;
+    help?: VNodeChild;
     /** 不渲染外层 label/wrapper，仅包 children */
     noStyle?: boolean;
     /** 覆盖父级 labelCol */

@@ -1,45 +1,23 @@
-/** Tabs — GPUIV port of animal-island-vue's `Tabs.vue`.
- *  ported from animal-island-vue (https://github.com/guokaigdg/animal-island-vue, MIT)
- *
- *  Fidelity notes (see issue #164), 原版做法 → 移植近似:
- *  - The original has no sliding ink bar and no line/card `type` variants:
- *    the active tab is a solid `#0cc0b5` pill with cream text, so there is
- *    no transform-based indicator to port.
- *  - Tab colour transitions (`transition: all 0.25s @motion-ease`) → instant
- *    swaps: GPUIV motion only tweens numeric geometry/opacity, not colours.
- *  - Active dot `transform: scale(1.2)` → dot fontSize 10 → 12 while active
- *    (GPUIV has no transforms).
- *  - Leaf wiggle (`animal-tabs-leaf-wiggle` rotate keyframes) → dropped (no
- *    CSS animations); the static leaf dot stays, so `leafAnimation` is
- *    accepted for API parity but inert — same trade-off as `Icon.bounce`.
- *  - Content fade-in (`animal-tabs-fade-in` opacity/translateY keyframes) →
- *    dropped (no CSS animations/transforms); panel swaps are instant.
- *  - DOM-id ARIA linkage (`aria-controls`/`aria-labelledby` on generated
- *    ids) → dropped: GPUIV elements have no DOM ids and the native layer
- *    only forwards role/aria-label/aria-expanded/aria-selected/
- *    aria-orientation/…; those are kept.
- *  - Roving tabindex + Arrow/Home/End keyboard model kept. Key handlers live
- *    on each tab because GPUIV key events do not bubble (the original
- *    listens once on the tablist); focus follows selection through
- *    `renderer.focusElement`, the same pattern as `Rate.tsx`.
- *  - Focus ring (native `<button>` default) → warning-yellow outline
- *    (`@focus-yellow` in the original variables).
- *  - The decorative leaf is absolutely positioned and filled, so it gets
- *    `pointerEvents: "none"`: GPUI paints a flat hit list and does not
- *    bubble clicks — a filled child would cover the tab's hitbox.
+/** Tabs — aligned with animal-island-ui's React Tabs (MIT).
+ * Supports node-valued labels and panels, native panel fade/lift, controlled
+ * keys, roving tab focus and Arrow/Home/End navigation. React's deprecated
+ * leafAnimation is accepted without rendering the removed leaf decoration.
+ * Colours change immediately. Native ARIA keeps roles/selected/orientation;
+ * browser DOM-id relationships remain outside the current native API.
  */
 
-import { computed, defineComponent, ref, watch, type PropType, type VNode } from "vue"
+import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue"
 import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { renderContent } from "./content.js"
 import { borderWidth, colors, fontSize, fonts, lineHeightBase, radius, spacing } from "../tokens.js"
 
 export interface TabItem {
   /** 唯一 key */
   key: string
   /** 标签标题 */
-  label: string
+  label: VNodeChild
   /** 面板内容（对应原库的 children）；不传时由与 key 同名的具名插槽渲染 */
-  children?: VNode
+  children?: VNodeChild
 }
 
 export interface TabsProps {
@@ -223,32 +201,19 @@ export const Tabs = defineComponent({
                   <text style={{ fontSize: isActive ? 12 : 10, color: c.text, lineHeight: isActive ? 12 : 10 }}>
                     {isActive ? "●" : "○"}
                   </text>
-                  <text>{item.label}</text>
-                  {isActive ? (
-                    <div
-                      style={{
-                        position: "absolute",
-                        right: -4,
-                        top: -4,
-                        width: 10,
-                        height: 10,
-                        borderRadius: radius.pill,
-                        backgroundColor: "#ffd166",
-                        // `box-shadow: 0 0 0 2px #fff9e3`（扩散环）
-                        boxShadow: { offsetX: 0, offsetY: 0, blurRadius: 0, spreadRadius: 2, color: "#fff9e3" },
-                        pointerEvents: "none",
-                      }}
-                    />
-                  ) : null}
+                  {renderContent(item.label)}
+
                 </div>
               )
             })}
           </div>
-          <div role="tabpanel" tabIndex={0} style={{ minHeight: 60, padding: spacing.xl }}>
+          <div key={activeKey.value} role="tabpanel" tabIndex={0}
+            motion={{ initial: { opacity: 0, top: 4 }, animate: { opacity: 1, top: 0 }, transition: { duration: 0.25, ease: "ease" } }}
+            style={{ position: "relative", minHeight: 60, padding: spacing.xl }}>
             <div
               style={{ minHeight: 40, color: c.textSecondary, fontSize: fontSize.base, lineHeight: fontSize.base * lineHeightBase }}
             >
-              {current?.children ?? (current ? slots[current.key]?.({ item: current }) : null)}
+              {current?.children !== undefined ? renderContent(current.children) : current ? slots[current.key]?.({ item: current }) : null}
             </div>
           </div>
         </div>

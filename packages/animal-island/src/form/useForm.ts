@@ -32,7 +32,7 @@ export interface FormStore {
 
 export type InternalForm = FormInstance & {
     __store: FormStore;
-    __bindCallbacks(callbacks: FormOptions): void;
+    __bindCallbacks(callbacks: FormOptions): () => void;
 };
 
 /** Objects become dot paths; arrays, dates and scalar values remain leaves. */
@@ -212,7 +212,17 @@ export function useForm<T = Record<string, unknown>>(options: FormOptions<T> = {
             fields.get(stringifyNamePath(name))?.host?.scrollIntoView?.();
         },
         __store: store,
-        __bindCallbacks(next) { Object.assign(callbacks, next); },
+        __bindCallbacks(next) {
+            const previous = { ...callbacks };
+            Object.assign(callbacks, next);
+            // A mounted Form may switch instances. Restore the previous owner
+            // only while this binding still owns each callback.
+            return () => {
+                for (const key of ['onFinish', 'onFinishFailed', 'onValuesChange'] as const) {
+                    if (callbacks[key] === next[key]) Object.assign(callbacks, { [key]: previous[key] });
+                }
+            };
+        },
     };
     return [form as unknown as FormInstance<T>];
 }

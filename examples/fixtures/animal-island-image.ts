@@ -12,7 +12,9 @@ let avatarFailures = 0
 const app = createApp(defineComponent(() => () => h('div', { style: { display: 'flex', gap: 20 } }, [
   h(Image, { src: src.value, testId: 'picture', width: 160, height: 120, onLoad: (event: EventPayload) => loads.push(event), onError: (event: EventPayload) => errors.push(event) }),
   h(Avatar, { src: avatarSrc.value, testId: 'avatar', onError: () => { avatarFailures++ } }, { default: () => h('text', '岛') }),
-])), { width: 400, height: 240, focus: false, show: false })
+// Exercise ordinary image notifications and animation completion on a live
+// surface. A hidden macOS window suspends normal frame delivery.
+])), { width: 400, height: 240, focus: false })
 
 const all = (): HostNode[] => {
   const walk = (node: HostNode): HostNode[] => [node, ...node.children.flatMap(walk)]

@@ -31,15 +31,16 @@
  *    is honoured for v-model callers.
  */
 
-import { computed, defineComponent, ref, watch, type PropType } from "vue"
+import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue"
 import { AnimateHeight, type StyleDesc } from "@gpuiv/vue"
 import { borderWidth, colors, ease, fontSize, fonts, radius, spacing } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { renderContent } from "./content.js"
 import { Icon } from "./Icon.js"
 
 export interface CollapseProps {
-  question?: string
-  answer?: string
+  question?: VNodeChild
+  answer?: VNodeChild
   defaultExpanded?: boolean
   expanded?: boolean
   disabled?: boolean
@@ -50,9 +51,9 @@ export const Collapse = defineComponent({
   inheritAttrs: false,
   props: {
     /** 标题文本（可被 question 插槽覆盖） */
-    question: { type: String, default: undefined },
+    question: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 内容文本（可被默认插槽覆盖） */
-    answer: { type: String, default: undefined },
+    answer: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 默认是否展开（非受控初始值） */
     defaultExpanded: { type: Boolean, default: false },
     /** 是否展开（受控，对应 v-model:expanded） */
@@ -163,7 +164,7 @@ export const Collapse = defineComponent({
                 color: c.text,
               }}
             >
-              {slots.question ? slots.question() : props.question !== undefined ? <text>{props.question}</text> : null}
+              {slots.question ? slots.question() : props.question !== undefined ? renderContent(props.question) : null}
             </div>
             <Icon name="Fish" size={20} style={{ pointerEvents: "none" }} />
           </div>
@@ -183,7 +184,7 @@ export const Collapse = defineComponent({
                 lineHeight: fontSize.base * 1.7,
               }}
             >
-              {slots.default ? slots.default() : props.answer !== undefined ? <text>{props.answer}</text> : null}
+              {slots.default ? slots.default() : props.answer !== undefined ? renderContent(props.answer) : null}
             </div>
           </AnimateHeight>
         </div>

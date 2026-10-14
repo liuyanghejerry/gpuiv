@@ -67,6 +67,8 @@ function floatingSurfaceStateStyle(
 ): InteractiveStyle | undefined {
   if (!style) return undefined
   const surface: InteractiveStyle = {}
+  if (style.backgroundColor !== undefined) surface.backgroundColor = style.backgroundColor
+  if (style.background !== undefined) surface.background = style.background
   if (style.visibility !== undefined) surface.visibility = style.visibility
   if (style.opacity !== undefined) surface.opacity = style.opacity
   if (style.borderRadius !== undefined) surface.borderRadius = style.borderRadius
@@ -86,13 +88,15 @@ function floatingSurfaceStateStyle(
 }
 
 /**
- * The outer `anchored` surface carries visibility, opacity, and the corner
- * radii (with hover/active refinements of the same keys) so the deferred
- * fallback fill never shows square corners behind rounded content and nested
- * opacity does not multiply against that fill.
+ * The outer `anchored` surface owns the fill, visibility, opacity and corner
+ * radii. Painting the fill once preserves alpha and lets the complete surface
+ * animate together, including explicit transparent SVG silhouettes.
  */
 function floatingSurfaceStyle(style: StyleDesc | undefined): StyleDesc {
   const surface: StyleDesc = floatingSurfaceStateStyle(style) ?? {}
+  if (surface.backgroundColor === undefined && surface.background === undefined) {
+    surface.backgroundColor = "#1A1A1A"
+  }
   const hover = floatingSurfaceStateStyle(style?.hover)
   const active = floatingSurfaceStateStyle(style?.active)
   if (hover) surface.hover = hover
@@ -100,24 +104,24 @@ function floatingSurfaceStyle(style: StyleDesc | undefined): StyleDesc {
   return surface
 }
 
-function withoutOpacity(
+function withoutSurfacePaint(
   style: InteractiveStyle | undefined
 ): InteractiveStyle | undefined {
   if (!style) return undefined
-  const { opacity: _opacity, ...rest } = style
+  const { opacity: _opacity, backgroundColor: _color, background: _background, ...rest } = style
   return rest
 }
 
-/** Content keeps everything except opacity — the surface owns that now. */
+/** Content owns layout and borders; surface fill and opacity must not repeat. */
 function floatingContentStyle(
   style: StyleDesc | undefined
 ): StyleDesc | undefined {
   if (!style) return undefined
-  const { opacity: _opacity, hover, active, ...rest } = style
+  const { opacity: _opacity, backgroundColor: _color, background: _background, hover, active, ...rest } = style
   return {
     ...rest,
-    hover: withoutOpacity(hover),
-    active: withoutOpacity(active),
+    hover: withoutSurfacePaint(hover),
+    active: withoutSurfacePaint(active),
   }
 }
 
@@ -182,15 +186,15 @@ export const FloatingLayer = defineComponent({
           ? { x: props.alignOffset, y: 0 }
           : { x: 0, y: props.alignOffset }
 
-      const contentStyle = mergeStyles(
-        { backgroundColor: "#1A1A1A" },
-        floatingContentStyle(attrs.style as StyleDesc | undefined)
-      )
+      const { motion, ...contentAttrs } = attrs
+      const surfaceStyle = floatingSurfaceStyle(attrs.style as StyleDesc | undefined)
+      if (motion) surfaceStyle.position = "relative"
 
       return h(
         "anchored",
         {
-          style: floatingSurfaceStyle(attrs.style as StyleDesc | undefined),
+          style: surfaceStyle,
+          ...(motion === undefined ? {} : { motion }),
           side: props.side,
           align: props.align,
           gap: props.sideOffset,
@@ -203,7 +207,7 @@ export const FloatingLayer = defineComponent({
           occlude:
             (attrs.style as StyleDesc | undefined)?.pointerEvents !== "none",
         },
-        [h("div", { ...attrs, style: contentStyle }, slots.default?.())],
+        [h("div", { ...contentAttrs, style: floatingContentStyle(attrs.style as StyleDesc | undefined) }, slots.default?.())],
       )
     }
   },

@@ -8,9 +8,8 @@
  *    wave-yellow/squiggle, tiled with `background-repeat: repeat-x`. GPUIV has
  *    no background images, so each pattern is baked at module load into one
  *    wide SVG (exact original dash cadence, wave path, stroke widths and
- *    colours, same period) and painted by a single `<img>` clipped by
- *    `overflow: hidden`. Tiling stops at ~3.2k px where the original repeats
- *    forever.
+ *    colours, same period) and painted by repeated `<img>` tiles clipped by
+ *    `overflow: hidden`. Measurement extends the strip at any window width.
  *  - `thin` is an exact port (1px solid #e8dec7).
  *  - icon mode repeats `<Icon>` + a 4×2 connecting line to fill the measured
  *    row; `useElementBounds` stands in for the original's ResizeObserver.
@@ -18,8 +17,9 @@
  *    #e8dec7 (thin), #d5c3a2 (hairline), #f5d04a (wave-yellow).
  */
 
-import { computed, defineComponent, ref, type PropType } from "vue"
+import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue"
 import { useElementBounds, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { renderContent } from "./content.js"
 import { colors } from "../tokens.js"
 import { Icon, type IconName } from "./Icon.js"
 
@@ -97,14 +97,14 @@ export const Divider = defineComponent({
   inheritAttrs: false,
   props: {
     type: { type: String as PropType<DividerType>, default: "dashed-brown" },
-    icon: { type: String as PropType<DividerIconName>, default: undefined },
+    icon: { type: [String, Number, Object, Array, Boolean] as PropType<DividerIconName | VNodeChild>, default: undefined },
     iconSize: { type: Number, default: 24 },
     iconGap: { type: Number, default: 8 },
     testId: { type: String, default: undefined },
   },
   setup(props, { attrs }) {
-    // Only icon mode measures — the ref is attached on that branch alone, so
-    // the bounds poll short-circuits on a null target for plain line types.
+    // Icon mode measures its cycle count; decorative lines measure how many
+    // wide repeat tiles are needed, including windows wider than one tile.
     const root = ref<HostNode | null>(null)
     const { bounds } = useElementBounds(root)
 
@@ -135,7 +135,7 @@ export const Divider = defineComponent({
           >
             {items.map((i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-                <Icon name={props.icon} size={props.iconSize} />
+                {typeof props.icon === "string" ? <Icon name={props.icon as DividerIconName} size={props.iconSize} /> : <div style={{ width: props.iconSize, height: props.iconSize, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>{renderContent(props.icon)}</div>}
                 {i < items.length - 1 ? (
                   <div
                     style={{
@@ -170,6 +170,7 @@ export const Divider = defineComponent({
       return (
         <div
           {...attrs}
+          ref={root}
           testId={props.testId}
           style={{
             display: "flex",
@@ -180,11 +181,15 @@ export const Divider = defineComponent({
             ...attrsStyle,
           }}
         >
-          <img src={line.src} style={{ width: line.tileWidth, height: line.height, flexShrink: 0 }} />
+          {Array.from({ length: Math.max(1, Math.ceil((bounds.value?.width ?? 0) / line.tileWidth)) }, (_, index) => (
+            <img key={index} src={line.src} style={{ width: line.tileWidth, height: line.height, flexShrink: 0, pointerEvents: "none" }} />
+          ))}
         </div>
       )
     }
   },
 })
+
+export type DividerProps = Omit<InstanceType<typeof Divider>["$props"], "style"> & { style?: StyleDesc }
 
 export default Divider

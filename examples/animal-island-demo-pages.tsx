@@ -2,12 +2,12 @@
 import { defineComponent, onBeforeUnmount, ref, type VNodeChild } from "vue"
 import {
   Avatar, AvatarGroup, BackTop, Background, Badge, Button, Card, Carousel,
-  Checkbox, CodeBlock, Collapse, Countdown, Cursor, DatePicker, Divider,
+  Checkbox, CodeBlock, Collapse, Countdown, CountUp, Cursor, DatePicker, Divider,
   Drawer, Footer, Form, FormItem, Icon, ICON_NAMES, Image, Input, Loading,
   Modal, Notification, NotificationContainer, Pagination, Progress, Radio,
   Rate, Select, Skeleton, SkeletonAvatar, SkeletonButton, SkeletonInput,
   Switch, Table, Tabs, Tag, Time, TimePicker, Title, Tooltip, Typewriter,
-  Upload, coffeeBreakScene, colors, sweetCornerScene, useForm,
+  Upload, cardSolid, coffeeBreakScene, colors, sweetCornerScene, useForm,
   type BackTopTarget, type DatePickerValue, type UploadFile,
 } from "@gpuiv/animal-island"
 
@@ -64,6 +64,7 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
   const uploaded = ref<UploadFile[]>([])
   const formResult = ref("")
   const [form] = useForm({ initialValues: { name: "小岛访客" } })
+  const countRound = ref(0), countRunning = ref(true), wood = ref(0)
   const countdownAt = Date.now() + 1000 * 60 * 60 * 2
   let loadingTimer: ReturnType<typeof setTimeout> | undefined
   onBeforeUnmount(() => { if (loadingTimer) clearTimeout(loadingTimer) })
@@ -76,7 +77,9 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
     ({ id, label: title, title, description, category, render })
 
   const pages: DemoPage[] = [
-    page("button", "Button 按钮", "基础组件", "按钮支持不同类型、尺寸，以及危险、幽灵、加载和禁用状态。", () => <Stack>
+    page("button", "Button 按钮", "基础组件", "对照 React：悬浮上抬、按下回弹、旋转甜甜圈，以及不同类型、尺寸和图标。", () => <Stack>
+      <Label text="type 按钮类型 · 悬停和按下体验动画" />
+      <Label text="danger / ghost / loading / disabled 状态" />
       <Row>
         <Button testId="btn-default">默认</Button>
         <Button testId="btn-primary" type="primary">主要</Button>
@@ -87,18 +90,28 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
       <Row>
         <Button testId="btn-danger" type="primary" danger>危险</Button>
         <Button testId="btn-danger-default" danger>危险描边</Button>
-        <Button testId="btn-loading" loading>加载中</Button>
-        <Button testId="btn-disabled" disabled>禁用</Button>
+        <Button testId="btn-loading" type="primary" loading>加载中</Button>
+        <Button testId="btn-disabled" type="primary" disabled>禁用</Button>
       </Row>
       <div style={{ display: "flex", padding: 16, backgroundColor: "#88c9a1", borderRadius: 16 }}>
         <Button testId="btn-ghost" type="primary" ghost>幽灵</Button>
       </div>
+      <Label text="size 尺寸" />
       <Row>
-        <Button testId="btn-small" size="small">小</Button>
-        <Button testId="btn-middle" size="middle">中</Button>
-        <Button testId="btn-large" size="large">大</Button>
+        <Button testId="btn-small" type="primary" size="small">小</Button>
+        <Button testId="btn-middle" type="primary" size="middle">中</Button>
+        <Button testId="btn-large" type="primary" size="large">大</Button>
       </Row>
+      <Label text="icon 图标按钮" />
+      <Row>
+        <Button testId="btn-search" type="primary" icon={<Icon name="Search" />}>搜索</Button>
+        <Button icon={<Icon name="Star" />}>收藏</Button>
+        <Button type="dashed" icon="＋">新增</Button>
+      </Row>
+      <Label text="block 块级按钮" />
       <Button block type="primary">块级按钮</Button>
+      <Label text="danger 组合" />
+      <Row>{(["primary", "default", "dashed", "text", "link"] as const).map(type => <Button key={type} type={type} danger>{`${type} danger`}</Button>)}</Row>
     </Stack>),
 
     page("card", "Card 卡片", "基础组件", "奶油底色、暖棕文字，搭配不同配色、纹理和悬浮反馈。", () => <Stack>
@@ -107,19 +120,10 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
         <Card type="dashed" style={{ width: 180 }}>虚线卡片。</Card>
         <Card hoverable style={{ width: 180 }}>悬浮时加深阴影。</Card>
       </Row>
-      <Row>
-        <Card color="app-pink" style={{ width: 140 }}>app-pink</Card>
-        <Card color="purple" style={{ width: 140 }}>purple</Card>
-        <Card color="app-blue" style={{ width: 140 }}>app-blue</Card>
-        <Card color="app-yellow" style={{ width: 140 }}>app-yellow</Card>
-        <Card color="app-orange" style={{ width: 140 }}>app-orange</Card>
-      </Row>
-      <Row>
-        <Card pattern="app-teal" style={{ width: 140 }}>pattern teal</Card>
-        <Card pattern="app-green" style={{ width: 140 }}>pattern green</Card>
-        <Card pattern="app-red" style={{ width: 140 }}>pattern red</Card>
-        <Card pattern="brown" style={{ width: 140 }}>pattern brown</Card>
-      </Row>
+      <Label text="全部实色配色" />
+      <Row>{(Object.keys(cardSolid) as Array<keyof typeof cardSolid>).map(color => <Card key={color} color={color} style={{ width: 140 }}>{color}</Card>)}</Row>
+      <Label text="全部纹理配色" />
+      <Row>{(Object.keys(cardSolid) as Array<keyof typeof cardSolid>).map(pattern => <Card key={pattern} pattern={pattern} style={{ width: 140 }}>{pattern}</Card>)}</Row>
     </Stack>),
 
     page("tag", "Tag 标签", "基础组件", "不同配色、尺寸和描边的标签，也可以关闭。", () => <Row>
@@ -178,10 +182,22 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
       </Row>
     </Stack>),
 
-    page("select", "Select 选择器", "数据录入", "选择一个目的地；菜单在触发器上方展开，也可通过键盘选择。", () => <Row>
+    page("select", "Select 选择器", "数据录入", "普通选择、搜索过滤与清空；支持键盘导航。", () => <Stack>
+      <Label text="基础选择" />
+      <Row>
       <Select testId="gallery-select" options={[{ key: "island", label: "小岛" }, { key: "forest", label: "森林" }, { key: "beach", label: "海滩" }]}
         value={selectValue.value} onChange={(value: string) => (selectValue.value = value)} placeholder="选择目的地" style={{ width: 240 }} />
-    </Row>),
+      </Row>
+      <Label text="showSearch / allowClear 搜索过滤与清空" />
+      <Row>
+        <Select testId="search-select" showSearch allowClear defaultValue="cat" placeholder="搜索小岛居民" options={[{ key: "cat", label: "猫猫" }, { key: "dog", label: "狗狗" }, { key: "otter", label: "水獭" }, { key: "bird", label: "鸟鸟" }]} style={{ width: 260 }} />
+        <Select showSearch optionFilterProp="key" placeholder="按英文 key 搜索" options={[{ key: "island", label: "小岛" }, { key: "forest", label: "森林" }, { key: "beach", label: "海滩" }]} style={{ width: 260 }} />
+      </Row>
+      <Row>
+        <Select showSearch notFoundContent={<text>暂无匹配的居民</text>} placeholder="自定义空状态" options={[{ key: "fox", label: "狐狸" }]} style={{ width: 260 }} />
+        <Select disabled showSearch allowClear defaultValue="cat" options={[{ key: "cat", label: "禁用状态" }]} style={{ width: 260 }} />
+      </Row>
+    </Stack>),
 
     page("switch", "Switch 开关", "数据录入", "切换开关状态，支持小尺寸和禁用状态。", () => <Row>
       <Switch checked={switchOn.value} onChange={(value: boolean) => (switchOn.value = value)} />
@@ -234,24 +250,28 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
         <Avatar shape="square" alt="水獭" />
         <Avatar src={sweetCornerScene} size={64} />
       </Row>
+      <Row><Avatar size={40} gap={4}>很长的名字</Avatar><Avatar size={64} gap={8}>Animal</Avatar></Row>
       <AvatarGroup maxCount={3} size="large">
         {["Cat", "Dog", "Otter", "Bird", "Fox"].map(name => <Avatar key={name} alt={name}><text>{name.slice(0, 1)}</text></Avatar>)}
       </AvatarGroup>
     </Stack>),
 
-    page("badge", "Badge 徽标", "数据展示", "数字、数量上限和小圆点提示。", () => <Row>
+    page("badge", "Badge 徽标", "数据展示", "数字、数量上限、小圆点和自定义内容。", () => <Row>
       <Badge count={5}><Button>消息</Button></Badge>
       <Badge count={120} overflowCount={99}><Button>邮件</Button></Badge>
       <Badge dot><Button>动态</Button></Badge>
+      <Badge count={<Icon name="Star" size={16} style={{ pointerEvents: "none" }} />}><Button>收藏</Button></Badge>
     </Row>),
 
     page("table", "Table 表格", "数据展示", "条纹表格、右对齐数字和分页。", () => <Table testId="animal-table" striped pagination={{ defaultCurrent: 1, pageSize: 3 }}
       columns={[{ title: "名字", dataIndex: "name" }, { title: "爱好", dataIndex: "hobby" }, { title: "到访次数", dataIndex: "visits", align: "right" }]}
       dataSource={[{ key: "cat", name: "猫猫", hobby: "晒太阳", visits: 7 }, { key: "dog", name: "狗狗", hobby: "散步", visits: 5 }, { key: "otter", name: "水獭", hobby: "写代码", visits: 12 }, { key: "bird", name: "鸟鸟", hobby: "唱歌", visits: 4 }]} />),
 
-    page("tabs", "Tabs 标签页", "数据展示", "在三个页签之间切换内容。", () => <Tabs
+    page("tabs", "Tabs 标签页", "数据展示", "在页签之间切换内容，支持图标标签、内容动画与键盘导航。", () => <Stack><Tabs
       items={[{ key: "one", label: "第一页", children: <text>第一个页签的内容。</text> }, { key: "two", label: "第二页", children: <text>第二个页签的内容。</text> }, { key: "three", label: "第三页", children: <text>第三个页签的内容。</text> }]}
-      activeKey={tabKey.value} onChange={(key: string) => (tabKey.value = key)} />),
+      activeKey={tabKey.value} onChange={(key: string) => (tabKey.value = key)} />
+      <Tabs items={[{ key: "home", label: <div style={{ display: "flex", gap: 6, alignItems: "center", pointerEvents: "none" }}><Icon name="Home" size={18} style={{ pointerEvents: "none" }} /><text>小岛</text></div>, children: <Card>带图标的标签与卡片内容。</Card> }, { key: "friends", label: "居民", children: <Avatar.Group><Avatar alt="猫猫" /><Avatar alt="水獭" /></Avatar.Group> }]} />
+    </Stack>),
 
     page("carousel", "Carousel 轮播", "数据展示", "切换三张小岛卡片，可使用箭头和圆点导航。", () => <Carousel testId="animal-carousel" autoplay={false}>
       {[["猫猫的小岛", "#fde4e8"], ["水獭的工作室", "#e8faf5"], ["鸟鸟的花园", "#fff8e0"]].map(([title, background]) => <div key={title}
@@ -269,6 +289,7 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
     page("progress", "Progress 进度条", "数据展示", "进度变化会平滑过渡，可调整完成百分比。", () => <Stack>
       <Progress percent={progress.value} style={{ width: 420, maxWidth: "100%" }} />
       <Progress percent={80} size="small" infoPosition="right" style={{ width: 420, maxWidth: "100%" }} />
+      {(["sweet-corner", "forest-grove", "starry-camp", "coffee-break"] as const).map(variant => <Progress key={variant} percent={progress.value} size="large" variant={variant} infoPosition="inside" style={{ width: 520, maxWidth: "100%" }} />)}
       <Row>
         <Button size="small" onClick={() => (progress.value = Math.max(0, progress.value - 10))}>-10</Button>
         <Button size="small" type="primary" onClick={() => (progress.value = Math.min(100, progress.value + 10))}>+10</Button>
@@ -282,6 +303,8 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
 
     page("tooltip", "Tooltip 文字提示", "反馈组件", "悬停在按钮上查看小岛风格的提示。", () => <Row>
       <Tooltip title="这是小岛风格的提示"><Button>悬停提示</Button></Tooltip>
+      <Tooltip trigger="focus" title="通过 Tab 聚焦时展开"><Button>聚焦提示</Button></Tooltip>
+      <Tooltip trigger="click" title={<text>点击或按 Enter / Space，再次操作收起。</text>} variant="island"><Button>点击提示</Button></Tooltip>
     </Row>),
 
     page("modal", "Modal 对话框", "反馈组件", "打开对话框，体验确认、取消和关闭操作。", () => <Row>
@@ -325,11 +348,34 @@ export function createDemoPages(options: DemoPageOptions = {}): { pages: DemoPag
 
     page("countdown", "Countdown 倒计时", "其他组件", "距离目标时间还有多久。", () => <Countdown value={countdownAt} format="HH:mm:ss" />),
 
+    page("count-up", "CountUp 数字计数", "数据展示", "游戏结算、暂停继续、庆祝反馈、千分位与小数格式。", () => <Stack>
+      <Label text="游戏结算 · 完成后庆祝" />
+      <CountUp key={`score-${countRound.value}`} testId="gallery-count-up" isCounting={countRunning.value} end={2480} duration={2} size="large" variant="island" thousandsSeparator="," suffix="分" celebrate={{ text: "完美！" }} />
+      <Row>
+        <Button onClick={() => (countRunning.value = !countRunning.value)}>{countRunning.value ? "暂停" : "继续"}</Button>
+        <Button onClick={() => { countRound.value++; countRunning.value = true }}>重新结算</Button>
+      </Row>
+      <Label text="累加计数" />
+      <Row>
+        <CountUp isCounting start={Math.max(0, wood.value - 15)} end={wood.value} duration={.6} suffix=" 木头" />
+        <Button onClick={() => (wood.value += 15)}>捡到木头 +15</Button>
+        <Button onClick={() => (wood.value = 0)}>重置</Button>
+      </Row>
+      <Label text="格式、尺寸与缓动" />
+      <Row>
+        <CountUp key={`money-${countRound.value}`} isCounting end={12876.5} decimalPlaces={2} thousandsSeparator="," prefix="¥" bordered />
+        <CountUp key={`linear-${countRound.value}`} isCounting end={100} size="small" easing="linear" suffix="%" />
+        <CountUp key={`expo-${countRound.value}`} isCounting end={100} easing="easeOutExpo" formatter={value => <text>{`进度 ${Math.round(value)} / 100`}</text>} />
+      </Row>
+    </Stack>),
+
     page("time", "Time 时间", "其他组件", "展示实时更新的小岛时钟。", () => <Time />),
 
-    page("background", "Background 背景", "其他组件", "使用甜点小岛场景装饰内容区域。", () => <Background type="sweet-corner" style={{ padding: 24, borderRadius: 20, minHeight: 160 }}>
+    page("background", "Background 背景", "其他组件", "场景、灰色圆点、网格和散落纹理。", () => <Stack><Background type="sweet-corner" style={{ padding: 24, borderRadius: 20, minHeight: 160 }}>
       <text style={{ fontWeight: 700 }}>甜点小岛场景背景(sweet-corner)</text>
-    </Background>),
+    </Background>
+      {(["dots-gray", "grid", "sprinkles", "dots-pink", "dots-teal"] as const).map(type => <Background key={type} type={type} style={{ padding: 24, borderRadius: 20, minHeight: 100 }}><text>{type}</text></Background>)}
+    </Stack>),
 
     page("cursor", "Cursor 鼠标跟随", "其他组件", "在示例区域移动鼠标，观察雨滴跟随效果。", () => <Cursor testId="animal-cursor" type="raindrop"
       style={{ height: 150, display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#fff8e0", borderRadius: 20 }}>

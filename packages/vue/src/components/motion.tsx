@@ -1,6 +1,6 @@
 /** Native animations with a Motion-like declarative Vue API. */
 
-import { computed, defineComponent, h, inject, ref, watch, watchEffect } from "vue"
+import { computed, defineComponent, h, inject, ref, watch } from "vue"
 import type { PropType } from "vue"
 import type { EventPayload } from "@gpuiv/native"
 import type { MotionProps, MotionStyle } from "../types.js"
@@ -60,9 +60,12 @@ export const motion = {
 
       // Without an exit target there is nothing to animate — release the
       // presence slot as soon as the node leaves.
-      watchEffect(() => {
-        if (!isPresent.value && props.exit === undefined) safeToRemove?.()
-      })
+      // Completion reads/writes the ancestor's descendant registry. Track
+      // only presence/exit, so sibling completions cannot retrigger this
+      // reporter and form a reactive loop with other motion descendants.
+      watch([isPresent, () => props.exit === undefined], ([present, noExit]) => {
+        if (!present && noExit) safeToRemove?.()
+      }, { immediate: true })
 
       const resolvedInitial = computed(() =>
         presence?.initial === false ? false : props.initial

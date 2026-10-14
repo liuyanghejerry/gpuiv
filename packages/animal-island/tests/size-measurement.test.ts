@@ -58,7 +58,7 @@ describe("size-dependent decoration and controls", () => {
     const host = mountHost(defineComponent({ setup: () => () => h(Progress, { percent: percent.value, duration: 0 }) }), { getElementBounds: () => box })
     hosts.push(host)
     await host.settle()
-    const fill = () => host.find((node) => (node.props.style as { backgroundColor?: string })?.backgroundColor === "rgb(255, 193, 7)")
+    const fill = () => host.find((node) => (node.props.style as { backgroundColor?: string })?.backgroundColor === "#19c8b9")
     expect(fill().props.style).toMatchObject({ width: 198 })
     const read = vi.spyOn(host.native, "getElementBounds")
     const apply = vi.spyOn(host.native, "applyBatch")

@@ -1,16 +1,18 @@
 /** Loading — ported from animal-island-vue Loading.vue (MIT), tracked in #164.
  * Uses a window-sized deferred layer at zIndex priority (3000 by default),
  * above dialogs. The existing 25fps snowfall clock also drives layer opacity;
- * radial vignette, flake rotation and text shadow are approximated/omitted.
+ * the original radial vignette uses SVG; circular flake rotation is visually
+ * inert, and text shadows remain omitted.
  * Show/delay/fade lifecycle, VNode tips and timer cleanup follow the original.
  * Every built-in decoration passes pointer hits through to the active layer;
  * fade-out disables the layer occluder, matching the original exiting state.
  */
 
-import { defineComponent, isVNode, onBeforeUnmount, ref, watch, type PropType, type VNode } from "vue"
+import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNodeChild } from "vue"
 import { motion, useElementBounds, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, fonts, spacing } from "../tokens.js"
 import { WindowLayer } from "./window-layer.js"
+import { contentLabel, renderContent } from "./content.js"
 
 /* Local tokens, mirroring the Less block inlined in the original. */
 const NIGHT_SKY = "#0b101a"
@@ -42,12 +44,12 @@ export const Loading = defineComponent({
     /** true 开启落雪屏；false 时渐变消失。 */
     active: { type: Boolean, default: true },
     /** 中央提示文字；更复杂的内容用默认插槽。 */
-    tip: { type: [String, Object] as PropType<string | VNode>, default: undefined },
+    tip: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 延迟显示（毫秒），避免加载快速结束时闪烁；0 = 立即显示。 */
     delay: { type: Number, default: 0 },
     /** 渐变消失时长（秒）。 */
     fadeDuration: { type: Number, default: 0.6 },
-    /** No-op in GPUIV (no z-index; mount Loading last to paint on top). */
+    /** Deferred-layer priority, matching the original overlay stacking value. */
     zIndex: { type: Number, default: 3000 },
     testId: { type: String, default: undefined },
   },
@@ -74,6 +76,13 @@ export const Loading = defineComponent({
     const exitStarted = ref(0)
     const snowHost = ref<HostNode | null>(null)
     const { bounds } = useElementBounds(snowHost)
+    const vignetteWidth = computed(() => Math.max(1, Math.ceil(bounds.value?.width ?? FALLBACK_SIZE.width)))
+    const vignetteHeight = computed(() => Math.max(1, Math.ceil(bounds.value?.height ?? FALLBACK_SIZE.height)))
+    const vignette = computed(() => {
+      const width = vignetteWidth.value, height = vignetteHeight.value
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><defs><radialGradient id="night" cx="50%" cy="50%" r="70.710678%"><stop offset="55%" stop-color="#050a14" stop-opacity="0"/><stop offset="100%" stop-color="#050a14" stop-opacity="0.6"/></radialGradient></defs><rect width="100%" height="100%" fill="url(#night)"/></svg>`
+      return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+    })
 
     watch(
       [() => props.active, () => props.delay, () => props.fadeDuration],
@@ -167,7 +176,7 @@ export const Loading = defineComponent({
 
       return (
         <WindowLayer backgroundColor={NIGHT_SKY} priority={props.zIndex} style={{ opacity, pointerEvents: exiting.value ? "none" : "auto" }}>
-        <div {...attrs} role="status" aria-label={typeof props.tip === "string" ? props.tip : "加载中"} testId={props.testId} style={shellStyle}>
+        <div {...attrs} role="status" aria-label={contentLabel(props.tip) ?? "加载中"} testId={props.testId} style={shellStyle}>
           <motion.div
             initial={false}
             animate={{ opacity: 1 }}
@@ -196,14 +205,14 @@ export const Loading = defineComponent({
                 )
               })}
             </div>
-            <div
+            <img src={vignette.value} alt="" objectFit="fill" aria-hidden={true}
               style={{
                 position: "absolute",
                 top: 0,
                 right: 0,
                 bottom: 0,
                 left: 0,
-                backgroundColor: "rgba(5, 10, 20, 0.3)",
+                width: "100%", height: "100%",
                 pointerEvents: "none",
               }}
             />
@@ -228,7 +237,7 @@ export const Loading = defineComponent({
                   pointerEvents: "none",
                 }}
               >
-                {slots.default ? slots.default() : isVNode(props.tip) ? props.tip : <text>{props.tip}</text>}
+                {slots.default ? slots.default() : renderContent(props.tip)}
               </div>
             ) : null}
             </> }}
@@ -239,5 +248,7 @@ export const Loading = defineComponent({
     }
   },
 })
+
+export type LoadingProps = Omit<InstanceType<typeof Loading>["$props"], "style"> & { style?: StyleDesc }
 
 export default Loading

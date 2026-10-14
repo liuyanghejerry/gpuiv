@@ -162,7 +162,7 @@ describe("v-model event order and native decoration contracts", () => {
 describe("Button variants follow the original Less cascade", () => {
   const variants: ButtonType[] = ["default", "dashed", "primary", "text", "link"]
   const combinations = variants.flatMap((type) => [false, true].flatMap((danger) => [false, true].map((ghost) => ({ type, danger, ghost }))))
-  it.each(combinations)("$type danger=$danger ghost=$ghost preserves idle/hover/active styling", ({ type, danger, ghost }) => {
+  it.each(combinations)("$type danger=$danger ghost=$ghost preserves idle/hover/active styling", async ({ type, danger, ghost }) => {
     const host = mount(Button, { type, danger, ghost })
     const idle = host.find("control").props.style as Record<string, unknown>
     const hover = { ...idle, ...(idle.hover as Record<string, unknown>) }
@@ -188,12 +188,21 @@ describe("Button variants follow the original Less cascade", () => {
         boxShadow: danger ? shadows.hardErrorActive : shadows.hardActive,
       })
     } else if (type === "default" || type === "dashed") {
-      expect(idle).toMatchObject({ color: danger ? c.error : c.text, backgroundColor: ghost ? "transparent" : c.bg, borderColor: danger ? c.error : c.border })
+      expect(idle).toMatchObject({ color: danger ? c.error : c.text, backgroundColor: ghost ? "transparent" : c.bg, borderColor: type === "dashed" ? "transparent" : danger ? c.error : c.border })
       expect(idle.boxShadow).toEqual(ghost ? undefined : shadows.sm)
-      expect(hover).toMatchObject({ color: danger ? c.error : c.primary, borderColor: danger ? c.errorHover : c.primary })
+      expect(hover).toMatchObject({ color: danger ? c.error : c.primary, borderColor: type === "dashed" ? "transparent" : danger ? c.errorHover : c.primary })
       expect(hover.boxShadow).toEqual(type === "default" ? shadows.base : ghost ? undefined : shadows.sm)
-      expect(active).toMatchObject({ color: danger ? c.error : c.primaryActive, borderColor: danger ? c.errorActive : c.primaryActive })
+      expect(active).toMatchObject({ color: danger ? c.error : c.primaryActive, borderColor: type === "dashed" ? "transparent" : danger ? c.errorActive : c.primaryActive })
       expect(active.boxShadow).toEqual(type === "default" || !ghost ? shadows.sm : undefined)
+      if (type === "dashed") {
+        await host.settle()
+        const outline = () => Buffer.from(String(host.find(node => node.type === "img").props.src).split(",")[1]!, "base64").toString()
+        expect(outline()).toContain(`stroke="${danger ? c.error : c.border}"`)
+        await host.fire("control", "mouseEnter")
+        expect(outline()).toContain(`stroke="${danger ? c.errorHover : c.primary}"`)
+        await host.fire("control", "mouseDown", { button: 0 })
+        expect(outline()).toContain(`stroke="${danger ? c.errorActive : c.primaryActive}"`)
+      }
     } else if (type === "text") {
       expect(idle).toMatchObject({ color: danger ? "#ffffff" : c.text, backgroundColor: "transparent", borderColor: "transparent" })
       expect(hover).toMatchObject({ color: danger ? "#ffffff" : c.text, backgroundColor: c.bgSecondary })

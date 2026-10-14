@@ -37,6 +37,8 @@ export interface PaginationProps {
   disabled?: boolean
   /** 配色：orange 琥珀橘（默认）/ teal 青 */
   variant?: PaginationVariant
+  onChange?: (page: number, pageSize: number) => void
+  onShowSizeChange?: (current: number, size: number) => void
 }
 
 type PageItem = number | "ellipsis-left" | "ellipsis-right"

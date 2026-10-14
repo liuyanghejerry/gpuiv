@@ -1,5 +1,5 @@
 /** Carousel — ported from animal-island-vue (MIT).
- * Native adaptation: CSS translateX becomes an opacity tween; controls keep
+ * Native adaptation: CSS translateX becomes a native left/opacity tween; controls keep
  * their original geometry and colours. GPUIV does not implement display:none,
  * so only the current slide is mounted. Switching pages unmounts inactive
  * content and resets its local state, unlike the original mounted hidden pages.
@@ -182,11 +182,11 @@ export const Carousel = defineComponent({
           ...(attrs.style as StyleDesc | undefined), ...(focusedControl.value === "region" ? { outline: { width: 2, color: colors.primary, offset: 3 } } : {}) }}>
         <div ref={viewport} testId={props.testId ? `${props.testId}-viewport` : undefined} onMouseEnter={hoverEnter} onMouseLeave={hoverLeave}
           style={{ position: "relative", display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 180, borderRadius: 20, backgroundColor: "rgb(247,243,223)" }}>
-          {activeSlide ? <motion.div key={activeSlide.key ?? index} initial={props.duration > 0 ? { opacity: 0 } : false}
-            animate={{ opacity: 1 }} transition={{ duration: Math.max(0, props.duration), ease }}
+          {activeSlide ? <motion.div key={activeSlide.key ?? index} initial={props.duration > 0 ? { opacity: 0, left: 18 } : false}
+            animate={{ opacity: 1, left: 0 }} transition={{ duration: Math.max(0, props.duration), ease }}
             {...{ role: "group", "aria-roledescription": "slide", "aria-label": `第 ${index + 1} 张，共 ${slides.length} 张`,
               testId: props.testId ? `${props.testId}-slide-${index}` : undefined, onMouseEnter: hoverEnter, onMouseLeave: hoverLeave }}
-            style={{ width: "100%", minHeight: 180, display: "flex", flexDirection: "column" }}>
+            style={{ position: "relative", width: "100%", minHeight: 180, display: "flex", flexDirection: "column" }}>
             {{ default: () => [cloneVNode(activeSlide, { onMouseEnter: hoverEnter, onMouseLeave: hoverLeave })] }}
           </motion.div> : null}
         </div>

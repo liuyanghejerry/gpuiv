@@ -8,6 +8,7 @@ import { defineComponent, h } from "vue"
 import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../../vue/src/testing.js"
 import { Select } from "../src/components/Select.js"
+import { FloatingLayer } from "../../vue/src/components/floating.js"
 
 // GPUI captureScreenshot saves an 8-bit, non-interlaced RGB/RGBA PNG.
 // Keep this small decoder local to the pixel test; no image dependency is
@@ -55,6 +56,41 @@ function readPng(bytes: Buffer) {
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 describeNative("Select popup painted corners", () => {
+  it.each(["transparent", "translucent"] as const)("preserves a %s anchored surface without a black fallback or repeated alpha", async variant => {
+    const viewport = { width: 500, height: 400 }
+    const app = createTestApp(defineComponent(() => () => h("div", {
+      style: { ...viewport, paddingLeft: 100, paddingTop: 200, backgroundColor: "#224466" },
+    }, h("div", { style: { position: "relative", width: 100 } }, h(FloatingLayer, {
+      testId: "surface", style: { width: 100, height: 80,
+        backgroundColor: variant === "transparent" ? "transparent" : "rgba(255, 255, 255, 0.5)",
+      },
+    }, { default: () => variant === "transparent" ? h("div", {
+      style: { width: 100, height: 80, borderRadius: 40, backgroundColor: "#ffeea0" },
+    }) : null })))), viewport)
+    const folder = mkdtempSync(join(tmpdir(), "gpuiv-floating-fill-"))
+    try {
+      await app.settle()
+      const panel = app.renderer.getElementBounds(app.renderer.findByTestId("surface")!.id)!
+      const path = join(folder, "surface.png")
+      app.renderer.captureScreenshot(path)
+      const image = readPng(readFileSync(path)), actualViewport = app.renderer.getWindowSize()
+      const scaleX = image.width / actualViewport.width, scaleY = image.height / actualViewport.height
+      expect(scaleX).toBeCloseTo(scaleY, 4)
+      const sample = (x: number, y: number, color: number[]) => image.pixel(Math.floor(x * scaleX), Math.floor(y * scaleY))
+        .forEach((value, channel) => expect(Math.abs(value - color[channel]!)).toBeLessThanOrEqual(2))
+      if (variant === "transparent") {
+        sample(panel.x + 2, panel.y + 2, [34, 68, 102])
+        sample(panel.x + panel.width - 2, panel.y + panel.height - 2, [34, 68, 102])
+        sample(panel.x + panel.width / 2, panel.y + panel.height / 2, [255, 238, 160])
+      } else {
+        sample(panel.x + panel.width / 2, panel.y + panel.height / 2, [145, 162, 179])
+      }
+    } finally {
+      app.unmount()
+      rmSync(folder, { recursive: true, force: true })
+    }
+  })
+
   it("keeps first and last option shoulders outside the 28px arc clear", async () => {
     const viewport = { width: 500, height: 400 }
     const app = createTestApp(defineComponent(() => () => h("div", {
@@ -77,7 +113,11 @@ describeNative("Select popup painted corners", () => {
       const path = join(folder, "popup.png")
       app.renderer.captureScreenshot(path)
       const image = readPng(readFileSync(path))
-      const scaleX = image.width / viewport.width, scaleY = image.height / viewport.height
+      // The Windows offscreen surface may use the platform's negotiated
+      // client size rather than the requested test dimensions. Pixel scale
+      // comes from that actual client viewport, not our root's CSS size.
+      const actualViewport = app.renderer.getWindowSize()
+      const scaleX = image.width / actualViewport.width, scaleY = image.height / actualViewport.height
       expect(scaleX).toBeGreaterThan(0)
       expect(scaleX).toBeCloseTo(scaleY, 4)
       const expectColor = (x: number, y: number, expected: number[]) => {

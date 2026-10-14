@@ -1,14 +1,16 @@
 /** Card — ported from animal-island-vue Card.vue (MIT), tracked in #164.
  * Preserves palette and two-layer dot textures through measured SVG patterns.
- * Dashed borders become solid. Hover keeps a shadow without translateY; colour
- * and shadow transitions are immediate. Decoration never receives pointer hits.
+ * Dashed borders use measured SVG strokes. React's opt-in hover lift uses a
+ * native top tween; dashed cards only change border colour. Decoration never
+ * receives pointer hits.
  */
 
-import { defineComponent, type PropType } from "vue"
-import type { StyleDesc } from "@gpuiv/vue"
-import { cardPattern, cardSolid, colors, fonts, radius, shadows, spacing } from "../tokens.js"
+import { defineComponent, ref, type PropType } from "vue"
+import type { EventPayload, StyleDesc } from "@gpuiv/vue"
+import { cardPattern, cardSolid, colors, fonts, radius, spacing } from "../tokens.js"
 import type { CardColor } from "../tokens.js"
 import { PatternSurface } from "../patterns.js"
+import { DashedBorderSurface } from "./border-decoration.js"
 
 export type { CardColor } from "../tokens.js"
 export type CardType = "default" | "dashed"
@@ -32,6 +34,7 @@ export const Card = defineComponent({
     testId: { type: String, default: undefined },
   },
   setup(props, { attrs, slots }) {
+    const hovered = ref(false)
     return () => {
       const style: StyleDesc = {
         position: "relative",
@@ -70,21 +73,37 @@ export const Card = defineComponent({
 
       if (props.hoverable) {
         style.cursor = "pointer"
-        style.hover = { boxShadow: shadows.base }
+      }
+
+      const custom = attrs.style as StyleDesc | undefined
+      const dashed = props.type === "dashed" && props.pattern === "none"
+      const dashedColor = custom?.borderColor ?? (hovered.value && props.hoverable ? "#d4c4a8" : style.borderColor ?? "#e8dcc8")
+      if (dashed) style.borderColor = "transparent"
+      const finalStyle: StyleDesc = { ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style, ...custom }
+      if (dashed) finalStyle.borderColor = "transparent"
+      const forward = (name: string, event: EventPayload) => {
+        const callbacks = attrs[name]
+        for (const callback of Array.isArray(callbacks) ? callbacks : [callbacks]) if (typeof callback === "function") callback(event)
       }
 
       return (
         <div
           {...attrs}
           testId={props.testId}
-          style={{ ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style, ...(attrs.style as StyleDesc | undefined) }}
+          onMouseEnter={(event: EventPayload) => { hovered.value = true; forward("onMouseEnter", event) }}
+          onMouseLeave={(event: EventPayload) => { hovered.value = false; forward("onMouseLeave", event) }}
+          motion={props.hoverable && props.type !== "dashed" && typeof custom?.top !== "string" ? { initial: false, animate: { top: (typeof custom?.top === "number" ? custom.top : 0) + (hovered.value ? -2 : 0) }, transition: { duration: 0.3, ease: "ease" } } : undefined}
+          style={finalStyle}
         >
-          {props.pattern !== "none" ? <PatternSurface pattern={props.pattern === "default" ? "default" : `dots-${props.pattern.replace(/^app-/, "")}`} radius={radius.card} /> : null}
+          {dashed ? <DashedBorderSurface color={String(dashedColor)} width={finalStyle.borderWidth} radius={finalStyle.borderRadius ?? radius.card} /> : null}
+          {props.pattern !== "none" ? <PatternSurface pattern={props.pattern === "default" ? "default" : `card-dots-${props.pattern.replace(/^app-/, "")}`} radius={radius.card} /> : null}
           {slots.default?.()}
         </div>
       )
     }
   },
 })
+
+export type CardProps = Omit<InstanceType<typeof Card>["$props"], "style"> & { style?: StyleDesc }
 
 export default Card

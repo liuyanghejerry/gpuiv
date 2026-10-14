@@ -8,7 +8,7 @@ const pageIds = [
   "button", "card", "tag", "title", "divider", "icon", "input", "select", "switch", "checkbox", "radio", "rate",
   "date-picker", "time-picker", "form", "upload", "avatar", "badge", "table", "tabs", "carousel", "image", "progress",
   "code-block", "collapse", "tooltip", "modal", "drawer", "notification", "loading", "skeleton", "pagination", "back-top",
-  "typewriter", "countdown", "time", "background", "cursor", "footer",
+  "typewriter", "countdown", "count-up", "time", "background", "cursor", "footer",
 ]
 let app: ReturnType<typeof mountHost> | undefined
 beforeEach(() => vi.useFakeTimers())
@@ -30,7 +30,7 @@ describe("Animal Island comparison gallery", () => {
     expect(exists("password-input")).toBe(false)
   })
 
-  it("navigates all 39 component families and marks exactly one active entry", async () => {
+  it("navigates all 40 component families and marks exactly one active entry", async () => {
     const host = mount()
     const entries = host.all().filter(node => String(node.props.testId).startsWith("nav-"))
     expect(entries.map(node => String(node.props.testId).slice(4)).sort()).toEqual([...pageIds].sort())

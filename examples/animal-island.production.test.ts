@@ -23,7 +23,7 @@ describeWindow('Animal Island production window', () => {
     const line = result.stdout.split('\n').find(line => line.startsWith('COMPARISON_GALLERY_OK '))
     expect(line, result.stdout).toBeDefined()
     const value = JSON.parse(line!.slice('COMPARISON_GALLERY_OK '.length))
-    expect(value.pages).toBe(39)
+    expect(value.pages).toBe(40)
     expect(value.scrollOwners).toBe(2)
     expect(value.retainedInput).toBe('Compare')
     expect(value.initial.showcase.width - value.resized.showcase.width).toBeCloseTo(280, 1)

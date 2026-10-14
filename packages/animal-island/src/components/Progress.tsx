@@ -11,22 +11,27 @@
  *    snapping like CSS.
  *  - Inset track shadow (`box-shadow: inset 0 2px 4px …`) → dropped (GPUIV
  *    has no inset shadows); the 2px bordered cream track carries the shape.
- *  - `variant` is accepted for API parity: in the Vue source it only adds a
- *    class hook and the fill is always amber `rgb(255, 193, 7)`, so it has no
- *    visual effect here either.
+ *  - React's optional `variant` paints its bundled scene at full track width
+ *    inside the animated clipping fill, revealing its left edge. No variant
+ *    paints React's three-stop teal ramp, or its lighter completed ramp when
+ *    rounded aria-valuenow reaches 100. Measured SVG decoration keeps the
+ *    original 14px dotted track and its rounded edges. Track heights match
+ *    React's 14/24/32px sizes; images never intercept pointer or wheel input.
  *  - Inside label (`position: absolute; right: 8px; top: 50%` + translate) →
  *    in-flow flex centering at the fill's / track's right end.
  *  - Label `text-shadow` and `letter-spacing` are dropped (unsupported).
  */
 
-import { computed, defineComponent, ref, type PropType } from "vue"
+import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue"
 import { motion, useElementBounds, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, ease, fontSize, fonts, radius } from "../tokens.js"
+import { coffeeBreakScene, forestGroveScene, starryCampScene, sweetCornerScene } from "../scene.js"
+import { ProgressFillDecoration, ProgressTrackDecoration } from "./progress-decoration.js"
 
 export type ProgressSize = "small" | "middle" | "large"
 export type ProgressInfoPosition = "inside" | "right" | "top"
-/** In the Vue source these only add a class hook; the fill stays amber. */
 export type ProgressVariant = "sweet-corner" | "forest-grove" | "starry-camp" | "coffee-break"
+const sceneByVariant: Record<ProgressVariant, string> = { "sweet-corner": sweetCornerScene, "forest-grove": forestGroveScene, "starry-camp": starryCampScene, "coffee-break": coffeeBreakScene }
 
 /** fill 末端留出文字宽度的阈值（避免 fill 太窄时文字外溢到 track 上被白色看不清） */
 const INSIDE_MIN_FILL = 18
@@ -39,13 +44,13 @@ interface ProgressGeometry {
 }
 
 const geometry: Record<ProgressSize, ProgressGeometry> = {
-  small: { height: 12, border: 1.5, insideFontSize: 9, insidePad: 4 },
-  middle: { height: 20, border: 2, insideFontSize: 11, insidePad: 8 },
-  large: { height: 28, border: 2, insideFontSize: 13, insidePad: 8 },
+  small: { height: 14, border: 2, insideFontSize: 9, insidePad: 4 },
+  middle: { height: 24, border: 2, insideFontSize: 11, insidePad: 8 },
+  large: { height: 32, border: 2, insideFontSize: 13, insidePad: 8 },
 }
 
-const FILL_COLOR = "rgb(255, 193, 7)"
-const TRACK_BORDER = "#e8dcc8"
+const FILL_COLOR = "#19c8b9"
+const TRACK_BORDER = "#e2d6bd"
 
 export const Progress = defineComponent({
   name: "AnimalProgress",
@@ -55,9 +60,9 @@ export const Progress = defineComponent({
     percent: { type: Number, required: true },
     size: { type: String as PropType<ProgressSize>, default: "middle" },
     showInfo: { type: Boolean, default: true },
-    variant: { type: String as PropType<ProgressVariant>, default: "sweet-corner" },
+    variant: { type: String as PropType<ProgressVariant>, default: undefined },
     infoPosition: { type: String as PropType<ProgressInfoPosition>, default: "right" },
-    infoFormat: { type: Function as PropType<(percent: number) => string>, default: undefined },
+    infoFormat: { type: Function as PropType<(percent: number) => VNodeChild>, default: undefined },
     /** 进度条 fill 宽度动画时长（秒），0 = 不动画 */
     duration: { type: Number, default: 0.6 },
     testId: { type: String, default: undefined },
@@ -74,19 +79,22 @@ export const Progress = defineComponent({
       const p = props.percent
       const safePercent = typeof p !== "number" || Number.isNaN(p) ? 0 : Math.max(0, Math.min(100, p))
       const renderedInfo = props.infoFormat ? props.infoFormat(safePercent) : `${Math.round(safePercent)}%`
+      const info = () => typeof renderedInfo === "string" || typeof renderedInfo === "number" ? <text>{String(renderedInfo)}</text> : renderedInfo
 
       const isInside = props.showInfo && props.infoPosition === "inside"
       const infoInsideVisible = isInside && safePercent >= INSIDE_MIN_FILL
 
       // The fill needs pixels for the native tween; the track is fluid, so
       // measure it. Null until the first painted frame — no fill before that.
-      const trackInnerWidth = trackWidth.value === null ? null : trackWidth.value - g.border * 2
+      const trackInnerWidth = trackWidth.value === null ? null : Math.max(0, trackWidth.value - g.border * 2)
+      const trackInnerHeight = g.height - g.border * 2
       const fillWidth = trackInnerWidth === null ? 0 : Math.round((trackInnerWidth * safePercent) / 100)
 
       const fillStyle: StyleDesc = {
+        position: "relative",
         height: "100%",
         flexShrink: 0,
-        backgroundColor: FILL_COLOR,
+        ...(props.variant ? {} : { backgroundColor: FILL_COLOR }),
         borderRadius: radius.pill,
         overflow: "hidden",
         display: "flex",
@@ -100,6 +108,13 @@ export const Progress = defineComponent({
         lineHeight: g.insideFontSize,
       }
 
+      const fillChildren = () => <>
+        {props.variant && trackInnerWidth !== null ? <img src={sceneByVariant[props.variant]} objectFit="fill" style={{ position: "absolute", top: 0, left: 0, width: trackInnerWidth, height: trackInnerWidth * 9 / 16, pointerEvents: "none" }} />
+          : <ProgressFillDecoration completed={Math.round(safePercent) === 100} height={trackInnerHeight}
+            testId={props.testId ? `${props.testId}-fill-decoration` : undefined} />}
+        {infoInsideVisible ? <div style={{ position: "relative", pointerEvents: "none" }}>{info()}</div> : null}
+      </>
+
       const fill =
         trackInnerWidth === null ? null : props.duration > 0 ? (
           <motion.div
@@ -109,11 +124,11 @@ export const Progress = defineComponent({
             transition={{ duration: props.duration, ease }}
             style={fillStyle}
           >
-            {infoInsideVisible ? <text>{renderedInfo}</text> : null}
+            {fillChildren}
           </motion.div>
         ) : (
           <div key="fill" style={{ ...fillStyle, width: fillWidth }}>
-            {infoInsideVisible ? <text>{renderedInfo}</text> : null}
+            {fillChildren()}
           </div>
         )
 
@@ -135,11 +150,13 @@ export const Progress = defineComponent({
             alignItems: "center",
           }}
         >
+          {trackInnerWidth !== null ? <ProgressTrackDecoration width={trackInnerWidth} height={trackInnerHeight}
+            testId={props.testId ? `${props.testId}-track-decoration` : undefined} /> : null}
           {fill}
           {isInside && !infoInsideVisible ? (
             <>
               <div style={{ flexGrow: 1 }} />
-              <text
+              <div
                 style={{
                   fontSize: g.insideFontSize,
                   fontWeight: 800,
@@ -149,8 +166,8 @@ export const Progress = defineComponent({
                   lineHeight: g.insideFontSize,
                 }}
               >
-                {renderedInfo}
-              </text>
+                {info()}
+              </div>
             </>
           ) : null}
         </div>
@@ -172,7 +189,7 @@ export const Progress = defineComponent({
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(safePercent)}
-          aria-valuetext={renderedInfo}
+          aria-valuetext={typeof renderedInfo === "string" ? renderedInfo : undefined}
           testId={props.testId}
           style={{
             ...(fonts.sans ? { fontFamily: fonts.sans } : {}),
@@ -198,7 +215,7 @@ export const Progress = defineComponent({
             >
               {props.showInfo ? (
                 <div style={{ ...infoStyle, alignSelf: "flex-end" }}>
-                  <text>{renderedInfo}</text>
+                  {info()}
                 </div>
               ) : null}
               {track}
@@ -218,7 +235,7 @@ export const Progress = defineComponent({
               {track}
               {props.showInfo && props.infoPosition === "right" ? (
                 <div style={{ ...infoStyle, minWidth: 44, display: "flex", justifyContent: "flex-end" }}>
-                  <text>{renderedInfo}</text>
+                  {info()}
                 </div>
               ) : null}
             </div>
@@ -230,3 +247,6 @@ export const Progress = defineComponent({
 })
 
 export default Progress
+
+/** Native public props, including rich infoFormat and native StyleDesc. */
+export type ProgressProps = InstanceType<typeof Progress>["$props"] & { style?: StyleDesc }

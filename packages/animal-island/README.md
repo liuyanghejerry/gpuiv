@@ -1,15 +1,17 @@
 # Animal Island for GPUIV
 
-Private workspace port of [animal-island-vue](https://github.com/guokaigdg/animal-island-vue).
-The audit below compares source at commit
+Private workspace port of [animal-island-vue](https://github.com/guokaigdg/animal-island-vue),
+now also aligned with the [React library](https://github.com/guokaigdg/animal-island-ui/tree/c696d16167d01370f822f95db22340b05d837555).
+The original Vue baseline is commit
 [`ac185709`](https://github.com/guokaigdg/animal-island-vue/tree/ac18570956da9da21fe899da438f17d75d2e446d).
 Tracking: [GPUIV #164](https://github.com/liuyanghejerry/gpuiv/issues/164).
 
-All **39 original component families** have native implementations. `AvatarGroup`,
+All **39 original Vue component families**, plus React's **CountUp**, have
+native implementations and **40 comparison pages**. `Avatar.Group`/`AvatarGroup`,
 the three specialized Skeleton components, `FormItem` and `FormProvider` are
-additional public companions; they do not change the 39-family denominator.
-The previous report of 35 implemented families was incorrect: it was 32 before
-DatePicker, TimePicker, Table, Form, Upload, Carousel and Cursor were added.
+additional public companions grouped with their main component pages.
+The [React parity audit](REACT_PARITY.md) checks public APIs, behavior and
+appearance against the pinned React source, including explicit native limits.
 
 ```sh
 cd packages/animal-island
@@ -41,66 +43,41 @@ The rounded yellow popup panel owns the fill; transparent option rows preserve
 the rounded outline, whole-row clicks and the outside hover arrow.
 
 The demo follows the [reference site's layout](https://guokaigdg.github.io/animal-island-ui/#/button):
-a 220px cream sidebar groups all 39 component families, and the selected page
+a 220px cream sidebar groups all 40 component pages, and the selected page
 appears in a large white showcase with its own heading and description.
 The sidebar and content are independent sibling scroll viewports. Selecting a
 page resets the content scroll and mounts only that page's examples.
+Buttons now lift on hover and press down using native motion; loading uses
+the original rotating Donut. Select supports search/filter/clear, input/picker
+controls accept React `value`, and Upload accepts `fileList`, while Vue models
+remain available. CountUp provides pause/resume, formatting, easing, replay,
+completion callbacks and celebration. Public component prop types use native
+styles/events and Vue nodes; React browser event and CSS types are not reused.
 
 ## Fidelity audit
 
-This is a **source/API audit with behavior tests**, not a screenshot similarity
-score. “Core retained” means the listed main behavior has been ported; the last
-column names remaining differences. CSS scale/rotation, arbitrary clipping,
-inset/multiple shadows and DOM-specific accessibility links remain platform
-limits. Native `lineHeight` values are pixels, so CSS multipliers are converted
-using each text size.
+The [complete React parity audit](REACT_PARITY.md) lists all 40 gallery families,
+the public APIs and behaviors checked against React commit `c696d161`, and
+remaining native adaptations. This is a source/API audit with behavior and
+native geometry tests, not a screenshot similarity score.
 
-| Family | Retained behavior and appearance | Remaining native differences |
+| Area | Retained in the native port | Remaining adaptations |
 | --- | --- | --- |
-| Avatar | Size/shape, image crop, icon/slot/default User fallback, image-error callback and fallback, group folding and defaults | Label auto-fit/gap is unavailable; returning false from onError retains the native failed-image placeholder |
-| BackTop | Target threshold, responsive icon, smooth return, keyboard and callback | Requires a native host target instead of a default browser window; 120ms sampling and native easing |
-| Background | All types; original two dot periods, grid, three sprinkle tiles and two scene SVGs | Texture follows painted bounds and appears after initial measurement |
-| Badge | Numeric/string/slot count, cap, zero/dot, sizes and palette | Capsule corner offset is approximate; no zoom entrance or native title tooltip |
-| Button | All variants/sizes, danger/ghost/loading/disabled, focus/keyboard and Form submit/reset | Hard-shadow press retained; vertical press movement, dashed border and moving loading stripes omitted |
-| Card | Colour/pattern precedence, two-layer dot textures, geometry, hoverable | Dashed border is solid; hover shadow replaces vertical lift |
-| Carousel | Controlled/default index, arrows/dots, keyboard, loop, autoplay and hover/focus pause | Fade replaces translated slide track; inactive slides unmount and lose local component state; native accessibility supports fewer roles; deeper custom filled children must forward hover to the slide root |
-| Checkbox | Group values/options, disabled states, sizes, check artwork and keyboard | Check drawing/splash animations and letter spacing omitted |
-| CodeBlock | Warm code surface, original token palette approximation, copy/reset states | Syntect classification replaces the original JS/TS regex tokenizer; no exact token-by-token colouring |
-| Collapse | Question/answer/slots, controlled/default expanded state, disabled and AnimateHeight | Fish/indicator rotation and DOM ID linkage omitted |
-| Countdown | Deadline/formats, prefix, variants, sizing, change/finish and restart | Digits change without odometer motion; island dashed border is solid; no tabular-number font feature |
-| Cursor | Default/raindrop artwork, local position tracking, trailing effects and press/leave state | Local wrapper follower, not a global replacement: system pointer stays visible; filled/interactive child hitboxes can block tracking; forceAll cannot override arbitrary child cursors |
-| DatePicker | Date/month/year panels, paired range, confirmation, format, disabledDate, today/clear, controlled open/value and keys | Flex replaces CSS grids; inset/multiple emphasis becomes border/outline; close is immediate |
-| Divider | Five line styles, original SVG wave/dash cadence and icon repetition | Baked line length is about 3.2k px; icon repeat count updates after bounds sampling |
-| Drawer | Four placements, geometry, edge animation, mask/close/footer and focus restore | pushBackground scale/blur is inactive; native Tab correction approximates focus trapping; mask shows without a fade |
-| Footer | Text/year, original colour/spacing and native contentinfo role | No material core difference found in source audit |
-| Form | Field binding/defaults, rules/async validation, dependencies, reset/submit, Provider and native field reveal | Proportional flex replaces 24-column CSS; native scroll chooses alignment; DOM label/error ID relationships differ |
-| Icon | 101 source SVGs, root stroke/width overrides retaining inner fills, custom component/src and label | Bounce scale/rotation omitted; no em/rem dimensions or DOM SVG selector styling |
-| Image | Three frames, colour palette, stamp year, decode events, pixel single-axis sizing by decoded ratio, loading fade/error artwork, preview, close and focus restore | Stamp perforation/filter, multiple shadows and lazy missing; unknown percentage/auto sizing follows native layout; empty sources stay idle and SVG event dimensions are decoded 2x bitmap pixels |
-| Input | Controlled/default text, native password masking, placeholder colour, affixes, clear, status/shadow, surrogate-safe maxLength, composition handling, disabled/readonly and submit | Other browser input types remain text editors; change(value, nativePayload) replaces the DOM event |
-| Loading | Original night cover, 50 moving snowflakes, tip, delay/fade/show lifecycle | No flake rotation; a uniform vignette replaces radial shading; deferred window overlay uses numeric priority and a 25fps opacity phase |
-| Modal | Original cream panel, mask, variant padding/footer, Typewriter replay and focus restore | Game silhouette is a rounded rectangle; scale entry is opacity; native Tab trap is approximate; mask has no fade |
-| Notification | Imperative store, six positions, types, icons, durations and dismissal | onClose runs when closing starts; native motion replaces CSS; mount the container explicitly; ordinary notification layers cannot paint above deferred dialogs |
-| Pagination | Original ghost circles, orange/teal palettes, page/size/jumper and events; page-size menu opens above with left alignment and an 8px gap | Trigger uses a fixed native width; colour swaps are immediate; ellipsis glyph differs |
-| Progress | Clamped percent, track/fill/info, measured numeric width animation | Inset track shadow omitted; fill is measured after first paint and re-tweens on resize |
-| Radio | Group values, options/sizes/disabled, original check artwork and roving keyboard focus | Check splash/drawing and colour transitions omitted |
-| Rate | Whole stars with original face artwork, hover preview, clear, readonly and keyboard | Pop/splash/lift omitted; half-stars/custom characters are absent in the original Vue source too |
-| Select | Native mounted item registry, disabled-aware arrows/Home/End, controlled/default values, white trigger, yellow menu, amber bar and arrow | Popup opens above by default instead of the original right-side placement; side/align are configurable; no hover arrow entrance animation; row-width layout differs from inline-block |
-| Skeleton | Text/rect/circle/paragraph plus Button/Input/Avatar companions and sizes | Opacity breathing replaces the moving shimmer band |
-| Switch | Controlled/default state, sizes/labels/disabled/loading, keyboard and numeric handle motion | No inset shadow; dot loader replaces rotating ring; slot label width is estimated |
-| Table | Columns/data, nested fields, header/cell slots, row render/events, stripes, loading/empty and client paging | Flex replaces HTML table layout; fixed columns unavailable; header scrolls with body; use one scroll owner |
-| Tabs | Active pill/leaf, items/slots, controlled/default key, keyboard and focus | Leaf wiggle/content translation and DOM ID linkage omitted |
-| Tag | Palette/variants/sizes, close and click, disabled and focus | Dashed border is solid; hover shadow replaces lift; colour changes are immediate |
-| Time | Original clock/date card, timer cleanup and blinking colon | No tabular-number font feature, tracking or colon optical shift |
-| TimePicker | Format/steps, hidden seconds, confirmation, now/clear, controlled open/value and keyboard | Seven visible rows per column, wheel/page controls instead of nested continuous scrollers; close is immediate |
-| Title | Sizes/colours, ribbon tails/folds/perspective/inset shade, layered papers and transparent tab cut/fold; selectable native text | No letter spacing/text shadow or hover scale; projected ribbon curves approximate perspective; layout reserves space for overhanging decoration |
-| Tooltip | Twelve placements, variants, border/tail, hover/focus/click and keyboard | Island silhouette becomes rounded; triangular arrow approximates rotated square; hover/focus triggers share the platform channel |
-| Typewriter | Original VNode clipping, speed/trigger/autoplay/done and cleanup | Optional blinking cursor is an extension; arbitrary DOM-only children need native replacements |
-| Upload | Native chooser/drop, directories, accept/multiple/maxCount, controlled lists, beforeUpload/customRequest, actual multipart request, remove/preview | fetch lacks XHR byte progress and browser cookie jar; no drag-enter highlight; directories do not follow symlinks; unknown extensions have empty MIME |
+| Button / Card / Tag | Original palette, sizes and modifiers; real dashed outlines; hover/press motion; rotating Donut; node-valued icons | Colour/shadow transitions are immediate; letter spacing is unavailable |
+| Select and input controls | Search/filter/clear/empty states; controlled/default models, React value/fileList aliases, keyboard and composition; selection splashes and star bursts | Browser event objects and DOM accessibility references differ; path drawing and CSS transform effects use native approximations |
+| CountUp / Countdown | CountUp formatting/easing/pause/replay/callbacks/celebration; Countdown's 20-face directional digit strip; island dashed outlines | CountUp uses a cancellable JS sampling clock; celebration scale/rotation use native geometry; reduced-motion preferences are not yet mapped |
+| Avatar / Badge / Progress | Actual native text fitting and gap; arbitrary count nodes; four bundled scenes, three-stop fill gradients, completion colours and dotted tracks | First measurement appears after paint; inset shadows and typography features differ |
+| Rich content and overlays | Node-valued labels/titles/tips; Tooltip hover/focus/click; organic game/island artwork; Notification closes after native exit and destroy removes immediately | Arbitrary child content is not clipped to SVG silhouettes; mask/focus behavior follows native APIs |
+| Image / Loading / BackTop | Stamp perforations/paper texture; decode events and preview; elliptical vignette; original Rocket return button | Image filters/multiple shadows and flake rotation differ; BackTop requires a native scroll target |
+| Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging; date/range/month and time selection; active slides, autoplay and native entrances | Avoid nested scrollers; picker columns page; Carousel inactive slides unmount and lose their local state |
+| Skeleton / Cursor | Shared breathing timer, specialised placeholders; local cursor follower and effects | Shimmer remains opacity rather than a moving gradient; the OS cursor cannot be replaced or hidden by this API |
 
 ## Verification and limits
 
-The package has **283 passing behavior tests** across nineteen files, plus five
-platform-dependent Title layout, native IME and Select corner-paint tests. The behavior tests run on Linux through the **real Vue custom renderer, GPUIV
+The complete run on this Linux workstation has **453 passing tests** across
+29 files: **451 host behavior cases** and **2 real-window cases**. Seven
+platform-dependent Title layout, native IME and floating-surface pixel tests
+are skipped here. The behavior tests run through the **real Vue custom renderer, GPUIV
 mutation protocol and event registry**, backed by a test native facade. They
 cover state transitions, native key names, controlled clearing, async rules,
 upload bytes over a local HTTP server and timer/resource cleanup. They do not
@@ -125,6 +102,12 @@ fixture verifies the 220px sidebar, white showcase dimensions, independent
 scroll viewports, resize, real navigation and controlled Input state retention.
 Native screenshot comparison remains pending; this pinned Linux renderer does
 not support screenshot readback, and no claim of pixel identity is made.
+The React production fixture verifies intermediate hover/press positions,
+rotating loading artwork and searchable/clearable Select through real native
+input. Additional native regressions verify Countdown's directional digit
+motion, Avatar fitting against native text measurements and Tooltip's complete
+surface entrance. macOS/Windows pixel regressions cover transparent silhouettes,
+single-pass translucent fills and Tooltip backdrop opacity.
 A focused gallery type check is available with
 `tsc --noEmit -p examples/tsconfig.animal-island.json` from the repository root.
 
@@ -160,7 +143,7 @@ The comparison gallery mounts only the selected component page, so unrelated
 examples and their timers do not run while scrolling. Revisiting a page resets
 its uncontrolled local component state; root-controlled values and the Form
 store survive. Components used outside the gallery are unaffected. Host tests
-cover all 39 navigation entries, Enter/Space activation, page isolation, state
+cover all 40 navigation entries, Enter/Space activation, page isolation, state
 retention, scroll reset and timer cleanup. The production layout fixture checks
 sidebar/card geometry, sibling scroll ownership, resize and real navigation.
 
@@ -187,6 +170,6 @@ translated track still needs reliable inactive-subtree focus/hit isolation.
 The active-only carousel remains the documented adaptation until those ownership
 and interaction constraints can be met without changing GPUI.
 
-The port stays private. Its upstream MIT licence is bundled in
-`LICENSE.animal-island-vue`; the added implementations and their adaptations are
+The port stays private. Both upstream MIT licences are bundled in
+`LICENSE.animal-island-vue` and `LICENSE.animal-island-ui`; implementations and their adaptations are
 tracked with the rest of this repository.

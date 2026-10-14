@@ -16,7 +16,7 @@ export type TimePickerSize = PickerSize
 export type TimePickerStatus = PickerStatus
 export type TimePart = { h: number; m: number; s: number }
 export interface TimePickerProps {
-  modelValue?: string | null; defaultValue?: string | null; placeholder?: string
+  value?: string | null; modelValue?: string | null; defaultValue?: string | null; placeholder?: string
   disabled?: boolean; allowClear?: boolean; size?: TimePickerSize; status?: TimePickerStatus
   format?: string; hourStep?: number; minuteStep?: number; secondStep?: number; open?: boolean
   ariaLabel?: string; ariaLabelledBy?: string; testId?: string
@@ -40,6 +40,7 @@ const units: { part: keyof TimePart; label: string }[] = [{ part: "h", label: "�
 export const TimePicker = defineComponent({
   name: "AnimalTimePicker", inheritAttrs: false,
   props: {
+    value: { type: String as PropType<string | null | undefined>, default: undefined },
     modelValue: { type: String as PropType<string | null | undefined>, default: undefined },
     defaultValue: { type: String as PropType<string | null>, default: null },
     placeholder: { type: String, default: "请选择时间" }, disabled: { type: Boolean, default: false },
@@ -52,7 +53,7 @@ export const TimePicker = defineComponent({
   emits: ["update:modelValue", "change", "update:open", "openChange"],
   setup(props, { attrs, emit }) {
     const innerValue = ref<string | null>(props.defaultValue)
-    const current = computed(() => props.modelValue !== undefined ? props.modelValue : innerValue.value)
+    const current = computed(() => props.value !== undefined ? props.value : props.modelValue !== undefined ? props.modelValue : innerValue.value)
     const pending = ref<TimePart>({ h: 0, m: 0, s: 0 })
     const activeUnit = ref<keyof TimePart>("h")
     const starts = reactive<TimePart>({ h: 0, m: 0, s: 0 })
@@ -74,7 +75,7 @@ export const TimePicker = defineComponent({
     }
     watch([() => props.format, () => props.hourStep, () => props.minuteStep, () => props.secondStep], () => { if (popup.open.value) centerColumns() })
     function commit(value: string | null) {
-      if (props.modelValue === undefined) innerValue.value = value
+      if (props.value === undefined && props.modelValue === undefined) innerValue.value = value
       emit("update:modelValue", value); emit("change", value)
     }
     function confirm() {

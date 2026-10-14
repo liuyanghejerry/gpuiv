@@ -3,7 +3,8 @@
  * submit/reset action: use form.submit()/resetFields(), the exposed submit/reset,
  * or a bound field's Enter submission. 24-column CSS grid in FormItem becomes
  * proportional flex widths. CSS classes remain accepted metadata; styling uses
- * StyleDesc. Context stays reactive when layout/disabled/size props change.
+ * StyleDesc. Context and mounted fields follow replacement form instances as
+ * well as layout/disabled/size changes, matching React's contextual instance.
  */
 import { computed, defineComponent, provide, watch, type PropType } from 'vue';
 import type { EventPayload, StyleDesc } from '@gpuiv/vue';
@@ -40,31 +41,34 @@ const FormComponent = defineComponent({
     },
     setup(props, { attrs, emit, expose, slots }) {
         const [fallback] = useForm();
-        const form = props.form ?? fallback;
-        (form as InternalForm).__bindCallbacks?.({
-            onFinish: values => emit('finish', values),
-            onFinishFailed: info => emit('finishFailed', info),
-            onValuesChange: (changed, all) => emit('valuesChange', changed, all),
-        });
+        const form = computed(() => props.form ?? fallback);
+        watch(form, (instance, _previous, onCleanup) => {
+            const unbind = (instance as InternalForm).__bindCallbacks?.({
+                onFinish: values => emit('finish', values),
+                onFinishFailed: info => emit('finishFailed', info),
+                onValuesChange: (changed, all) => emit('valuesChange', changed, all),
+            });
+            if (typeof unbind === 'function') onCleanup(unbind);
+        }, { immediate: true, flush: 'sync' });
         let lastInitial: string | undefined;
-        watch(() => props.initialValues, values => {
+        watch([form, () => props.initialValues], ([instance, values]) => {
             if (!values) return;
             const key = JSON.stringify(values);
             if (key === lastInitial) return;
             lastInitial = key;
-            form.setFieldsValue(values);
+            instance.setFieldsValue(values);
         }, { immediate: true, deep: true });
 
         provide(FormContextKey, computed<FormContextValue>(() => ({
-            form, prefixCls: 'island-form', layout: props.layout,
+            form: form.value, prefixCls: 'island-form', layout: props.layout,
             labelAlign: props.labelAlign ?? (props.layout === 'horizontal' ? 'right' : 'left'),
             labelCol: props.labelCol, wrapperCol: props.wrapperCol, size: props.size,
             disabled: props.disabled, colon: props.colon, requiredMark: props.requiredMark,
             reset,
         })));
 
-        function reset(event?: EventPayload) { form.resetFields(); emit('reset', event); }
-        expose({ form, submit: () => form.submit(), reset });
+        function reset(event?: EventPayload) { form.value.resetFields(); emit('reset', event); }
+        expose({ get form() { return form.value; }, submit: () => form.value.submit(), reset });
         return () => <div
             {...attrs}
             role="form"

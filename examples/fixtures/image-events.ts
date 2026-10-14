@@ -38,9 +38,11 @@ const app = createApp(defineComponent(() => () => h('div', { style: { display: '
   image('bad-data', 'data:image/png;base64,bm90LWFuLWltYWdl'), image('malformed', 'data:image/png;base64,%%%'),
   image('race', raceSrc.value), mounted.value ? image('unmount', url('/slow-unmount')) : null,
   image('shared-main', url('/shared'), true), image('live', ''),
-])), { width: 900, height: 400, focus: false, show: false })
+// Both consumers need ordinary frame delivery to verify that shared decode
+// completion updates layout without a query forcing either window to paint.
+])), { width: 900, height: 400, focus: false })
 const other = createWindow(defineComponent(() => () => image('shared-other', url('/shared'), true)),
-  { width: 240, height: 180, focus: false, show: false })
+  { width: 240, height: 180, focus: false })
 
 const find = (root: HostNode, id: string): HostNode | undefined => root.props.testId === id ? root : root.children.map(node => find(node, id)).find(Boolean)
 const count = (host: string, kind?: string) => events.filter(event => event.host === host && (!kind || event.kind === kind))

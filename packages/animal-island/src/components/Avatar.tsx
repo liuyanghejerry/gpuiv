@@ -1,14 +1,16 @@
 /** Avatar — ported from animal-island-vue Avatar.vue (MIT), tracked in #164.
  * Retains dimensions, shape, image clipping, icon prop and default User icon.
- * Text auto-fit/gap remain unimplemented; an oversized label clips. Failed
- * images switch to the original icon/slot fallback unless onError returns false.
+ * Natural native text bounds drive gap-based font fitting. An invisible,
+ * unshrunk measurement node keeps the base font size to avoid a feedback loop.
+ * Failed images switch to the icon/slot fallback unless onError returns false.
  */
 
-import { computed, defineComponent, inject, ref, watch, type InjectionKey, type PropType, type VNode } from "vue"
-import type { EventPayload, StyleDesc } from "@gpuiv/vue"
+import { computed, defineComponent, inject, ref, watch, type InjectionKey, type PropType, type VNode, type VNodeChild } from "vue"
+import { useElementBounds, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, fonts } from "../tokens.js"
 import { Icon } from "./Icon.js"
 import { imageEventMatches } from "./image-events.js"
+import { renderContent } from "./content.js"
 
 export type AvatarShape = "circle" | "square"
 export type AvatarSize = "small" | "middle" | "large"
@@ -34,7 +36,7 @@ export const Avatar = defineComponent({
     src: { type: String, default: undefined },
     alt: { type: String, default: undefined },
     gap: { type: Number, default: 4 },
-    icon: { type: Object as PropType<VNode>, default: undefined },
+    icon: { type: null as unknown as PropType<VNodeChild>, default: undefined },
     onError: { type: Function as PropType<() => boolean | void>, default: undefined },
     testId: { type: String, default: undefined },
   },
@@ -55,10 +57,28 @@ export const Avatar = defineComponent({
     const fontPx = computed<number>(() =>
       typeof effSize.value === "number" ? Math.max(12, Math.round(px.value * 0.4)) : PRESET_FONT[effSize.value],
     )
+    const textMeasure = ref<HostNode | null>(null)
+    const { bounds } = useElementBounds(textMeasure)
+    // Only the width participates in fitting. Scroll position polls do not
+    // subscribe the component render or send new styles across the FFI.
+    const measuredWidth = computed(() => bounds.value?.width ?? 0)
+    const textScale = computed(() => {
+      const available = px.value - Math.max(0, props.gap) * 2
+      return available > 0 && measuredWidth.value > available ? available / measuredWidth.value : 1
+    })
+
+    function textContent(nodes: unknown): string {
+      if (typeof nodes === "string" || typeof nodes === "number") return String(nodes)
+      if (Array.isArray(nodes)) return nodes.map(textContent).join("")
+      if (nodes && typeof nodes === "object" && "children" in nodes) return textContent((nodes as VNode).children)
+      return ""
+    }
 
     return () => {
       const hasImage = !!props.src && !failed.value
       const br = effShape.value === "square" ? 8 : 999
+      const children = slots.default?.()
+      const label = props.icon ? "" : textContent(children)
 
       const style: StyleDesc = {
         position: "relative",
@@ -100,7 +120,10 @@ export const Avatar = defineComponent({
               style={{ width: "100%", height: "100%", borderRadius: br }}
             />
           ) : (
-            props.icon ?? slots.default?.() ?? <Icon name="User" size={Math.round(px.value * 0.5)} />
+            props.icon ? renderContent(props.icon) : (label ? <>
+              <div ref={textMeasure} style={{ position: "absolute", top: 0, left: 0, width: "auto", flexShrink: 0, opacity: 0, fontSize: fontPx.value, whiteSpace: "nowrap", pointerEvents: "none" }}><text>{label}</text></div>
+              <div style={{ fontSize: fontPx.value * textScale.value, whiteSpace: "nowrap", flexShrink: 0, pointerEvents: "none" }}>{children}</div>
+            </> : children ?? <Icon name="User" size={Math.round(px.value * 0.5)} />)
           )}
         </div>
       )
@@ -109,3 +132,6 @@ export const Avatar = defineComponent({
 })
 
 export default Avatar
+
+/** Native public props, derived from the component's controlled runtime API. */
+export type AvatarProps = InstanceType<typeof Avatar>["$props"] & { style?: StyleDesc }

@@ -1,19 +1,8 @@
-/** Tag — GPUIV port of animal-island-vue's `Tag.vue`.
- *  ported from animal-island-vue (https://github.com/guokaigdg/animal-island-vue, MIT)
- *
- *  Fidelity notes (see issue #164):
- *  - `variant="dashed"`: the original sets `border-style: dashed`; GPUIV has
- *    no border styles, so it renders as a solid border of the same colour
- *    (identical to `outlined` in the port).
- *  - Clickable hover: the original lifts with `translateY(-1px)` + a soft
- *    shadow; GPUIV has no transforms, so only the shadow is kept (applied
- *    natively by GPUI — the 0.2s transition is dropped).
- *  - The original close button calls `stopPropagation()` to keep the tag's
- *    own click from firing; GPUIV paints a flat hit list and does not bubble
- *    clicks, so the close hitbox swallows the press on its own.
- *  - The tag colour palette (`--animal-tag-color` / `-soft-bg` / `-soft-text`
- *    custom properties in the Less) is resolved here in TS — there are no
- *    CSS variables in GPUIV.
+/** Tag — aligned with animal-island-ui's React Tag (MIT).
+ * Palette, 24/32/40px sizing, variants and close/keyboard behavior are kept.
+ * Dashed outlines use a measured SVG; clickable lift uses native top motion.
+ * Shadow/colour changes remain immediate. Native clicks do not bubble, so
+ * close controls naturally keep their press separate from the tag callback.
  */
 
 import { defineComponent, ref, type PropType } from "vue"
@@ -21,6 +10,7 @@ import type { EventPayload, StyleDesc } from "@gpuiv/vue"
 import { colors, fontSize, fonts, radius, spacing } from "../tokens.js"
 import type { CardColor } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { DashedBorderSurface } from "./border-decoration.js"
 
 export type TagSize = "small" | "medium" | "large"
 export type TagVariant = "solid" | "outlined" | "dashed" | "soft"
@@ -93,6 +83,7 @@ export const Tag = defineComponent({
   setup(props, { attrs, slots }) {
     const focused = ref(false)
     const closeFocused = ref(false)
+    const hovered = ref(false)
 
     return () => {
       // The original derives interactivity from a registered click listener;
@@ -100,6 +91,7 @@ export const Tag = defineComponent({
       const interactive = !!props.onClick && !props.disabled
 
       const style: StyleDesc = {
+        position: "relative",
         display: "flex",
         alignItems: "center",
         gap: spacing.xs,
@@ -113,8 +105,7 @@ export const Tag = defineComponent({
         cursor: props.disabled ? "not-allowed" : interactive ? "pointer" : "default",
         ...sizeStyle[props.size],
         ...variantStyle(props.variant, props.color),
-        // translateY(-1px) lift dropped — shadow only (see header).
-        ...(interactive ? { hover: { boxShadow: clickableShadow } } : {}),
+          ...(interactive ? { hover: { boxShadow: clickableShadow } } : {}),
         ...(attrs.style as StyleDesc | undefined),
         ...(focused.value && interactive
           ? { outline: { width: 2, color: colors.warning, offset: 2 } }
@@ -124,6 +115,12 @@ export const Tag = defineComponent({
       if (props.disabled) {
         style.opacity = 0.5
         style.pointerEvents = "none"
+      }
+      const dashedColor = style.borderColor ?? "#c4b89e"
+      if (props.variant === "dashed") style.borderColor = "transparent"
+      const forward = (name: string, event: EventPayload) => {
+        const callbacks = attrs[name]
+        for (const callback of Array.isArray(callbacks) ? callbacks : [callbacks]) if (typeof callback === "function") callback(event)
       }
 
       const close = (e: EventPayload) => {
@@ -139,10 +136,14 @@ export const Tag = defineComponent({
           testId={props.testId}
           onFocus={() => (focused.value = true)}
           onBlur={() => (focused.value = false)}
+          onMouseEnter={(event: EventPayload) => { hovered.value = true; forward("onMouseEnter", event) }}
+          onMouseLeave={(event: EventPayload) => { hovered.value = false; forward("onMouseLeave", event) }}
+          motion={interactive && typeof style.top !== "string" ? { initial: false, animate: { top: (typeof style.top === "number" ? style.top : 0) + (hovered.value ? -1 : 0) }, transition: { duration: 0.2, ease: "ease" } } : undefined}
           onClick={interactive ? (e: EventPayload) => props.onClick?.(e) : undefined}
           onKeyDown={interactive ? activationKeys((e) => props.onClick?.(e)) : undefined}
           style={{ ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style }}
         >
+          {props.variant === "dashed" ? <DashedBorderSurface color={String(dashedColor)} width={style.borderWidth ?? 1.5} radius={style.borderRadius ?? radius.pill} /> : null}
           {slots.default?.()}
           {props.closable ? (
             <div
@@ -180,5 +181,7 @@ export const Tag = defineComponent({
     }
   },
 })
+
+export type TagProps = Omit<InstanceType<typeof Tag>["$props"], "style"> & { style?: StyleDesc }
 
 export default Tag

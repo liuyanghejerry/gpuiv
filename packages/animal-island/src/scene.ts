@@ -12,3 +12,6 @@ import { fileURLToPath } from "node:url"
 
 export const sweetCornerScene = fileURLToPath(new URL("../assets/scene/sweet-corner.svg", import.meta.url))
 export const coffeeBreakScene = fileURLToPath(new URL("../assets/scene/coffee-break.svg", import.meta.url))
+/** React Animal Island Progress scene variants (MIT). */
+export const forestGroveScene = fileURLToPath(new URL("../assets/scene/forest-grove.svg", import.meta.url))
+export const starryCampScene = fileURLToPath(new URL("../assets/scene/starry-camp.svg", import.meta.url))

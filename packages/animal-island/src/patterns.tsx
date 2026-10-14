@@ -14,8 +14,8 @@ const dots: Record<string, [string, string]> = {
     "rgba(140, 200, 140, 0.15)"
   ],
   "dots-pink": [
-    "rgba(248, 166, 178, 0.18)",
-    "rgba(255, 200, 210, 0.12)"
+    "rgba(248, 166, 178, 0.26)",
+    "rgba(255, 200, 210, 0.18)"
   ],
   "dots-purple": [
     "rgba(183, 125, 238, 0.18)",
@@ -26,16 +26,16 @@ const dots: Record<string, [string, string]> = {
     "rgba(180, 195, 255, 0.12)"
   ],
   "dots-yellow": [
-    "rgba(247, 205, 103, 0.18)",
-    "rgba(255, 230, 160, 0.12)"
+    "rgba(247, 205, 103, 0.26)",
+    "rgba(255, 230, 160, 0.18)"
   ],
   "dots-orange": [
     "rgba(229, 146, 102, 0.18)",
     "rgba(255, 190, 150, 0.12)"
   ],
   "dots-teal": [
-    "rgba(130, 213, 187, 0.18)",
-    "rgba(170, 235, 210, 0.12)"
+    "rgba(130, 213, 187, 0.26)",
+    "rgba(170, 235, 210, 0.18)"
   ],
   "dots-green": [
     "rgba(138, 198, 138, 0.18)",
@@ -46,12 +46,12 @@ const dots: Record<string, [string, string]> = {
     "rgba(255, 160, 155, 0.12)"
   ],
   "dots-lime-green": [
-    "rgba(209, 218, 73, 0.18)",
-    "rgba(230, 240, 130, 0.12)"
+    "rgba(209, 218, 73, 0.26)",
+    "rgba(230, 240, 130, 0.18)"
   ],
   "dots-yellow-green": [
-    "rgba(236, 223, 82, 0.18)",
-    "rgba(255, 245, 140, 0.12)"
+    "rgba(236, 223, 82, 0.26)",
+    "rgba(255, 245, 140, 0.18)"
   ],
   "dots-brown": [
     "rgba(154, 131, 90, 0.18)",
@@ -60,7 +60,8 @@ const dots: Record<string, [string, string]> = {
   "dots-warm-peach-pink": [
     "rgba(225, 140, 111, 0.18)",
     "rgba(255, 185, 160, 0.12)"
-  ]
+  ],
+  "dots-gray": ["rgba(140, 140, 140, 0.18)", "rgba(190, 190, 190, 0.12)"]
 }
 const sprinkles = [
   {
@@ -96,8 +97,12 @@ export function patternDataUrl(name: string, width: number, height: number): str
     defs = sprinkles.map((p, i) => `<pattern id="p${i}" x="${p.x}" y="${p.y}" width="${p.width}" height="${p.height}" patternUnits="userSpaceOnUse">${p.inner}</pattern>`).join("")
     layers = [...sprinkles.keys()].reverse().map(i => `<rect width="100%" height="100%" fill="url(#p${i})"/>`).join("")
   } else {
-    const pair = dots[name] ?? dots.default
-    defs = `<pattern id="large" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="14" cy="14" r="1.5" fill="${pair[0]}"/></pattern><pattern id="small" x="7" y="7" width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="7" cy="7" r="1" fill="${pair[1]}"/></pattern>`
+    const pattern = name.replace(/^card-/, "")
+    const source = dots[pattern] ?? dots.default
+    // React's wallpapers use stronger dots in five bright palettes; Card's
+    // corresponding textures keep their original 0.18 / 0.12 opacity.
+    const pair = name.startsWith("card-") ? source.map((ink, index) => ink.replace(/0\.26\)/, "0.18)").replace(/0\.18\)/, index === 1 ? "0.12)" : "0.18)")) : source
+    defs = `<pattern id="large" width="28" height="28" patternUnits="userSpaceOnUse"><circle cx="14" cy="14" r="1.4" fill="${pair[0]}"/></pattern><pattern id="small" x="7" y="7" width="14" height="14" patternUnits="userSpaceOnUse"><circle cx="7" cy="7" r="1" fill="${pair[1]}"/></pattern>`
     layers = '<rect width="100%" height="100%" fill="url(#small)"/><rect width="100%" height="100%" fill="url(#large)"/>'
   }
   return `data:image/svg+xml;base64,${Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><defs>${defs}</defs>${layers}</svg>`).toString("base64")}`

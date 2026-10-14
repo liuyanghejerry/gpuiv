@@ -3,12 +3,13 @@
  *
  *  Fidelity notes (see issue #164), 原版做法 → 移植近似:
  *  - DigitRoll 里程表滚动（20 面数字条 translateY + transform transition 0.35s）
- *    → GPUIV 无 transform/CSS transition，数字静态切换；为免字宽抖动，数字格
- *    固定宽度（0.62em，代替 `font-variant-numeric: tabular-nums`）+ 居中。
+ *    → native motion.top 驱动同样的 20 面数字条，始终向下滚动；跨循环时
+ *    重新挂载到等价数字面再滚动。固定格宽避免数字宽度抖动。
  *  - 数字格 `height: 1.2em; line-height: 1.2` → height/lineHeight 数值。
  *  - 数字块底 `linear-gradient(180deg, #fff 0%, #f8f8f0 100%)`（island: #fffdf4）
  *    → GPUIV 两停 linear-gradient（angle 180）。
- *  - island 根边框 `2px dashed #d4c4a8` → 实线（GPUIV 无 dashed）。
+ *  - island 根边框 `2px dashed #d4c4a8` → 原生透明边框保留布局，测量 SVG
+ *    描边还原虚线与圆角。
  *  - bordered 数字块 `border: 1.5px solid` → borderWidth 1.5。
  *  - 冒号 `position: relative; top: -0.08em` → relative + top 数值（-0.08 × 字号
  *    ≈ -2/-2/-3）。
@@ -22,9 +23,10 @@
  *    只发一次；emits(`change`/`finish`) → onChange/onFinish props。
  */
 
-import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue"
-import { useWindowSize, type StyleDesc } from "@gpuiv/vue"
+import { computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType, type VNodeChild } from "vue"
+import { motion, useWindowSize, type StyleDesc } from "@gpuiv/vue"
 import { colors, fonts, shadows, spacing } from "../tokens.js"
+import { DashedBorderSurface } from "./border-decoration.js"
 
 export type CountdownSize = "small" | "middle" | "large"
 export type CountdownVariant = "default" | "island"
@@ -82,6 +84,33 @@ interface RenderLiteral {
   colon: boolean
 }
 
+/** Match the original odometer direction without JS frame-by-frame styles. */
+const DigitRoll = defineComponent({
+  props: { digit: { type: String, required: true }, fontSize: { type: Number, required: true } },
+  setup(props) {
+    const position = ref(Number(props.digit)), generation = ref(0), from = ref<number | null>(null)
+    watch(() => props.digit, (next, previous) => {
+      const delta = (Number(previous) - Number(next) + 10) % 10
+      if (delta === 0) return
+      let start = position.value
+      if (start - delta < 0) {
+        start += 10
+        from.value = start
+        generation.value++
+      }
+      position.value = start - delta
+    }, { flush: "sync" })
+    return () => {
+      const height = Math.round(props.fontSize * 1.2)
+      return <div style={{ position: "relative", width: Math.round(props.fontSize * .62), height, overflow: "hidden", flexShrink: 0, color: DIGIT_COLOR, fontSize: props.fontSize, fontWeight: 900, lineHeight: height, pointerEvents: "none" }}>
+        <motion.div key={generation.value} initial={from.value === null ? false : { top: -from.value * height }} animate={{ top: -position.value * height }} transition={{ duration: .35, ease: [.4, 0, .2, 1] }} style={{ position: "absolute", left: 0, width: "100%", height: height * 20, display: "flex", flexDirection: "column", pointerEvents: "none" }}>
+          {() => Array.from({ length: 20 }, (_, index) => <div key={index} style={{ height, flexShrink: 0, display: "flex", justifyContent: "center", alignItems: "center", pointerEvents: "none" }}><text>{String(index % 10)}</text></div>)}
+        </motion.div>
+      </div>
+    }
+  },
+})
+
 export const Countdown = defineComponent({
   name: "AnimalCountdown",
   inheritAttrs: false,
@@ -90,6 +119,7 @@ export const Countdown = defineComponent({
     value: { type: [Number, Date] as PropType<number | Date>, required: true },
     /** 输出格式，支持 DD、HH、mm、ss，默认 HH:mm:ss */
     format: { type: String, default: "HH:mm:ss" },
+    prefix: { type: null as unknown as PropType<VNodeChild>, default: undefined },
     /** 尺寸 */
     size: { type: String as PropType<CountdownSize>, default: "middle" },
     /** 显示风格 */
@@ -170,6 +200,7 @@ export const Countdown = defineComponent({
       const narrow = windowSize.value.width <= 480
 
       const rootStyle: StyleDesc = {
+        position: "relative",
         display: "flex",
         alignItems: "center",
         gap: spacing.sm,
@@ -185,7 +216,6 @@ export const Countdown = defineComponent({
               paddingLeft: 20,
               paddingRight: 20,
               backgroundColor: ISLAND_BG,
-              // 原版为 2px dashed；GPUIV 无 dashed，实线近似。
               borderWidth: 2,
               borderColor: ISLAND_BORDER,
             }
@@ -201,6 +231,10 @@ export const Countdown = defineComponent({
         ...(fonts.sans ? { fontFamily: fonts.sans } : {}),
         ...(attrs.style as StyleDesc | undefined),
       }
+      const borderInk = typeof rootStyle.borderColor === "string" ? rootStyle.borderColor : ISLAND_BORDER
+      const borderWidth = typeof rootStyle.borderWidth === "number" ? rootStyle.borderWidth : 2
+      const borderRadius = typeof rootStyle.borderRadius === "number" ? rootStyle.borderRadius : 20
+      if (island) rootStyle.borderColor = "transparent"
 
       const unitStyle: StyleDesc = {
         display: "flex",
@@ -224,32 +258,15 @@ export const Countdown = defineComponent({
 
       return (
         <div {...attrs} role="timer" aria-valuetext={readable.value} testId={props.testId} style={rootStyle}>
-          {slots.prefix ? (
-            <div style={{ color: colors.warmSoft, fontWeight: 600, whiteSpace: "nowrap" }}>{slots.prefix()}</div>
+          {island && borderWidth > 0 ? <DashedBorderSurface color={borderInk} width={borderWidth} radius={borderRadius} /> : null}
+          {slots.prefix || props.prefix !== undefined ? (
+            <div style={{ color: colors.warmSoft, fontWeight: 600, whiteSpace: "nowrap" }}>{slots.prefix?.() ?? (typeof props.prefix === "string" || typeof props.prefix === "number" ? <text>{String(props.prefix)}</text> : props.prefix)}</div>
           ) : null}
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             {renderParts.value.map((part, i) =>
               part.kind === "token" ? (
                 <div key={i} style={unitStyle}>
-                  {part.chars.map((char, j) => (
-                    <div
-                      key={j}
-                      style={{
-                        // 固定格宽 + 居中，代替 tabular-nums（见文件头）。
-                        width: Math.round(sz.digit * 0.62),
-                        height: Math.round(sz.digit * 1.2),
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: DIGIT_COLOR,
-                        fontSize: sz.digit,
-                        fontWeight: 900,
-                        lineHeight: sz.digit * 1.2,
-                      }}
-                    >
-                      <text>{char}</text>
-                    </div>
-                  ))}
+                  {part.chars.map((char, j) => <DigitRoll key={j} digit={char} fontSize={sz.digit} />)}
                 </div>
               ) : part.colon ? (
                 // 原版 top: -0.08em 的光学上移用 relative + 数值 top 近似。
@@ -279,3 +296,6 @@ export const Countdown = defineComponent({
 })
 
 export default Countdown
+
+/** Derived native props retain required value and optional defaulted options. */
+export type CountdownProps = InstanceType<typeof Countdown>["$props"] & { style?: StyleDesc }

@@ -27,6 +27,8 @@ import {
   defineComponent,
   h,
   onBeforeUnmount,
+  onMounted,
+  onUpdated,
   ref,
   watch,
   type PropType,
@@ -36,6 +38,33 @@ import {
 interface State {
   remaining: number
   stopped: boolean
+}
+
+type ChildSlots = Record<string, unknown> & { default?: () => unknown }
+
+function childSlots(children: unknown): ChildSlots | null {
+  return children && typeof children === "object" && !Array.isArray(children)
+    && "default" in children && typeof children.default === "function"
+    ? children as ChildSlots : null
+}
+
+/** Component children are Vue slots rather than an array of VNodes. Snapshot
+ * only their default content while Typewriter renders, so counting and clipping
+ * see the same tree and never invoke consumer slots from a timer or watcher.
+ * Named slots keep their original callbacks; only the displayed default text
+ * participates in the typing sequence, just like React's children prop.
+ */
+function snapshotChildren(nodes: unknown): unknown {
+  if (Array.isArray(nodes)) return nodes.map(snapshotChildren)
+  if (!nodes || typeof nodes !== "object" || !("type" in nodes)) return nodes
+  const vnode = nodes as VNode
+  const slots = childSlots(vnode.children)
+  if (slots) {
+    const content = snapshotChildren(slots.default!())
+    return cloneWithChildren(vnode, { ...slots, _: undefined, default: () => content })
+  }
+  if (Array.isArray(vnode.children)) return cloneWithChildren(vnode, snapshotChildren(vnode.children))
+  return vnode
 }
 
 const CURSOR = "▍"
@@ -49,7 +78,8 @@ function countText(nodes: unknown): number {
   if (v && typeof v === "object" && "type" in v) {
     if (v.type === Comment) return 0
     if (v.type === Text) return String(v.children ?? "").length
-    return countText(v.children)
+    const slots = childSlots(v.children)
+    return countText(slots ? slots.default!() : v.children)
   }
   return 0
 }
@@ -92,6 +122,13 @@ function clip(nodes: unknown, state: State): unknown {
     if (v.type === Fragment) {
       return cloneWithChildren(v, clip(v.children, state))
     }
+    const slots = childSlots(v.children)
+    if (slots) {
+      // Clip now, while siblings share the same remaining-character budget;
+      // the child's later render only reads the already clipped snapshot.
+      const content = clip(slots.default!(), state)
+      return cloneWithChildren(v, { ...slots, _: undefined, default: () => content })
+    }
     if (v.children === null || v.children === undefined || typeof v.children === "string") {
       const text = String(v.children ?? "")
       if (text.length === 0) return v
@@ -133,6 +170,11 @@ function appendCursor(nodes: unknown): unknown {
   if (v && typeof v === "object" && "type" in v) {
     if (v.type === Comment) return null
     if (v.type === Text) return cloneWithChildren(v, String(v.children ?? "") + CURSOR)
+    const slots = childSlots(v.children)
+    if (slots) {
+      const content = appendCursor(slots.default!())
+      return content === null ? null : cloneWithChildren(v, { ...slots, _: undefined, default: () => content })
+    }
     if (v.children === null || v.children === undefined) return null
     if (typeof v.children === "string") return cloneWithChildren(v, v.children + CURSOR)
     if (Array.isArray(v.children)) {
@@ -167,13 +209,11 @@ export const Typewriter = defineComponent({
     onDone: { type: Function as PropType<() => void>, default: undefined },
   },
   setup(props, { slots }) {
-    const getNodes = (): VNode[] => {
-      return slots.default ? (slots.default() as VNode[]) : []
-    }
-
     const total = ref(0)
     const count = ref(0)
+    let renderedTotal = 0
     let timer: ReturnType<typeof setInterval> | null = null
+    let completed = false
 
     const stop = () => {
       if (timer) {
@@ -184,7 +224,8 @@ export const Typewriter = defineComponent({
 
     const start = () => {
       stop()
-      total.value = countText(getNodes())
+      completed = false
+      total.value = renderedTotal
       if (!props.autoPlay) {
         count.value = total.value
         return
@@ -194,13 +235,11 @@ export const Typewriter = defineComponent({
       timer = setInterval(() => {
         if (count.value >= total.value) {
           stop()
-          props.onDone?.()
           return
         }
         count.value += 1
         if (count.value >= total.value) {
           stop()
-          props.onDone?.()
         }
       }, props.speed)
     }
@@ -208,8 +247,17 @@ export const Typewriter = defineComponent({
     watch(
       () => [props.speed, props.trigger, props.autoPlay],
       () => start(),
-      { immediate: true },
     )
+    // React replays when the total text length changes, including a parent
+    // updating slot content after the previous run has finished.
+    onMounted(start)
+    onUpdated(() => { if (renderedTotal !== total.value) start() })
+    watch(() => [count.value, total.value], () => {
+      if (!completed && total.value > 0 && count.value >= total.value) {
+        completed = true
+        props.onDone?.()
+      }
+    }, { immediate: true })
 
     // Cursor blink stands in for the CSS blink animation a web port would use.
     // Kept independent of the type timer so it keeps blinking after done.
@@ -241,13 +289,15 @@ export const Typewriter = defineComponent({
     })
 
     return () => {
-      // re-evaluate per render so slot content changes are picked up
-      total.value = countText(getNodes())
+      // Read slots only while rendering; writing reactive state here would
+      // make a replay watcher invalidate the parent presence/slot render.
+      const nodes = snapshotChildren(slots.default?.() ?? [])
+      renderedTotal = countText(nodes)
       if (!props.autoPlay) {
-        return getNodes()
+        return nodes as VNode | VNode[] | null
       }
       const state: State = { remaining: count.value, stopped: false }
-      const clipped = clip(getNodes(), state) as VNode | VNode[] | null
+      const clipped = clip(nodes, state) as VNode | VNode[] | null
       if (props.showCursor && cursorOn.value) {
         const withCursor = appendCursor(clipped)
         return (withCursor === null ? clipped : withCursor) as VNode | VNode[] | null

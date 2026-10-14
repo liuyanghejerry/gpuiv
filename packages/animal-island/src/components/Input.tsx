@@ -25,10 +25,11 @@
  *    onClear → onChange('')。
  */
 
-import { computed, defineComponent, ref, type PropType } from "vue"
+import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue"
 import { type BoxShadow, type EventPayload, type StyleDesc } from "@gpuiv/vue"
 import { colors, fontSize, fonts, height, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { renderContent } from "./content.js"
 
 export type InputSize = "small" | "middle" | "large"
 export type InputStatus = "error" | "warning"
@@ -73,16 +74,18 @@ export const Input = defineComponent({
   name: "AnimalInput",
   inheritAttrs: false,
   props: {
+    /** React-compatible controlled value; takes precedence over modelValue. */
+    value: { type: [String, Number] as PropType<string | number | undefined>, default: undefined },
     /** 输入值（受控，对应 v-model） */
     modelValue: { type: String as PropType<string | undefined>, default: undefined },
     /** 默认输入值（非受控初始值） */
-    defaultValue: { type: String, default: "" },
+    defaultValue: { type: [String, Number], default: "" },
     /** 输入框尺寸 */
     size: { type: String as PropType<InputSize>, default: "middle" },
     /** 前缀内容（同名 slot 优先） */
-    prefix: { type: [String, Number], default: undefined },
+    prefix: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 后缀内容（同名 slot 优先） */
-    suffix: { type: [String, Number], default: undefined },
+    suffix: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },
     /** 允许清除 */
     allowClear: { type: Boolean, default: false },
     /** 校验状态 */
@@ -98,6 +101,9 @@ export const Input = defineComponent({
     placeholderColor: { type: String, default: colors.textDisabled },
     /** 只读 */
     readonly: { type: Boolean, default: false },
+    readOnly: { type: Boolean, default: false },
+    autoFocus: { type: Boolean, default: false },
+    tabIndex: { type: Number, default: 0 },
     /** 最大长度（JS 截断近似，见文件头注释） */
     maxLength: { type: Number, default: undefined },
     /** 清除按钮的无障碍标签 */
@@ -106,6 +112,8 @@ export const Input = defineComponent({
     onClear: { type: Function as PropType<() => void>, default: undefined },
     onFocus: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
     onBlur: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
+    onKeyDown: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
+    onKeyUp: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
     onSubmit: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
     onCompositionStart: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
     onCompositionUpdate: { type: Function as PropType<(e: EventPayload) => void>, default: undefined },
@@ -113,14 +121,14 @@ export const Input = defineComponent({
     testId: { type: String, default: undefined },
   },
   setup(props, { attrs, slots }) {
-    const innerValue = ref(props.defaultValue)
+    const innerValue = ref(String(props.defaultValue))
     const focused = ref(false)
     /** Bumped whenever maxLength truncates, so the native editor takes the
      *  truncated value even when it equals the previous prop value. */
     const revision = ref(0)
-    // 受控判断：modelValue 存在即为受控，否则使用内部 innerValue
-    const isControlled = computed(() => props.modelValue !== undefined)
-    const currentValue = computed(() => (isControlled.value ? props.modelValue! : innerValue.value))
+    // React value takes priority; modelValue keeps the existing Vue binding.
+    const isControlled = computed(() => props.value !== undefined || props.modelValue !== undefined)
+    const currentValue = computed(() => props.value !== undefined ? String(props.value) : props.modelValue ?? innerValue.value)
     let composing = false
     let markedText = ""
     let latestFullValue = currentValue.value
@@ -263,7 +271,7 @@ export const Input = defineComponent({
         <div {...forwardAttrs} testId={props.testId} style={style}>
           {props.prefix || slots.prefix ? (
             <div style={{ ...affixStyle, marginRight: 6 }}>
-              {slots.prefix ? slots.prefix() : <text>{String(props.prefix)}</text>}
+              {slots.prefix ? slots.prefix() : renderContent(props.prefix)}
             </div>
           ) : null}
           <input
@@ -271,8 +279,9 @@ export const Input = defineComponent({
             value={value}
             placeholder={props.placeholder}
             placeholderColor={props.placeholderColor}
-            readOnly={props.readonly || props.disabled}
-            tabIndex={props.disabled ? -1 : 0}
+            readOnly={props.readOnly || props.readonly || props.disabled}
+            tabIndex={props.disabled ? -1 : props.tabIndex}
+            autoFocus={props.autoFocus && !props.disabled}
             theme={inputTheme}
             valueRevision={revision.value}
             onChange={handleChange}
@@ -282,6 +291,8 @@ export const Input = defineComponent({
             onSubmit={props.disabled ? undefined : props.onSubmit}
             onFocus={handleFocus}
             onBlur={handleBlur}
+            onKeyDown={props.onKeyDown}
+            onKeyUp={props.onKeyUp}
             style={inputStyle}
           />
           {showClear ? (
@@ -313,7 +324,7 @@ export const Input = defineComponent({
           ) : null}
           {props.suffix || slots.suffix ? (
             <div style={{ ...affixStyle, marginLeft: 6 }}>
-              {slots.suffix ? slots.suffix() : <text>{String(props.suffix)}</text>}
+              {slots.suffix ? slots.suffix() : renderContent(props.suffix)}
             </div>
           ) : null}
         </div>
@@ -323,3 +334,7 @@ export const Input = defineComponent({
 })
 
 export default Input
+
+/** Native public props inferred from the component. Rich children use Vue
+ * slots; event callbacks carry native values/payloads, not browser events. */
+export type InputProps = Omit<InstanceType<typeof Input>["$props"], "style"> & { style?: StyleDesc }
