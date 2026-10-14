@@ -15,6 +15,19 @@ const highlighted = (host: ReturnType<typeof mountHost>) => host.all().filter(no
 ).map(node => node.props.testId)
 
 describe("Select Home/End mounted option navigation", () => {
+  it("respects explicit popup placement overrides", async () => {
+    const host = mountHost(defineComponent(() => () => h(AnimalSelect, {
+      testId: "custom-placement", side: "right", align: "center", sideOffset: 6,
+      options: [{ key: "island", label: "小岛" }],
+    })))
+    hosts.push(host)
+    await host.fire("custom-placement", "click")
+    const layer = host.find(node => node.type === "anchored")
+    expect(layer.props.side).toBe("right")
+    expect(layer.props.align).toBe("center")
+    expect(layer.props.gap).toBe(6)
+  })
+
   it("ignores closed Home/End and jumps to enabled edges from trigger or popup without selecting", async () => {
     const change = vi.fn()
     const host = mountHost(defineComponent(() => () => h(Select, { defaultValue: "middle", onValueChange: change }, {
@@ -97,9 +110,9 @@ describe("Select Home/End mounted option navigation", () => {
     hosts.push(host)
     await host.fire("animal", "click")
     const layer = host.find(node => node.type === "anchored")
-    expect(layer.props.side).toBe("right")
-    expect(layer.props.align).toBe("center")
-    expect(layer.props.gap).toBe(6)
+    expect(layer.props.side).toBe("top")
+    expect(layer.props.align).toBe("start")
+    expect(layer.props.gap).toBe(8)
     const content = host.find(node => typeof node.props.onKeyDown === "function" && node.props.autoFocus === true)
     await host.fire(content, "keyDown", { key: "end" })
     await host.fire(content, "keyDown", { key: "enter" })

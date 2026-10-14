@@ -35,8 +35,8 @@ use GPUI deferred anchored layers. `Form.useForm()` / `useForm()` return `[form]
 Upload selects actual filesystem paths through the native panel and accepts OS
 file drops. Its File values come from `node:buffer`, not browser input elements.
 
-Select accepts native `side`, `align` and `sideOffset` props (defaults: right,
-center, 6px). Pagination uses top, start and 8px for its page-size popup.
+Select accepts native `side`, `align` and `sideOffset` props (defaults: top,
+start, 8px). Pagination uses the same placement for its page-size popup.
 
 ## Fidelity audit
 
@@ -76,7 +76,7 @@ using each text size.
 | Progress | Clamped percent, track/fill/info, measured numeric width animation | Inset track shadow omitted; fill is measured after first paint and re-tweens on resize |
 | Radio | Group values, options/sizes/disabled, original check artwork and roving keyboard focus | Check splash/drawing and colour transitions omitted |
 | Rate | Whole stars with original face artwork, hover preview, clear, readonly and keyboard | Pop/splash/lift omitted; half-stars/custom characters are absent in the original Vue source too |
-| Select | Native mounted item registry, disabled-aware arrows/Home/End, controlled/default values, white trigger, yellow menu, amber bar and arrow | No hover arrow entrance animation; row-width layout differs from inline-block |
+| Select | Native mounted item registry, disabled-aware arrows/Home/End, controlled/default values, white trigger, yellow menu, amber bar and arrow | Popup opens above by default instead of the original right-side placement; side/align are configurable; no hover arrow entrance animation; row-width layout differs from inline-block |
 | Skeleton | Text/rect/circle/paragraph plus Button/Input/Avatar companions and sizes | Opacity breathing replaces the moving shimmer band |
 | Switch | Controlled/default state, sizes/labels/disabled/loading, keyboard and numeric handle motion | No inset shadow; dot loader replaces rotating ring; slot label width is estimated |
 | Table | Columns/data, nested fields, header/cell slots, row render/events, stripes, loading/empty and client paging | Flex replaces HTML table layout; fixed columns unavailable; header scrolls with body; use one scroll owner |
@@ -91,7 +91,7 @@ using each text size.
 
 ## Verification and limits
 
-The package has **281 passing behavior tests** across eighteen files, plus four
+The package has **282 passing behavior tests** across eighteen files, plus four
 platform-dependent Title layout and native IME tests. The behavior tests run on Linux through the **real Vue custom renderer, GPUIV
 mutation protocol and event registry**, backed by a test native facade. They
 cover state transitions, native key names, controlled clearing, async rules,
@@ -108,6 +108,8 @@ made. A focused gallery type check is available with
 The Pagination popup production regression checks outer-edge alignment and the
 8px gap before and during scrolling, after resize, and after window-edge fitting,
 then clicks an option and checks the selected label, callbacks and dismissal.
+The gallery Select regression drives the actual “选择目的地” control, checks its
+above-trigger alignment before and during scrolling, and selects “森林”.
 
 ## Scroll performance
 

@@ -2,6 +2,7 @@
  * Platform headless Select owns the mounted-item registry, dismissal and focus.
  * Original white trigger, yellow 28px popup, amber selection bar and hover
  * arrow are retained. The arrow changes direction without CSS rotation.
+ * Popup defaults to above/start with an 8px gap; side/align remain configurable.
  * Home/End follow the platform's enabled mounted items; fade applies to popup children.
  * Native layout fills a row by default; pass a width to shrink the trigger.
  */
@@ -92,10 +93,10 @@ export const Select = defineComponent({
     placeholder: { type: String, default: "请选择" },
     disabled: { type: Boolean, default: false },
     size: { type: String as PropType<SelectSize>, default: "middle" },
-    /** 弹层相对触发器的位置；普通 Select 保持原版右侧居中。 */
-    side: { type: String as PropType<FloatingSide>, default: "right" },
-    align: { type: String as PropType<FloatingAlign>, default: "center" },
-    sideOffset: { type: Number, default: 6 },
+    /** 弹层相对触发器的位置；默认上方弹出，与触发器左边缘对齐。 */
+    side: { type: String as PropType<FloatingSide>, default: "top" },
+    align: { type: String as PropType<FloatingAlign>, default: "start" },
+    sideOffset: { type: Number, default: 8 },
     /** 对外暴露的无障碍标签（无可见 label 时使用） */
     ariaLabel: { type: String, default: undefined },
     /** 关联外部可见 label 的 id */
