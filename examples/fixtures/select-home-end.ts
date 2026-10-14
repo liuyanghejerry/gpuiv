@@ -17,7 +17,9 @@ const App = defineComponent(() => () => h('div', { style: { width: '100%', heigh
       }))),
   ] }),
 ]))
-const app = createApp(App, { width: 400, height: 350, focus: false, show: false })
+// Fresh automation waits for ordinary window paints, which hidden Windows
+// windows do not deliver. focus:false shows this fixture without activation.
+const app = createApp(App, { width: 400, height: 350, focus: false, show: true })
 const renderer = app.renderer as typeof app.renderer & LiveAutomationRenderer
 let exitCode = 0
 try {

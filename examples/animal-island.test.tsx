@@ -106,7 +106,10 @@ describeNative("animal-island gallery", () => {
     const scroll = await automation.getByTestId("gallery-scroll").bounds()
     const sidebar = await automation.getByTestId("gallery-sidebar").bounds()
     const navigation = await automation.getByTestId("gallery-nav-scroll").bounds()
-    expect(root.height).toBeCloseTo(459, 1)
+    // GPUI may constrain the requested offscreen window to the display bounds.
+    const viewport = app.renderer.getWindowSize()
+    expect(root.width).toBeCloseTo(viewport.width, 1)
+    expect(root.height).toBeCloseTo(viewport.height, 1)
     // Closed overlays leave Vue Fragment anchors in the root. Those empty
     // text nodes must not consume line height and shorten the scroll viewport.
     expect(scroll.y + scroll.height).toBeCloseTo(root.y + root.height, 1)

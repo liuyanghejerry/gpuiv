@@ -20,7 +20,8 @@ const App = defineComponent(() => () => h('div', {
   onShowSizeChange: (page: number, size: number) => sizeChanges.push([page, size]),
 })))))
 
-const app = createApp(App, { width: 760, height: 600, focus: false, show: false })
+// A visible, nonactivating window receives ordinary native paint frames.
+const app = createApp(App, { width: 760, height: 600, focus: false, show: true })
 const renderer = app.renderer as typeof app.renderer & LiveAutomationRenderer
 const near = (actual: number, expected: number, message: string) =>
   assert(Math.abs(actual - expected) < 1, `${message}: ${actual} != ${expected}`)

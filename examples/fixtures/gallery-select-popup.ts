@@ -5,7 +5,8 @@ import { createApp, resetApp, type ElementBounds, type HostNode } from '@gpuiv/v
 import { connectTest, liveRendererAsTest, type LiveAutomationRenderer } from '@gpuiv/vue/automation'
 import { App } from '../animal-island'
 
-const app = createApp(App, { width: 1120, height: 600, focus: false, show: false })
+// A visible, nonactivating window receives ordinary native paint frames.
+const app = createApp(App, { width: 1120, height: 600, focus: false, show: true })
 const renderer = app.renderer as typeof app.renderer & LiveAutomationRenderer
 const walk = (node: HostNode): HostNode[] => [node, ...node.children.flatMap(walk)]
 const all = (): HostNode[] => walk(app.container)

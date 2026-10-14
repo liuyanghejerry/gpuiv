@@ -69,7 +69,9 @@ const App = defineComponent({
 
 let exitCode = 0
 try {
-  const app = createApp(App, { width: 680, height: 320, focus: false, show: false })
+  // Fresh automation waits for ordinary window paints, which hidden Windows
+  // windows do not deliver. focus:false shows this fixture without activation.
+  const app = createApp(App, { width: 680, height: 320, focus: false, show: true })
   const live = app.renderer as typeof app.renderer & LiveAutomationRenderer
   const all = (node: HostNode): HostNode[] => [node, ...node.children.flatMap(all)]
   const bounds = (id: string): ElementBounds => {

@@ -7,7 +7,9 @@ const top = ref(120)
 const App = defineComponent(() => () => h('div', { style: { width: '100%', height: '100%' } }, [
   h('div', { testId: 'measured', style: { position: 'absolute', left: 80, top: top.value, width: 200, height: 80, backgroundColor: '#ffeea0' } }),
 ]))
-const app = createApp(App, { width: 600, height: 400, focus: false, show: false })
+// Fresh automation waits for ordinary window paints, which hidden Windows
+// windows do not deliver. focus:false shows this fixture without activation.
+const app = createApp(App, { width: 600, height: 400, focus: false, show: true })
 const renderer = app.renderer
 const find = (node: HostNode): HostNode | undefined => node.props.testId === 'measured' ? node : node.children.map(find).find(Boolean)
 const id = find(app.container)!.id!

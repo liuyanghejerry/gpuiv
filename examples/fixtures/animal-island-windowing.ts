@@ -5,7 +5,8 @@ import { createApp, resetApp, type ElementBounds, type HostNode } from '@gpuiv/v
 import { connectTest, liveRendererAsTest, type LiveAutomationRenderer } from '@gpuiv/vue/automation'
 import { App } from '../animal-island'
 
-const app = createApp(App, { width: 1120, height: 820, focus: false, show: false })
+// A visible, nonactivating window receives ordinary native paint frames.
+const app = createApp(App, { width: 1120, height: 820, focus: false, show: true })
 const renderer = app.renderer as typeof app.renderer & LiveAutomationRenderer
 const walk = (node: HostNode): HostNode[] => [node, ...node.children.flatMap(walk)]
 const all = (): HostNode[] => walk(app.container)
@@ -103,7 +104,7 @@ try {
   const resized = await snapshot('resized')
   near(resized.root.width, 840, 'Root width follows window resize')
   near(resized.root.height, 640, 'Root height follows window resize')
-  near(resized.showcase.width, initial.showcase.width - 280, 'The example card fills the remaining main-column width')
+  near(resized.showcase.width, initial.showcase.width + resized.root.width - initial.root.width, 'The example card fills the remaining main-column width')
 
   await choose('input')
   const controlled = all().find(node => node.type === 'input' && node.props.placeholder === '说点什么…')!

@@ -73,6 +73,8 @@ try {
   await search.press("enter")
   await until(() => selected.value === "otter" && !find("search-popup"), "Native Enter selects the filtered resident")
   assert(searches.includes("水") && searches.includes(""))
+  await search.hover()
+  await driver.getByTestId("search-clear").waitFor()
   await driver.getByTestId("search-clear").click()
   await until(() => selected.value === "", "Clicking clear must clear the controlled native model")
   await search.fill("不存在")

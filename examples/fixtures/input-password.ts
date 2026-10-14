@@ -5,10 +5,12 @@ import { createApp, resetApp, type EventPayload, type HostNode } from '@gpuiv/vu
 import { connectTest, liveRendererAsTest } from '@gpuiv/vue/automation'
 
 const value = ref('a😀中é'), mode = ref('password')
+// Fresh automation waits for ordinary window paints, which hidden Windows
+// windows do not deliver. focus:false shows this fixture without activation.
 const app = createApp(defineComponent(() => () => h('input', {
   value: value.value, type: mode.value, placeholder: '密码', placeholderColor: '#c4b89e', testId: 'password',
   onChange: (event: EventPayload) => { value.value = event.value ?? '' }, style: { width: 320, height: 40, fontSize: 20 },
-})), { width: 400, height: 180, focus: false, show: false })
+})), { width: 400, height: 180, focus: false, show: true })
 const renderer = app.renderer as typeof app.renderer & { getPaintedText(): string[], readClipboardText(): string | null,
   writeClipboardText(text: string): void }
 const find = (node: HostNode): HostNode | undefined => node.props.testId === 'password' ? node : node.children.map(find).find(Boolean)

@@ -8,12 +8,14 @@ import { Input } from '@gpuiv/animal-island'
 const value = ref(''), maxLength = ref(1)
 const correctedValue = ref(''), revision = ref(0)
 const nativeValues: string[] = [], errors: unknown[] = []
+// Fresh automation waits for ordinary window paints, which hidden Windows
+// windows do not deliver. focus:false shows this fixture without activation.
 const app = createApp(defineComponent(() => () => h('div', { style: { width: 320, display: 'flex', flexDirection: 'column', gap: 20 } }, [
   h(Input, { testId: 'limited', modelValue: value.value, maxLength: maxLength.value,
     'onUpdate:modelValue': (next: string) => { value.value = next } }),
   h('input', { testId: 'revision', value: correctedValue.value, valueRevision: revision.value,
     onChange: (event: EventPayload) => { nativeValues.push(event.value ?? '') }, style: { width: 300, height: 40 } }),
-])), { width: 400, height: 200, focus: false, show: false, errorOverlay: false,
+])), { width: 400, height: 200, focus: false, show: true, errorOverlay: false,
   onRuntimeError: (error: unknown) => { errors.push(error) } })
 const settle = async () => { await nextTick(); await Bun.sleep(60) }
 let exitCode = 0
