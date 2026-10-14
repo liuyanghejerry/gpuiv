@@ -35,6 +35,9 @@ use GPUI deferred anchored layers. `Form.useForm()` / `useForm()` return `[form]
 Upload selects actual filesystem paths through the native panel and accepts OS
 file drops. Its File values come from `node:buffer`, not browser input elements.
 
+Select accepts native `side`, `align` and `sideOffset` props (defaults: right,
+center, 6px). Pagination uses top, start and 8px for its page-size popup.
+
 ## Fidelity audit
 
 This is a **source/API audit with behavior tests**, not a screenshot similarity
@@ -69,7 +72,7 @@ using each text size.
 | Loading | Original night cover, 50 moving snowflakes, tip, delay/fade/show lifecycle | No flake rotation; a uniform vignette replaces radial shading; deferred window overlay uses numeric priority and a 25fps opacity phase |
 | Modal | Original cream panel, mask, variant padding/footer, Typewriter replay and focus restore | Game silhouette is a rounded rectangle; scale entry is opacity; native Tab trap is approximate; mask has no fade |
 | Notification | Imperative store, six positions, types, icons, durations and dismissal | onClose runs when closing starts; native motion replaces CSS; mount the container explicitly; ordinary notification layers cannot paint above deferred dialogs |
-| Pagination | Original ghost circles, orange/teal palettes, page/size/jumper and events | Size menu reuses side-opening Select; colour swaps are immediate; ellipsis glyph differs |
+| Pagination | Original ghost circles, orange/teal palettes, page/size/jumper and events; page-size menu opens above with left alignment and an 8px gap | Trigger uses a fixed native width; colour swaps are immediate; ellipsis glyph differs |
 | Progress | Clamped percent, track/fill/info, measured numeric width animation | Inset track shadow omitted; fill is measured after first paint and re-tweens on resize |
 | Radio | Group values, options/sizes/disabled, original check artwork and roving keyboard focus | Check splash/drawing and colour transitions omitted |
 | Rate | Whole stars with original face artwork, hover preview, clear, readonly and keyboard | Pop/splash/lift omitted; half-stars/custom characters are absent in the original Vue source too |
@@ -88,7 +91,7 @@ using each text size.
 
 ## Verification and limits
 
-The package has **280 passing behavior tests** across eighteen files, plus four
+The package has **281 passing behavior tests** across eighteen files, plus four
 platform-dependent Title layout and native IME tests. The behavior tests run on Linux through the **real Vue custom renderer, GPUIV
 mutation protocol and event registry**, backed by a test native facade. They
 cover state transitions, native key names, controlled clearing, async rules,
@@ -101,6 +104,10 @@ headless image readback for this pinned GPUI build, so those tests skip there.
 A hidden Linux native window also mounts and reports real bounds for the seven newly ported families; its carousel occupies one 180px slide, rather than stacking inactive pages. Production fixtures verify image events for data/local/HTTP sources, shared resources in two windows, stale-source/unmount rejection, Image fades/error artwork, single-axis frame/image geometry, Avatar fallbacks, font loading/weight selection, password editing/cut protection and Input length corrections to the actual native buffer. The current release addon also verifies that the gallery scroll viewport fills the window below its header, empty overlay anchors have zero height, and centered floating layers stay aligned on all four sides after scrolling. Use a release build from the current source: the older npm 0.5.0 addon retains empty text line heights and the previous floating-center calculation, and lacks password/image lifecycle support. Native screenshot comparison remains pending; no claim of pixel identity is
 made. A focused gallery type check is available with
 `tsc --noEmit -p examples/tsconfig.animal-island.json` from the repository root.
+
+The Pagination popup production regression checks outer-edge alignment and the
+8px gap before and during scrolling, after resize, and after window-edge fitting,
+then clicks an option and checks the selected label, callbacks and dismissal.
 
 ## Scroll performance
 

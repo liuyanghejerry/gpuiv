@@ -8,6 +8,17 @@ afterEach(() => hosts.splice(0).forEach((host) => host.unmount()))
 function text(node: HostNode): string { return node.text + node.children.map(text).join("") }
 
 describe("Pagination", () => {
+  it("opens the page-size menu above its trigger with the original left alignment and gap", async () => {
+    const host = mountHost(defineComponent(() => () => h(Pagination, { testId: "pager", total: 100, showSizeChanger: true })))
+    hosts.push(host)
+    await host.fire("pager-size-changer", "click")
+    const layer = host.find(node => node.type === "anchored")
+    expect(layer.props.side).toBe("top")
+    expect(layer.props.align).toBe("start")
+    expect(layer.props.gap).toBe(8)
+    expect(host.find(node => node.props.testId === "pager-size-changer-popup")).toBeDefined()
+  })
+
   it("emits change for an uncontrolled size update and clamps the page", async () => {
     const onChange = vi.fn(), onShowSizeChange = vi.fn()
     const host = mountHost(defineComponent({ setup: () => () => h(Pagination, { total: 100, defaultCurrent: 9, showSizeChanger: true, onChange, onShowSizeChange }) }))

@@ -1,7 +1,8 @@
 /** Pagination — ported from animal-island-vue Pagination.vue (MIT), #164.
  * Keeps paging/size/jump events and the original transparent circular buttons.
  * Colour transitions are immediate. Page-size selection reuses the native
- * anchored Select; its popup opens to the right rather than the web menu's top.
+ * anchored Select; the page-size menu opens above and aligns to the left edge,
+ * with the original 8px gap. GPUI keeps the deferred panel inside the window.
  * Native input needs valueRevision when rejecting non-digit edits.
  */
 
@@ -365,7 +366,11 @@ export const Pagination = defineComponent({
           {renderEdgeButton("next")}
           {props.showSizeChanger ? (
             <Select
+              testId={props.testId ? `${props.testId}-size-changer` : undefined}
               size="small"
+              side="top"
+              align="start"
+              sideOffset={8}
               value={String(pageSize.value)}
               options={sizeOptions.value.map((n) => ({ key: String(n), label: `${n} 条/页` }))}
               disabled={props.disabled}

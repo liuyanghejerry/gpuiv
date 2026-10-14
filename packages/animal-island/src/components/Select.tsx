@@ -13,6 +13,8 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
+  type FloatingAlign,
+  type FloatingSide,
   type SelectItemState,
   type SelectTriggerState,
   type StyleDesc,
@@ -34,6 +36,9 @@ export interface SelectProps {
   placeholder?: string
   disabled?: boolean
   size?: SelectSize
+  side?: FloatingSide
+  align?: FloatingAlign
+  sideOffset?: number
   ariaLabel?: string
   ariaLabelledBy?: string
   onChange?: (value: string) => void
@@ -87,6 +92,10 @@ export const Select = defineComponent({
     placeholder: { type: String, default: "请选择" },
     disabled: { type: Boolean, default: false },
     size: { type: String as PropType<SelectSize>, default: "middle" },
+    /** 弹层相对触发器的位置；普通 Select 保持原版右侧居中。 */
+    side: { type: String as PropType<FloatingSide>, default: "right" },
+    align: { type: String as PropType<FloatingAlign>, default: "center" },
+    sideOffset: { type: Number, default: 6 },
     /** 对外暴露的无障碍标签（无可见 label 时使用） */
     ariaLabel: { type: String, default: undefined },
     /** 关联外部可见 label 的 id */
@@ -132,8 +141,6 @@ export const Select = defineComponent({
 
       const triggerStyle = (state: SelectTriggerState): StyleDesc => {
         const style: StyleDesc = {
-          // position:relative 让内嵌的 SelectContent 锚定到触发器本身
-          position: "relative",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -223,29 +230,33 @@ export const Select = defineComponent({
           }}
           style={userStyle as StyleDesc | undefined}
         >
-          <SelectTrigger {...triggerAttrs} style={triggerStyle}>
-            <text
-              style={{
-                color: hasValue ? c.warmSoft : PLACEHOLDER_COLOR,
-                fontWeight: hasValue ? 600 : 400,
-                whiteSpace: "nowrap",
-                pointerEvents: "none",
-              }}
-            >
-              {currentLabel.value}
-            </text>
-            <svg
-              aria-hidden={true}
-              src={openState.value ? chevronUpUrl : chevronDownUrl}
-              style={{
-                width: 12,
-                height: 12,
-                flexShrink: 0,
-                color: openState.value && !props.disabled ? c.primary : PLACEHOLDER_COLOR,
-                pointerEvents: "none",
-              }}
-            />
-            <SelectContent {...{ role: "listbox", testId: props.testId ? `${props.testId}-popup` : undefined }} side="right" align="center" sideOffset={6} style={panelStyle}>
+          {/* Keep the positioning box outside the trigger's border. Absolute
+              children inside the trigger anchor to its inner border edge. */}
+          <div style={{ position: "relative", width: "100%", minWidth: 140, height: g.height }}>
+            <SelectTrigger {...triggerAttrs} style={triggerStyle}>
+              <text
+                style={{
+                  color: hasValue ? c.warmSoft : PLACEHOLDER_COLOR,
+                  fontWeight: hasValue ? 600 : 400,
+                  whiteSpace: "nowrap",
+                  pointerEvents: "none",
+                }}
+              >
+                {currentLabel.value}
+              </text>
+              <svg
+                aria-hidden={true}
+                src={openState.value ? chevronUpUrl : chevronDownUrl}
+                style={{
+                  width: 12,
+                  height: 12,
+                  flexShrink: 0,
+                  color: openState.value && !props.disabled ? c.primary : PLACEHOLDER_COLOR,
+                  pointerEvents: "none",
+                }}
+              />
+            </SelectTrigger>
+            <SelectContent {...{ role: "listbox", testId: props.testId ? `${props.testId}-popup` : undefined }} side={props.side} align={props.align} sideOffset={props.sideOffset} style={panelStyle}>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease }}>
                 {props.options.map((option) => (
                   <SelectItem key={option.key} {...{ role: "option", "aria-selected": currentValue.value === option.key, testId: props.testId ? `${props.testId}-option-${option.key}` : undefined }} value={option.key} style={itemStyle}>
@@ -270,7 +281,7 @@ export const Select = defineComponent({
                 ))}
               </motion.div>
             </SelectContent>
-          </SelectTrigger>
+          </div>
         </PlatformSelect>
       )
     }

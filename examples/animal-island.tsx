@@ -580,6 +580,7 @@ const App = defineComponent({
             <Section title="Pagination 分页" note="双配色 · 条数切换 · 快速跳页">
               <Pagination total={256} current={page.value} onChange={(p: number) => (page.value = p)} showTotal />
               <Pagination
+                testId="gallery-pagination"
                 total={512}
                 defaultCurrent={3}
                 variant="teal"
