@@ -66,7 +66,7 @@
 | Table | 列/表头/render/插槽、rows/key、stripe/loading/empty、scroll/client pagination；修复 pagination.onChange 被吞掉；PaginationProps 补齐回调类型。 | 使用 flex 而非 HTML table；无 sticky header；fixed 列在 React 源码同样未实现。纵向滚动需置于其他滚动容器之外。 |
 | Pagination | 受控/default 页码、pageSize、尺寸选择、jumper、总数、variants、change/showSizeChange；尺寸菜单沿用上方左对齐定位。 | 颜色直接切换；输入通过原生 valueRevision 保持受控同步。 |
 | Typewriter | speed、trigger、autoPlay、onDone、保留节点结构；原生组件默认插槽可嵌套逐字裁剪，保留组件状态、具名插槽和事件；文本总长度变化重播；autoPlay=false 显示全文并触发完成；额外 showCursor 保留。 | 与 React 一样按 UTF-16 字符截取；长度未改变的内容更新不重新播放；组件内部未通过默认插槽暴露的文本不参与裁剪。 |
-| Image | frame/color、native load/error、单轴自然比例、preview；默认三层阴影按原顺序绘制；stamp 实际齿孔按 16px 节距及 5px 半径适配任意比例，暖纸和半色调纹理。 | saturation/contrast、stamp 的两层 alpha 轮廓 drop-shadow 滤镜及文字阴影未完全还原；lazy 仍由原生后台立即解码。 |
+| Image | variant/color、native load/error、单轴自然比例、preview；默认三层阴影按原顺序绘制；stamp 实际齿孔按 16px 节距及 5px 半径适配任意比例，暖纸和半色调纹理。 | saturation/contrast、stamp 的两层 alpha 轮廓 drop-shadow 滤镜及文字阴影未完全还原；lazy 仍由原生后台立即解码。 |
 | Carousel | 受控/default、键盘、autoplay、焦点暂停、控件；18px 和 opacity 幻灯片入场。 | 非当前页卸载以移除 native focus/event hosts，不像 React 保留隐藏页的局部状态；没有同时保留旧页进行交叉淡出。 |
 | Time | 实时时/分、星期/月日、冒号闪烁、透明度入场、原生 attrs。 | 闪烁遵循墙钟半秒而非 CSS 挂载相位；字距、tabular-nums 与 aria-live 元数据未全部映射。 |
 | Countdown | number/Date 目标；DD/HH/mm/ss 与字面量；prefix；尺寸/variant/bordered；250ms change、finish 一次；20 面数字条始终向下滚动，跨循环落到等价面；island 真虚线。 | 固定宽度数字格代替 tabular-nums；aria-valuetext 代替浏览器 sr-only 文本。 |

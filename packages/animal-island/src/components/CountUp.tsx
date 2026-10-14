@@ -26,7 +26,7 @@ export interface CountUpProps {
   prefix?: VNodeChild; suffix?: VNodeChild; size?: CountUpSize; variant?: CountUpVariant; bordered?: boolean
   celebrate?: boolean | CountUpCelebrateOptions; onUpdate?: (value: number) => void
   onComplete?: (elapsedTime: number) => void | CountUpCompleteResult
-  children?: (state: CountUpRenderState) => VNodeChild; testId?: string
+  children?: (state: CountUpRenderState) => VNodeChild; style?: StyleDesc; testId?: string
 }
 
 const easings: Record<CountUpEasingName, CountUpEasingFunction> = {
