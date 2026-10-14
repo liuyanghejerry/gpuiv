@@ -1,6 +1,6 @@
 import { onBeforeUnmount, onMounted, shallowRef, type Ref } from "vue"
 import { useGpuix } from "./use-gpuix.js"
-import type { EdgeInsets, NativeWindowInsets } from "../types.js"
+import type { EdgeInsets, NativeRenderer, NativeWindowInsets } from "../types.js"
 
 export interface WindowSize {
   width: number
@@ -27,8 +27,19 @@ export interface WindowSizeOptions {
   intervalMs?: number | false
 }
 
+interface WindowSizePoll {
+  latest: WindowSize
+  subscribers: Set<Ref<WindowSize>>
+  timer: ReturnType<typeof setInterval> | null
+}
+
+// A window has one size. Components with the same sampling cadence share a
+// native query and Vue flush, while retaining independent writable refs.
+const sizePolls = new WeakMap<NativeRenderer, Map<number, WindowSizePoll>>()
+
 /**
- * The current window size, sampled every 100ms by default.
+ * The current window size, sampled every 100ms by default. Subscribers on the
+ * same renderer and interval share one poll, including the initial reading.
  *
  * It polls rather than reading once, for the same reason `useWindowInsets`
  * does: the first read can land before the platform window has a size, and a
@@ -38,8 +49,54 @@ export interface WindowSizeOptions {
  */
 export function useWindowSize(options: WindowSizeOptions = {}): Ref<WindowSize> {
   const { renderer } = useGpuix()
-  const size = shallowRef<WindowSize>(readWindowSize(renderer))
   const intervalMs = options.intervalMs ?? 100
+  if (renderer?.getWindowSize && intervalMs !== false) {
+    const cadence = Math.max(16, intervalMs)
+    let groups = sizePolls.get(renderer)
+    if (!groups) {
+      groups = new Map()
+      sizePolls.set(renderer, groups)
+    }
+    let poll = groups.get(cadence)
+    if (!poll) {
+      poll = { latest: readWindowSize(renderer), subscribers: new Set(), timer: null }
+      groups.set(cadence, poll)
+    }
+    const group = poll
+    const size = shallowRef<WindowSize>({ ...group.latest })
+    const update = () => {
+      group.latest = readWindowSize(renderer)
+      for (const subscriber of group.subscribers) {
+        if (subscriber.value.width !== group.latest.width || subscriber.value.height !== group.latest.height) {
+          subscriber.value = { ...group.latest }
+        }
+      }
+    }
+    onMounted(() => {
+      // The first mount retries a setup-time fallback; further mounts reuse
+      // the same reading and do not serialize another UI-thread query.
+      group.subscribers.add(size)
+      if (group.timer === null) {
+        groups.set(cadence, group)
+        update()
+        group.timer = setInterval(update, cadence)
+      } else {
+        if (size.value.width !== group.latest.width || size.value.height !== group.latest.height) {
+          size.value = { ...group.latest }
+        }
+      }
+    })
+    onBeforeUnmount(() => {
+      group.subscribers.delete(size)
+      if (group.subscribers.size === 0) {
+        if (group.timer !== null) clearInterval(group.timer)
+        group.timer = null
+        if (groups.get(cadence) === group) groups.delete(cadence)
+      }
+    })
+    return size
+  }
+  const size = shallowRef<WindowSize>(readWindowSize(renderer))
   let timer: ReturnType<typeof setInterval> | null = null
 
   onMounted(() => {
@@ -50,7 +107,7 @@ export function useWindowSize(options: WindowSizeOptions = {}): Ref<WindowSize> 
       }
     }
     update()
-    if (intervalMs === false) return
+    if (intervalMs === false || !renderer?.getWindowSize) return
     timer = setInterval(update, Math.max(16, intervalMs))
   })
 

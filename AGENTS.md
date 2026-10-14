@@ -85,6 +85,12 @@ Full diagrams and explanation: [Architecture](./docs/architecture.md#architectur
   `theme.ts` are the design-token layer (`provideTheme`/`useTheme`, oklch
   light/dark maps, `mix`/`withAlpha` for `color-mix`), `atoms/` the shared
   building blocks, `primitives/` the components. Gallery: `examples/beautiful-ui.tsx`
+- `packages/animal-island` — `@gpuiv/animal-island` (private, not published):
+  animal-island-vue components ported to GPUIV (issue #164). `tokens.ts` maps
+  the original Less variables (cream/warm-brown palette, hard-press shadow
+  structs), `components/` all 39 original component families, `icons/` the 101-icon
+  data set, `assets/scene/` the bundled scene SVGs. Each file header lists
+  the native adaptations. [Fidelity audit](packages/animal-island/README.md); gallery: `examples/animal-island.tsx`
 - `examples/` — chat.tsx (the flagship) and its tests; `scripts/` — dev.ts,
   screenshots.ts; `docs/` — design plans, agents/ deep-dives, upstream/ ledger;
   `zed/` — pinned GPUI fork submodule

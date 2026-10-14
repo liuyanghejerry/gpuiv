@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use gpui::{
     actions, div, fill, point, prelude::*, px, relative, size, App, Bounds, ClipboardEntry,
     ClipboardItem, Context, CursorStyle, DispatchPhase, ElementInputHandler, Entity,
-    EntityInputHandler, Font, FocusHandle, FontStyle, FontWeight, GlobalElementId, KeyBinding,
+    EntityInputHandler, FocusHandle, Font, FontStyle, FontWeight, GlobalElementId, KeyBinding,
     LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels, Point,
     ScrollWheelEvent, SharedString, StrikethroughStyle, Style, Task, TextRun, TextStyle,
     UTF16Selection, UnderlineStyle, Window, WrappedLine,
@@ -149,8 +149,79 @@ fn utf16_offset_to_utf8(text: &str, offset: usize) -> usize {
     utf8_offset
 }
 
+/// Passwords retain the real buffer for editing and GPUI's UTF-16 IME
+/// protocol. Only the shaped display changes, with one bullet per Unicode
+/// scalar and a bijection between real/display UTF-8 character boundaries.
+/// Keyboard grapheme movement still uses the real buffer (including ZWJ and
+/// combining sequences); hit testing and candidate-window geometry map through
+/// this projection rather than passing bullet byte offsets to the editor.
+#[derive(Clone, Debug)]
+struct PasswordProjection {
+    display: SharedString,
+    boundaries: Vec<(usize, usize)>,
+}
+
+impl PasswordProjection {
+    fn new(content: &str) -> Self {
+        let mut display = String::new();
+        let mut boundaries = Vec::new();
+        for (index, _) in content.char_indices() {
+            boundaries.push((index, display.len()));
+            display.push('•');
+        }
+        boundaries.push((content.len(), display.len()));
+        Self {
+            display: display.into(),
+            boundaries,
+        }
+    }
+
+    fn to_display(&self, index: usize) -> usize {
+        let position = self
+            .boundaries
+            .partition_point(|(content, _)| *content <= index);
+        self.boundaries[position.saturating_sub(1)].1
+    }
+
+    fn to_content(&self, index: usize) -> usize {
+        let position = self
+            .boundaries
+            .partition_point(|(_, display)| *display <= index);
+        self.boundaries[position.saturating_sub(1)].0
+    }
+
+    fn utf16_to_display(&self, content: &str, offset: usize) -> usize {
+        // Each displayed bullet is one UTF-16 unit but three UTF-8 bytes.
+        self.to_display(utf16_offset_to_utf8(content, offset)) / '•'.len_utf8()
+    }
+}
+
 fn single_line_text(text: &str) -> String {
     text.replace("\r\n", " ").replace(['\r', '\n'], " ")
+}
+
+/// A revision is an explicit model correction, even when Vue coalesces it
+/// with a value that matches an earlier pending native edit. Ordinary echoes
+/// must still leave native selection/IME marking untouched.
+fn model_value_needs_update(
+    pending: &mut VecDeque<String>,
+    value: &str,
+    prop_changed: bool,
+    revision_changed: bool,
+) -> bool {
+    if revision_changed {
+        pending.clear();
+        return true;
+    }
+    if !prop_changed {
+        return false;
+    }
+    if let Some(index) = pending.iter().rposition(|pending| pending == value) {
+        pending.drain(..=index);
+        return false;
+    }
+    pending.clear();
+    true
 }
 
 pub fn init(cx: &mut App) {
@@ -269,6 +340,8 @@ struct TextEditorElement {
     multiline: bool,
     value: String,
     placeholder: String,
+    password: bool,
+    placeholder_color: Option<gpui::Hsla>,
     read_only: bool,
     min_rows: usize,
     max_rows: usize,
@@ -289,6 +362,8 @@ impl TextEditorElement {
             multiline,
             value: String::new(),
             placeholder: String::new(),
+            password: false,
+            placeholder_color: None,
             read_only: false,
             min_rows: 1,
             max_rows: if multiline { 10 } else { 1 },
@@ -332,6 +407,8 @@ impl CustomElement for TextEditorElement {
             .get_or_insert_with(|| {
                 let value = self.value.clone();
                 let placeholder = self.placeholder.clone();
+                let password = self.password;
+                let placeholder_color = self.placeholder_color;
                 let multiline = self.multiline;
                 let read_only = self.read_only;
                 let min_rows = self.min_rows;
@@ -356,6 +433,9 @@ impl CustomElement for TextEditorElement {
                     focus_handle: state_focus_handle,
                     content: value,
                     placeholder: placeholder.into(),
+                    password,
+                    placeholder_color,
+                    password_projection: None,
                     multiline,
                     read_only,
                     min_rows,
@@ -410,7 +490,8 @@ impl CustomElement for TextEditorElement {
             state.emits_select_all = emits_select_all;
             state.emits_context_menu = emits_context_menu;
             state.emits_selection_drag = emits_selection_drag;
-            state.selection_color = ctx.style
+            state.selection_color = ctx
+                .style
                 .and_then(|style| style.selection_color.as_deref())
                 .and_then(crate::color::parse_color_rgba)
                 .map(Into::into)
@@ -420,6 +501,13 @@ impl CustomElement for TextEditorElement {
                 cx.notify();
             }
             state.placeholder = self.placeholder.clone().into();
+            if state.password != self.password || state.placeholder_color != self.placeholder_color
+            {
+                state.password = self.password;
+                state.placeholder_color = self.placeholder_color;
+                state.follow_cursor = true;
+                cx.notify();
+            }
             state.read_only = self.read_only;
             state.min_rows = self.min_rows.max(1);
             state.max_rows = self.max_rows.max(state.min_rows);
@@ -427,13 +515,16 @@ impl CustomElement for TextEditorElement {
                 state.caret_color = self.theme.caret;
                 cx.notify();
             }
-            if prop_changed {
-                state.sync_prop_value(self.value.clone(), cx);
-            } else if self.value_revision != self.applied_value_revision {
+            if model_value_needs_update(
+                &mut state.pending_values,
+                &self.value,
+                prop_changed,
+                self.value_revision != self.applied_value_revision,
+            ) {
                 // The document model rewrote this block (input rule, undo,
                 // formatting) so the new value is authoritative even when it
-                // equals the previously applied one. Bypass echo suppression.
-                state.pending_values.clear();
+                // equals a pending echo or the previously applied value.
+                // Normal unchanged-revision echoes preserve native IME state.
                 state.set_external_text(self.value.clone(), cx);
             }
             self.applied_value_revision = self.value_revision;
@@ -459,6 +550,9 @@ impl CustomElement for TextEditorElement {
         });
         self.last_prop_value = Some(self.value.clone());
 
+        let password_value = self
+            .password
+            .then(|| PasswordProjection::new(&state.read(cx).content).display);
         let element_id = gpui::SharedString::from(format!("__gpuix_editor_{}", ctx.id));
         let mut editor = div()
             .id(element_id)
@@ -485,13 +579,19 @@ impl CustomElement for TextEditorElement {
         {
             editor = editor.relative();
         }
-        let default_role = if self.multiline {
+        let default_role = if self.password {
+            gpui::Role::PasswordInput
+        } else if self.multiline {
             gpui::Role::MultilineTextInput
         } else {
             gpui::Role::TextInput
         };
         editor = crate::accessibility::apply_accessibility(editor, ctx.props, Some(default_role));
-        if ctx.props.get("aria-valuetext").is_none() && !self.value.is_empty() {
+        if let Some(value) = password_value {
+            // Never expose the clear-text value through the accessibility tree,
+            // even if the host supplied aria-valuetext. IME keeps its real text.
+            editor = editor.aria_value(value);
+        } else if ctx.props.get("aria-valuetext").is_none() && !self.value.is_empty() {
             editor = editor.aria_value(self.value.clone());
         }
         if !self.placeholder.is_empty() {
@@ -541,12 +641,8 @@ impl CustomElement for TextEditorElement {
                 .map(crate::style::bounds_insets)
                 .unwrap_or_default(),
         ));
-        editor = crate::accessibility::apply_a11y_click(
-            editor,
-            ctx.events,
-            ctx.id,
-            ctx.event_callback,
-        );
+        editor =
+            crate::accessibility::apply_a11y_click(editor, ctx.events, ctx.id, ctx.event_callback);
         editor.into_any_element()
     }
 
@@ -554,6 +650,8 @@ impl CustomElement for TextEditorElement {
         match key {
             "value" => self.value = value.as_str().unwrap_or_default().to_string(),
             "placeholder" => self.placeholder = value.as_str().unwrap_or_default().to_string(),
+            "type" => self.password = !self.multiline && value.as_str() == Some("password"),
+            "placeholderColor" => self.placeholder_color = parse_hsla(Some(&value)),
             "readOnly" => self.read_only = value.as_bool().unwrap_or(false),
             "minRows" => self.min_rows = value.as_u64().unwrap_or(1) as usize,
             "maxRows" => {
@@ -563,12 +661,8 @@ impl CustomElement for TextEditorElement {
                     as usize
             }
             "theme" => self.theme = Theme::from_prop(Some(&value)),
-            "valueRevision" => {
-                self.value_revision = value.as_u64().unwrap_or(0)
-            }
-            "interceptClipboard" => {
-                self.intercept_clipboard = value.as_bool().unwrap_or(false)
-            }
+            "valueRevision" => self.value_revision = value.as_u64().unwrap_or(0),
+            "interceptClipboard" => self.intercept_clipboard = value.as_bool().unwrap_or(false),
             "spans" => self.spans = parse_span_props(&value),
             "decorations" => self.decorations = parse_decoration_props(&value),
             "selection" => {
@@ -586,6 +680,8 @@ impl CustomElement for TextEditorElement {
         &[
             "value",
             "placeholder",
+            "type",
+            "placeholderColor",
             "readOnly",
             "minRows",
             "maxRows",
@@ -600,10 +696,27 @@ impl CustomElement for TextEditorElement {
 
     fn supported_events(&self) -> &'static [&'static str] {
         &[
-            "change", "submit", "click", "keyDown", "keyUp", "focus", "blur", "fileDrop",
-            "compositionStart", "compositionUpdate", "compositionEnd", "selectionChange",
-            "copy", "cut", "paste", "backspaceStart", "undo", "redo", "selectAll",
-            "contextMenu", "selectionDrag",
+            "change",
+            "submit",
+            "click",
+            "keyDown",
+            "keyUp",
+            "focus",
+            "blur",
+            "fileDrop",
+            "compositionStart",
+            "compositionUpdate",
+            "compositionEnd",
+            "selectionChange",
+            "copy",
+            "cut",
+            "paste",
+            "backspaceStart",
+            "undo",
+            "redo",
+            "selectAll",
+            "contextMenu",
+            "selectionDrag",
         ]
     }
 
@@ -907,8 +1020,12 @@ fn build_span_runs(
             text: text[start..end].to_string(),
             color: u32::from(gpui::Rgba::from(color)),
             background: background.map(|bg| u32::from(gpui::Rgba::from(bg))),
-            bold: runs.last().is_some_and(|run| run.font.weight >= FontWeight::SEMIBOLD),
-            italic: runs.last().is_some_and(|run| run.font.style == FontStyle::Italic),
+            bold: runs
+                .last()
+                .is_some_and(|run| run.font.weight >= FontWeight::SEMIBOLD),
+            italic: runs
+                .last()
+                .is_some_and(|run| run.font.style == FontStyle::Italic),
             underline: runs.last().is_some_and(|run| run.underline.is_some()),
             strikethrough: runs.last().is_some_and(|run| run.strikethrough.is_some()),
             font_family: runs.last().and_then(|run| {
@@ -962,16 +1079,14 @@ mod span_tests {
     fn spans_split_runs_and_report_style() {
         let text = "abc def";
         let spans = vec![span(0, 3, deco_bold()), span(4, 7, deco_strike())];
-        let (runs, summary, _) = build_span_runs(
-            text,
-            &base_font(),
-            gpui::Hsla::default(),
-            &spans,
-            None,
-        );
+        let (runs, summary, _) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
         assert_eq!(runs.len(), 3);
         assert_eq!(
-            summary.iter().map(|entry| entry.text.as_str()).collect::<Vec<_>>(),
+            summary
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
             vec!["abc", " ", "def"]
         );
         assert!(summary[0].bold);
@@ -983,22 +1098,24 @@ mod span_tests {
     fn overlapping_spans_compose() {
         let text = "abcdef";
         let spans = vec![
-            span(0, 6, SpanDecoration {
-                background: Some(gpui::Hsla::default()),
-                ..Default::default()
-            }),
+            span(
+                0,
+                6,
+                SpanDecoration {
+                    background: Some(gpui::Hsla::default()),
+                    ..Default::default()
+                },
+            ),
             span(2, 4, deco_bold()),
         ];
-        let (runs, summary, has_background) = build_span_runs(
-            text,
-            &base_font(),
-            gpui::Hsla::default(),
-            &spans,
-            None,
-        );
+        let (runs, summary, has_background) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
         assert!(has_background);
         assert_eq!(
-            summary.iter().map(|entry| entry.text.as_str()).collect::<Vec<_>>(),
+            summary
+                .iter()
+                .map(|entry| entry.text.as_str())
+                .collect::<Vec<_>>(),
             vec!["ab", "cd", "ef"]
         );
         assert!(!summary[0].bold);
@@ -1020,7 +1137,9 @@ mod span_tests {
             Some(&(1..3)),
         );
         assert!(runs.len() >= 3);
-        assert!(summary.iter().any(|entry| entry.underline && entry.text == "ih"));
+        assert!(summary
+            .iter()
+            .any(|entry| entry.underline && entry.text == "ih"));
         assert!(summary.iter().all(|entry| entry.bold));
     }
 
@@ -1028,8 +1147,7 @@ mod span_tests {
     fn stale_spans_clip_to_text() {
         let text = "ab";
         let spans = vec![span(0, 99, deco_bold())];
-        let (runs, _, _) =
-            build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
+        let (runs, _, _) = build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
         assert_eq!(runs.iter().map(|run| run.len).sum::<usize>(), text.len());
     }
 
@@ -1039,13 +1157,8 @@ mod span_tests {
         let spans = vec![span(0, 3, deco_bold())];
         // Two spans producing the same style on both sides of a boundary merge.
         let spans = vec![span(0, 1, deco_bold()), span(1, 3, deco_bold())];
-        let (runs, summary, _) = build_span_runs(
-            text,
-            &base_font(),
-            gpui::Hsla::default(),
-            &spans,
-            None,
-        );
+        let (runs, summary, _) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
         assert_eq!(runs.len(), 1);
         assert_eq!(summary[0].text, "abc");
     }
@@ -1055,13 +1168,8 @@ mod span_tests {
         let text = "a😀b";
         // 😀 is one UTF-16 unit pair (2), so UTF-16 offset 3 is after it.
         let spans = vec![span(3, 4, deco_bold())];
-        let (_, summary, _) = build_span_runs(
-            text,
-            &base_font(),
-            gpui::Hsla::default(),
-            &spans,
-            None,
-        );
+        let (_, summary, _) =
+            build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
         assert_eq!(summary[summary.len() - 1].text, "b");
         assert!(summary[summary.len() - 1].bold);
     }
@@ -1120,13 +1228,7 @@ mod span_tests {
         let spans = parse_span_props(&serde_json::json!([
             { "start": 0, "end": 3, "underline": "#ff0000" }
         ]));
-        let (runs, _, _) = build_span_runs(
-            text,
-            &base_font(),
-            gpui::Hsla::default(),
-            &spans,
-            None,
-        );
+        let (runs, _, _) = build_span_runs(text, &base_font(), gpui::Hsla::default(), &spans, None);
         assert_eq!(
             runs[0].underline.and_then(|style| style.color),
             Some(gpui::rgba(0xff0000ff).into())
@@ -1203,6 +1305,9 @@ pub(crate) struct TextEditorState {
     focus_handle: FocusHandle,
     content: String,
     placeholder: SharedString,
+    password: bool,
+    placeholder_color: Option<gpui::Hsla>,
+    password_projection: Option<PasswordProjection>,
     multiline: bool,
     read_only: bool,
     min_rows: usize,
@@ -1284,19 +1389,6 @@ impl TextEditorState {
             selected_range: self.selected_range.clone(),
             selection_reversed: self.selection_reversed,
         }
-    }
-
-    fn sync_prop_value(&mut self, value: String, cx: &mut Context<Self>) {
-        if let Some(index) = self
-            .pending_values
-            .iter()
-            .rposition(|pending| pending == &value)
-        {
-            self.pending_values.drain(..=index);
-            return;
-        }
-        self.pending_values.clear();
-        self.set_external_text(value, cx);
     }
 
     fn set_external_text(&mut self, value: String, cx: &mut Context<Self>) {
@@ -1793,6 +1885,9 @@ impl TextEditorState {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
+        if self.password {
+            return;
+        }
         if self.intercept_clipboard {
             // Keybindings consume cmd-c before keyDown reaches JS, so an
             // opt-in editor reports the intent and the host serializes
@@ -1812,7 +1907,7 @@ impl TextEditorState {
     }
 
     fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<Self>) {
-        if self.read_only || self.selected_range.is_empty() {
+        if self.password || self.read_only || self.selected_range.is_empty() {
             return;
         }
         if self.intercept_clipboard {
@@ -1906,6 +2001,10 @@ impl TextEditorState {
     }
 
     fn point_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        let index = self
+            .password_projection
+            .as_ref()
+            .map_or(index, |projection| projection.to_display(index));
         for (line_index, line) in self.last_lines.iter().enumerate() {
             let line_start = *self.line_starts.get(line_index)?;
             if index < line_start || index > line_start + line.len() {
@@ -1918,7 +2017,10 @@ impl TextEditorState {
                 .take(line_index)
                 .map(|line| line.size(self.line_height).height)
                 .sum();
-            return Some(point(local.x + self.line_alignment_offset(line, local.y), local.y + y_offset));
+            return Some(point(
+                local.x + self.line_alignment_offset(line, local.y),
+                local.y + y_offset,
+            ));
         }
         None
     }
@@ -1933,11 +2035,21 @@ impl TextEditorState {
             let line_start = self.line_starts.get(line_index).copied().unwrap_or(0);
             if y < height || line_index + 1 == self.last_lines.len() {
                 let local_y = px(y.min(height - 1.0).max(0.0));
-                let local = point(position.x - self.line_alignment_offset(line, local_y), local_y);
+                let local = point(
+                    position.x - self.line_alignment_offset(line, local_y),
+                    local_y,
+                );
                 let index = line
                     .closest_index_for_position(local, self.line_height)
                     .unwrap_or_else(|index| index);
-                return (line_start + index).min(self.content.len());
+                let display_index = line_start + index;
+                return self
+                    .password_projection
+                    .as_ref()
+                    .map_or(display_index, |projection| {
+                        projection.to_content(display_index)
+                    })
+                    .min(self.content.len());
             }
             y -= height;
         }
@@ -1949,11 +2061,17 @@ impl TextEditorState {
     /// Translate to that same coordinate space using GPUI's shaped glyph and
     /// wrap positions; never change the layout or its glyph positions.
     fn line_alignment_offset(&self, line: &WrappedLine, y: Pixels) -> Pixels {
-        let Some(bounds) = self.last_bounds else { return px(0.0) };
-        let row = (f32::from(y) / f32::from(self.line_height)).floor().max(0.0) as usize;
+        let Some(bounds) = self.last_bounds else {
+            return px(0.0);
+        };
+        let row = (f32::from(y) / f32::from(self.line_height))
+            .floor()
+            .max(0.0) as usize;
         let boundary_x = |index: usize| {
             line.wrap_boundaries().get(index).map(|boundary| {
-                line.runs()[boundary.run_ix].glyphs[boundary.glyph_ix].position.x
+                line.runs()[boundary.run_ix].glyphs[boundary.glyph_ix]
+                    .position
+                    .x
             })
         };
         let start = row.checked_sub(1).and_then(boundary_x).unwrap_or(px(0.0));
@@ -2137,10 +2255,7 @@ impl TextEditorState {
         } else {
             position.x
         };
-        point(
-            x,
-            position.y.clamp(bounds.top(), bounds.bottom() - px(0.5)),
-        )
+        point(x, position.y.clamp(bounds.top(), bounds.bottom() - px(0.5)))
     }
 
     fn drag_scroll_delta(&self, position: Point<Pixels>) -> f32 {
@@ -2244,8 +2359,12 @@ impl TextEditorState {
     }
 
     fn layout_text(&mut self, width: Pixels, style: &TextStyle, window: &mut Window) -> f32 {
+        self.password_projection = (self.password && !self.content.is_empty())
+            .then(|| PasswordProjection::new(&self.content));
         let (display, is_placeholder) = if self.content.is_empty() {
             (self.placeholder.clone(), true)
+        } else if let Some(projection) = &self.password_projection {
+            (projection.display.clone(), false)
         } else {
             (SharedString::from(self.content.clone()), false)
         };
@@ -2260,7 +2379,8 @@ impl TextEditorState {
         self.line_height = style.line_height_in_pixels(rem_size);
         self.text_align = style.text_align;
         let color = if is_placeholder {
-            gpui::rgba(0x8f8f8fff).into()
+            self.placeholder_color
+                .unwrap_or_else(|| gpui::rgba(0x8f8f8fff).into())
         } else {
             style.color
         };
@@ -2293,8 +2413,29 @@ impl TextEditorState {
             return self.shape_and_measure(display, runs, self.multiline.then_some(width), window);
         }
         self.display_is_placeholder = false;
+        let projected_spans;
+        let projected_marked;
+        let (spans, marked) = if let Some(projection) = &self.password_projection {
+            projected_spans = self
+                .spans
+                .iter()
+                .cloned()
+                .map(|mut span| {
+                    span.start = projection.utf16_to_display(&self.content, span.start);
+                    span.end = projection.utf16_to_display(&self.content, span.end);
+                    span
+                })
+                .collect::<Vec<_>>();
+            projected_marked = self
+                .marked_range
+                .as_ref()
+                .map(|range| projection.to_display(range.start)..projection.to_display(range.end));
+            (projected_spans.as_slice(), projected_marked.as_ref())
+        } else {
+            (self.spans.as_slice(), self.marked_range.as_ref())
+        };
         let (runs, summary, has_background) =
-            build_span_runs(&display, &style.font(), color, &self.spans, self.marked_range.as_ref());
+            build_span_runs(&display, &style.font(), color, spans, marked);
         self.spans_applied(&summary, has_background);
         self.shape_and_measure(display, runs, self.multiline.then_some(width), window)
     }
@@ -2407,10 +2548,19 @@ impl EntityInputHandler for TextEditorState {
         if let Some(marked) = self.marked_range.take() {
             // A cancelled composition still ends, exactly like a committed
             // one; the data is the composed text being dropped.
-            let data = self.content.get(marked).map(str::to_string).unwrap_or_default();
-            emit_event_full(&self.callback, self.element_id, "compositionEnd", |payload| {
-                payload.value = Some(data);
-            });
+            let data = self
+                .content
+                .get(marked)
+                .map(str::to_string)
+                .unwrap_or_default();
+            emit_event_full(
+                &self.callback,
+                self.element_id,
+                "compositionEnd",
+                |payload| {
+                    payload.value = Some(data);
+                },
+            );
         }
         cx.notify();
     }
@@ -2871,23 +3021,32 @@ impl gpui::Element for EditorTextElement {
             }
         });
         window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-            let (lines, line_height, scroll_top, scroll_left, display, paint_backgrounds, text_align) =
-                self.input.update(cx, |input, _| {
-                    let display = if input.content.is_empty() {
-                        input.placeholder.clone()
-                    } else {
-                        input.content.clone().into()
-                    };
-                    (
-                        std::mem::take(&mut input.last_lines),
-                        input.line_height,
-                        input.scroll_top,
-                        input.scroll_left,
-                        display,
-                        input.has_background_runs,
-                        input.text_align,
-                    )
-                });
+            let (
+                lines,
+                line_height,
+                scroll_top,
+                scroll_left,
+                display,
+                paint_backgrounds,
+                text_align,
+            ) = self.input.update(cx, |input, _| {
+                let display = if input.content.is_empty() {
+                    input.placeholder.clone()
+                } else if let Some(projection) = &input.password_projection {
+                    projection.display.clone()
+                } else {
+                    input.content.clone().into()
+                };
+                (
+                    std::mem::take(&mut input.last_lines),
+                    input.line_height,
+                    input.scroll_top,
+                    input.scroll_left,
+                    display,
+                    input.has_background_runs,
+                    input.text_align,
+                )
+            });
             crate::text::log_painted_text(display);
             let mut y = bounds.top() - px(scroll_top);
             for line in &lines {
@@ -3039,6 +3198,118 @@ mod tests {
         let mut input = TextEditorElement::new(false);
         input.set_prop("theme", serde_json::json!({ "caret": "#22c55e" }));
         assert_eq!(input.theme.caret, gpui::rgba(0x22c55eff).into());
+    }
+
+    #[test]
+    fn password_projection_round_trips_real_unicode_boundaries() {
+        // Non-BMP, CJK, combining marks and a joined emoji all retain their
+        // real UTF-8 offsets; a bullet byte is never used as a buffer index.
+        let text = "a😀中e\u{301}👩\u{200d}🚀";
+        let projection = PasswordProjection::new(text);
+        assert_eq!(
+            projection.display.as_ref(),
+            "•".repeat(text.chars().count())
+        );
+        for index in text
+            .char_indices()
+            .map(|(index, _)| index)
+            .chain([text.len()])
+        {
+            assert_eq!(projection.to_content(projection.to_display(index)), index);
+        }
+        assert_eq!(projection.to_content(usize::MAX), text.len());
+        assert_eq!(projection.to_display(usize::MAX), projection.display.len());
+    }
+
+    #[test]
+    fn password_projection_maps_utf16_spans_and_ime_marking_after_surrogates() {
+        let text = "a😀中";
+        let projection = PasswordProjection::new(text);
+        assert_eq!(projection.utf16_to_display(text, 1), 1);
+        assert_eq!(projection.utf16_to_display(text, 3), 2);
+        assert_eq!(projection.utf16_to_display(text, 4), 3);
+        let marked = 1..5; // real UTF-8 emoji byte range
+        let display_marked = projection.to_display(marked.start)..projection.to_display(marked.end);
+        let font = Font {
+            family: "monospace".into(),
+            ..Font::default()
+        };
+        let (_, runs, _) = build_span_runs(
+            &projection.display,
+            &font,
+            gpui::Hsla::default(),
+            &[],
+            Some(&display_marked),
+        );
+        assert_eq!(
+            runs.iter().map(|run| run.text.as_str()).collect::<String>(),
+            "•••"
+        );
+        assert_eq!(runs.iter().find(|run| run.underline).unwrap().text, "•");
+    }
+
+    #[test]
+    fn password_projection_empty_and_scalar_interior_offsets_are_safe() {
+        let empty = PasswordProjection::new("");
+        assert_eq!(empty.to_display(100), 0);
+        assert_eq!(empty.to_content(100), 0);
+        let projection = PasswordProjection::new("😀b");
+        assert_eq!(projection.to_display(2), 0);
+        assert_eq!(projection.to_content(1), 0);
+        assert_eq!(projection.to_content(3), 4);
+    }
+
+    #[test]
+    fn password_mode_and_placeholder_color_are_native_props() {
+        let mut input = TextEditorElement::new(false);
+        input.set_prop("type", serde_json::json!("password"));
+        input.set_prop("placeholderColor", serde_json::json!("#c4b89e"));
+        assert!(input.password);
+        assert_eq!(input.placeholder_color, Some(gpui::rgba(0xc4b89eff).into()));
+        input.set_prop("type", serde_json::json!("text"));
+        input.set_prop("placeholderColor", serde_json::Value::Null);
+        assert!(!input.password);
+        assert_eq!(input.placeholder_color, None);
+        let mut textarea = TextEditorElement::new(true);
+        textarea.set_prop("type", serde_json::json!("password"));
+        assert!(!textarea.password);
+    }
+
+    #[test]
+    fn model_value_revision_overrides_an_earlier_coalesced_echo() {
+        let mut pending = VecDeque::from(["A".to_string(), "A🌴".to_string()]);
+        let mut native_value = "A🌴".to_string();
+        if model_value_needs_update(&mut pending, "A", true, true) {
+            native_value = "A".into();
+        }
+        assert_eq!(native_value, "A");
+        assert!(pending.is_empty());
+
+        // A correction back to the already applied prop must force too.
+        pending.push_back("A🌴".into());
+        assert!(model_value_needs_update(&mut pending, "A", false, true));
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn model_value_echo_preserves_later_native_edits_and_ime() {
+        let mut pending = VecDeque::from(["n".to_string(), "ni".to_string(), "你好".to_string()]);
+        assert!(!model_value_needs_update(&mut pending, "ni", true, false));
+        assert_eq!(pending, VecDeque::from(["你好".to_string()]));
+        assert!(!model_value_needs_update(&mut pending, "ni", false, false));
+        assert_eq!(pending, VecDeque::from(["你好".to_string()]));
+    }
+
+    #[test]
+    fn model_value_external_replacement_clears_unacknowledged_edits() {
+        let mut pending = VecDeque::from(["native edit".to_string()]);
+        assert!(model_value_needs_update(
+            &mut pending,
+            "external value",
+            true,
+            false
+        ));
+        assert!(pending.is_empty());
     }
 
     #[test]

@@ -248,6 +248,11 @@ Dimensions must be positive, finite numbers. GPUI and the OS own size constraint
 and apply the request asynchronously; `getWindowSize()` / `useWindowSize()` report
 the resulting viewport. Runtime window positioning remains unavailable.
 
+`useWindowSize()` samples every 100ms by default. Components on the same
+renderer with the same `intervalMs` share one native query and timer, while
+receiving independent refs. The timer stops when its last subscriber unmounts.
+Set `intervalMs: false` for startup/mount readings without ongoing polling.
+
 ## Multiple windows
 
 `createWindow()` mounts a component in a **new native window** (macOS).
@@ -1271,6 +1276,13 @@ inactive. Override its colour through the shared native theme:
 <input theme={{ caret: '#22c55e' }} />
 ```
 
+`<input type="password">` masks the painted text and accessibility value with
+one bullet per Unicode scalar. Native editing, IME, caret and selection still
+use the real buffer; `onChange.value` remains the real input value. Copy and cut
+do not export password text. The mode applies to single-line inputs only.
+Set `placeholderColor="#c4b89e"` on `<input>` or `<textarea>` to override the
+placeholder ink independently of the entered text colour.
+
 When the clipboard has no text, `Cmd+V` or `Ctrl+V` continues to `onKeyDown`
 instead of disappearing inside the editor. Applications can then handle an
 image-only or file-only clipboard themselves. Copied files also propagate even
@@ -1343,6 +1355,7 @@ Native defaults, so common elements are not silent:
 | ------------- | ----------------------- | ------------------------------------ |
 | `<text>`      | `Label`                 | content as `aria-valuetext`          |
 | `<input>`     | `TextInput`             | `value` and `placeholder`            |
+| `<input type="password">` | `PasswordInput` | masked value and `placeholder` |
 | `<textarea>`  | `MultilineTextInput`    | `value` and `placeholder`            |
 | `<img>`       | `Image`                 | `alt` as `aria-label`                |
 
@@ -2033,6 +2046,24 @@ not written to a temp file.
 placeholder instead of crashing. A URL that is still loading paints an empty
 box of the declared size.
 
+`onLoad` and `onError` report decode completion once per source generation,
+including cache hits. Their `EventPayload.value` is JSON: load carries
+`{src, generation, naturalWidth, naturalHeight}`, and error carries
+`{src, generation, error}`. Source changes and unmounts reject old completions;
+an empty source stays idle without either event. This reports image decoding,
+not GPU upload success. Live image uploads report load with the current source
+or an empty string; invalid upload arguments still throw synchronously.
+Dimensions are decoded bitmap pixels: GPUI rasterizes SVG at twice its logical
+size, so a 24×18 SVG reports 48×36. The image's layout and aspect ratio continue
+to use GPUI's logical dimensions.
+
+```tsx
+<img src={photo} onLoad={event => {
+  const { naturalWidth, naturalHeight } = JSON.parse(event.value!)
+  console.log(naturalWidth, naturalHeight)
+}} onError={event => console.error(JSON.parse(event.value!).error)} />
+```
+
 ### Live images from a buffer
 
 A data URL still works, but it base64-encodes the bytes into the mutation JSON.
@@ -2328,6 +2359,7 @@ tracking.
 | Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
 | Pinch | `onPinch` | `x`, `y`, `zoomDelta`, `touchPhase`, `modifiers` — one step per event; accumulate `zoomDelta` into a scale |
 | File drop | `onFileDrop` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS; desktop only |
+| Image decode | `onLoad`, `onError` | `value` — JSON source generation and intrinsic dimensions or error; `<img>` only |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |

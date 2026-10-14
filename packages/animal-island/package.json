@@ -1,0 +1,33 @@
+{
+  "name": "@gpuiv/animal-island",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@gpuiv/vue": "workspace:*"
+  },
+  "peerDependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18",
+    "@types/node": "^25.3.3",
+    "typescript": "^5.3.0",
+    "vue": "^3.5.13"
+  }
+}

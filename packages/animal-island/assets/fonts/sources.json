@@ -1,0 +1,77 @@
+{
+  "fontTools": "4.66.1",
+  "faces": [
+    {
+      "file": "AnimalIslandNunito-Medium.ttf",
+      "family": "Animal Island Nunito",
+      "style": "Medium",
+      "weight": 500,
+      "original": "nunito-latin-500-normal.woff",
+      "originalFamily": "Nunito Medium",
+      "sourceSha256": "be14dbc6349bcb81f2dcac0994350588831919e4f8074da2031bac24d7f4121f",
+      "sha256": "46744d8eee94f53a19111951285360005f0e52db90989471750c78f890d61201",
+      "codePoints": 230,
+      "license": "Nunito-OFL.txt"
+    },
+    {
+      "file": "AnimalIslandNunito-Bold.ttf",
+      "family": "Animal Island Nunito",
+      "style": "Bold",
+      "weight": 700,
+      "original": "nunito-latin-700-normal.woff",
+      "originalFamily": "Nunito",
+      "sourceSha256": "ce9107dc33f5d3bb8237776799400f28b96aed4b114773d4fd7fbacb3b218509",
+      "sha256": "80ff2adb5b7aac7d22ff77637e434177c95d5a93cd8b8325d54578180e00150a",
+      "codePoints": 230,
+      "license": "Nunito-OFL.txt"
+    },
+    {
+      "file": "AnimalIslandNunito-Black.ttf",
+      "family": "Animal Island Nunito",
+      "style": "Black",
+      "weight": 900,
+      "original": "nunito-latin-900-normal.woff",
+      "originalFamily": "Nunito Black",
+      "sourceSha256": "001c1d9c9147801a37b9e22c1768bc050590d0a833de46698fe5fbac76162431",
+      "sha256": "e84f6fe75cb834312eceacb20853420ee33d23d9d38336b1c3334bdb7baa357f",
+      "codePoints": 230,
+      "license": "Nunito-OFL.txt"
+    },
+    {
+      "file": "AnimalIslandNotoSansSC-Regular.ttf",
+      "family": "Animal Island Noto Sans SC",
+      "style": "Regular",
+      "weight": 400,
+      "original": "noto-sans-sc-chinese-simplified-400-normal.woff",
+      "originalFamily": "Noto Sans SC Thin",
+      "sourceSha256": "8d40fc865213d898dd3929b099acd7d4568a2fdf0970292b76e9eb0f5021b1bd",
+      "sha256": "1edc629cb3815cd1d5f9da608629e56519d223e4b1bdc4240925e2ef37815f78",
+      "codePoints": 7946,
+      "license": "NotoSansSC-OFL.txt"
+    },
+    {
+      "file": "AnimalIslandNotoSansSC-Medium.ttf",
+      "family": "Animal Island Noto Sans SC",
+      "style": "Medium",
+      "weight": 500,
+      "original": "noto-sans-sc-chinese-simplified-500-normal.woff",
+      "originalFamily": "Noto Sans SC Thin Medium",
+      "sourceSha256": "e783ee6de227f5cd72110c2a7484a182cc8f7038e8829787a17822d02b794c13",
+      "sha256": "f187b2779e62221da7d3dbcd1955746fbd25b892b14da8d184b7c316dcc97562",
+      "codePoints": 7946,
+      "license": "NotoSansSC-OFL.txt"
+    },
+    {
+      "file": "AnimalIslandNotoSansSC-Bold.ttf",
+      "family": "Animal Island Noto Sans SC",
+      "style": "Bold",
+      "weight": 700,
+      "original": "noto-sans-sc-chinese-simplified-700-normal.woff",
+      "originalFamily": "Noto Sans SC Thin",
+      "sourceSha256": "c1e8689c61b393f12ad2c0690a3edcdf65c805773665479b062a05f53774c3a3",
+      "sha256": "084bd0667e64d044a7b08594a2adb4890bb9e857059236302f89162cb74d5a3f",
+      "codePoints": 7946,
+      "license": "NotoSansSC-OFL.txt"
+    }
+  ]
+}

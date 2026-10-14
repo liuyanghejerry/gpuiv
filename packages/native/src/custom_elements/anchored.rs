@@ -179,6 +179,10 @@ impl AnchoredElement {
     fn wrap_at_trigger(&self, layer: gpui::AnyElement) -> gpui::AnyElement {
         use gpui::prelude::*;
 
+        // This wrapper locates a point on the trigger, not the popup's box.
+        // Deferred retains the anchored child's measured layout size, so flex
+        // centering here would subtract half that size before gpui::Anchor
+        // subtracts it again. Only gpui::Anchor compensates for popup size.
         match (self.side, self.align) {
             (Side::Top, Alignment::Start) => gpui::div()
                 .absolute()
@@ -190,11 +194,8 @@ impl AnchoredElement {
             (Side::Top, Alignment::Center) => gpui::div()
                 .absolute()
                 .top_0()
-                .left_0()
-                .h_0()
-                .w_full()
-                .flex()
-                .justify_center()
+                .left(gpui::relative(0.5))
+                .size_0()
                 .child(layer)
                 .into_any_element(),
             (Side::Top, Alignment::End) => gpui::div()
@@ -213,12 +214,9 @@ impl AnchoredElement {
                 .into_any_element(),
             (Side::Right, Alignment::Center) => gpui::div()
                 .absolute()
-                .top_0()
+                .top(gpui::relative(0.5))
                 .right_0()
-                .w_0()
-                .h_full()
-                .flex()
-                .items_center()
+                .size_0()
                 .child(layer)
                 .into_any_element(),
             (Side::Right, Alignment::End) => gpui::div()
@@ -238,11 +236,8 @@ impl AnchoredElement {
             (Side::Bottom, Alignment::Center) => gpui::div()
                 .absolute()
                 .bottom_0()
-                .left_0()
-                .h_0()
-                .w_full()
-                .flex()
-                .justify_center()
+                .left(gpui::relative(0.5))
+                .size_0()
                 .child(layer)
                 .into_any_element(),
             (Side::Bottom, Alignment::End) => gpui::div()
@@ -261,12 +256,9 @@ impl AnchoredElement {
                 .into_any_element(),
             (Side::Left, Alignment::Center) => gpui::div()
                 .absolute()
-                .top_0()
+                .top(gpui::relative(0.5))
                 .left_0()
-                .w_0()
-                .h_full()
-                .flex()
-                .items_center()
+                .size_0()
                 .child(layer)
                 .into_any_element(),
             (Side::Left, Alignment::End) => gpui::div()

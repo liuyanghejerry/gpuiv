@@ -21,9 +21,9 @@
 - [x] GPU-backed test renderer with screenshot capture
 - [x] Test resource ownership counters and GPUI entity leak baselines; dedicated macOS memory resource CI gate with production-Bun heap/RSS reports
 - [x] Standalone build (pinned GPUI platform dependencies)
-- [x] Native text input and multiline textarea
+- [x] Native text input and multiline textarea, with single-line password masking and configurable placeholder ink
 - [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block drag selection with markdown copy/paste, ⌘F search decorations, full-height source mode, anchor jumps; heading-specific spacing and rules, padded code blocks, single-width table borders, and muted completed tasks. The partial `theme` prop includes `border`, `codeBlockBackground`, and `tableHeaderBackground` colors; styled spans / decorations / programmatic selection / `selectionChange` / `selectionDrag` / clipboard interception props on `<input>`/`<textarea>`
-- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, `<svg>`), plus `setImage` / `setImagePixels` (RGBA or BGRA) on `<img>` refs
+- [x] Image and SVG elements (`<img>` local/data URL/http(s) sources, decode `onLoad`/`onError`, `<svg>`), plus `setImage` / `setImagePixels` (RGBA or BGRA) on `<img>` refs
 - [x] Virtual lists (`<virtual-list>`), with sticky section headers on the `<VirtualList>` wrapper (`stickyIndices` + `renderStickyHeader`, pinned overlay above the rows) and item-geometry queries (`getVirtualListGeometry`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>` incl. standalone images, GFM footnotes with numbered clickable markers, interactive task-list checkboxes with `onTaskToggle` source offsets, inline and `$$…$$` math rendered from the `math` map — `renderMathMap` in `@gpuiv/vue/math` bakes MathJax SVGs with colour, px sizing and baseline depth; inline formulas ride the text baseline — and ` ```mermaid ` fences rendered from an app-supplied `mermaid` map with a labelled-code-card fallback)
 - [x] Inline-styled text (`<text runs={…}>`: per-segment colour, weight, italic, family, underline/strikethrough, background)
@@ -40,6 +40,7 @@
 - [x] Headless Collapsible (`Collapsible`, `CollapsibleTrigger`, `CollapsiblePanel`; controlled state, keyboard, focus restoration and retained panels)
 - [x] Custom font loading (`loadFont`, `loadFontBytes`)
 - [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, shared 60Hz loading/shimmer clock, keyboard controls, editable/resizable records grid with page-scroll previews, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](../packages/beautiful-ui/README.md)
+- [x] Private animal-island-vue component port (`@gpuiv/animal-island`, issue #164): all 39 original component families (including Table/Form, date/time pickers, Upload, Carousel and the local Cursor follower) with the signature cream/warm-brown look and blur-free hard-press shadow, 101 built-in colour icons, and a gallery at `examples/animal-island.tsx`; [fidelity audit and native limits](../packages/animal-island/README.md)
 - [x] Cross-element text selection
 - [x] Headless Select, Combobox and Tooltip
 - [x] Native `hover` and `active` styles

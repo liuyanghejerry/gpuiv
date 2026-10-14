@@ -8,6 +8,111 @@
 /// definite `width` and `height` keep the layout box stable during that load.
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
 use base64::Engine as _;
+use std::{cell::RefCell, rc::Rc, sync::Arc};
+
+type ImageResult = Result<Arc<gpui::RenderImage>, gpui::ImageCacheError>;
+
+/// GPUI's encoded-image decoder is private. This asset only exposes its public
+/// `Image::to_image_data` operation to `use_asset`, preserving background decode
+/// and GPUI's cache instead of decoding during a paint.
+enum EncodedImageLoader {}
+
+impl gpui::Asset for EncodedImageLoader {
+    type Source = Arc<gpui::Image>;
+    type Output = ImageResult;
+
+    fn load(
+        source: Self::Source,
+        cx: &mut gpui::App,
+    ) -> impl std::future::Future<Output = Self::Output> + Send + 'static {
+        let renderer = cx.svg_renderer();
+        async move { source.to_image_data(renderer).map_err(Into::into) }
+    }
+}
+
+struct ImageLoadState {
+    alive: bool,
+    generation: u64,
+    completed: bool,
+    src: String,
+    id: u64,
+    load: bool,
+    error: bool,
+    callback: Option<crate::renderer::EventCallback>,
+}
+
+impl Default for ImageLoadState {
+    fn default() -> Self {
+        Self {
+            alive: true,
+            generation: 0,
+            completed: false,
+            src: String::new(),
+            id: 0,
+            load: false,
+            error: false,
+            callback: None,
+        }
+    }
+}
+
+impl ImageLoadState {
+    /// Returns an event only for the current, still-mounted source. Layout and
+    /// paint can ask for an image repeatedly; load/error are terminal once per
+    /// source generation, rather than once per frame (including animated GIFs).
+    fn complete(
+        &mut self,
+        generation: u64,
+        result: &ImageResult,
+    ) -> Option<(&'static str, String)> {
+        if !self.alive || self.generation != generation || self.completed {
+            return None;
+        }
+        self.completed = true;
+        match result {
+            Ok(image) if self.load => {
+                // Public GPUI reports the decoded bitmap in DevicePixels.
+                // SVGs rasterized by SvgRenderer are 2x their logical source
+                // size for smoothness; GPUI's logical render_size/scale_factor
+                // are private. Report actual bitmap dimensions consistently
+                // rather than guessing a resource format or bypassing GPUI.
+                let size = image.size(0);
+                Some((
+                    "load",
+                    serde_json::json!({ "src": self.src, "generation": generation,
+                    "naturalWidth": size.width.0, "naturalHeight": size.height.0 })
+                    .to_string(),
+                ))
+            }
+            Err(error) if self.error => Some((
+                "error",
+                serde_json::json!({ "src": self.src,
+                "generation": generation, "error": error.to_string() })
+                .to_string(),
+            )),
+            _ => None,
+        }
+    }
+}
+
+fn complete_image_load(
+    state: &Rc<RefCell<ImageLoadState>>,
+    generation: u64,
+    result: &ImageResult,
+) -> bool {
+    let (current, event, callback, id) = {
+        let mut state = state.borrow_mut();
+        let current = state.alive && state.generation == generation;
+        let event = state.complete(generation, result);
+        (current, event, state.callback.clone(), state.id)
+    };
+    if let Some((event_type, value)) = event {
+        crate::renderer::emit_event_full(&callback, id, event_type, |payload| {
+            payload.value = Some(value)
+        });
+    }
+    current
+}
 
 pub struct ImgFactory;
 
@@ -81,16 +186,19 @@ enum ImgSource {
     Invalid,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct ImgElement {
     source: ImgSource,
     object_fit: ImgObjectFit,
     alt: String,
     dropped: Option<std::sync::Arc<gpui::RenderImage>>,
+    load_state: Rc<RefCell<ImageLoadState>>,
+    load_task: Option<gpui::Task<()>>,
 }
 
 impl ImgElement {
     fn load_src(&mut self, src: &str) {
+        self.begin_source(src);
         let src = src.trim();
         self.source = if src.is_empty() {
             ImgSource::Empty
@@ -107,6 +215,48 @@ impl ImgElement {
             ImgSource::Path(src.into())
         };
     }
+
+    fn begin_source(&mut self, src: &str) {
+        self.load_task = None;
+        let mut state = self.load_state.borrow_mut();
+        state.generation += 1;
+        state.completed = false;
+        state.src = src.to_string();
+    }
+
+    fn observe_asset<A: gpui::Asset<Output = ImageResult>>(
+        &mut self,
+        source: &A::Source,
+        window: &gpui::Window,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
+    ) {
+        if self.load_task.is_some() {
+            return;
+        }
+        let (task, _) = cx.fetch_asset::<A>(source);
+        let state = self.load_state.clone();
+        let generation = state.borrow().generation;
+        let entity_id = cx.entity_id();
+        // `use_asset` only subscribes its first consumer for repaint. Observe
+        // the shared GPUI task once for this host/source so a second window also
+        // paints on completion. Dropping this observer does not cancel the
+        // shared asset or evict data used by another image.
+        self.load_task = Some(cx.spawn_in(window, async move |_view, cx| {
+            let result = task.await;
+            if complete_image_load(&state, generation, &result) {
+                // Match Window::use_asset: batch resource completions into the
+                // next frame. A separate view.update per image can redraw the
+                // full window per resource in GPUI's test-support effect loop,
+                // starving queued UI commands.
+                cx.on_next_frame(move |_, cx| {
+                    let state = state.borrow();
+                    if state.alive && state.generation == generation {
+                        cx.notify(entity_id);
+                    }
+                });
+            }
+        }));
+    }
 }
 
 fn http_image_uri(src: &str) -> Option<gpui::SharedUri> {
@@ -122,7 +272,10 @@ fn http_image_uri(src: &str) -> Option<gpui::SharedUri> {
 /// custom-element pipeline (markdown image blocks). Classifies the source the
 /// same way `ImgElement::load_src` does. `None` when the src is empty or a
 /// malformed data URL — callers render their own placeholder.
-pub(crate) fn standalone_img(src: &str, id: gpui::SharedString) -> Option<gpui::Stateful<gpui::Img>> {
+pub(crate) fn standalone_img(
+    src: &str,
+    id: gpui::SharedString,
+) -> Option<gpui::Stateful<gpui::Img>> {
     use gpui::{InteractiveElement as _, StyledImage as _};
 
     let src = src.trim();
@@ -180,7 +333,7 @@ pub fn init(cx: &mut gpui::App) {
 
 #[cfg(test)]
 mod tests {
-    use super::http_image_uri;
+    use super::{http_image_uri, CustomElement, ImageLoadState, ImgElement, ImgSource};
 
     #[test]
     fn only_http_urls_become_uri_sources() {
@@ -192,6 +345,74 @@ mod tests {
         assert!(http_image_uri("file:///tmp/a.png").is_none());
         assert!(http_image_uri("https://").is_none());
         assert!(http_image_uri("http://").is_none());
+    }
+
+    #[test]
+    fn image_load_reports_decoded_dimensions_once_per_source() {
+        let mut state = ImageLoadState {
+            generation: 7,
+            src: "  fixture.png  ".into(),
+            load: true,
+            ..Default::default()
+        };
+        let image = std::sync::Arc::new(gpui::RenderImage::from_bgra(2, 3, vec![0; 24]).unwrap());
+        let result = Ok(image);
+        let (kind, value) = state.complete(7, &result).unwrap();
+        assert_eq!(kind, "load");
+        let value: serde_json::Value = serde_json::from_str(&value).unwrap();
+        assert_eq!(value["src"], "  fixture.png  ");
+        assert_eq!(value["naturalWidth"], 2);
+        assert_eq!(value["naturalHeight"], 3);
+        assert!(state.complete(7, &result).is_none());
+    }
+
+    #[test]
+    fn image_load_rejects_stale_and_destroyed_sources() {
+        let mut element = ImgElement::default();
+        element.load_src("old.png");
+        let old = element.load_state.borrow().generation;
+        element.load_src("new.png");
+        let current = element.load_state.borrow().generation;
+        element.load_state.borrow_mut().error = true;
+        let result = Err(gpui::ImageCacheError::Asset("fixture failure".into()));
+        assert!(element
+            .load_state
+            .borrow_mut()
+            .complete(old, &result)
+            .is_none());
+        let (kind, value) = element
+            .load_state
+            .borrow_mut()
+            .complete(current, &result)
+            .unwrap();
+        assert_eq!(kind, "error");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&value).unwrap()["src"],
+            "new.png"
+        );
+        element.load_src("pending.png");
+        let pending = element.load_state.borrow().generation;
+        element.destroy();
+        assert!(element
+            .load_state
+            .borrow_mut()
+            .complete(pending, &result)
+            .is_none());
+    }
+
+    #[test]
+    fn image_live_updates_keep_the_same_load_generation() {
+        let mut element = ImgElement::default();
+        let first = std::sync::Arc::new(gpui::RenderImage::from_bgra(1, 1, vec![0; 4]).unwrap());
+        assert!(element.replace_live_image(first.clone()).is_none());
+        let generation = element.load_state.borrow().generation;
+        let second = std::sync::Arc::new(gpui::RenderImage::from_bgra(1, 1, vec![0; 4]).unwrap());
+        assert!(element.replace_live_image(second).is_some());
+        assert_eq!(element.load_state.borrow().generation, generation);
+        assert!(matches!(element.source, ImgSource::Render(_)));
+        element.load_src("");
+        assert!(matches!(element.source, ImgSource::Empty));
+        assert!(element.load_state.borrow().generation > generation);
     }
 }
 
@@ -210,11 +431,8 @@ fn img_fallback(ctx: &CustomRenderContext, alt: &str, message: &str) -> gpui::An
             .text_color(gpui::rgba(0xa4accdff)),
         ctx,
     );
-    fallback = crate::accessibility::apply_accessibility(
-        fallback,
-        ctx.props,
-        Some(gpui::Role::Image),
-    );
+    fallback =
+        crate::accessibility::apply_accessibility(fallback, ctx.props, Some(gpui::Role::Image));
     fallback = crate::accessibility::apply_image_label(fallback, ctx.props, alt);
     // `chrome_text`, not a raw string: a raw child is invisible to
     // `getPaintedText()`, so this state could only be tested by screenshot.
@@ -228,7 +446,7 @@ impl CustomElement for ImgElement {
         &mut self,
         ctx: CustomRenderContext,
         window: &mut gpui::Window,
-        _cx: &mut gpui::Context<crate::renderer::GpuixView>,
+        cx: &mut gpui::Context<crate::renderer::GpuixView>,
     ) -> gpui::AnyElement {
         use gpui::prelude::*;
 
@@ -236,13 +454,51 @@ impl CustomElement for ImgElement {
             window.drop_image(image).ok();
         }
 
-        let el = match &self.source {
-            ImgSource::Path(path) => gpui::img(path.clone()),
-            ImgSource::Uri(uri) => gpui::img(uri.clone()),
-            ImgSource::Data(image) => gpui::img(image.clone()),
-            ImgSource::Render(image) => gpui::img(image.clone()),
+        {
+            let mut state = self.load_state.borrow_mut();
+            state.id = ctx.id;
+            state.callback = ctx.event_callback.clone();
+            state.load = ctx.events.contains("load");
+            state.error = ctx.events.contains("error");
+        }
+        let el = match self.source.clone() {
+            ImgSource::Path(path) => {
+                let resource = gpui::Resource::from(path);
+                self.observe_asset::<gpui::ImgResourceLoader>(&resource, window, cx);
+                gpui::img(move |window: &mut gpui::Window, cx: &mut gpui::App| {
+                    window.use_asset::<gpui::ImgResourceLoader>(&resource, cx)
+                })
+            }
+            ImgSource::Uri(uri) => {
+                let resource = gpui::Resource::from(uri);
+                self.observe_asset::<gpui::ImgResourceLoader>(&resource, window, cx);
+                gpui::img(move |window: &mut gpui::Window, cx: &mut gpui::App| {
+                    window.use_asset::<gpui::ImgResourceLoader>(&resource, cx)
+                })
+            }
+            ImgSource::Data(image) => {
+                self.observe_asset::<gpui::AssetLogger<EncodedImageLoader>>(&image, window, cx);
+                gpui::img(move |window: &mut gpui::Window, cx: &mut gpui::App| {
+                    window.use_asset::<gpui::AssetLogger<EncodedImageLoader>>(&image, cx)
+                })
+            }
+            ImgSource::Render(image) => {
+                let generation = self.load_state.borrow().generation;
+                complete_image_load(&self.load_state, generation, &Ok(image.clone()));
+                gpui::img(image)
+            }
             ImgSource::Empty => return img_fallback(&ctx, &self.alt, "img: no src"),
-            ImgSource::Invalid => return img_fallback(&ctx, &self.alt, "img: load failed"),
+            ImgSource::Invalid => {
+                let generation = self.load_state.borrow().generation;
+                complete_image_load(
+                    &self.load_state,
+                    generation,
+                    &Err(gpui::ImageCacheError::Asset(
+                        "invalid image data URL".into(),
+                    )),
+                );
+                return img_fallback(&ctx, &self.alt, "img: load failed");
+            }
         };
         // The id is what makes gpui's `ImgState` persist. Without it `Img` has no
         // `GlobalElementId`, so the animated-GIF frame index and the delayed
@@ -305,10 +561,20 @@ impl CustomElement for ImgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &["click", "mouseEnter", "mouseLeave", "fileDrop"]
+        &[
+            "click",
+            "mouseEnter",
+            "mouseLeave",
+            "fileDrop",
+            "load",
+            "error",
+        ]
     }
 
-    fn destroy(&mut self) {}
+    fn destroy(&mut self) {
+        self.load_state.borrow_mut().alive = false;
+        self.load_task = None;
+    }
 
     fn live_image(&self) -> Option<std::sync::Arc<gpui::RenderImage>> {
         match &self.source {
@@ -322,6 +588,10 @@ impl CustomElement for ImgElement {
         image: std::sync::Arc<gpui::RenderImage>,
     ) -> Option<std::sync::Arc<gpui::RenderImage>> {
         let previous = self.live_image();
+        if previous.is_none() {
+            let src = self.load_state.borrow().src.clone();
+            self.begin_source(&src);
+        }
         self.source = ImgSource::Render(image);
         previous
     }
@@ -389,7 +659,8 @@ pub fn render_image_from_encoded(
     bytes: Vec<u8>,
     svg_renderer: gpui::SvgRenderer,
 ) -> std::result::Result<std::sync::Arc<gpui::RenderImage>, String> {
-    let format = sniff_image_format(&bytes).ok_or_else(|| "unrecognized image format".to_string())?;
+    let format =
+        sniff_image_format(&bytes).ok_or_else(|| "unrecognized image format".to_string())?;
     gpui::Image::from_bytes(format, bytes)
         .to_image_data(svg_renderer)
         .map_err(|error| error.to_string())

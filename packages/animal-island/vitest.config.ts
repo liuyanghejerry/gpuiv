@@ -1,0 +1,9 @@
+import { defineConfig } from "vitest/config"
+import { fileURLToPath } from "node:url"
+
+export default defineConfig({
+  resolve: {
+    alias: [{ find: /^@gpuiv\/vue$/, replacement: fileURLToPath(new URL("../vue/src/index.ts", import.meta.url)) }],
+  },
+  test: { include: ["tests/**/*.test.{ts,tsx}"], fileParallelism: false },
+})

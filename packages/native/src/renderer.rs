@@ -1176,13 +1176,11 @@ fn run_window_command(
             })
         }
         WindowCommand::GetElementBounds { id, response } => {
-            window.update(cx, move |view, window, cx| {
-                let state = view.paint_state.clone();
-                cx.notify();
-                window.refresh();
-                window.on_next_frame(move |_window, _cx| {
-                    response.send(state.get_bounds(id)).ok();
-                });
+            window.update(cx, move |view, _window, _cx| {
+                // The public API returns last-painted bounds, as on macOS.
+                // Polling this snapshot must not force repaint or wait for a
+                // frame; automation's fresh-frame query is handled above.
+                response.send(view.paint_state.get_bounds(id)).ok();
             })
         }
         WindowCommand::GetInputTextOffset { id, x, y, response } => {

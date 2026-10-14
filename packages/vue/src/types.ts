@@ -427,6 +427,17 @@ export interface ElementProps {
    *  non-Unicode paths never fire. Desktop only. */
   onFileDrop?: (event: EventPayload) => void
 
+  // ── Image decoding ────────────────────────────────────────────
+  /** `<img>` decoded successfully. `value` is JSON containing `src`,
+   *  `generation`, `naturalWidth` and `naturalHeight` in decoded bitmap pixels
+   *  (GPUI SVG rasterization uses 2x pixels). Fires once per source
+   *  generation, including cached images; empty sources stay idle. */
+  onLoad?: (event: EventPayload) => void
+  /** `<img>` source could not be decoded. `value` is JSON containing `src`,
+   *  `generation` and `error`. GPU upload errors remain GPUI diagnostics;
+   *  invalid live-upload arguments throw synchronously instead. */
+  onError?: (event: EventPayload) => void
+
   // ── Text search ────────────────────────────────────────────────────
   /**
    * Wash matches under this subtree. Scoped by tree position: the nearest
@@ -458,6 +469,11 @@ export interface ElementProps {
   onPinch?: (event: EventPayload) => void
 
   // ── Text editor events ─────────────────────────────────────────
+  /** Native single-line editor mode. Password changes display only; editing
+   *  and event values retain the real buffer and UTF-16 selection offsets. */
+  type?: "text" | "password"
+  /** Native input/textarea placeholder ink; default #8f8f8f. */
+  placeholderColor?: string
   onChange?: (event: EventPayload) => void
   /** `onInput` is an alias for `onChange` in Vue (`v-model` friendly). */
   onInput?: (event: EventPayload) => void
