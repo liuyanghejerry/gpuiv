@@ -26,6 +26,8 @@ describeWindow('Animal Island production window', () => {
     expect(value.pages).toBe(40)
     expect(value.scrollOwners).toBe(2)
     expect(value.retainedInput).toBe('Compare')
-    expect(value.initial.showcase.width - value.resized.showcase.width).toBeCloseTo(280, 1)
+    expect(value.initial.showcase.width - value.resized.showcase.width).toBeCloseTo(
+      value.initial.root.width - value.resized.root.width, 1,
+    )
   }, 25_000)
 })
