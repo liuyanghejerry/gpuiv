@@ -11,6 +11,7 @@ import { Radio, type RadioProps, type RadioOption } from "../src/components/Radi
 import { Switch, type SwitchProps } from "../src/components/Switch.js"
 import type { RateProps } from "../src/components/Rate.js"
 import type { EventPayload, StyleDesc } from "@gpuiv/vue"
+import { Progress } from "../src/components/Progress.js"
 import { Form } from "../src/components/Form.js"
 import { FormItem } from "../src/components/FormItem.js"
 import { FormProvider } from "../src/components/FormProvider.js"
@@ -257,6 +258,34 @@ describe.each(["prefix", "suffix", "tip"] as const)("ReactNode %s content", fiel
 
 // Validate that controls send native tracks, rather than running JS frame loops.
 describe("React selection animation parity", () => {
+  it.each([
+    { checked: false, loading: false, disabled: false, color: "rgba(114, 93, 66, 0.15)", opacity: undefined },
+    { checked: true, loading: false, disabled: false, color: "rgba(90, 158, 30, 0.2)", opacity: undefined },
+    { checked: false, loading: true, disabled: false, color: "rgba(114, 93, 66, 0.15)", opacity: 0.7 },
+    { checked: true, loading: true, disabled: false, color: "rgba(90, 158, 30, 0.2)", opacity: 0.7 },
+    { checked: true, loading: false, disabled: true, color: "rgba(90, 158, 30, 0.2)", opacity: 0.5 },
+  ])("keeps React Switch inset depth with checked=$checked/loading=$loading/disabled=$disabled", ({ color, opacity, ...props }) => {
+    const host = mountHost(defineComponent(() => () => h(Switch, { testId: "inset-switch", ...props })))
+    hosts.push(host)
+    const style = host.find("inset-switch").props.style as StyleDesc
+    expect(style.boxShadow).toEqual({ offsetX: 0, offsetY: 2, blurRadius: 4, spreadRadius: 0, color, inset: true })
+    expect(style.opacity).toBe(opacity)
+  })
+  it.each([undefined, "forest-grove"] as const)("paints the native Progress inset highlight above its %s artwork and below the label", async variant => {
+    const host = mountHost(defineComponent(() => () => h(Progress, { testId: "inset-progress", percent: 50, duration: 0, showInfo: true, infoPosition: "inside", variant })))
+    hosts.push(host)
+    await host.settle()
+    const highlight = host.find("inset-progress-fill-highlight")
+    expect(highlight.props.style).toMatchObject({ position: "absolute", width: "100%", height: 20, pointerEvents: "none", borderRadius: 999, boxShadow: { offsetX: 0, offsetY: 2, blurRadius: 0, spreadRadius: 0, color: "rgba(255, 255, 255, 0.45)", inset: true } })
+    const fill = highlight.parent!
+    expect((fill.props.style as StyleDesc).boxShadow).toBeUndefined()
+    const artworkIndex = fill.children.findIndex(child => child.type === "img")
+    expect(artworkIndex).toBeGreaterThanOrEqual(0)
+    expect(fill.children.indexOf(highlight)).toBeGreaterThan(artworkIndex)
+    const infoIndex = fill.children.findIndex(child => subtreeText(child) === "50%")
+    expect(infoIndex).toBeGreaterThan(fill.children.indexOf(highlight))
+    expect((fill.parent!.props.style as StyleDesc).boxShadow).toBeUndefined()
+  })
   it.each([Checkbox, Radio])("sends six expanding/fading native splash dots on selection", async Control => {
     const host = mountHost(defineComponent(() => () => h(Control as Component, { testId: "choice", options: [{ value: "a", label: "选项" }] })))
     hosts.push(host)

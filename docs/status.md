@@ -29,6 +29,7 @@
 - [x] Inline-styled text (`<text runs={…}>`: per-segment colour, weight, italic, family, underline/strikethrough, background)
 - [x] Selectable ANSI output (`AnsiText`, virtualized streaming `AnsiLog`, `parseAnsi` / `createAnsiParser`)
 - [x] `outline` style (focus rings that take no layout space)
+- [x] Structured `boxShadow` stacks, including native inset shadows and hover/active overrides
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
 - [x] Streaming markdown parsing (appends re-parse from the last stable block boundary; full parity with a full parse)
@@ -40,7 +41,7 @@
 - [x] Headless Collapsible (`Collapsible`, `CollapsibleTrigger`, `CollapsiblePanel`; controlled state, keyboard, focus restoration and retained panels)
 - [x] Custom font loading (`loadFont`, `loadFontBytes`)
 - [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, shared 60Hz loading/shimmer clock, keyboard controls, editable/resizable records grid with page-scroll previews, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](../packages/beautiful-ui/README.md)
-- [x] Private animal-island-vue component port (`@gpuiv/animal-island`, issue #164): all 39 original component families (including Table/Form, date/time pickers, Upload, Carousel and the local Cursor follower) with the signature cream/warm-brown look and blur-free hard-press shadow, 101 built-in colour icons, and a gallery at `examples/animal-island.tsx`; [fidelity audit and native limits](../packages/animal-island/README.md)
+- [x] Private Animal Island component port (`@gpuiv/animal-island`, issue #164): all 39 original Vue families plus React's CountUp, searchable/clearable Select, rich content, native control/digit/panel motion, 101 colour icons and a 40-page comparison gallery at `examples/animal-island.tsx`; [React parity audit and native limits](../packages/animal-island/REACT_PARITY.md)
 - [x] Cross-element text selection
 - [x] Headless Select, Combobox and Tooltip
 - [x] Native `hover` and `active` styles

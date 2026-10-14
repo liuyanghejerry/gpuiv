@@ -8,8 +8,9 @@
  *    are instant — motion only tweens numeric geometry and opacity.
  *  - `top: 50%; transform: translateY(-50%)` on the handle → computed numeric
  *    `top` (GPUIV has no transforms).
- *  - Inset track shadow (`box-shadow: inset 0 2px 4px …`) → dropped (GPUIV
- *    has no inset shadows); the solid sand/green fills carry the state.
+ *  - Track inset shadow uses GPUI's existing inset-shadow paint: 0 2px 4px,
+ *    warm-brown .15 when unchecked and green .2 when checked. Disabled/loading
+ *    retain the same shadow with the whole control's original opacity.
  *  - Border-ring loading spinner (CSS `rotate` keyframes) → the native
  *    three-dot `Spinner` scaled down to the handle.
  *  - The original track grows with the label through CSS layout; GPUIV cannot
@@ -111,6 +112,7 @@ export const Switch = defineComponent({
         paddingLeft: checked ? g.labelPad : g.handleZone,
         paddingRight: checked ? g.handleZone : g.labelPad,
         backgroundColor: checked ? "#86d67a" : c.shadowSoft,
+        boxShadow: { offsetX: 0, offsetY: 2, blurRadius: 4, spreadRadius: 0, color: checked ? "rgba(90, 158, 30, 0.2)" : "rgba(114, 93, 66, 0.15)", inset: true },
         borderWidth: g.border,
         borderColor: checked ? c.success : c.shadowSoftHover,
         borderRadius: radius.pill,

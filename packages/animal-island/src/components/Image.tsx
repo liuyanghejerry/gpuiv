@@ -11,8 +11,8 @@
  *  - object-fit: 原版相框 img 只设 width/height 100%，未设 object-fit → 默认
  *    fill 拉伸，移植保留 `objectFit="fill"`；预览大图原版 `object-fit: contain`
  *    → `objectFit="contain"`。
- *  - variant=default: 原版三重 box-shadow（13px/27px/-5px 主影 + 两道补影）→
- *    GPUIV 单阴影，保留主影及 -5px spread。卡片大圆角 12px 原样。
+ *  - variant=default: 原版三重 box-shadow 原样交给 GPUI 的阴影列表，含负
+ *    spread：13/27/-5 主影、8/16/-8 下影、-6/16/-6 上影。圆角仍为 12px。
  *  - variant=bordered: 白底（或 color 调色板底色）+ padding 12 + 圆角 8 +
  *    柔和阴影 `0 8px 14px 0 rgba(0,0,0,0.08)` 原样（原版注释叫「边框」但
  *    border: none，移植同样无边框）。
@@ -53,6 +53,7 @@ import {
   useGpuix,
   useWindowSize,
   type EventPayload,
+  type BoxShadow,
   type HostNode,
   type StyleDesc,
 } from "@gpuiv/vue"
@@ -82,6 +83,13 @@ export interface ImageProps {
 
 /** 原版 Less `.animal-image--default` 底色（卡片 pattern-default 同款，无花纹）。 */
 const DEFAULT_PALETTE = { bg: "rgb(247, 243, 223)", text: "#725d42" }
+
+/** React Image's ordered shadow stack; first layer is the foreground shadow. */
+const DEFAULT_FRAME_SHADOWS: BoxShadow[] = [
+  { offsetX: 0, offsetY: 13, blurRadius: 27, spreadRadius: -5, color: "rgba(50, 50, 93, 0.25)" },
+  { offsetX: 0, offsetY: 8, blurRadius: 16, spreadRadius: -8, color: "rgba(0, 0, 0, 0.3)" },
+  { offsetX: 0, offsetY: -6, blurRadius: 16, spreadRadius: -6, color: "rgba(0, 0, 0, 0.03)" },
+]
 
 function paletteOf(color: ImageColor): { bg: string; text: string } {
   if (color === "white") return { bg: "#ffffff", text: "#725d42" }
@@ -254,12 +262,12 @@ export const Image = defineComponent({
           break
         case "default":
         default:
-          // 原版三重阴影 → 主影单阴影，保留 GPUI 支持的负 spread。
+          // GPUI 支持多重阴影，保持 React 的三个层次和负 spread。
           variantStyle = {
             padding: 0,
             backgroundColor: "transparent",
             borderRadius: 12,
-            boxShadow: { offsetX: 0, offsetY: 13, blurRadius: 27, spreadRadius: -5, color: "rgba(50, 50, 93, 0.25)" },
+            boxShadow: DEFAULT_FRAME_SHADOWS,
           }
           break
       }

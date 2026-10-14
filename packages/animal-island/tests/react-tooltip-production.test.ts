@@ -17,7 +17,7 @@ const hasDisplay = process.platform !== "linux" || Boolean(process.env.DISPLAY |
       expect(Math.abs(row.end - row.start)).toBeCloseTo(4, 0)
       expect(row.middle).toBeGreaterThan(Math.min(row.start, row.end))
       expect(row.middle).toBeLessThan(Math.max(row.start, row.end))
-      expect(row.pixelChecked).toBe(process.platform !== "linux")
+      expect(row.pixelChecked).toBe(process.platform === "darwin")
     }
   }, 25000)
 })

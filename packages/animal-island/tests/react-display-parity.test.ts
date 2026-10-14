@@ -108,7 +108,11 @@ describe("React display component parity", () => {
     vi.useFakeTimers()
     let box = { x: 0, y: 0, width: 100, height: 16 }
     const gap = ref(4)
-    const host = mount(defineComponent(() => () => h(Avatar, { gap: gap.value, size: 40, testId: "avatar" }, { default: () => h("text", "LONG NAME") })), { getElementBounds: () => box })
+    let host: ReturnType<typeof mountHost>
+    host = mount(defineComponent(() => () => h(Avatar, { gap: gap.value, size: 40, testId: "avatar" }, { default: () => h("text", "LONG NAME") })), { getElementBounds: id => {
+      const style = host?.all().find(node => node.id === id)?.props.style as { opacity?: number; fontSize?: number } | undefined
+      return style?.opacity === 0 || !style ? box : { ...box, width: box.width * (style.fontSize ?? 16) / 16 }
+    } })
     await host.settle()
     const visible = () => host.find("avatar").children.find(node => (node.props.style as { flexShrink?: number; opacity?: number } | undefined)?.flexShrink === 0 && (node.props.style as { opacity?: number })?.opacity !== 0)!
     expect(visible().props.style).toMatchObject({ fontSize: 5.12 })
@@ -121,6 +125,47 @@ describe("React display component parity", () => {
     await host.settle()
     expect(visible().props.style).toMatchObject({ fontSize: 6.4 })
     batches.mockRestore()
+  })
+  it("Avatar corrects nonlinear native font metrics and releases fitting work after convergence", async () => {
+    vi.useFakeTimers()
+    let host: ReturnType<typeof mountHost>
+    let position = { x: 0, y: 0 }
+    const gap = ref(4), icon = ref<string | undefined>()
+    host = mount(defineComponent(() => () => h(Avatar, { size: 40, gap: gap.value, icon: icon.value, testId: "avatar" }, { default: () => h("text", "Animal Island") })), { getElementBounds: id => {
+      const style = host?.all().find(node => node.id === id)?.props.style as { opacity?: number; fontSize?: number } | undefined
+      return { ...position, width: style?.opacity === 0 || !style ? 96 : Math.ceil(style.fontSize ?? 16) * 6, height: 16 }
+    } })
+    await host.settle()
+    const visible = () => host.find("avatar").children.find(node => (node.props.style as { flexShrink?: number; opacity?: number } | undefined)?.flexShrink === 0 && (node.props.style as { opacity?: number })?.opacity !== 0)!
+    expect((visible().props.style as { fontSize: number }).fontSize).toBeCloseTo(16 * 32 / 96)
+    // At this font size the hinted native width rounds up to 36px.
+    await vi.advanceTimersByTimeAsync(100)
+    await host.settle()
+    expect((visible().props.style as { fontSize: number }).fontSize).toBeLessThan(16 * 32 / 96)
+    await vi.advanceTimersByTimeAsync(100)
+    await host.settle()
+    expect(host.native.getElementBounds!(visible().id!)!.width).toBeLessThanOrEqual(32)
+    const batches = vi.spyOn(host.native, "applyBatch")
+    position = { x: 20, y: -100 }
+    await vi.advanceTimersByTimeAsync(200)
+    await host.settle()
+    expect(batches).not.toHaveBeenCalled()
+    batches.mockRestore()
+    icon.value = "A"
+    await host.settle()
+    gap.value = 5
+    await host.settle()
+    gap.value = 4
+    await host.settle()
+    // Restore text with the same natural width after it was replaced. Its
+    // painted fit still needs validation even though width did not change.
+    icon.value = undefined
+    await host.settle()
+    await vi.advanceTimersByTimeAsync(200)
+    await host.settle()
+    expect(host.native.getElementBounds!(visible().id!)!.width).toBeLessThanOrEqual(32)
+    host.unmount(); hosts.pop()
+    expect(vi.getTimerCount()).toBe(0)
   })
   it("Avatar accepts React node-valued icon content rather than only a component VNode", () => {
     const host = mount(defineComponent(() => () => h("div", [

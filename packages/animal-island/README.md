@@ -66,7 +66,7 @@ native geometry tests, not a screenshot similarity score.
 | Button / Card / Tag | Original palette, sizes and modifiers; real dashed outlines; hover/press motion; rotating Donut; node-valued icons | Colour/shadow transitions are immediate; letter spacing is unavailable |
 | Select and input controls | Search/filter/clear/empty states; controlled/default models, React value/fileList aliases, keyboard and composition; selection splashes and star bursts | Browser event objects and DOM accessibility references differ; path drawing and CSS transform effects use native approximations |
 | CountUp / Countdown | CountUp formatting/easing/pause/replay/callbacks/celebration; Countdown's 20-face directional digit strip; island dashed outlines | CountUp uses a cancellable JS sampling clock; celebration scale/rotation use native geometry; reduced-motion preferences are not yet mapped |
-| Avatar / Badge / Progress | Actual native text fitting and gap; arbitrary count nodes; four bundled scenes, three-stop fill gradients, completion colours and dotted tracks | First measurement appears after paint; inset shadows and typography features differ |
+| Avatar / Badge / Progress | Actual native text fitting and gap; arbitrary count nodes; four bundled scenes, three-stop fill gradients, completion colours, dotted tracks and native inset highlights | First measurement appears after paint; typography features differ |
 | Rich content and overlays | Node-valued labels/titles/tips; Tooltip hover/focus/click; organic game/island artwork; Notification closes after native exit and destroy removes immediately | Arbitrary child content is not clipped to SVG silhouettes; mask/focus behavior follows native APIs |
 | Image / Loading / BackTop | Stamp perforations/paper texture; decode events and preview; elliptical vignette; original Rocket return button | Image filters/multiple shadows and flake rotation differ; BackTop requires a native scroll target |
 | Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging; date/range/month and time selection; active slides, autoplay and native entrances | Avoid nested scrollers; picker columns page; Carousel inactive slides unmount and lose their local state |
@@ -74,8 +74,8 @@ native geometry tests, not a screenshot similarity score.
 
 ## Verification and limits
 
-The complete run on this Linux workstation has **453 passing tests** across
-29 files: **451 host behavior cases** and **2 real-window cases**. Seven
+The complete run on this Linux workstation has **462 passing tests** across
+29 files: **460 host behavior cases** and **2 real-window cases**. Eleven
 platform-dependent Title layout, native IME and floating-surface pixel tests
 are skipped here. The behavior tests run through the **real Vue custom renderer, GPUIV
 mutation protocol and event registry**, backed by a test native facade. They
@@ -107,7 +107,9 @@ rotating loading artwork and searchable/clearable Select through real native
 input. Additional native regressions verify Countdown's directional digit
 motion, Avatar fitting against native text measurements and Tooltip's complete
 surface entrance. macOS/Windows pixel regressions cover transparent silhouettes,
-single-pass translucent fills and Tooltip backdrop opacity.
+single-pass translucent fills, Tooltip backdrop opacity, inset shading and
+multiple-shadow ordering. Windows production windows lack readback in this
+binding; their pixel assertions use the headless native test renderer.
 A focused gallery type check is available with
 `tsc --noEmit -p examples/tsconfig.animal-island.json` from the repository root.
 

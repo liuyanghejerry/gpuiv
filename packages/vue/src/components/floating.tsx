@@ -69,6 +69,7 @@ function floatingSurfaceStateStyle(
   const surface: InteractiveStyle = {}
   if (style.backgroundColor !== undefined) surface.backgroundColor = style.backgroundColor
   if (style.background !== undefined) surface.background = style.background
+  if (style.boxShadow !== undefined) surface.boxShadow = style.boxShadow
   if (style.visibility !== undefined) surface.visibility = style.visibility
   if (style.opacity !== undefined) surface.opacity = style.opacity
   if (style.borderRadius !== undefined) surface.borderRadius = style.borderRadius
@@ -88,7 +89,7 @@ function floatingSurfaceStateStyle(
 }
 
 /**
- * The outer `anchored` surface owns the fill, visibility, opacity and corner
+ * The outer `anchored` surface owns the fill, shadows, visibility, opacity and corner
  * radii. Painting the fill once preserves alpha and lets the complete surface
  * animate together, including explicit transparent SVG silhouettes.
  */
@@ -108,7 +109,7 @@ function withoutSurfacePaint(
   style: InteractiveStyle | undefined
 ): InteractiveStyle | undefined {
   if (!style) return undefined
-  const { opacity: _opacity, backgroundColor: _color, background: _background, ...rest } = style
+  const { opacity: _opacity, backgroundColor: _color, background: _background, boxShadow: _shadow, ...rest } = style
   return rest
 }
 
@@ -117,7 +118,7 @@ function floatingContentStyle(
   style: StyleDesc | undefined
 ): StyleDesc | undefined {
   if (!style) return undefined
-  const { opacity: _opacity, backgroundColor: _color, background: _background, hover, active, ...rest } = style
+  const { opacity: _opacity, backgroundColor: _color, background: _background, boxShadow: _shadow, hover, active, ...rest } = style
   return {
     ...rest,
     hover: withoutSurfacePaint(hover),

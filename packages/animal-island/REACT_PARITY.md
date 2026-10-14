@@ -10,7 +10,7 @@
 - 保留 Vue 的 `modelValue` / `onUpdate:modelValue`。Input、Select、DatePicker、TimePicker 的 React `value` 和 Upload 的 `fileList` 同样可受控使用；显式 React 值优先于 Vue 别名。
 - 公共 Props 类型使用原生事件、VNode 与 `StyleDesc`，并公开 CountUp 相关类型和 `Avatar.Group`。不将浏览器 `SyntheticEvent`、`CSSProperties` 或 DOM 引用伪装为原生对象。
 - 弹层采用 `FloatingLayer`、平台 Select 或 deferred anchored 层。侧栏和右侧展示区是独立的兄弟滚动容器；组件内部避免嵌套滚动。
-- 本次修改位于 Animal Island 包及 Vue 动画/浮动层。本地 native Rust 仅修正 anchored 背景默认值：明确指定透明背景时不再被默认黑色覆盖；未修改上游 GPUIX 或 Zed。
+- 本次修改位于 Animal Island 包、Vue 动画/浮动层及本地 native 翻译层。native 保留 anchored 显式透明背景，并将单个/数组阴影及 inset 标志映射到现有 GPUI 阴影 API；未修改上游 GPUIX 或 Zed。
 
 ## 基础组件
 
@@ -31,7 +31,7 @@
 | 页面 | 已覆盖的 React 契约与本次变化 | 仍有的原生差异 |
 | --- | --- | --- |
 | Input | React `value` 的字符串/数字受控别名、readOnly、autoFocus、tabIndex、键盘回调；VNode 前后缀；原有 defaultValue、清空、状态、阴影、password、IME、maxLength。 | `onChange(value, nativeEvent?)` 是 Vue/原生回调；除密码外，浏览器 input type 的验证约束不适用；颜色/阴影直接切换。 |
-| Switch | checked/modelValue、defaultChecked、disabled/loading、键盘及原生滑块；VNode checkedChildren/unCheckedChildren。 | VNode 标签需要调用者提供合适宽度；字符串标签保留宽度估计。内阴影、文字阴影和旋转边框加载效果采用原生近似。 |
+| Switch | checked/modelValue、defaultChecked、disabled/loading、键盘及原生滑块；完整节点 checkedChildren/unCheckedChildren；正常/选中原生内阴影。 | VNode 标签需要调用者提供合适宽度；字符串标签保留宽度估计。文字阴影和旋转边框加载效果仍为近似。 |
 | Select | React 搜索、清空、onSearch/onClear、clearAriaLabel；filterOption 布尔/自定义函数、optionFilterProp；任意 notFoundContent；过滤结果键盘导航、Esc 清空查询后关闭、焦点保持。普通菜单继续使用平台已挂载条目注册表。 | 按用户要求默认在触发器上方、左侧对齐、间隔 8px，覆盖 React 原有位置算法；可配置 side/align。长菜单不引入嵌套滚动；原生 ARIA 不具备所有 DOM 引用关系；退出立即完成。 |
 | DatePicker | React `value` 与 Vue 受控值；日期/范围/月模式、disabledDate、自定义 format、待确认值、清空、today、键盘和 popup 控制。 | 弹层位置采用原生锚定；退出立即完成；浏览器 ARIA 引用关系不完整。 |
 | TimePicker | React `value` 与 Vue 受控值；步长、format、时间列、待确认值、当前时间、清空、popup 和键盘。 | 每列以七行分页替代浏览器滚动列，避免嵌套滚动。 |
@@ -50,7 +50,7 @@
 | Drawer | 任意 title/footer 节点；四方向、尺寸、位置动画、关闭与焦点恢复。 | `pushBackground` 的 scale/blur 没有原生 transform/filter，仍不生效；Tab 约束与 ARIA 引用仍有平台差异。 |
 | Loading | 原椭圆暗角渐变、任意 tip、50 个雪花、delay、受控显示、打断退出与卸载清理；zIndex 对应 native deferred priority。 | 文字阴影和 OS reduced-motion 偏好未自动映射；圆形雪花旋转不改变视觉。 |
 | Tooltip | 分离 hover/focus/click 模式；事件组合到实际子组件，保留原回调；100ms 关闭宽限、重新进入取消关闭、可选 delay；任意标题；island 复用 React 归一化路径；完整 deferred 表面使用 0.25s opacity 与朝触发器的 4px 位移入场。 | deferred 命中/遮挡区域为矩形，SVG 不裁剪原生后代；旋转方形箭头用三角装饰代替；无 described-by DOM 关联。 |
-| Progress | percent 钳制、showInfo、任意 infoFormat、duration；14/24/32px 轨道、2px 描边、14px 波点；默认薄荷三段渐变、100% 完成态提亮；四种场景图固定为整轨宽度，再从左侧揭开。保留 inside/top 信息位置扩展。 | 不绘制 CSS inset shadow 或字距；渐变与场景图用原生 img 和圆角裁剪；第一次填充等待轨道尺寸；resize 时会再次补间。 |
+| Progress | percent 钳制、showInfo、任意 infoFormat、duration；14/24/32px 轨道、2px 描边、14px 波点；默认薄荷三段渐变、100% 完成态提亮和 2px 内高光；四种场景图固定为整轨宽度，再从左侧揭开。保留 inside/top 信息位置扩展。 | 字距未映射；渐变与场景图用原生 img 和圆角裁剪；第一次填充等待轨道尺寸；resize 时会再次补间。 |
 | Skeleton | loading、四种变体、active、rows、width/rowWidths/widthValue/heightValue；Button/Input/Avatar 辅助组件；共同采样时钟、独立相位与卸载清理。 | 原移动高光条仍采用透明度呼吸近似；没有 CSS 三停背景渐变平移。loading=false 且无内容时输出空内容。 |
 | BackTop | React Rocket 图案、64px 尺寸、bottom 32/right 24、10px 入场、1.08 hover 尺寸、0.96 press 尺寸及 2px 位移；SVG 轮廓阴影。 | 原生没有隐式浏览器 window 滚动器，需要指定目标 id/ref；120ms 查询滚动位置代替浏览器滚动事件。 |
 
@@ -59,14 +59,14 @@
 | 页面 | 已覆盖的 React 契约与本次变化 | 仍有的原生差异 |
 | --- | --- | --- |
 | Card | 全部 13 色/14 pattern；真实虚线；hoverable 按 React 抬升 2px/0.3s；虚线卡片不抬升，仅变描边；样式覆盖保留。 | 颜色直接切换；测量装饰在第一次尺寸采样后出现。 |
-| Avatar | size/shape/src/alt/任意 icon 节点/gap/onError；真实图片错误回退及返回 false 的拒绝回退；原生自然文本测量控制字号。AvatarGroup 提供 maxCount/maxStyle/size/shape/gap、继承与子项优先、+N，以及 Avatar.Group 别名。 | 第一帧以基础字号绘制，测量后缩字；显式子内容字体样式可能影响最终适配。测量对象保持基础字号且不参与正常布局。 |
+| Avatar | size/shape/src/alt/任意 icon 节点/gap/onError；真实图片错误回退及返回 false 的拒绝回退；原生自然文本测量控制字号，绘制后继续校正字体 hinting 导致的宽度取整。AvatarGroup 提供 maxCount/maxStyle/size/shape/gap、继承与子项优先、+N，以及 Avatar.Group 别名。 | 第一帧以基础字号绘制，测量后缩字；显式子内容字体样式可能影响最终适配。测量对象保持基础字号且不参与正常布局；收敛后不持续采样可见文字。 |
 | Badge | 数字/字符串/任意节点 count、overflowCount、showZero、dot、尺寸、调色板、独立/包裹使用；空值隐藏；原生淡入。 | CSS scale 入场改为 opacity；浏览器 title tooltip 未自动提供；宽胶囊仍使用固定角点偏移。 |
 | Collapse | 任意节点/数组的 question、answer，兼容具名插槽；0.3s AnimateHeight 开合和原受控扩展。 | 鱼/字形旋转未还原；背景直接切换；ARIA 无 DOM-id 引用。 |
 | Tabs | 任意标签与文本/数组面板；受控/default/键盘；0.25s 透明度和 4px 面板入场；按当前 React 移除旧叶子装饰，deprecated leafAnimation 仍被接受。 | 颜色直接切换；ARIA 不提供 DOM-id 关系。 |
 | Table | 列/表头/render/插槽、rows/key、stripe/loading/empty、scroll/client pagination；修复 pagination.onChange 被吞掉；PaginationProps 补齐回调类型。 | 使用 flex 而非 HTML table；无 sticky header；fixed 列在 React 源码同样未实现。纵向滚动需置于其他滚动容器之外。 |
 | Pagination | 受控/default 页码、pageSize、尺寸选择、jumper、总数、variants、change/showSizeChange；尺寸菜单沿用上方左对齐定位。 | 颜色直接切换；输入通过原生 valueRevision 保持受控同步。 |
 | Typewriter | speed、trigger、autoPlay、onDone、保留节点结构；原生组件默认插槽可嵌套逐字裁剪，保留组件状态、具名插槽和事件；文本总长度变化重播；autoPlay=false 显示全文并触发完成；额外 showCursor 保留。 | 与 React 一样按 UTF-16 字符截取；长度未改变的内容更新不重新播放；组件内部未通过默认插槽暴露的文本不参与裁剪。 |
-| Image | frame/color、native load/error、单轴自然比例、preview；stamp 实际齿孔按 16px 节距及 5px 半径适配任意比例，暖纸和半色调纹理。 | saturation/contrast、双重/三重阴影、文字阴影未完全还原；lazy 仍由原生后台立即解码。 |
+| Image | frame/color、native load/error、单轴自然比例、preview；默认三层阴影按原顺序绘制；stamp 实际齿孔按 16px 节距及 5px 半径适配任意比例，暖纸和半色调纹理。 | saturation/contrast、stamp 的两层 alpha 轮廓 drop-shadow 滤镜及文字阴影未完全还原；lazy 仍由原生后台立即解码。 |
 | Carousel | 受控/default、键盘、autoplay、焦点暂停、控件；18px 和 opacity 幻灯片入场。 | 非当前页卸载以移除 native focus/event hosts，不像 React 保留隐藏页的局部状态；没有同时保留旧页进行交叉淡出。 |
 | Time | 实时时/分、星期/月日、冒号闪烁、透明度入场、原生 attrs。 | 闪烁遵循墙钟半秒而非 CSS 挂载相位；字距、tabular-nums 与 aria-live 元数据未全部映射。 |
 | Countdown | number/Date 目标；DD/HH/mm/ss 与字面量；prefix；尺寸/variant/bordered；250ms change、finish 一次；20 面数字条始终向下滚动，跨循环落到等价面；island 真虚线。 | 固定宽度数字格代替 tabular-nums；aria-valuetext 代替浏览器 sr-only 文本。 |

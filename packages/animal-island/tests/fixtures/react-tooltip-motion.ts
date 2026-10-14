@@ -75,7 +75,9 @@ try {
     const start = measure()[axis]
     const pixels: number[][] = []
     function capture(stage: string) {
-      if (process.platform === "linux") return
+      // Production screenshot readback is macOS-only. Windows uses the
+      // headless TestGpuixRenderer pixel regression instead.
+      if (process.platform !== "darwin") return
       const path = join(folder, `${index}-${stage}.png`)
       renderer.captureScreenshot(path)
       const image = readPng(readFileSync(path)), viewport = renderer.getWindowSize!()

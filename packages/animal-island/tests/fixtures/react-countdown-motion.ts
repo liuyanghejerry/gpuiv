@@ -11,7 +11,6 @@ const app = createApp(defineComponent(() => () => h("div", { style: { width: "10
   h(Countdown, { value: finishAt.value, format: "ss", testId: "countdown" }),
   h(Avatar, { size: 40, gap: 4, testId: "avatar" }, { default: () => h("text", "Animal Island") }),
 ])), { width: 500, height: 240, focus: false, show: true })
-finishAt.value = Date.now() + 1800
 const renderer = app.renderer as typeof app.renderer & LiveAutomationRenderer
 const walk = (node: HostNode): HostNode[] => [node, ...node.children.flatMap(walk)]
 const all = () => walk(app.container)
@@ -25,7 +24,8 @@ try {
   await until(() => {
     const avatar = all().find(node => node.props.testId === "avatar")
     const fitted = avatar?.children.find(node => (node.props.style as { flexShrink?: number; opacity?: number } | undefined)?.flexShrink === 0 && (node.props.style as { opacity?: number })?.opacity !== 0)
-    return ((fitted?.props.style as { fontSize?: number } | undefined)?.fontSize ?? 16) < 16
+    const fittedWidth = fitted?.id == null ? undefined : renderer.getElementBounds(fitted.id)?.width
+    return ((fitted?.props.style as { fontSize?: number } | undefined)?.fontSize ?? 16) < 16 && fittedWidth != null && fittedWidth > 0 && fittedWidth <= 33
   }, "Avatar must fit the real unshrunk native text width")
   const avatar = all().find(node => node.props.testId === "avatar")!
   const measure = avatar.children.find(node => (node.props.style as { opacity?: number } | undefined)?.opacity === 0)!
@@ -34,6 +34,8 @@ try {
   const visibleWidth = renderer.getElementBounds(visible.id!)!.width
   assert(naturalWidth > 32, "The measurement must retain the text's natural width outside the avatar layout")
   assert(visibleWidth <= 33, `The fitted native text must fit the avatar gap (${visibleWidth})`)
+  finishAt.value = Date.now() + 1800
+  await nextTick()
   await until(() => all().find(node => node.props.testId === "countdown")?.props["aria-valuetext"] === "01", "Countdown must reach the final second")
   const digit = all().find(node => (node.props.motion as { animate?: { top?: number } } | undefined)?.animate?.top === -31)
   assert(digit?.id != null, "The changing digit must have an actual native motion strip")

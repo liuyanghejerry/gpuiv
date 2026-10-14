@@ -9,8 +9,10 @@
  *    a static div). Consequences: the fill appears one frame after the track
  *    (first measurement), and a track resize re-tweens the fill instead of
  *    snapping like CSS.
- *  - Inset track shadow (`box-shadow: inset 0 2px 4px …`) → dropped (GPUIV
- *    has no inset shadows); the 2px bordered cream track carries the shape.
+ *  - React's current track uses a 2px border rather than an inset groove.
+ *    Fill's white inset 0 2px 0 highlight uses native shadow paint on a last
+ *    decorative child: GPUI paints a parent inset before its children, while
+ *    this port's SVG/scene child supplies what CSS paints as the background.
  *  - React's optional `variant` paints its bundled scene at full track width
  *    inside the animated clipping fill, revealing its left edge. No variant
  *    paints React's three-stop teal ramp, or its lighter completed ramp when
@@ -112,6 +114,7 @@ export const Progress = defineComponent({
         {props.variant && trackInnerWidth !== null ? <img src={sceneByVariant[props.variant]} objectFit="fill" style={{ position: "absolute", top: 0, left: 0, width: trackInnerWidth, height: trackInnerWidth * 9 / 16, pointerEvents: "none" }} />
           : <ProgressFillDecoration completed={Math.round(safePercent) === 100} height={trackInnerHeight}
             testId={props.testId ? `${props.testId}-fill-decoration` : undefined} />}
+        <div testId={props.testId ? `${props.testId}-fill-highlight` : undefined} aria-hidden={true} style={{ position: "absolute", top: 0, left: 0, width: "100%", height: trackInnerHeight, borderRadius: radius.pill, pointerEvents: "none", boxShadow: { offsetX: 0, offsetY: 2, blurRadius: 0, spreadRadius: 0, color: "rgba(255, 255, 255, 0.45)", inset: true } }} />
         {infoInsideVisible ? <div style={{ position: "relative", pointerEvents: "none" }}>{info()}</div> : null}
       </>
 

@@ -68,4 +68,13 @@ describe("floating surface ownership", () => {
     expect(surface.props.style).toMatchObject({ position: "relative", borderRadius: 16 })
     expect(content.props.motion).toBeUndefined()
   })
+
+  it("paints drop shadows behind the fill instead of over it on the inner content", () => {
+    const shadow = { offsetX: 0, offsetY: 3, blurRadius: 10, spreadRadius: 0, color: "rgba(61, 52, 40, 0.1)" }
+    const hovered = { ...shadow, blurRadius: 14 }
+    const { surface, content } = mount({ backgroundColor: "#f7f3df", boxShadow: shadow, hover: { boxShadow: hovered } })
+    expect(surface.props.style).toMatchObject({ backgroundColor: "#f7f3df", boxShadow: shadow, hover: { boxShadow: hovered } })
+    expect(content.props.style.boxShadow).toBeUndefined()
+    expect(content.props.style.hover.boxShadow).toBeUndefined()
+  })
 })

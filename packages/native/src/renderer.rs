@@ -7997,15 +7997,8 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         }
     }
     if let Some(ref shadow) = style.box_shadow {
-        if let Some(color) = crate::color::parse_color_rgba(&shadow.color) {
-            let shadow = gpui::BoxShadow::new(
-                gpui::px(shadow.offset_x as f32),
-                gpui::px(shadow.offset_y as f32),
-                color.into(),
-            )
-            .blur_radius(gpui::px(shadow.blur_radius.max(0.0) as f32))
-            .spread_radius(gpui::px(shadow.spread_radius as f32));
-            el = el.shadow(vec![shadow]);
+        if let Some(shadows) = shadow.resolved_shadows() {
+            el = el.shadow(shadows);
         }
     }
     if let Some(ref outline) = style.outline {

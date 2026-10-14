@@ -1655,18 +1655,19 @@ markdown through the menu, and clicks hit the text behind it.
 </Select>
 ```
 
-Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
-`FloatingLayer` defaults to `#1A1A1A`. Item rows should use the same solid
-color, or a solid hover color. A `#00000000` child on a blurred window punches
-through Metal to the desktop.
+`FloatingLayer` defaults to the opaque fill `#1A1A1A`. Explicit transparent
+and translucent fills are preserved, including panels drawn with SVG outlines.
+When the panel owns its fill, transparent item rows preserve its rounded corners.
 
 `FloatingLayer` copies uniform and per-corner border radii to its anchored
 surface, so rounded Select, Combobox, and Tooltip content does not show square
 corners behind it. It also puts `visibility` and `opacity` on that outer surface
 so the fallback fill follows them without multiplying nested opacity.
-`pointerEvents: "none"` disables the anchored occluder. Backgrounds, borders,
-shadows, overflow, and layout remain on the inner content to avoid double paint
-or changed popup geometry.
+Backgrounds and shadows belong to that same outer surface: drop shadows paint
+behind the fill, and translucent backgrounds paint only once. The optional
+native `motion` attr also targets this complete surface. Borders, overflow,
+layout, focus and keyboard handlers remain on the inner content.
+`pointerEvents: "none"` disables the anchored occluder.
 
 A filled in-flow `div` blocks clicks and hovers behind it. The parent
 scroller still gets the wheel. `position: "absolute"` / `"fixed"` or
@@ -2408,7 +2409,7 @@ apply to every binding form.
 >   but easier to miss because there is no browser DevTools to inspect.
 > - **No shorthand values.** `padding`, `margin`, and `border` take numbers.
 >   CSS strings like `"0 16px"`, `"1px solid #fff"`, or `calc()` are ignored.
-> - **`boxShadow` is a structured object**, not a CSS string. See below.
+> - **`boxShadow` is a structured object or array**, not a CSS string. See below.
 > - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
 > - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
 >   into one line. A `<text>` child of another `<text>` is a nested div.
@@ -2512,8 +2513,13 @@ Limited relative-color forms can derive a new color from a base value:
 />
 ```
 
-`boxShadow` accepts one structured shadow. Its fields are `offsetX`, `offsetY`,
-`blurRadius`, `spreadRadius`, and `color`:
+`boxShadow` accepts a structured shadow or an array of shadows. Each shadow has
+`offsetX`, `offsetY`, `blurRadius`, `spreadRadius`, `color`, and optional
+`inset` (defaults to `false`). Drop shadows paint behind the element; inset
+shadows paint inside its border box over the fill. An empty array clears the
+shadow stack, including in `hover` or `active` styles.
+Within each drop/inset group, the first array entry paints on top, following
+CSS shadow ordering.
 
 ```tsx
 <div

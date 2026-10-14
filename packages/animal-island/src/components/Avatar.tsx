@@ -5,7 +5,7 @@
  * Failed images switch to the icon/slot fallback unless onError returns false.
  */
 
-import { computed, defineComponent, inject, ref, watch, type InjectionKey, type PropType, type VNode, type VNodeChild } from "vue"
+import { computed, defineComponent, inject, onBeforeUnmount, ref, watch, type InjectionKey, type PropType, type VNode, type VNodeChild } from "vue"
 import { useElementBounds, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, fonts } from "../tokens.js"
 import { Icon } from "./Icon.js"
@@ -62,10 +62,41 @@ export const Avatar = defineComponent({
     // Only the width participates in fitting. Scroll position polls do not
     // subscribe the component render or send new styles across the FFI.
     const measuredWidth = computed(() => bounds.value?.width ?? 0)
-    const textScale = computed(() => {
-      const available = px.value - Math.max(0, props.gap) * 2
-      return available > 0 && measuredWidth.value > available ? available / measuredWidth.value : 1
+    const availableWidth = computed(() => px.value - Math.max(0, props.gap) * 2)
+    const desiredFont = computed(() => fontPx.value * (availableWidth.value > 0 && measuredWidth.value > availableWidth.value ? availableWidth.value / measuredWidth.value : 1))
+    const fittedFont = ref(fontPx.value)
+    const visibleText = ref<HostNode | null>(null)
+    const { measure: measureVisibleText } = useElementBounds(visibleText, { intervalMs: false })
+    let fitTimer: ReturnType<typeof setTimeout> | undefined
+    let corrections = 0
+    function cancelFit() { clearTimeout(fitTimer); fitTimer = undefined }
+    function checkFit() {
+      fitTimer = undefined
+      const visible = measureVisibleText()
+      if (!visible || availableWidth.value <= 0 || visible.width <= availableWidth.value + .5 || corrections >= 8) return
+      // Native font hinting/rounding need not scale widths linearly. Sample
+      // the freshly painted fitted content before applying another correction;
+      // the unshrunk measurement remains independent of these adjustments.
+      fittedFont.value *= availableWidth.value / visible.width
+      corrections++
+      fitTimer = setTimeout(checkFit, 100)
+    }
+    watch([desiredFont, availableWidth], () => {
+      cancelFit()
+      corrections = 0
+      fittedFont.value = desiredFont.value
+      // Wait for native paint instead of comparing against the previous frame.
+      if (measuredWidth.value > 0 && availableWidth.value > 0) fitTimer = setTimeout(checkFit, 100)
+    }, { immediate: true })
+    watch(visibleText, node => {
+      cancelFit()
+      corrections = 0
+      // An image/icon can temporarily replace the fitted text while size or
+      // gap changes. Check the restored host even if its natural width matches
+      // the last reading, since no width-change watcher would run in that case.
+      if (node && availableWidth.value > 0) fitTimer = setTimeout(checkFit, 100)
     })
+    onBeforeUnmount(cancelFit)
 
     function textContent(nodes: unknown): string {
       if (typeof nodes === "string" || typeof nodes === "number") return String(nodes)
@@ -122,7 +153,7 @@ export const Avatar = defineComponent({
           ) : (
             props.icon ? renderContent(props.icon) : (label ? <>
               <div ref={textMeasure} style={{ position: "absolute", top: 0, left: 0, width: "auto", flexShrink: 0, opacity: 0, fontSize: fontPx.value, whiteSpace: "nowrap", pointerEvents: "none" }}><text>{label}</text></div>
-              <div style={{ fontSize: fontPx.value * textScale.value, whiteSpace: "nowrap", flexShrink: 0, pointerEvents: "none" }}>{children}</div>
+              <div ref={visibleText} style={{ width: "auto", fontSize: fittedFont.value, whiteSpace: "nowrap", flexShrink: 0, pointerEvents: "none" }}>{children}</div>
             </> : children ?? <Icon name="User" size={Math.round(px.value * 0.5)} />)
           )}
         </div>

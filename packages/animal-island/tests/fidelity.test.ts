@@ -3,6 +3,7 @@ import { defineComponent, h, ref } from "vue"
 import { mountHost } from "./harness.js"
 import { Button } from "../src/components/Button.js"
 import { Input } from "../src/components/Input.js"
+import { Image } from "../src/components/Image.js"
 import { Modal } from "../src/components/Modal.js"
 import { Select } from "../src/components/Select.js"
 import { Icon, getIconDataUrl } from "../src/components/Icon.js"
@@ -23,6 +24,23 @@ function mount(component: Parameters<typeof mountHost>[0]) {
 afterEach(() => { cleanups.splice(0).reverse().forEach(fn => fn()); vi.useRealTimers() })
 
 describe("original animal-island contracts", () => {
+  it("replaces the default Image shadow stack on failure and restores it for a new source", async () => {
+    const src = ref("first.png")
+    const app = mount(defineComponent(() => () => h(Image, { src: src.value, preview: false, testId: "image" })))
+    const shadow = () => (app.find("image").props.style as { boxShadow: unknown }).boxShadow
+    expect(shadow()).toEqual([
+      { offsetX: 0, offsetY: 13, blurRadius: 27, spreadRadius: -5, color: "rgba(50, 50, 93, 0.25)" },
+      { offsetX: 0, offsetY: 8, blurRadius: 16, spreadRadius: -8, color: "rgba(0, 0, 0, 0.3)" },
+      { offsetX: 0, offsetY: -6, blurRadius: 16, spreadRadius: -6, color: "rgba(0, 0, 0, 0.03)" },
+    ])
+    await app.fire("image-img", "error", { value: JSON.stringify({ src: "first.png", generation: 1, error: "decode failed" }) })
+    expect(Array.isArray(shadow())).toBe(false)
+    expect(shadow()).toMatchObject({ offsetY: 8, blurRadius: 14, spreadRadius: 0, color: "rgba(0, 0, 0, 0.08)" })
+    src.value = "next.png"
+    await app.settle()
+    expect(shadow()).toHaveLength(3)
+    expect(app.text()).not.toContain("图片加载失败")
+  })
   it("preserves button size, cream fill, hard shadow and keyboard activation", async () => {
     const click = vi.fn()
     const app = mount(defineComponent(() => () => h(Button, { type: "primary", testId: "button", onClick: click }, () => "确定")))

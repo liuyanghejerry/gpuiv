@@ -44,6 +44,8 @@ export interface BoxShadow {
   blurRadius: number
   spreadRadius: number
   color: string
+  /** Paint inside the rounded element bounds; omitted means a drop shadow. */
+  inset?: boolean
 }
 
 /** One styled segment of a `<text runs={…}>` element. Attributes left unset
@@ -185,7 +187,8 @@ export interface StyleDesc {
   borderTopRightRadius?: number
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
-  boxShadow?: BoxShadow
+  /** One shadow or GPUI's ordered shadow stack; [] explicitly clears it. */
+  boxShadow?: BoxShadow | BoxShadow[]
   outline?: Outline
 
   /** Styled segments for a `<text>` element — inline runs in one node.
