@@ -91,7 +91,7 @@ describeNative("floating layer surfaces", () => {
     expect(content?.style.opacity).toBeUndefined()
     expect(content?.style.hover?.opacity).toBeNull()
     expect(content?.style.hover?.backgroundColor).toBeNull()
-    expect(content?.style.backgroundColor).toBeNull()
+    expect(content?.style.backgroundColor).toBeUndefined()
     expect(anchored.style.backgroundColor).toBe("#1A1A1A")
   })
 })
