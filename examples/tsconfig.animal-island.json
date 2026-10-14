@@ -3,6 +3,7 @@
   "include": [
     "shims.d.ts",
     "animal-island.tsx",
+    "animal-island-demo-pages.tsx",
     "animal-island.test.tsx",
     "animal-island.production.test.ts",
     "bounds-query.production.test.ts",

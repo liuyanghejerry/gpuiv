@@ -196,8 +196,8 @@ export const Select = defineComponent({
         fontSize: g.optionFontSize,
         fontWeight: state.highlighted || state.selected ? 700 : 500,
         color: "#725d42",
-        // 行填充必须在 item 自己身上（扁平命中列表，子元素填充会盖住点击）
-        backgroundColor: "#ffeea0",
+        // The rounded panel owns the fill. Square row fills would cover its
+        // corners; click/hover listeners still create whole-row hitboxes.
         whiteSpace: "nowrap",
         userSelect: "none",
         cursor: "pointer",

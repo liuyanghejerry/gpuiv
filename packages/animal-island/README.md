@@ -37,6 +37,14 @@ file drops. Its File values come from `node:buffer`, not browser input elements.
 
 Select accepts native `side`, `align` and `sideOffset` props (defaults: top,
 start, 8px). Pagination uses the same placement for its page-size popup.
+The rounded yellow popup panel owns the fill; transparent option rows preserve
+the rounded outline, whole-row clicks and the outside hover arrow.
+
+The demo follows the [reference site's layout](https://guokaigdg.github.io/animal-island-ui/#/button):
+a 220px cream sidebar groups all 39 component families, and the selected page
+appears in a large white showcase with its own heading and description.
+The sidebar and content are independent sibling scroll viewports. Selecting a
+page resets the content scroll and mounts only that page's examples.
 
 ## Fidelity audit
 
@@ -91,25 +99,44 @@ using each text size.
 
 ## Verification and limits
 
-The package has **282 passing behavior tests** across eighteen files, plus four
-platform-dependent Title layout and native IME tests. The behavior tests run on Linux through the **real Vue custom renderer, GPUIV
+The package has **283 passing behavior tests** across nineteen files, plus five
+platform-dependent Title layout, native IME and Select corner-paint tests. The behavior tests run on Linux through the **real Vue custom renderer, GPUIV
 mutation protocol and event registry**, backed by a test native facade. They
 cover state transitions, native key names, controlled clearing, async rules,
 upload bytes over a local HTTP server and timer/resource cleanup. They do not
 paint, resolve Taffy layout or verify GPUI hit testing. Structural assertions
 check that decorative surfaces do not register blocking pointer behavior.
+The multipart-upload test starts a local HTTP server, so the full run requires
+permission to listen on localhost.
 
 The example's GPU tests use `createTestApp()` on macOS/Windows. Linux has no
 headless image readback for this pinned GPUI build, so those tests skip there.
-A hidden Linux native window also mounts and reports real bounds for the seven newly ported families; its carousel occupies one 180px slide, rather than stacking inactive pages. Production fixtures verify image events for data/local/HTTP sources, shared resources in two windows, stale-source/unmount rejection, Image fades/error artwork, single-axis frame/image geometry, Avatar fallbacks, font loading/weight selection, password editing/cut protection and Input length corrections to the actual native buffer. The current release addon also verifies that the gallery scroll viewport fills the window below its header, empty overlay anchors have zero height, and centered floating layers stay aligned on all four sides after scrolling. Use a release build from the current source: the older npm 0.5.0 addon retains empty text line heights and the previous floating-center calculation, and lacks password/image lifecycle support. Native screenshot comparison remains pending; no claim of pixel identity is
-made. A focused gallery type check is available with
+Earlier hidden Linux native-window checks verified the seven newly ported
+families, the Carousel's single 180px slide, image events for data/local/HTTP
+sources, shared resources in two windows, stale-source/unmount rejection,
+Image fades/error artwork, single-axis image geometry, Avatar fallbacks,
+font loading/weights, password editing/cut protection and native Input length
+corrections. They also verified full-height scroll viewports, zero-height
+empty overlay anchors and centered floating layers after scrolling.
+Use a release build from the current source: the older npm 0.5.0 addon retains
+empty text line heights and the previous floating-center calculation, and lacks
+password/image lifecycle support. The comparison layout's Linux production
+fixture verifies the 220px sidebar, white showcase dimensions, independent
+scroll viewports, resize, real navigation and controlled Input state retention.
+Native screenshot comparison remains pending; this pinned Linux renderer does
+not support screenshot readback, and no claim of pixel identity is made.
+A focused gallery type check is available with
 `tsc --noEmit -p examples/tsconfig.animal-island.json` from the repository root.
 
 The Pagination popup production regression checks outer-edge alignment and the
 8px gap before and during scrolling, after resize, and after window-edge fitting,
 then clicks an option and checks the selected label, callbacks and dismissal.
-The gallery Select regression drives the actual “选择目的地” control, checks its
-above-trigger alignment before and during scrolling, and selects “森林”.
+The gallery Select regression navigates to the actual “选择目的地” control,
+checks its above-trigger alignment before and during scrolling, and clicks
+the left and right blank portions of option rows. The earlier continuous
+gallery and the comparison layout both pass this native regression. The rounded-surface host test checks transparent
+interactive rows, and the macOS/Windows pixel test checks that option shoulders
+leave the 28px corner arcs clear.
 
 ## Scroll performance
 
@@ -124,17 +151,18 @@ Image decode completion follows GPUI's next-frame notification schedule so a
 burst of completed assets does not repaint the entire window once per image.
 The production burst regression releases 48 HTTP images together: the previous
 notification path draws 48 frames and fails the check, while the coalesced path
-draws two. A fixed 90-step scroll trajectory on this machine reduces the maximum
-observed bounds wait from about 1.25 seconds to 32ms. These measurements establish
+draws two. Before the comparison layout, a fixed 90-step scroll trajectory on
+this machine reduced the maximum observed bounds wait from about 1.25 seconds
+to 32ms. These measurements establish
 the removed notification burst, not a frame-rate guarantee on other hardware.
 
-The gallery mounts nearby sections and keeps measured placeholders for distant
-ones, with overscan and hysteresis to avoid repeated mount/unmount at an edge.
-Resize remeasures the section heights. This is a demo optimisation: remounting
-resets a section's uncontrolled local component state; root-controlled values
-and the Form store survive. Components used outside the gallery are unaffected.
-The production windowing test checks the single scroll owner, viewport height,
-deep scrolling, resize and return to the top.
+The comparison gallery mounts only the selected component page, so unrelated
+examples and their timers do not run while scrolling. Revisiting a page resets
+its uncontrolled local component state; root-controlled values and the Form
+store survive. Components used outside the gallery are unaffected. Host tests
+cover all 39 navigation entries, Enter/Space activation, page isolation, state
+retention, scroll reset and timer cleanup. The production layout fixture checks
+sidebar/card geometry, sibling scroll ownership, resize and real navigation.
 
 ```sh
 cd examples
@@ -144,8 +172,14 @@ PROFILE_LABEL=fixed PROFILE_STEPS=90 bun profile-animal-island-scroll.ts
 ```
 
 The profiling script writes draw-duration, query, mutation and event-loop
-metrics to `tmp/animal-island-perf/`. Draw time is not FPS; GPU load and the
-visible demo affect these measurements.
+metrics to `tmp/animal-island-perf/`. It opens the long BackTop page by default;
+`PROFILE_PAGE=icon` selects a different page. Compare runs on the same page and
+check the recorded final offset for scroll clamping. Draw time is not FPS;
+GPU load and the visible demo affect these measurements.
+On this machine, the comparison layout's 90-step BackTop run records a p90
+draw duration of 4.08ms and maximum draw duration of 5.67ms, with a maximum
+bounds-query duration of 6.87ms. Its final offset is -1169px, so later steps
+are clamped; this run does not repeat the earlier continuous-gallery trajectory.
 
 A retained Carousel slide cache was also tested against the current renderer.
 Vue KeepAlive storage left an orphan native host after unmount, while a full

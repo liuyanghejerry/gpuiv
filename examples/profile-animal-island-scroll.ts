@@ -5,8 +5,10 @@
  * reports event-loop delays and the time spent in synchronous native queries.
  * PROFILE_STEPS=90 fixes the trajectory to 90 steps of 30px for A/B runs;
  * without it, the driver keeps its 2500ms duration limit.
+ * PROFILE_PAGE chooses a component page (default: back-top, with long content).
  */
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { defineComponent, h } from 'vue'
 import { createApp, resetApp, type HostNode } from '@gpuiv/vue'
 import { App } from './animal-island'
 
@@ -14,7 +16,9 @@ const fixedSteps = process.env.PROFILE_STEPS ? Number(process.env.PROFILE_STEPS)
 if (fixedSteps !== null && (!Number.isSafeInteger(fixedSteps) || fixedSteps <= 0)) {
   throw new Error('PROFILE_STEPS must be a positive integer')
 }
-const nativeApp = createApp(App, { width: 1120, height: 820, focus: false, show: false })
+const page = process.env.PROFILE_PAGE ?? 'back-top'
+const ProfileApp = defineComponent(() => () => h(App, { initialPage: page }))
+const nativeApp = createApp(ProfileApp, { width: 1120, height: 820, focus: false, show: false })
 const renderer = nativeApp.renderer
 const find = (node: HostNode, id: string): HostNode | undefined => node.props?.testId === id ? node : node.children.map(child => find(child, id)).find(Boolean)
 const scrollId = find(nativeApp.container, 'gallery-scroll')!.id!
@@ -48,7 +52,7 @@ const elapsedMs = performance.now() - started
 measuring = false
 const frames = renderer.getDebugFrameOverlayStats!()
 const count = (node: HostNode): number => 1 + node.children.reduce((n, child) => n + count(child), 0)
-const metric = { label: process.env.PROFILE_LABEL ?? 'before', fixedSteps, elapsedMs, steps, stepMs: elapsedMs / steps, calls, frames, nodes: count(nativeApp.container) }
+const metric = { label: process.env.PROFILE_LABEL ?? 'current', page, fixedSteps, elapsedMs, steps, stepMs: elapsedMs / steps, calls, frames, finalOffset: renderer.getScrollOffset?.(scrollId), nodes: count(nativeApp.container) }
 mkdirSync('../tmp/animal-island-perf', { recursive: true })
 writeFileSync(`../tmp/animal-island-perf/${metric.label}.json`, JSON.stringify(metric, null, 2))
 console.log('ANIMAL_ISLAND_PERF', JSON.stringify(metric))

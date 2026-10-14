@@ -22,7 +22,12 @@ describeNative("Title GPUI decoration bounds", () => {
       const bounds = (testId: string) => app.renderer.getElementBounds(app.renderer.findByTestId(testId)!.id)!
       const root = bounds("title"), surface = bounds("title-surface"), image = bounds("title-decoration"), text = bounds("title-text")
       expect(surface.height).toBeCloseTo(variant === "layer" ? 42 : 40, 1)
-      expect(root.width - surface.width).toBeCloseTo(variant === "ribbon" ? 24 : variant === "layer" ? 5.2 : 0, 1)
+      // GPUI's TestWindow uses a 2x device scale, and Taffy snaps authored
+      // padding to that pixel grid: the layer's .26em = 5.2px becomes 5px.
+      // title.test.ts separately checks the exact authored 5.2px host style.
+      const authoredHorizontalBleed = variant === "ribbon" ? 24 : variant === "layer" ? 5.2 : 0
+      const snappedHorizontalBleed = Math.round(authoredHorizontalBleed * 2) / 2
+      expect(root.width - surface.width).toBeCloseTo(snappedHorizontalBleed, 1)
       expect(root.height - surface.height).toBeCloseTo(variant === "ribbon" ? 8 : variant === "layer" ? 6 : 0, 1)
       // Leaf images report their own GPUI paint bounds. A padded div's
       // embedded canvas tracker can have a flex static-position offset; use

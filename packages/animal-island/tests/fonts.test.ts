@@ -74,7 +74,13 @@ describe("bundled Animal Island fonts", () => {
     expect(name(bytes, 17)).toBe(face.style)
     expect(table(bytes, "OS/2").readUInt16BE(4)).toBe(face.weight)
     expect(table(bytes, "head").readUInt16BE(18)).toBe(1000)
-    expect(name(bytes, 13)).toBe(readFileSync(new URL(face.license, folder), "utf8"))
+    const license = readFileSync(new URL(face.license, folder), "utf8")
+    // Git may check out text licences with CRLF on Windows; the binary font
+    // retains LF. Check both checkout forms without trimming or changing any
+    // of the complete OFL's wording, blank lines, or other whitespace.
+    for (const checkoutLicense of [license, license.replace(/\r?\n/g, "\r\n")]) {
+      expect(name(bytes, 13)).toBe(checkoutLicense.replace(/\r\n/g, "\n"))
+    }
     expect(name(bytes, 0)).toContain(face.family.includes("Nunito") ? "Nunito Project Authors" : "Adobe")
     const points = codePoints(bytes)
     expect(points.size).toBe(face.codePoints)

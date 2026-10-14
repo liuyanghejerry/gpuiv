@@ -1,156 +1,122 @@
-import { defineComponent, h, ref } from "vue"
+/** The comparison gallery mounts one family while preserving external models. */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { HostNode } from "@gpuiv/vue"
-import { GallerySection, useGalleryWindowing } from "../../../examples/animal-island.js"
+import { App } from "../../../examples/animal-island.js"
 import { mountHost } from "./harness.js"
 
+const pageIds = [
+  "button", "card", "tag", "title", "divider", "icon", "input", "select", "switch", "checkbox", "radio", "rate",
+  "date-picker", "time-picker", "form", "upload", "avatar", "badge", "table", "tabs", "carousel", "image", "progress",
+  "code-block", "collapse", "tooltip", "modal", "drawer", "notification", "loading", "skeleton", "pagination", "back-top",
+  "typewriter", "countdown", "time", "background", "cursor", "footer",
+]
 let app: ReturnType<typeof mountHost> | undefined
 beforeEach(() => vi.useFakeTimers())
 afterEach(() => { app?.unmount(); app = undefined; vi.useRealTimers() })
+const content = (node: HostNode): string => (node.text ?? "") + node.children.map(content).join("")
+const descendants = (node: HostNode): HostNode[] => [node, ...node.children.flatMap(descendants)]
+const exists = (testId: string) => app!.all().some(node => node.props.testId === testId)
+function mount(overrides: Parameters<typeof mountHost>[1] = {}) { app = mountHost(App, overrides); return app }
 
-function fixture() {
-  const geometry = { viewportWidth: 600, paintedWidth: 600, viewportHeight: 400, offset: 0, heights: [500, 500, 500, 500, 500, 500] }
-  const boundsReads = { viewport: 0, header: 0, body: 0 }
-  const localMounts = new Map<number, number>()
-  const Demo = defineComponent({
-    props: { index: { type: Number, required: true } },
-    setup(props) {
-      localMounts.set(props.index, (localMounts.get(props.index) ?? 0) + 1)
-      return () => h("text", null, `demo-${props.index}`)
-    },
-  })
-  const App = defineComponent({
-    setup() {
-      const scroller = ref<HostNode | null>(null)
-      useGalleryWindowing(scroller)
-      return () => h("div", { ref: scroller, testId: "scroller", style: { overflow: "scroll", height: geometry.viewportHeight, width: geometry.viewportWidth } },
-        [h("div", { style: { display: "flex", flexDirection: "column", gap: 40, padding: 28 } },
-          geometry.heights.map((_height, index) => h(GallerySection, { key: index, title: `Section ${index}` }, {
-            default: () => [h(Demo, { index })],
-          })),
-        )],
-      )
-    },
-  })
-  app = mountHost(App, {
-    getScrollOffset: () => [0, geometry.offset],
-    getElementBounds: (id) => {
-      const node = app?.all().find((candidate) => candidate.id === id)
-      if (!node) return null
-      if (node.props.testId === "scroller") {
-        boundsReads.viewport++
-        return { x: 0, y: 62 + geometry.offset, width: geometry.viewportWidth, height: geometry.viewportHeight }
-      }
-      const marker = /^section-mounted-(\d+)$/.exec(String(node.props.testId))
-      if (marker) {
-        boundsReads.body++
-        return { x: 28, y: 10000, width: geometry.paintedWidth - 56, height: geometry.heights[Number(marker[1])] }
-      }
-      // Header text/header bounds are always mounted. Deliberately stale y:
-      // windowing must use current measured heights, not capture that y forever.
-      boundsReads.header++
-      return { x: 28, y: 10000, width: geometry.viewportWidth - 56, height: 28 }
-    },
-  })
-  return { app, geometry, localMounts, boundsReads }
-}
-async function advance(ms = 400) { await vi.advanceTimersByTimeAsync(ms); await app!.settle() }
-const exists = (testId: string) => app!.all().some((node) => node.props.testId === testId)
-
-describe("Animal Island section windowing", () => {
-  it("keeps section titles and body heights while distant demos unmount", async () => {
-    const { app } = fixture()
-    await advance()
-    expect(app.text()).toContain("Section 5")
-    expect(exists("section-mounted-0")).toBe(true)
-    expect(exists("section-mounted-5")).toBe(false)
-    expect(app.find("section-placeholder-5").props.style).toMatchObject({ height: 500 })
-    expect(app.find("section-body-5").props).toMatchObject({ "aria-label": "Section 5" })
-    expect(app.all().filter((node) => (node.props.style as { overflow?: string } | undefined)?.overflow === "scroll")).toHaveLength(1)
+describe("Animal Island comparison gallery", () => {
+  it("starts on Button with a cream sidebar and a large white example card", () => {
+    const host = mount()
+    expect(host.find("gallery-showcase").props).toMatchObject({ "aria-label": "Button 按钮展示" })
+    expect(host.find("gallery-showcase").props.style).toMatchObject({ backgroundColor: "#ffffff", minHeight: 520, padding: 24, borderRadius: 12 })
+    expect(host.find("gallery-sidebar").props.style).toMatchObject({ width: 220 })
+    expect(content(host.find("gallery-page-title"))).toBe("Button 按钮")
+    expect(exists("btn-default")).toBe(true)
+    expect(exists("animal-table")).toBe(false)
+    expect(exists("password-input")).toBe(false)
   })
 
-  it("mounts near a new scroll position and unmounts after the wider hysteresis band", async () => {
-    const { geometry } = fixture()
-    await advance()
-    expect(exists("section-mounted-2")).toBe(false)
-    geometry.offset = -700; await advance(120)
-    expect(exists("section-mounted-2")).toBe(true)
-    // Going just beyond the mount band retains the mounted body.
-    geometry.offset = -300; await advance(120)
-    expect(exists("section-mounted-2")).toBe(true)
-    geometry.offset = -3000; await advance(120)
-    expect(exists("section-mounted-0")).toBe(false)
-    expect(exists("section-mounted-5")).toBe(true)
+  it("navigates all 39 component families and marks exactly one active entry", async () => {
+    const host = mount()
+    const entries = host.all().filter(node => String(node.props.testId).startsWith("nav-"))
+    expect(entries.map(node => String(node.props.testId).slice(4)).sort()).toEqual([...pageIds].sort())
+    for (const id of pageIds) {
+      await host.fire(`nav-${id}`, "click")
+      expect(host.find("gallery-showcase").props["aria-label"]).toBe(`${content(host.find(`nav-${id}`))}展示`)
+      const active = host.all().filter(node => String(node.props.testId).startsWith("nav-") && node.props["aria-pressed"] === true)
+      expect(active.map(node => node.props.testId)).toEqual([`nav-${id}`])
+      expect(content(host.find("gallery-page-title"))).toBe(content(host.find(`nav-${id}`)))
+    }
   })
 
-  it("updates later content positions after a mounted Collapse/Form grows", async () => {
-    const { geometry } = fixture()
-    await advance()
-    geometry.offset = -700; await advance(120)
-    expect(exists("section-mounted-2")).toBe(true)
-    geometry.heights[1] = 2400; await advance(400)
-    expect(exists("section-mounted-2")).toBe(false)
-    expect(app!.find("section-placeholder-2").props.style).toMatchObject({ height: 500 })
+  it("activates navigation using native Enter and Space keys", async () => {
+    const host = mount()
+    expect(host.find("nav-select").props).toMatchObject({ role: "button", tabIndex: 0 })
+    await host.fire("nav-select", "keyDown", { key: "enter" })
+    expect(host.find("gallery-showcase").props["aria-label"]).toBe("Select 选择器展示")
+    await host.fire("nav-input", "keyDown", { key: "space" })
+    expect(host.find("gallery-showcase").props["aria-label"]).toBe("Input 输入框展示")
+    await host.fire("nav-card", "keyDown", { key: "arrowdown" })
+    expect(host.find("gallery-showcase").props["aria-label"]).toBe("Input 输入框展示")
   })
 
-  it("only polls mounted bodies in steady state and refreshes headers on width changes", async () => {
-    const { geometry, boundsReads } = fixture()
-    await advance()
-    expect(boundsReads.header).toBe(6)
-    const bodyReads = boundsReads.body
-    await advance(800)
-    expect(boundsReads.header).toBe(6)
-    expect(boundsReads.body).toBeGreaterThan(bodyReads)
-    geometry.viewportWidth = 400
-    geometry.paintedWidth = 400
-    await advance(400)
-    expect(boundsReads.header).toBe(12)
+  it("unmounts the inactive page instead of placing the entire gallery offscreen", async () => {
+    const host = mount()
+    await host.fire("nav-table", "click")
+    expect(exists("animal-table")).toBe(true)
+    expect(exists("btn-default")).toBe(false)
+    await host.fire("nav-icon", "click")
+    expect(exists("animal-table")).toBe(false)
+    expect(descendants(host.find("gallery-showcase")).filter(node => node.type === "img")).toHaveLength(104)
+    await host.fire("nav-button", "click")
+    expect(exists("btn-default")).toBe(true)
+    expect(content(host.find("gallery-showcase"))).not.toContain("Airplane")
   })
 
-  it("uses the current viewport height after a resize", async () => {
-    const { geometry } = fixture()
-    await advance()
-    expect(exists("section-mounted-3")).toBe(false)
-    geometry.viewportHeight = 1000; await advance(250)
-    expect(exists("section-mounted-3")).toBe(true)
+  it("retains the controlled Input model after leaving and revisiting its page", async () => {
+    const host = mount()
+    await host.fire("nav-input", "click")
+    const input = host.find(node => node.type === "input" && node.props.placeholder === "说点什么…")
+    await host.fire(input, "change", { value: "小岛🌴 revisited" })
+    await host.fire("nav-button", "click")
+    await host.fire("nav-input", "click")
+    expect(host.find(node => node.type === "input" && node.props.placeholder === "说点什么…").props.value).toBe("小岛🌴 revisited")
   })
 
-  it("remeasures all body heights at a new viewport width", async () => {
-    const { geometry } = fixture()
-    await advance()
-    expect(exists("section-placeholder-5")).toBe(true)
-    geometry.viewportWidth = 400
-    geometry.paintedWidth = 400
-    geometry.heights[5] = 900
-    await advance(250)
-    expect(exists("section-mounted-5")).toBe(true)
-    await advance(150)
-    expect(exists("section-placeholder-5")).toBe(true)
-    expect(app!.find("section-placeholder-5").props.style).toMatchObject({ height: 900 })
+  it("retains the Form store and submitted result when its page remounts", async () => {
+    const host = mount()
+    await host.fire("nav-form", "click")
+    const input = descendants(host.find("form-name")).find(node => node.type === "input")!
+    await host.fire(input, "change", { value: "水獭访客" })
+    await host.fire("form-submit", "click")
+    await host.settle()
+    await host.fire("nav-button", "click")
+    await host.fire("nav-form", "click")
+    const returned = descendants(host.find("form-name")).find(node => node.type === "input")!
+    expect(returned.props.value).toBe("水獭访客")
+    expect(content(host.find("gallery-showcase"))).toContain("欢迎，水獭访客")
   })
 
-  it("waits for newly painted dimensions instead of accepting old resize bounds", async () => {
-    const { geometry } = fixture()
-    await advance()
-    geometry.viewportWidth = 400
-    geometry.heights[5] = 900
-    await advance(400)
-    // The viewport reports its new width, but these section bounds still
-    // belong to the previous frame. Bodies stay mounted until the new frame.
-    expect(exists("section-mounted-5")).toBe(true)
-    geometry.paintedWidth = 400
-    await advance(400)
-    expect(app!.find("section-placeholder-5").props.style).toMatchObject({ height: 900 })
+  it("resets only the right content scroller when the selected family changes", async () => {
+    const scrollTo = vi.fn()
+    const host = mount({ scrollTo })
+    scrollTo.mockClear()
+    await host.fire("nav-back-top", "click")
+    const rightId = host.find("gallery-scroll").id
+    expect(scrollTo).toHaveBeenLastCalledWith(rightId, 0, 0)
+    await host.fire("nav-icon", "click")
+    expect(scrollTo).toHaveBeenLastCalledWith(rightId, 0, 0)
+    expect(scrollTo.mock.calls.every(([id]) => id === rightId)).toBe(true)
+    const owners = host.all().filter(node => (node.props.style as { overflow?: string } | undefined)?.overflow === "scroll")
+    expect(owners.map(node => node.props.testId).sort()).toEqual(["gallery-nav-scroll", "gallery-scroll"])
+    for (const owner of owners) expect(descendants(owner).slice(1).filter(node => (node.props.style as { overflow?: string } | undefined)?.overflow === "scroll")).toHaveLength(0)
   })
 
-  it("restarts uncontrolled demos on revisit while all polling timers clean up", async () => {
-    const { app: host, geometry, localMounts } = fixture()
-    await advance()
-    expect(localMounts.get(0)).toBe(1)
-    geometry.offset = -3000; await advance(120)
-    geometry.offset = 0; await advance(120)
-    expect(localMounts.get(0)).toBe(2)
-    expect(vi.getTimerCount()).toBe(3)
+  it("cleans up timers when a timed page or the whole gallery is unmounted", async () => {
+    const host = mount()
+    const baseTimers = vi.getTimerCount()
+    vi.setSystemTime(new Date("2026-10-15T10:00:00Z"))
+    await host.fire("nav-time", "click")
+    const before = content(host.find("gallery-showcase"))
+    await vi.advanceTimersByTimeAsync(60_000)
+    await host.settle()
+    expect(content(host.find("gallery-showcase"))).not.toBe(before)
+    await host.fire("nav-button", "click")
+    expect(vi.getTimerCount()).toBe(baseTimers)
     host.unmount()
     expect(vi.getTimerCount()).toBe(0)
     app = undefined
