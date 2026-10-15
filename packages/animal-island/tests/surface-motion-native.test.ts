@@ -13,7 +13,7 @@ import type { StyleDesc } from "@gpuiv/vue"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 const close = (actual: number[], expected: number[]) => actual.forEach((value, index) => {
-  expect(Math.abs(value - expected[index]!)).toBeLessThanOrEqual(3)
+  expect(Math.abs(value - expected[index]!), `${actual} vs ${expected}, channel ${index}`).toBeLessThanOrEqual(3)
 })
 
 describeNative("Animal Island surface paint motion", () => {
@@ -48,7 +48,11 @@ describeNative("Animal Island surface paint motion", () => {
       app.renderer.clockFastForward(500)
       await app.settle()
       const middle = sample()
-      close(middle[0]!, [191, 64, 128])
+      // GPUI paints the complete drop-shadow quad beneath the fill, including
+      // its translucent interior; it does not perform CSS outer-shadow knockout.
+      // At .5 the red shadow's alpha is .5 over white; cover that with the
+      // interpolated premultiplied fill (R=.5, B=.25, A=.75), using source-over.
+      close(middle[0]!, [191, 32, 96])
       close(middle[1]!, [255, 128, 128])
       app.renderer.nativeSimulateMouseMove(450, 350)
       await app.settle()
@@ -59,7 +63,9 @@ describeNative("Animal Island surface paint motion", () => {
       app.renderer.clockFastForward(500)
       await app.settle()
       const returnMiddle = sample()
-      close(returnMiddle[0]!, [223, 32, 64])
+      // Halfway back: shadow alpha=.25, premultiplied fill R=.75, B=.125,
+      // A=.875. Composite over the shadow's [1,.75,.75] white-matte result.
+      close(returnMiddle[0]!, [223, 24, 56])
       close(returnMiddle[1]!, [255, 191, 191])
       app.renderer.clockFastForward(500)
       await app.settle()

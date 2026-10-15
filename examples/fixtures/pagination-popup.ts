@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { defineComponent, h, nextTick } from 'vue'
 import { createApp, resetApp, type ElementBounds } from '@gpuiv/vue'
-import { connectTest, liveRendererAsTest, type LiveAutomationRenderer } from '@gpuiv/vue/automation'
+import { connectTest, liveRendererAsTest, type LiveAutomationRenderer, type TreeNode } from '@gpuiv/vue/automation'
 import { Pagination } from '@gpuiv/animal-island'
 
 const changes: number[][] = []
@@ -41,7 +41,16 @@ try {
   await Bun.sleep(250)
 
   async function snapshot(label: string, aligned = true): Promise<Snapshot> {
-    const value = { label, trigger: await trigger.bounds(), popup: await popup.bounds(), offset: renderer.getScrollOffset(scrollId)! }
+    // Every rectangle in a geometry comparison must come from one completed
+    // paint. Separate locator.bounds() calls each request another native frame.
+    const { tree } = await driver.call('getTree', {})
+    const flatten = (node: TreeNode | null): TreeNode[] => node ? [node, ...(node.children ?? []).flatMap(flatten)] : []
+    const nodes = flatten(tree)
+    const triggerNode = nodes.find(node => node.testId === 'pager-size-changer')
+    const popupNode = nodes.find(node => node.testId === 'pager-size-changer-popup')
+    assert(triggerNode?.bounds, `${label}: trigger must have painted bounds in the snapshot`)
+    assert(popupNode?.bounds, `${label}: open popup must have painted bounds in the same snapshot`)
+    const value = { label, trigger: triggerNode.bounds, popup: popupNode.bounds, offset: renderer.getScrollOffset(scrollId)! }
     console.log('PAGINATION_POPUP_BOUNDS', JSON.stringify(value))
     assert(value.popup.width > 0 && value.popup.height > 0, `${label}: popup must be painted`)
     if (aligned) {

@@ -765,6 +765,11 @@ transparent zero-length shadows. Incompatible inset/outset lists switch
 discretely at the midpoint. These tracks use the same native clock and
 continuous retargeting as numeric tracks.
 
+GPUI paints drop shadows beneath the full surface. A translucent fill can
+reveal that shadow inside its bounds; this differs from
+[CSS's outer-shadow interior cutout](https://www.w3.org/TR/css-backgrounds-3/#shadow-shape).
+Animated colors retain this native compositing behavior.
+
 Put the desired interaction colors in `animate`. A competing `style.hover`
 or `style.active` value for that same property can override its animated
 sample. Text children with their own explicit color also keep that color.

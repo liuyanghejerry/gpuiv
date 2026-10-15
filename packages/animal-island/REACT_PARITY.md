@@ -76,6 +76,8 @@
 
 上表记录当前实现；下列工程内路径已接入，通用合成能力仍单独列为边界。
 
+GPUI 的外阴影绘制在完整填充下面，透明/半透明填充可露出边框盒内部的阴影；它不等同于 CSS 外阴影对内部区域的剔除规则。
+
 - **颜色与盒阴影过渡已接入**：本地 [MotionStyle](../vue/src/types.ts) 与 [native motion](../native/src/motion.rs) 支持 `backgroundColor`、`color`、`borderColor`、`boxShadow`，和已有数字属性共享原生帧时钟及连续重定向。颜色按预乘 alpha 的 sRGB 插值；阴影长度和颜色一起补间，缺失层淡入/淡出，inset/outset 不兼容时在中点离散切换。Animal Island 的私有 `ColorSurface` / `surfaceMotion` 将交互状态转成动画目标，保留原生元素身份及事件，不通过逐帧 Vue 更新驱动颜色。文字子节点显式指定自己的颜色时不继承父级颜色轨道。
 - **图片 CSS 滤镜已接入**：原生 `<img filter="…">` 支持顺序组合 `brightness`、`contrast`、`saturate`、`grayscale`、`sepia`、`invert`、`opacity`、`hue-rotate`、`blur` 和 `drop-shadow`。加工在 GPUI 后台资源任务中完成并缓存；颜色运算保留透明 alpha，blur/阴影在原图 `objectFit` 和圆角裁切后处理，外扩像素不改变原始布局盒。它是图片 prop，不是任意 `StyleDesc.filter`；滤镜列表本身尚不支持 motion 连续插值，也不支持 `url()`、字体相对长度或 Canvas 2D 的独立 filter 属性。
 - **已知 SVG 透明轮廓阴影已补齐**：stamp 将 `0 2px 3px rgba(0,0,0,.35)` 与 `0 16px 26px rgba(0,0,0,.45)` 按 CSS 顺序串联，第二层包含第一层的 alpha；Tooltip island 沿有机路径绘制阴影；Rocket 使用正确的静止/hover σ10/14px。尺寸 SVG 缓存且预留外扩画布，真实文字和交互仍在原生树中。Rocket 两个滤镜状态仍离散替换，不将其描述为连续滤镜动画。

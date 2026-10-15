@@ -76,6 +76,9 @@ the public APIs and behaviors checked against React commit `c696d161`, and
 remaining native adaptations. This is a source/API audit with behavior and
 native geometry tests, not a screenshot similarity score.
 
+GPUI paints drop shadows beneath the complete fill, so a translucent fill can
+reveal shadow inside its border box; CSS outer shadows remove that interior.
+
 | Area | Retained in the native port | Remaining adaptations |
 | --- | --- | --- |
 | Button / Card / Tag | Original palette, sizes and modifiers; fixed dashed geometry with animated tint; native color/shadow and hover/press motion; rotating Donut; node-valued icons | Generic CSS transforms and letter spacing remain unavailable; Donut rotation uses cached SVG frames |
