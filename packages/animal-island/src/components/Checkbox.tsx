@@ -16,7 +16,7 @@
  *  - `indeterminate` 是移植扩展（源码没有）：option 级布尔，展示 primary
  *    填充 + 白色横杠，`aria-checked="mixed"`；纯展示态，由调用方经 options
  *    控制，不参与值逻辑。
- *  - `transition: border-color / color` → 状态色即时切换；label
+ *  - 边框色 0.25s / label 色 0.15s 通过原生 motion 时钟补间；label
  *    `letter-spacing: 0.01em` 砍掉（GPUIV 不支持）。
  *  - `:focus-visible` 黄圈 → onFocus/onBlur 驱动的勾选框 outline
  *    （#ffcc00 = Less @focus-yellow，offset 2，同 Switch.tsx 做法）。
@@ -26,10 +26,11 @@
 
 import { computed, defineComponent, ref, type PropType, type VNodeChild } from "vue"
 import type { StyleDesc } from "@gpuiv/vue"
-import { borderWidth, colors, fontSize, fonts, spacing } from "../tokens.js"
+import { borderWidth, colors, ease, fontSize, fonts, spacing } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { SelectionSplash } from "./selection-motion.js"
 import { contentLabel, renderContent } from "./content.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type CheckboxSize = "small" | "middle" | "large"
 export type CheckboxValue = string | number
@@ -167,7 +168,7 @@ export const Checkbox = defineComponent({
             }
 
             return (
-              <div
+              <ColorSurface
                 key={String(opt.value)}
                 role="checkbox"
                 aria-checked={indeterminate ? "mixed" : checked}
@@ -178,9 +179,10 @@ export const Checkbox = defineComponent({
                 onKeyDown={rowDisabled ? undefined : activationKeys(() => toggle(opt))}
                 onFocus={() => (focusedValue.value = opt.value)}
                 onBlur={() => (focusedValue.value = null)}
+                transition={{ duration: 0.15, ease: "ease" }}
                 style={rowStyle}
-              >
-                <div style={boxStyle}>
+              >{() => <>
+                <div style={boxStyle} motion={{ initial: false, animate: { borderColor: boxStyle.borderColor }, transition: { duration: 0.25, ease } }}>
                   {checked && !rowDisabled ? <SelectionSplash size={g.box - borderWidth * 2} color={c.primary} testId={props.testId ? `${props.testId}-splash-${opt.value}` : undefined} /> : null}
                   {indeterminate ? (
                     <div
@@ -200,7 +202,7 @@ export const Checkbox = defineComponent({
                   ) : null}
                 </div>
                 <div style={{ display: "flex", alignItems: "center" }}>{renderContent(opt.label)}</div>
-              </div>
+              </>}</ColorSurface>
             )
           })}
         </div>

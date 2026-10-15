@@ -2,14 +2,15 @@
  * Supports node-valued labels and panels, native panel fade/lift, controlled
  * keys, roving tab focus and Arrow/Home/End navigation. React's deprecated
  * leafAnimation is accepted without rendering the removed leaf decoration.
- * Colours change immediately. Native ARIA keeps roles/selected/orientation;
+ * Native color/shadow motion complements the panel transition. ARIA keeps roles/selected/orientation;
  * browser DOM-id relationships remain outside the current native API.
  */
 
 import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue"
 import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { renderContent } from "./content.js"
-import { borderWidth, colors, fontSize, fonts, lineHeightBase, radius, spacing } from "../tokens.js"
+import { borderWidth, colors, ease, fontSize, fonts, lineHeightBase, radius, spacing } from "../tokens.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export interface TabItem {
   /** 唯一 key */
@@ -180,9 +181,9 @@ export const Tabs = defineComponent({
                   : {}),
               }
               return (
-                <div
+                <ColorSurface
                   key={item.key}
-                  ref={(el: HostNode | null) => {
+                  hostRef={(el: HostNode | null) => {
                     if (el?.id != null) tabIds.set(item.key, el.id)
                     else tabIds.delete(item.key)
                   }}
@@ -197,18 +198,20 @@ export const Tabs = defineComponent({
                   onFocus={() => (focusedKey.value = item.key)}
                   onBlur={() => (focusedKey.value = null)}
                   style={itemStyle}
+                  transition={{ duration: 0.25, ease }}
                 >
-                  <text style={{ fontSize: isActive ? 12 : 10, color: c.text, lineHeight: isActive ? 12 : 10 }}>
+                  {{ default: () => [
+                    <text style={{ fontSize: isActive ? 12 : 10, color: c.text, lineHeight: isActive ? 12 : 10 }}>
                     {isActive ? "●" : "○"}
-                  </text>
-                  {renderContent(item.label)}
-
-                </div>
+                  </text>,
+                    renderContent(item.label)
+                  ] }}
+                </ColorSurface>
               )
             })}
           </div>
           <div key={activeKey.value} role="tabpanel" tabIndex={0}
-            motion={{ initial: { opacity: 0, top: 4 }, animate: { opacity: 1, top: 0 }, transition: { duration: 0.25, ease: "ease" } }}
+            motion={{ initial: { opacity: 0, top: 4 }, animate: { opacity: 1, top: 0 }, transition: { duration: 0.25, ease } }}
             style={{ position: "relative", minHeight: 60, padding: spacing.xl }}>
             <div
               style={{ minHeight: 40, color: c.textSecondary, fontSize: fontSize.base, lineHeight: fontSize.base * lineHeightBase }}

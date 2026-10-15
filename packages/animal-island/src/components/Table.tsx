@@ -12,8 +12,9 @@ import { computed, defineComponent, isVNode, ref, type PropType, type VNodeChild
 import { Spinner, type EventPayload, type StyleDesc } from '@gpuiv/vue';
 import { Pagination, type PaginationProps } from './Pagination.js';
 import { activationKeys } from '../interaction.js';
-import { colors, fonts } from '../tokens.js';
+import { colors, ease, fonts } from '../tokens.js';
 import { renderContent } from './content.js';
+import { ColorSurface } from "./surface-motion.js"
 
 export type TableRecord = Record<string, unknown>;
 const SEPARATOR_SVG = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="960" height="1" viewBox="0 0 960 1"><path d="M0 .5H960" fill="none" stroke="black" stroke-dasharray="6 6" /></svg>')}`;
@@ -149,18 +150,20 @@ export const Table = defineComponent({
                             const rowClass = typeof props.rowClassName === 'function' ? props.rowClassName(record, index) : props.rowClassName;
                             const { onDblclick, onClick, style, ...rowAttrs } = row;
                             return <div key={rowKey}>
-                                <div {...rowAttrs} role="row" class={['animal-table__row', rowClass, row.class]} testId={row.testId ?? (props.testId ? `${props.testId}-row-${rowKey}` : undefined)}
+                                <ColorSurface geometry={["borderRadius"]} {...rowAttrs} role="row" class={['animal-table__row', rowClass, row.class]} testId={row.testId ?? (props.testId ? `${props.testId}-row-${rowKey}` : undefined)}
                                     tabIndex={onClick && !props.loading ? ((row.tabIndex as number | undefined) ?? 0) : (row.tabIndex as number | undefined)}
                                     onClick={(event: EventPayload) => { if (props.loading) return; onClick?.(event); if ((event.clickCount ?? 0) >= 2) onDblclick?.(event); }}
                                     onKeyDown={onClick && !props.loading ? activationKeys(onClick) : undefined}
-                                    style={{ display: 'flex', backgroundColor: props.striped && index % 2 === 1 ? 'rgba(248, 248, 240, 0.6)' : undefined, hover: { backgroundColor: '#d6f0ea', borderRadius: 30 }, ...style }}>
-                                    {props.columns.map((col, ci) => {
+                                    style={{ display: 'flex', backgroundColor: props.striped && index % 2 === 1 ? 'rgba(248, 248, 240, 0.6)' : undefined, hover: { backgroundColor: '#d6f0ea', borderRadius: 30 }, ...style }} transition={{ duration: 0.25, ease }}>
+                                  {{ default: () => [
+                                    props.columns.map((col, ci) => {
                                         const path = Array.isArray(col.dataIndex) ? col.dataIndex.join('.') : col.dataIndex;
                                         const value = fieldValue(record, col.dataIndex);
                                         const cellSlot = path ? slots[`cell-${path}`] : undefined;
                                         return <div key={ci} role="cell" style={cellStyle(col, false)}>{painted(cellSlot ? cellSlot({ value, record, index }) : col.render ? col.render(value, record, index) : value)}</div>;
-                                    })}
-                                </div>{index < data.value.length - 1 ? separator() : null}
+                                    })
+                                  ] }}
+                                </ColorSurface>{index < data.value.length - 1 ? separator() : null}
                             </div>;
                         })}
                     </div>

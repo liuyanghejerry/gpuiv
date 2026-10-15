@@ -6,7 +6,7 @@
  *    奶油输入底 #fffbe7，深度全靠硬阴影。阴影优先级照抄 CSS 特异性：
  *    `shadow && !disabled` 的尺寸阴影（2/3/4px @shadow-soft）> `status`
  *    阴影（3px error/warning-active）> 无；`disabled` 一律无阴影。
- *  - `transition: all 0.25s` → 砍掉（GPUIV 无样式过渡），阴影/颜色即时切换。
+ *  - 容器颜色/阴影以原生 motion 补间 0.25s，清除按钮颜色过渡 0.15s。
  *  - placeholder 颜色使用原生 placeholderColor，默认 @text-color-disabled；
  *    caret 设为 warmSoft 贴近文本色。
  *  - `type="password"` 使用原生编辑器的遮罩，真实值、IME、光标及选区仍由
@@ -30,6 +30,7 @@ import { type BoxShadow, type EventPayload, type StyleDesc } from "@gpuiv/vue"
 import { colors, fontSize, fonts, height, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { renderContent } from "./content.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type InputSize = "small" | "middle" | "large"
 export type InputStatus = "error" | "warning"
@@ -237,6 +238,10 @@ export const Input = defineComponent({
         fontWeight: 500,
         color: c.warmSoft,
         boxShadow,
+        // Status hover selectors outrank size and no-shadow selectors; without
+        // status, small/large retain their size shadow and middle softens it.
+        hover: props.disabled ? undefined : props.status ? { boxShadow: statusShadow[props.status] }
+          : props.shadow && props.size === "middle" ? { boxShadow: hardShadow(3, c.shadowSoftHover) } : undefined,
         ...(fonts.sans ? { fontFamily: fonts.sans } : {}),
         ...(attrs.style as StyleDesc | undefined),
         ...(focused.value && !props.disabled
@@ -268,7 +273,7 @@ export const Input = defineComponent({
       }
 
       return (
-        <div {...forwardAttrs} testId={props.testId} style={style}>
+        <ColorSurface {...forwardAttrs} testId={props.testId} style={style}>{() => <>
           {props.prefix || slots.prefix ? (
             <div style={{ ...affixStyle, marginRight: 6 }}>
               {slots.prefix ? slots.prefix() : renderContent(props.prefix)}
@@ -296,12 +301,13 @@ export const Input = defineComponent({
             style={inputStyle}
           />
           {showClear ? (
-            <div
+            <ColorSurface
               role="button"
               aria-label={props.clearAriaLabel}
               tabIndex={0}
               onClick={handleClear}
               onKeyDown={activationKeys(handleClear)}
+              transition={{ duration: 0.15, ease: "ease" }}
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -319,15 +325,15 @@ export const Input = defineComponent({
                 hover: { color: c.warmSoft, backgroundColor: "rgba(114, 93, 66, 0.1)" },
               }}
             >
-              <text>×</text>
-            </div>
+              {() => <text>×</text>}
+            </ColorSurface>
           ) : null}
           {props.suffix || slots.suffix ? (
             <div style={{ ...affixStyle, marginLeft: 6 }}>
               {slots.suffix ? slots.suffix() : renderContent(props.suffix)}
             </div>
           ) : null}
-        </div>
+        </>}</ColorSurface>
       )
     }
   },

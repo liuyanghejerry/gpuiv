@@ -29,6 +29,7 @@ import {
 } from "@gpuiv/vue"
 import { activationKeys } from "../interaction.js"
 import { renderContent } from "./content.js"
+import { ColorSurface, surfaceMotion } from "./surface-motion.js"
 import { borderWidth, colors, ease, fontSize, fonts, height, radius, shadows, spacing } from "../tokens.js"
 
 export interface SelectOption {
@@ -134,6 +135,8 @@ export const Select = defineComponent({
     const openState = ref(false)
     const focused = ref(false)
     const hovered = ref(false)
+    const clearHovered = ref(false)
+    const clearFocused = ref(false)
     const searchValue = ref<string | null>(null)
     const activeKey = ref<string | null>(null)
     const searchInput = ref<HostNode | null>(null)
@@ -148,6 +151,12 @@ export const Select = defineComponent({
       return raw === "" || raw === undefined ? undefined : raw
     })
     const currentValue = computed(() => (isControlled.value ? controlledValue.value : innerValue.value))
+    watch([currentValue, () => props.disabled], ([value, disabled]) => {
+      if (value === undefined || disabled) {
+        clearHovered.value = false
+        clearFocused.value = false
+      }
+    })
     const currentLabel = computed(() => {
       const v = currentValue.value
       if (v === undefined) return props.placeholder
@@ -319,11 +328,17 @@ export const Select = defineComponent({
         onMouseLeave: () => (hovered.value = false),
       }
 
-      const clearControl = () => props.allowClear && hasValue && !props.disabled && (hovered.value || focused.value) ? <div
-        ref={clearButton} role="button" aria-label={props.clearAriaLabel} tabIndex={0}
+      // A painted child has its own GPUI hover/focus hitbox. Keep the clear
+      // control mounted while the pointer or keyboard focus moves onto it;
+      // the input's blur must not destroy the target between down and up.
+      const clearControl = () => props.allowClear && hasValue && !props.disabled && (hovered.value || focused.value || clearHovered.value || clearFocused.value) ? <ColorSurface
+        hostRef={clearButton} role="button" aria-label={props.clearAriaLabel} tabIndex={0}
         testId={props.testId ? `${props.testId}-clear` : undefined} onClick={clear} onKeyDown={activationKeys(clear)}
+        onMouseEnter={() => { clearHovered.value = true }} onMouseLeave={() => { clearHovered.value = false }}
+        onFocus={() => { clearFocused.value = true }} onBlur={() => { clearFocused.value = false }}
+        transition={{ duration: 0.15, ease }}
         style={{ width: 18, height: 18, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 999, color: PLACEHOLDER_COLOR, cursor: "pointer", pointerEvents: "auto", hover: { color: c.warmSoft, backgroundColor: "rgba(114, 93, 66, 0.1)" } }}
-      ><text>×</text></div> : null
+      >{() => <text>×</text>}</ColorSurface> : null
       const arrow = () => <svg aria-hidden={true} src={openState.value ? chevronUpUrl : chevronDownUrl} style={{ width: 12, height: 12, flexShrink: 0, color: openState.value && !props.disabled ? c.primary : PLACEHOLDER_COLOR, pointerEvents: "none" }} />
       const notFound = () => <div role="option" aria-disabled={true} aria-selected={false} testId={props.testId ? `${props.testId}-empty` : undefined} style={{ padding: 16, color: PLACEHOLDER_COLOR, fontSize: g.optionFontSize, textAlign: "center" }}>{renderContent(props.notFoundContent)}</div>
       const optionContent = (option: SelectOption, state: SelectItemState) => <div style={{ display: "flex", alignItems: "center", pointerEvents: "none" }}>
@@ -337,8 +352,8 @@ export const Select = defineComponent({
         const displayQuery = openState.value && searchValue.value !== null ? searchValue.value : hasValue ? currentLabel.value : ""
         return <div {...forwardAttrs} style={{ position: "relative", minWidth: 140, ...userStyle as StyleDesc }}>
           <div style={{ position: "relative", width: "100%", minWidth: 140, height: g.height }}>
-            <div onMouseEnter={() => { hovered.value = true }} onMouseLeave={() => { hovered.value = false }}
-              onClick={() => setSearchOpen(!openState.value)} style={triggerStyle({ open: openState.value, disabled: props.disabled, placeholder: !hasValue })}>
+            <ColorSurface onMouseEnter={() => { hovered.value = true }} onMouseLeave={() => { hovered.value = false }} transition={{ duration: 0.2, ease: "ease" }}
+              onClick={() => setSearchOpen(!openState.value)} style={triggerStyle({ open: openState.value, disabled: props.disabled, placeholder: !hasValue })}>{() => <>
               <input ref={searchInput} testId={props.testId} value={displayQuery} valueRevision={searchRevision.value}
                 readOnly={props.disabled} tabIndex={props.disabled ? -1 : 0} placeholder={props.placeholder} placeholderColor={PLACEHOLDER_COLOR}
                 role="combobox" aria-label={props.ariaLabel ?? attrs["aria-label"]} aria-expanded={openState.value} aria-disabled={props.disabled || undefined}
@@ -348,7 +363,7 @@ export const Select = defineComponent({
                 onSubmit={(event: EventPayload) => searchKeyDown({ ...event, key: "enter" })}
                 style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, color: hasValue ? c.warmSoft : PLACEHOLDER_COLOR, fontSize: g.fontSize, fontWeight: hasValue ? 600 : 400, ...(props.disabled ? { pointerEvents: "none" as const } : {}) }} />
               {clearControl()}{arrow()}
-            </div>
+            </>}</ColorSurface>
             {openState.value ? <FloatingLayer side={props.side} align={props.align} sideOffset={props.sideOffset}
               {...{ role: "listbox", testId: props.testId ? `${props.testId}-popup` : undefined, onMouseDownOutside: () => setSearchOpen(false), style: panelStyle }}>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease }}>
@@ -363,6 +378,11 @@ export const Select = defineComponent({
         </div>
       }
 
+      // The platform trigger must keep its own native ref, keyboard handling
+      // and registered host identity. Supply translated targets directly
+      // rather than wrapping it in an extra interactive component.
+      const triggerSurface = surfaceMotion(triggerStyle({ open: openState.value, disabled: props.disabled, placeholder: !hasValue }), { hovered: hovered.value && !props.disabled })
+      triggerAttrs.motion = { initial: false, animate: triggerSurface.animate, transition: { duration: 0.2, ease: "ease" } }
       return (
         <PlatformSelect
           {...forwardAttrs}
@@ -379,7 +399,7 @@ export const Select = defineComponent({
           {/* Keep the positioning box outside the trigger's border. Absolute
               children inside the trigger anchor to its inner border edge. */}
           <div style={{ position: "relative", width: "100%", minWidth: 140, height: g.height }}>
-            <SelectTrigger {...triggerAttrs} style={triggerStyle}>
+            <SelectTrigger {...triggerAttrs} style={triggerSurface.style}>
               <text
                 style={{
                   color: hasValue ? c.warmSoft : PLACEHOLDER_COLOR,

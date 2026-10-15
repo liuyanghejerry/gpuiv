@@ -11,6 +11,7 @@ import { cardPattern, cardSolid, colors, fonts, radius, spacing } from "../token
 import type { CardColor } from "../tokens.js"
 import { PatternSurface } from "../patterns.js"
 import { DashedBorderSurface } from "./border-decoration.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type { CardColor } from "../tokens.js"
 export type CardType = "default" | "dashed"
@@ -87,18 +88,21 @@ export const Card = defineComponent({
       }
 
       return (
-        <div
+        <ColorSurface
           {...attrs}
           testId={props.testId}
           onMouseEnter={(event: EventPayload) => { hovered.value = true; forward("onMouseEnter", event) }}
           onMouseLeave={(event: EventPayload) => { hovered.value = false; forward("onMouseLeave", event) }}
           motion={props.hoverable && props.type !== "dashed" && typeof custom?.top !== "string" ? { initial: false, animate: { top: (typeof custom?.top === "number" ? custom.top : 0) + (hovered.value ? -2 : 0) }, transition: { duration: 0.3, ease: "ease" } } : undefined}
           style={finalStyle}
+          transition={{ duration: 0.3, ease: "ease" }}
         >
-          {dashed ? <DashedBorderSurface color={String(dashedColor)} width={finalStyle.borderWidth} radius={finalStyle.borderRadius ?? radius.card} /> : null}
-          {props.pattern !== "none" ? <PatternSurface pattern={props.pattern === "default" ? "default" : `card-dots-${props.pattern.replace(/^app-/, "")}`} radius={radius.card} /> : null}
-          {slots.default?.()}
-        </div>
+          {{ default: () => [
+            dashed ? <DashedBorderSurface color={String(dashedColor)} width={finalStyle.borderWidth} radius={finalStyle.borderRadius ?? radius.card} transition={{ duration: 0.3, ease: "ease" }} /> : null,
+            props.pattern !== "none" ? <PatternSurface pattern={props.pattern === "default" ? "default" : `card-dots-${props.pattern.replace(/^app-/, "")}`} radius={radius.card} /> : null,
+            slots.default?.()
+          ] }}
+        </ColorSurface>
       )
     }
   },

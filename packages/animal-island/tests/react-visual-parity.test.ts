@@ -152,7 +152,15 @@ describe("React visual component contracts", () => {
     expect(app.find("card").props.motion).toMatchObject({ animate: { top: -2 } })
     expect((app.find("card").props.style as StyleDesc).hover?.boxShadow).toBeUndefined()
     await app.fire("dashed", "mouseEnter")
-    expect(app.find("dashed").props.motion).toBeUndefined()
+    expect((app.find("dashed").props.motion as { animate: { top?: number } }).animate.top).toBeUndefined()
+    expect(app.find("dashed").props.motion).toMatchObject({ animate: { backgroundColor: "#faf8f2", borderColor: "transparent" }, transition: { duration: 0.3, ease: "ease" } })
+    const outline = app.find(node => node.type === "svg" && node.parent?.parent?.props.testId === "dashed")
+    const source = outline.props.src
+    expect(decode(String(source))).toContain('stroke="#ffffff"')
+    expect(outline.props.motion).toMatchObject({ animate: { color: "#d4c4a8" } })
+    await app.fire("dashed", "mouseLeave")
+    expect(outline.props.src).toBe(source)
+    expect(outline.props.motion).toMatchObject({ animate: { color: "#e8dcc8" } })
     expect(app.find("dashed").props.style).toMatchObject({ borderWidth: 2, borderColor: "transparent" })
     expect(decode(dashedBorderDataUrl(240, 100, "#d4c4a8", 2, 20))).toContain('stroke-dasharray="6 6"')
   })
@@ -243,11 +251,11 @@ describe("React visual component contracts", () => {
     expect(art).toContain("feDropShadow")
     expect(art).not.toContain("#FFF7DE")
     await app.fire("back", "mouseEnter")
-    expect((app.find("back-icon").props.motion as { animate: { width: number } }).animate.width).toBeCloseTo(129.6)
+    expect((app.find("back-icon").props.motion as { animate: { width: number } }).animate.width).toBeCloseTo(190.08)
     await app.fire("back", "mouseDown", { button: 0 })
     const pressed = (app.find("back-icon").props.motion as { animate: { width: number; top: number } }).animate
-    expect(pressed.width).toBeCloseTo(115.2)
-    expect(pressed.top).toBeCloseTo(-23.6)
+    expect(pressed.width).toBeCloseTo(168.96)
+    expect(pressed.top).toBeCloseTo(-46.64)
   })
 
   it("restores Loading's elliptical vignette and accepts rich tip lists", () => {

@@ -17,6 +17,7 @@ import { Comment, Fragment, cloneVNode, computed, defineComponent, onBeforeUnmou
 import { motion, useElementBounds, useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, ease, fonts, radius, shadows } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export interface CarouselProps {
   modelValue?: number
@@ -152,16 +153,18 @@ export const Carousel = defineComponent({
     const hoverEnter = () => { if (props.pauseOnHover) hoverPaused.value = true }
     const hoverLeave = () => { hoverPaused.value = false }
     function control(name: string, label: string, action: () => void, style: StyleDesc, disabled = false, content: unknown = null, selected?: boolean) {
-      return <div role="button" tabIndex={disabled ? -1 : 0} aria-label={label} aria-disabled={disabled || undefined} aria-selected={selected}
+      return <ColorSurface role="button" tabIndex={disabled ? -1 : 0} aria-label={label} aria-disabled={disabled || undefined} aria-selected={selected}
         testId={props.testId ? `${props.testId}-${name}` : undefined}
         onClick={disabled ? undefined : action} onKeyDown={disabled ? undefined : activationKeys(action)}
         onMouseEnter={hoverEnter} onMouseLeave={hoverLeave}
         onFocus={() => onFocus(name)} onBlur={onBlur}
         style={{ display: "flex", alignItems: "center", justifyContent: "center", userSelect: "none", cursor: disabled ? "not-allowed" : "pointer",
           ...(disabled ? { opacity: 0.4 } : {}), ...style,
-          ...(focusedControl.value === name ? { outline: { width: 2, color: colors.primary, offset: 2 } } : {}) }}>
-        {content}
-      </div>
+          ...(focusedControl.value === name ? { outline: { width: 2, color: colors.primary, offset: 2 } } : {}) }} transition={{ duration: 0.25, ease }}>
+        {{ default: () => [
+          content
+        ] }}
+      </ColorSurface>
     }
     return () => {
       // Read the slot only inside render so reactive slot children track correctly.
@@ -200,8 +203,8 @@ export const Carousel = defineComponent({
           <div role="group" aria-label="选择轮播页" onMouseEnter={hoverEnter} onMouseLeave={hoverLeave} style={{ display: "flex", gap: 2, paddingTop: 7, paddingBottom: 7, paddingLeft: 10, paddingRight: 10,
             borderRadius: radius.pill, backgroundColor: "rgba(255,255,255,0.85)", pointerEvents: "auto" }}>
             {slides.map((_, index) => control(`dot-${index}`, `转到第 ${index + 1} 张`, () => goTo(index), { width: 30, height: 30, borderRadius: radius.pill }, false,
-              <div aria-current={index === currentIndex.value ? "true" : undefined} style={{ width: index === currentIndex.value ? 24 : 10, height: 10, borderRadius: radius.pill,
-                backgroundColor: index === currentIndex.value ? colors.primary : colors.shadowSoft, pointerEvents: "none" }} />, index === currentIndex.value))}
+              <ColorSurface geometry={["width"]} aria-current={index === currentIndex.value ? "true" : undefined} style={{ width: index === currentIndex.value ? 24 : 10, height: 10, borderRadius: radius.pill,
+                backgroundColor: index === currentIndex.value ? colors.primary : colors.shadowSoft, pointerEvents: "none" }} transition={{ duration: 0.25, ease }} />, index === currentIndex.value))}
           </div>
         </div> : null}
       </div>

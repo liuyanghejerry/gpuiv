@@ -16,7 +16,7 @@
  *    把焦点移到新行；Enter/Space 经 activationKeys 激活当前行（原生 radio
  *    的空格选中）。重复选中同一项不重复触发 onChange（对齐原生 change
  *    语义，源码靠浏览器隐含保证）。
- *  - `transition: border-color / color` → 状态色即时切换；label
+ *  - 边框色 0.25s / label 色 0.15s 通过原生 motion 时钟补间；label
  *    `letter-spacing: 0.01em` 砍掉（不支持）。
  *  - `:focus-visible` 黄圈 → onFocus/onBlur + roving index 驱动的圆圈 outline
  *    （#ffcc00 = Less @focus-yellow，offset 2，同 Switch.tsx 做法）。
@@ -24,10 +24,11 @@
 
 import { computed, defineComponent, ref, watch, type PropType, type VNodeChild } from "vue"
 import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
-import { borderWidth, colors, fontSize, fonts, spacing } from "../tokens.js"
+import { borderWidth, colors, ease, fontSize, fonts, spacing } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { SelectionSplash } from "./selection-motion.js"
 import { contentLabel, renderContent } from "./content.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type RadioSize = "small" | "middle" | "large"
 export type RadioValue = string | number
@@ -212,9 +213,9 @@ export const Radio = defineComponent({
             }
 
             return (
-              <div
+              <ColorSurface
                 key={String(opt.value)}
-                ref={(el: HostNode | null) => {
+                hostRef={(el: HostNode | null) => {
                   itemIds[idx] = el?.id ?? null
                 }}
                 role="radio"
@@ -230,9 +231,10 @@ export const Radio = defineComponent({
                   hasFocus.value = true
                 }}
                 onBlur={() => (hasFocus.value = false)}
+                transition={{ duration: 0.15, ease: "ease" }}
                 style={rowStyle}
-              >
-                <div style={boxStyle}>
+              >{() => <>
+                <div style={boxStyle} motion={{ initial: false, animate: { borderColor: boxStyle.borderColor }, transition: { duration: 0.25, ease } }}>
                   {checked && !rowDisabled ? <SelectionSplash size={g.box - borderWidth * 2} color={c.primary} testId={props.testId ? `${props.testId}-splash-${opt.value}` : undefined} /> : null}
                   {checked ? (
                     <img
@@ -242,7 +244,7 @@ export const Radio = defineComponent({
                   ) : null}
                 </div>
                 <div style={{ display: "flex", alignItems: "center" }}>{renderContent(opt.label)}</div>
-              </div>
+              </>}</ColorSurface>
             )
           })}
         </div>

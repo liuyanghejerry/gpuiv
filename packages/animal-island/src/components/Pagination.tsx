@@ -11,6 +11,7 @@ import { type EventPayload, type StyleDesc } from "@gpuiv/vue"
 import { borderWidth, colors, fontSize, fonts, radius, spacing } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { Select } from "./Select.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type PaginationVariant = "orange" | "teal"
 
@@ -253,7 +254,7 @@ export const Pagination = defineComponent({
         const itemDisabled = props.disabled || atEdge
         const go = () => changePage(page.value + (dir === "prev" ? -1 : 1))
         return (
-          <div
+          <ColorSurface
             key={dir}
             role="button"
             aria-label={dir === "prev" ? "上一页" : "下一页"}
@@ -264,8 +265,10 @@ export const Pagination = defineComponent({
             onFocus={() => (focusedKey.value = dir)}
             onBlur={() => (focusedKey.value = null)}
             style={itemStyle({ active: false, itemDisabled, focusKey: dir })}
+            transition={{ duration: 0.15, ease: "ease" }}
           >
-            <svg
+            {{ default: () => [
+              <svg
               aria-hidden={true}
               src={dir === "prev" ? prevChevronUrl : nextChevronUrl}
               style={{
@@ -275,7 +278,8 @@ export const Pagination = defineComponent({
                 pointerEvents: "none",
               }}
             />
-          </div>
+            ] }}
+          </ColorSurface>
         )
       }
 
@@ -284,7 +288,7 @@ export const Pagination = defineComponent({
         const focusKey = `page-${item}`
         const go = () => changePage(item)
         return (
-          <div
+          <ColorSurface
             key={focusKey}
             role="button"
             aria-disabled={props.disabled || undefined}
@@ -294,9 +298,12 @@ export const Pagination = defineComponent({
             onFocus={() => (focusedKey.value = focusKey)}
             onBlur={() => (focusedKey.value = null)}
             style={itemStyle({ active: isActive, itemDisabled: props.disabled, focusKey })}
+            transition={{ duration: 0.15, ease: "ease" }}
           >
-            <text>{String(item)}</text>
-          </div>
+            {{ default: () => [
+              <text>{String(item)}</text>
+            ] }}
+          </ColorSurface>
         )
       }
 

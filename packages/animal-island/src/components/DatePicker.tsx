@@ -10,6 +10,7 @@ import { computed, defineComponent, h, ref, type PropType } from "vue"
 import { FloatingLayer, motion, useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, ease, fonts } from "../tokens.js"
 import { normalizePickerKey, pad2, pickerButton, pickerFooterStyle, pickerIcons, pickerPanelStyle, pickerTriggerStyle, usePickerPopup, type PickerSize, type PickerStatus } from "./picker-utils.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type DatePickerSize = PickerSize
 export type DatePickerStatus = PickerStatus
@@ -184,10 +185,11 @@ export const DatePicker = defineComponent({
       const unavailable = disabled(date)
       const isToday = sameDay(date, new Date()) && !props.range
       const isFocused = sameDay(date, focused.value)
-      return <div key={toValue(date)} testId={id(`day-${panelIndex}-${toValue(date)}`)} role="button"
+      return <ColorSurface key={toValue(date)} testId={id(`day-${panelIndex}-${toValue(date)}`)} role="button" aria-disabled={unavailable || undefined}
         aria-label={`${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`} aria-selected={selectedCell || edge || undefined}
         tabIndex={-1} onClick={() => selectDate(date)}
         onMouseEnter={() => { if (props.range && !unavailable) hovered.value = date }} onMouseLeave={() => { hovered.value = null }}
+        transition={{ duration: 0.15, ease: "ease" }}
         style={{
           width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
           borderRadius: 999, fontSize: 13, fontWeight: selectedCell || edge || isToday ? 700 : 500,
@@ -197,7 +199,7 @@ export const DatePicker = defineComponent({
           cursor: unavailable ? "not-allowed" : "pointer",
           outline: isFocused && !unavailable ? { width: 1, color: colors.primary, offset: 1 } : undefined,
           hover: unavailable ? undefined : { backgroundColor: selectedCell ? colors.primaryHover : props.range ? "#ffd54f" : colors.primaryBg, color: selectedCell ? "#ffffff" : props.range ? colors.warmSoft : colors.primary },
-        }}><text style={{ pointerEvents: "none" }}>{date.getDate()}</text></div>
+        }}>{() => <text style={{ pointerEvents: "none" }}>{date.getDate()}</text>}</ColorSurface>
     }
     function calendar(date: Date, panelIndex: number) {
       const days = cells(date)
@@ -241,9 +243,10 @@ export const DatePicker = defineComponent({
       }
       const hasValue = props.range ? !!selectedRange.value : !!selected.value
       return <div {...forwardAttrs} style={{ width: "100%", fontFamily: fonts.sans, ...(userStyle as StyleDesc) }}>
-        <div ref={popup.trigger} testId={props.testId} role="combobox" aria-label={props.ariaLabel} aria-expanded={popup.open.value}
+        <ColorSurface hostRef={popup.trigger} testId={props.testId} role="combobox" aria-label={props.ariaLabel} aria-expanded={popup.open.value} aria-disabled={props.disabled || undefined}
+          transition={{ duration: 0.2, ease }}
           tabIndex={props.disabled ? -1 : 0} onMouseDown={popup.onTriggerMouseDown} onClick={popup.onTriggerClick} onKeyDown={keyDown}
-          style={pickerTriggerStyle(props.size, props.disabled, popup.open.value, props.status)}>
+          style={pickerTriggerStyle(props.size, props.disabled, popup.open.value, props.status)}>{() => <>
           {rangeDisplay ? <div style={{ flexGrow: 1, display: "flex", alignItems: "center", gap: 8, pointerEvents: "none" }}>
             <text style={{ flexGrow: 1, color: props.disabled ? colors.textDisabled : "#8a7b66", fontWeight: 500, whiteSpace: "nowrap", pointerEvents: "none" }}>{rangeDisplay[0]}</text>
             <div style={{ width: 1, height: 16, marginLeft: 2, marginRight: 2, backgroundColor: "#e8dcc8", flexShrink: 0, pointerEvents: "none" }} />
@@ -265,7 +268,7 @@ export const DatePicker = defineComponent({
               {pickerButton("确定", confirm, { testId: id("confirm"), style: { backgroundColor: "#ffb400", color: "#ffffff", fontWeight: 700, hover: { backgroundColor: "#e5a200" } } })}
             </div> : null}
           </div>}</motion.div> }) : null}
-        </div>
+        </>}</ColorSurface>
       </div>
     }
   },

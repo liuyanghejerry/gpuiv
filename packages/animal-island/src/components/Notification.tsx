@@ -23,6 +23,7 @@ import { motion, useWindowSize, type BoxShadow, type StyleDesc } from "@gpuiv/vu
 import { borderWidth, colors, ease, fonts, radius, spacing } from "../tokens.js"
 import { renderContent } from "./content.js"
 import { activationKeys } from "../interaction.js"
+import { ColorSurface } from "./surface-motion.js"
 
 /* ── Types (ported from types.ts) ─────────────── */
 
@@ -338,7 +339,7 @@ const NotificationCard = defineComponent({
       }
 
       return (
-        <div
+        <ColorSurface
           role={clickable ? "button" : undefined}
           tabIndex={clickable ? 0 : undefined}
           onClick={clickable ? () => item.onClick?.() : undefined}
@@ -349,8 +350,10 @@ const NotificationCard = defineComponent({
           onFocus={clickable ? () => (cardFocused.value = true) : undefined}
           onBlur={clickable ? () => (cardFocused.value = false) : undefined}
           style={cardStyle}
+          transition={{ duration: 0.2, ease: "ease" }}
         >
-          <div
+          {{ default: () => [
+            <div
             aria-hidden={true}
             style={{
               display: "flex",
@@ -377,8 +380,8 @@ const NotificationCard = defineComponent({
                 style={{ width: 18, height: 18, color: accent.iconColor, pointerEvents: "none" }}
               />
             )}
-          </div>
-          <div
+          </div>,
+            <div
             style={{
               display: "flex",
               flexDirection: "column",
@@ -395,13 +398,13 @@ const NotificationCard = defineComponent({
                 {renderContent(item.description)}
               </div>
             ) : null}
-          </div>
-          {item.btn ? (
+          </div>,
+            item.btn ? (
             <div style={{ display: "flex", alignItems: "center", flexShrink: 0, marginLeft: spacing.xs }}>
               {renderContent(item.btn)}
             </div>
-          ) : null}
-          <div
+          ) : null,
+            <ColorSurface
             role="button"
             tabIndex={0}
             aria-label="close"
@@ -425,10 +428,14 @@ const NotificationCard = defineComponent({
               hover: { backgroundColor: "rgba(114, 93, 66, 0.12)", color: "rgba(114, 93, 66, 1)" },
               ...(closeFocused.value ? { outline: FOCUS_OUTLINE } : {}),
             }}
+            transition={{ duration: 0.2, ease: "ease" }}
           >
-            {item.closeIcon !== undefined && item.closeIcon !== null ? renderContent(item.closeIcon) : <text>×</text>}
-          </div>
-        </div>
+            {{ default: () => [
+              item.closeIcon !== undefined && item.closeIcon !== null ? renderContent(item.closeIcon) : <text>×</text>
+            ] }}
+          </ColorSurface>
+          ] }}
+        </ColorSurface>
       )
     }
   },

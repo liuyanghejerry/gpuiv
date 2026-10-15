@@ -4,8 +4,8 @@
  *  Fidelity notes (see issue #164), 原版做法 → 移植近似:
  *  - Handle slide (`left: 2px` ↔ `calc(100% - 24px)` with a CSS transition)
  *    → native `motion.div` `left` tween over computed pixels (0.25s,
- *    cubic-bezier(0.4, 0, 0.2, 1) from tokens). Track/handle colour changes
- *    are instant — motion only tweens numeric geometry and opacity.
+ *    cubic-bezier(0.4, 0, 0.2, 1) from tokens). Track and handle colours and
+ *    the track's inset shadow share the same native motion clock.
  *  - `top: 50%; transform: translateY(-50%)` on the handle → computed numeric
  *    `top` (GPUIV has no transforms).
  *  - Track inset shadow uses GPUI's existing inset-shadow paint: 0 2px 4px,
@@ -24,6 +24,7 @@ import { Spinner, motion, type StyleDesc } from "@gpuiv/vue"
 import { colors, duration, ease, fonts, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { contentLabel, renderContent } from "./content.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type SwitchSize = "small" | "default"
 
@@ -136,7 +137,7 @@ export const Switch = defineComponent({
       if (inactive) style.pointerEvents = "none"
 
       return (
-        <div
+        <ColorSurface
           {...forwardAttrs}
           role="switch"
           aria-checked={checked}
@@ -149,7 +150,7 @@ export const Switch = defineComponent({
           onClick={inactive ? undefined : () => toggle()}
           onKeyDown={inactive ? undefined : activationKeys(() => toggle())}
           style={{ ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style }}
-        >
+        >{() => <>
           {label !== undefined ? renderContent(label) : checked ? (
             slots.checked?.()
           ) : (
@@ -157,7 +158,7 @@ export const Switch = defineComponent({
           )}
           <motion.div
             initial={false}
-            animate={{ left: checked ? trackWidth - g.border * 2 - g.handle - g.inset : g.inset }}
+            animate={{ left: checked ? trackWidth - g.border * 2 - g.handle - g.inset : g.inset, backgroundColor: "#f7f3df", borderColor: checked ? c.success : c.shadowSoftHover }}
             transition={{ duration: duration.base, ease }}
             style={{
               // The animated handle is decorative; the track owns the press.
@@ -179,7 +180,7 @@ export const Switch = defineComponent({
               <Spinner size={g.spinnerSize} color={checked ? c.success : c.shadowSoftStrong} label="Loading" />
             ) : null}
           </motion.div>
-        </div>
+        </>}</ColorSurface>
       )
     }
   },

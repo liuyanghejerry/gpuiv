@@ -90,15 +90,29 @@ describe("React Button interaction and artwork", () => {
     expect(app.text()).toContain("搜索")
   })
 
-  it("renders a real dashed SVG outline and updates its hover ink", async () => {
+  it("keeps dashed SVG geometry fixed while native motion changes its ink", async () => {
     const app = mount(defineComponent(() => () => h(Button, { type: "dashed", testId: "button" })))
     await app.settle()
-    const outline = () => Buffer.from(String(app.find(node => node.type === "img").props.src).split(",")[1]!, "base64").toString()
-    expect(outline()).toContain('stroke-dasharray="6 6"')
-    expect(outline()).toContain('stroke="#aaa69d"')
+    const outline = app.find(node => node.type === "svg")
+    const source = outline.props.src
+    const svg = Buffer.from(String(source).split(",")[1]!, "base64").toString()
+    expect(svg).toContain('stroke-dasharray="6 6"')
+    expect(svg).toContain('stroke-width="2"')
+    expect(svg).toContain('stroke="#ffffff"')
+    expect(outline.props.motion).toMatchObject({ initial: false, animate: { color: "#aaa69d" }, transition: { duration: 0.25, ease: [0.4, 0, 0.2, 1] } })
+    expect(outline.props.style).toMatchObject({ pointerEvents: "none" })
     expect(app.find("button").props.style).toMatchObject({ borderColor: "transparent" })
     await app.fire("button", "mouseEnter")
-    expect(outline()).toContain('stroke="#19c8b9"')
+    expect(outline.props.src).toBe(source)
+    expect(outline.props.motion).toMatchObject({ animate: { color: "#19c8b9" } })
+    await app.fire("button", "mouseDown", { button: 0 })
+    expect(outline.props.src).toBe(source)
+    expect(outline.props.motion).toMatchObject({ animate: { color: "#50b9ab" } })
+    await app.fire("button", "mouseUp", { button: 0 })
+    expect(outline.props.motion).toMatchObject({ animate: { color: "#19c8b9" } })
+    await app.fire("button", "mouseLeave")
+    expect(outline.props.src).toBe(source)
+    expect(outline.props.motion).toMatchObject({ animate: { color: "#aaa69d" } })
   })
 
   it("rotates the original Donut counterclockwise over 2.5s and releases its timer", async () => {

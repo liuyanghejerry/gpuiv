@@ -3,8 +3,9 @@
  * uses the renderer API; no DOM or document listeners are involved.
  */
 import { computed, h, ref, watch, type Ref } from "vue"
-import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { useGpuix, type BoxShadow, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, fonts } from "../tokens.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type PickerSize = "small" | "middle" | "large"
 export type PickerStatus = "error" | "warning"
@@ -18,7 +19,7 @@ export function normalizePickerKey(key: string | undefined): string {
 }
 
 export const pad2 = (value: number) => String(value).padStart(2, "0")
-export const hardShadow = (color: string): NonNullable<StyleDesc["boxShadow"]> =>
+export const hardShadow = (color: string): BoxShadow =>
   ({ offsetX: 0, offsetY: 3, blurRadius: 0, spreadRadius: 0, color })
 
 export const pickerPanelStyle: StyleDesc = {
@@ -41,9 +42,7 @@ export function pickerTriggerStyle(size: PickerSize, disabled: boolean, open: bo
     fontFamily: fonts.sans, borderRadius: 50, backgroundColor: disabled ? "#ece8dc" : colors.bgInput,
     cursor: disabled ? "not-allowed" : "pointer", userSelect: "none", opacity: disabled ? 0.6 : 1,
     boxShadow: disabled ? undefined : status ? hardShadow(status === "error" ? colors.errorActive : colors.warningActive)
-      : open ? hardShadow("#e0b800") : undefined,
-    // GPUI supports one shadow; the original's second open-state shadow is an outline.
-    outline: open && !disabled ? { width: 3, color: "rgba(255, 204, 0, 0.15)", offset: 0 } : undefined,
+      : open ? [hardShadow("#e0b800"), { offsetX: 0, offsetY: 0, blurRadius: 0, spreadRadius: 3, color: "rgba(255, 204, 0, 0.15)" }] : undefined,
     hover: disabled || open || status ? undefined : { boxShadow: hardShadow(colors.shadowSoftHover) },
   }
 }
@@ -52,9 +51,11 @@ export function pickerButton(label: string, onClick: () => void, options: {
   testId?: string; ariaLabel?: string; disabled?: boolean; style?: StyleDesc; selected?: boolean
 } = {}) {
   const activate = () => { if (!options.disabled) onClick() }
-  return h("div", {
+  return h(ColorSurface, {
     role: "button", "aria-label": options.ariaLabel ?? label,
     "aria-selected": options.selected, testId: options.testId, tabIndex: options.disabled ? -1 : 0,
+    "aria-disabled": options.disabled || undefined,
+    transition: { duration: 0.15, ease: "ease" },
     onClick: activate,
     onKeyDown: (event: EventPayload) => {
       const key = normalizePickerKey(event.key)
@@ -67,7 +68,7 @@ export function pickerButton(label: string, onClick: () => void, options: {
       hover: options.disabled ? undefined : { backgroundColor: "#f0e8d8", color: colors.warmSoft },
       ...options.style,
     },
-  }, [h("text", { style: { pointerEvents: "none" } }, label)])
+  }, { default: () => h("text", { style: { pointerEvents: "none" } }, label) })
 }
 
 function iconUrl(content: string) {

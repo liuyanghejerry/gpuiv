@@ -22,6 +22,10 @@ function motionStyleKey(style: MotionStyle | false | undefined) {
     style.bottom,
     style.left,
     style.borderRadius,
+    [style.backgroundColor !== undefined, style.backgroundColor],
+    [style.color !== undefined, style.color],
+    [style.borderColor !== undefined, style.borderColor],
+    style.boxShadow,
   ]
 }
 

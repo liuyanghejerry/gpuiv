@@ -11,6 +11,7 @@ import { computed, defineComponent, h, reactive, ref, watch, type PropType } fro
 import { FloatingLayer, motion, useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, ease, fonts } from "../tokens.js"
 import { normalizePickerKey, pad2, pickerButton, pickerFooterStyle, pickerIcons, pickerPanelStyle, pickerTriggerStyle, usePickerPopup, type PickerSize, type PickerStatus } from "./picker-utils.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type TimePickerSize = PickerSize
 export type TimePickerStatus = PickerStatus
@@ -156,9 +157,10 @@ export const TimePicker = defineComponent({
       const display = popup.open.value ? formatTime(pending.value, props.format) : parsed ? formatTime(parsed, props.format) : props.placeholder
       const { style: userStyle, ...forwardAttrs } = attrs
       return <div {...forwardAttrs} style={{ width: "100%", fontFamily: fonts.sans, ...(userStyle as StyleDesc) }}>
-        <div ref={popup.trigger} testId={props.testId} role="combobox" aria-label={props.ariaLabel} aria-expanded={popup.open.value}
+        <ColorSurface hostRef={popup.trigger} testId={props.testId} role="combobox" aria-label={props.ariaLabel} aria-expanded={popup.open.value} aria-disabled={props.disabled || undefined}
+          transition={{ duration: 0.2, ease }}
           tabIndex={props.disabled ? -1 : 0} onMouseDown={popup.onTriggerMouseDown} onClick={popup.onTriggerClick} onKeyDown={keyDown}
-          style={pickerTriggerStyle(props.size, props.disabled, popup.open.value, props.status)}>
+          style={pickerTriggerStyle(props.size, props.disabled, popup.open.value, props.status)}>{() => <>
           <text style={{ flexGrow: 1, color: !props.disabled && (parsed || popup.open.value) ? "#8a7b66" : colors.textDisabled, fontWeight: parsed || popup.open.value ? 500 : 400, whiteSpace: "nowrap", pointerEvents: "none" }}>{display}</text>
           {props.allowClear && parsed && !props.disabled ? pickerButton("×", clear, { testId: id("clear"), ariaLabel: "清除时间", style: { width: 20, height: 20, padding: 0, borderRadius: 999, fontSize: 13, fontWeight: 700, color: colors.textDisabled, pointerEvents: "auto" } }) : null}
           <svg src={pickerIcons.clock} style={{ width: 14, height: 14, flexShrink: 0, color: "#a0936e", pointerEvents: "none" }} />
@@ -173,7 +175,7 @@ export const TimePicker = defineComponent({
               {pickerButton("确定", confirm, { testId: id("confirm"), style: { backgroundColor: "#ffb400", color: "#ffffff", fontWeight: 700, hover: { backgroundColor: "#e5a200" } } })}
             </div>
           </div>}</motion.div> }) : null}
-        </div>
+        </>}</ColorSurface>
       </div>
     }
   },

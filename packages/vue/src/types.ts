@@ -12,6 +12,12 @@ export interface MotionStyle {
   bottom?: number
   left?: number
   borderRadius?: number
+  /** Color tracks interpolate in premultiplied sRGB. Null restores the base style. */
+  backgroundColor?: string | null
+  color?: string | null
+  borderColor?: string | null
+  /** An empty list clears shadows; missing layers fade to transparent. */
+  boxShadow?: BoxShadow | BoxShadow[]
 }
 
 export type MotionEase =

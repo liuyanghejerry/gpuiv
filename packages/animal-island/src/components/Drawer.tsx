@@ -24,6 +24,7 @@ import { fonts, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { contentLabel, renderContent } from "./content.js"
 import { WindowLayer } from "./window-layer.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type DrawerPlacement = "left" | "right" | "top" | "bottom"
 
@@ -287,7 +288,7 @@ export const Drawer = defineComponent({
                       <div style={{ fontSize: 28, fontWeight: 700, color: "rgba(114, 93, 66, 1)" }}>
                         {slots.title ? slots.title() : renderContent(props.title)}
                       </div>
-                      <div
+                      <ColorSurface
                         role="button"
                         tabIndex={0}
                         aria-label="关闭"
@@ -305,9 +306,12 @@ export const Drawer = defineComponent({
                           cursor: "pointer",
                           hover: { backgroundColor: "rgba(114, 93, 66, 0.1)", color: "rgba(114, 93, 66, 1)" },
                         }}
+                        transition={{ duration: 0.2, ease: "ease" }}
                       >
-                        <text style={{ pointerEvents: "none" }}>×</text>
-                      </div>
+                        {{ default: () => [
+                          <text style={{ pointerEvents: "none" }}>×</text>
+                        ] }}
+                      </ColorSurface>
                     </div>
                   ) : null}
                   <div

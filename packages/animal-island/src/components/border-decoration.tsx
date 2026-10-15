@@ -1,7 +1,8 @@
 /** Dashed CSS borders translated to a measured SVG stroke. Only decoration
  * paints here; the parent keeps its transparent native border for layout. */
-import { computed, defineComponent, ref } from "vue"
-import { useElementBounds, type HostNode } from "@gpuiv/vue"
+import { computed, defineComponent, ref, type PropType } from "vue"
+import { useElementBounds, type HostNode, type MotionTransition } from "@gpuiv/vue"
+import { duration, ease } from "../tokens.js"
 
 export function dashedBorderDataUrl(width: number, height: number, color: string, strokeWidth: number, radius: number): string {
   const w = Math.max(1, width), h = Math.max(1, height), inset = strokeWidth / 2
@@ -16,14 +17,17 @@ export const DashedBorderSurface = defineComponent({
     color: { type: String, required: true },
     width: { type: Number, default: 2 },
     radius: { type: Number, default: 0 },
+    transition: { type: Object as PropType<MotionTransition>, default: undefined },
   },
   setup(props) {
     const surface = ref<HostNode | null>(null)
     const { bounds } = useElementBounds(surface)
     const width = computed(() => bounds.value?.width ?? null), height = computed(() => bounds.value?.height ?? null)
-    const src = computed(() => width.value !== null && height.value !== null ? dashedBorderDataUrl(width.value, height.value, props.color, props.width, props.radius) : null)
+    // Cache geometry independently of ink. GPUI's monochrome SVG tint can
+    // interpolate the outline without re-decoding an SVG for every color.
+    const src = computed(() => width.value !== null && height.value !== null ? dashedBorderDataUrl(width.value, height.value, "#ffffff", props.width, props.radius) : null)
     return () => <div ref={surface} aria-hidden={true} style={{ position: "absolute", top: -props.width, left: -props.width, right: -props.width, bottom: -props.width, pointerEvents: "none" }}>
-      {src.value ? <img src={src.value} objectFit="fill" style={{ width: "100%", height: "100%", pointerEvents: "none" }} /> : null}
+      {src.value ? <svg src={src.value} motion={{ initial: false, animate: { color: props.color }, transition: props.transition ?? { duration: duration.base, ease } }} style={{ width: "100%", height: "100%", color: props.color, pointerEvents: "none" }} /> : null}
     </div>
   },
 })

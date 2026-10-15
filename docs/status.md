@@ -30,6 +30,8 @@
 - [x] Selectable ANSI output (`AnsiText`, virtualized streaming `AnsiLog`, `parseAnsi` / `createAnsiParser`)
 - [x] `outline` style (focus rings that take no layout space)
 - [x] Structured `boxShadow` stacks, including native inset shadows and hover/active overrides
+- [x] Native motion color and shadow tracks, with premultiplied alpha, continuous retargeting and explicit color-track release
+- [x] Native `<img filter>` functions with cached background processing, transparent blur/shadow expansion and animated image frame preservation
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)
 - [x] Streaming markdown parsing (appends re-parse from the last stable block boundary; full parity with a full parse)

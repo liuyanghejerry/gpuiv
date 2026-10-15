@@ -37,6 +37,7 @@ import { borderWidth, colors, ease, fontSize, fonts, radius, spacing } from "../
 import { activationKeys } from "../interaction.js"
 import { renderContent } from "./content.js"
 import { Icon } from "./Icon.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export interface CollapseProps {
   question?: VNodeChild
@@ -129,7 +130,7 @@ export const Collapse = defineComponent({
               userSelect: "none",
             }}
           >
-            <div
+            <ColorSurface
               style={{
                 display: "flex",
                 alignItems: "center",
@@ -152,9 +153,12 @@ export const Collapse = defineComponent({
                 },
                 pointerEvents: "none",
               }}
+              transition={{ duration: 0.25, ease }}
             >
-              <text>{expanded ? "−" : "+"}</text>
-            </div>
+              {{ default: () => [
+                <text>{expanded ? "−" : "+"}</text>
+              ] }}
+            </ColorSurface>
             <div
               style={{
                 flexGrow: 1,

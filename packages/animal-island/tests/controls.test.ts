@@ -164,56 +164,99 @@ describe("Button variants follow the original Less cascade", () => {
   const combinations = variants.flatMap((type) => [false, true].flatMap((danger) => [false, true].map((ghost) => ({ type, danger, ghost }))))
   it.each(combinations)("$type danger=$danger ghost=$ghost preserves idle/hover/active styling", async ({ type, danger, ghost }) => {
     const host = mount(Button, { type, danger, ghost })
-    const idle = host.find("control").props.style as Record<string, unknown>
-    const hover = { ...idle, ...(idle.hover as Record<string, unknown>) }
-    const active = { ...hover, ...(idle.active as Record<string, unknown>) }
     const c = colors
-    if (type === "primary") {
-      expect(idle).toMatchObject({
-        color: ghost ? c.primary : danger ? "#ffffff" : c.warm,
-        backgroundColor: ghost ? "transparent" : danger ? c.error : c.cream,
-        borderColor: danger ? c.error : c.cream,
-      })
-      expect(idle.boxShadow).toEqual(ghost ? undefined : danger ? shadows.hardError : shadows.hard)
-      expect(hover).toMatchObject({
-        color: ghost ? c.primaryHover : danger ? "#ffffff" : c.warm,
-        backgroundColor: ghost ? "rgba(25, 200, 185, 0.08)" : danger ? c.errorHover : c.cream,
-        borderColor: ghost ? c.primaryHover : danger ? c.errorHover : c.cream,
-        boxShadow: danger ? shadows.hardErrorHover : shadows.hardHover,
-      })
-      expect(active).toMatchObject({
-        color: ghost ? c.primaryHover : danger ? "#ffffff" : c.warm,
-        backgroundColor: danger ? c.errorActive : ghost ? "rgba(25, 200, 185, 0.08)" : c.cream,
-        borderColor: danger ? c.errorActive : ghost ? c.primaryHover : c.cream,
-        boxShadow: danger ? shadows.hardErrorActive : shadows.hardActive,
-      })
-    } else if (type === "default" || type === "dashed") {
-      expect(idle).toMatchObject({ color: danger ? c.error : c.text, backgroundColor: ghost ? "transparent" : c.bg, borderColor: type === "dashed" ? "transparent" : danger ? c.error : c.border })
-      expect(idle.boxShadow).toEqual(ghost ? undefined : shadows.sm)
-      expect(hover).toMatchObject({ color: danger ? c.error : c.primary, borderColor: type === "dashed" ? "transparent" : danger ? c.errorHover : c.primary })
-      expect(hover.boxShadow).toEqual(type === "default" ? shadows.base : ghost ? undefined : shadows.sm)
-      expect(active).toMatchObject({ color: danger ? c.error : c.primaryActive, borderColor: type === "dashed" ? "transparent" : danger ? c.errorActive : c.primaryActive })
-      expect(active.boxShadow).toEqual(type === "default" || !ghost ? shadows.sm : undefined)
-      if (type === "dashed") {
-        await host.settle()
-        const outline = () => Buffer.from(String(host.find(node => node.type === "img").props.src).split(",")[1]!, "base64").toString()
-        expect(outline()).toContain(`stroke="${danger ? c.error : c.border}"`)
-        await host.fire("control", "mouseEnter")
-        expect(outline()).toContain(`stroke="${danger ? c.errorHover : c.primary}"`)
-        await host.fire("control", "mouseDown", { button: 0 })
-        expect(outline()).toContain(`stroke="${danger ? c.errorActive : c.primaryActive}"`)
-      }
-    } else if (type === "text") {
-      expect(idle).toMatchObject({ color: danger ? "#ffffff" : c.text, backgroundColor: "transparent", borderColor: "transparent" })
-      expect(hover).toMatchObject({ color: danger ? "#ffffff" : c.text, backgroundColor: c.bgSecondary })
-      expect(active).toMatchObject({ color: danger ? "#ffffff" : c.text, backgroundColor: "#e9ddc6" })
-      expect(idle.boxShadow).toBeUndefined()
-    } else {
-      expect(idle).toMatchObject({ color: danger ? "#ffffff" : c.primary, backgroundColor: "transparent", borderColor: "transparent" })
-      expect(hover).toMatchObject({ color: danger ? "#ffffff" : c.primaryHover, opacity: 0.85 })
-      expect(active.color).toBe(danger ? "#ffffff" : c.primaryActive)
-      expect(idle.boxShadow).toBeUndefined()
+    // Motion owns sampled colors/shadows. Only non-animated pseudo styles
+    // such as link opacity remain in GPUI's hover/active refinement.
+    const appearance = (hovered = false, pressed = false) => {
+      const node = host.find("control"), style = node.props.style as Record<string, unknown>
+      const motion = node.props.motion as { animate: Record<string, unknown> }
+      return { ...style, ...(hovered ? style.hover as object : {}), ...(pressed ? style.active as object : {}), ...motion.animate }
     }
+    const nativeBorder = (ink: string) => type === "dashed" ? "transparent" : ink
+    const rest = type === "primary" ? {
+      color: ghost ? c.primary : danger ? "#ffffff" : c.warm,
+      backgroundColor: ghost ? "transparent" : danger ? c.error : c.cream,
+      borderColor: danger ? c.error : c.cream,
+      boxShadow: ghost ? [] : danger ? shadows.hardError : shadows.hard,
+    } : type === "default" || type === "dashed" ? {
+      color: danger ? c.error : c.text, backgroundColor: ghost ? "transparent" : c.bg,
+      borderColor: nativeBorder(danger ? c.error : c.border), boxShadow: ghost ? [] : shadows.sm,
+    } : {
+      color: danger ? "#ffffff" : type === "text" ? c.text : c.primary,
+      backgroundColor: "transparent", borderColor: "transparent", boxShadow: [],
+    }
+    const over = type === "primary" ? {
+      color: ghost ? c.primaryHover : danger ? "#ffffff" : c.warm,
+      backgroundColor: ghost ? "rgba(25, 200, 185, 0.08)" : danger ? c.errorHover : c.cream,
+      borderColor: ghost ? c.primaryHover : danger ? c.errorHover : c.cream,
+      boxShadow: danger ? shadows.hardErrorHover : shadows.hardHover,
+    } : type === "default" || type === "dashed" ? {
+      color: danger ? c.error : c.primary,
+      backgroundColor: ghost ? "transparent" : c.bg,
+      borderColor: nativeBorder(danger ? c.errorHover : c.primary),
+      boxShadow: type === "default" ? shadows.base : ghost ? [] : shadows.sm,
+    } : type === "text" ? { ...rest, backgroundColor: c.bgSecondary }
+      : { ...rest, color: danger ? "#ffffff" : c.primaryHover, opacity: 0.85 }
+    const down = type === "primary" ? {
+      ...over,
+      // .btn-ghost.btn-primary:hover is declared after, and has the same
+      // specificity as, .btn-danger.btn-primary:active. A pointer press keeps
+      // the ghost hover fill/border while retaining the danger active shadow.
+      backgroundColor: ghost ? "rgba(25, 200, 185, 0.08)" : danger ? c.errorActive : c.cream,
+      borderColor: ghost ? c.primaryHover : danger ? c.errorActive : c.cream,
+      boxShadow: danger ? shadows.hardErrorActive : shadows.hardActive,
+    } : type === "default" || type === "dashed" ? {
+      ...over, color: danger ? c.error : c.primaryActive,
+      borderColor: nativeBorder(danger ? c.errorActive : c.primaryActive),
+      boxShadow: type === "default" || !ghost ? shadows.sm : [],
+    } : type === "text" ? { ...over, backgroundColor: "#e9ddc6" }
+      : { ...over, color: danger ? "#ffffff" : c.primaryActive }
+    expect(appearance()).toMatchObject(rest)
+    expect(host.find("control").props.style).toMatchObject({ height: 45, paddingLeft: 20, paddingRight: 20, borderWidth: 2 })
+    await host.settle()
+    const outline = type === "dashed" ? host.find(node => node.type === "svg") : null
+    const source = outline?.props.src
+    if (outline) {
+      const svg = Buffer.from(String(source).split(",")[1], "base64").toString()
+      expect(svg).toContain('stroke="#ffffff"')
+      expect(svg).toContain('stroke-width="2"')
+      expect(svg).toContain('stroke-dasharray="6 6"')
+      expect(outline.props.motion).toMatchObject({ animate: { color: danger ? c.error : c.border } })
+      expect(outline.props.style).toMatchObject({ pointerEvents: "none" })
+    }
+    await host.fire("control", "mouseEnter")
+    expect(appearance(true)).toMatchObject(over)
+    if (outline) {
+      expect(outline.props.src).toBe(source)
+      expect(outline.props.motion).toMatchObject({ animate: { color: danger ? c.errorHover : c.primary } })
+    }
+    await host.fire("control", "mouseDown", { button: 0 })
+    expect(appearance(true, true)).toMatchObject(down)
+    if (outline) {
+      expect(outline.props.src).toBe(source)
+      expect(outline.props.motion).toMatchObject({ animate: { color: danger ? c.errorActive : c.primaryActive } })
+    }
+    await host.fire("control", "mouseUp", { button: 0 })
+    expect(appearance(true)).toMatchObject(over)
+    await host.fire("control", "mouseLeave")
+    expect(appearance()).toMatchObject(rest)
+    if (outline) {
+      expect(outline.props.src).toBe(source)
+      expect(outline.props.motion).toMatchObject({ animate: { color: danger ? c.error : c.border } })
+    }
+    if (type === "primary" && danger && ghost) {
+      // Keyboard activation away from the pointer has no ghost :hover rule.
+      // It must still reach danger :active, rather than freezing the hover
+      // palette globally to accommodate the pointer cascade above.
+      await host.fire("control", "keyDown", { key: "space" })
+      expect(appearance(false, true)).toMatchObject({
+        color: c.primary, backgroundColor: c.errorActive, borderColor: c.errorActive,
+        boxShadow: shadows.hardErrorActive,
+      })
+      await host.fire("control", "keyUp", { key: "space" })
+      expect(appearance()).toMatchObject(rest)
+    }
+    expect(host.find("control").props.motion).toMatchObject({ initial: false, transition: { duration: 0.25, ease: [0.4, 0, 0.2, 1] } })
   })
 
   it.each(variants)("loading $type overrides all modifiers and retains native sizes", async (type) => {

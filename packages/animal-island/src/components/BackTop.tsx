@@ -18,6 +18,7 @@ import {
 import { ease, fonts } from "../tokens.js"
 import { getIconDataUrl } from "./Icon.js"
 import { activationKeys } from "../interaction.js"
+import { dropShadowBounds, svgShadowDecoration, type SvgDecoration, type SvgDropShadow } from "./svg-effects.js"
 
 /** 滚动容器目标：元素 id 数字，或带数值 `id` 的 host ref / VirtualList ref。 */
 export type BackTopTarget = number | { id?: number | null } | null | undefined
@@ -32,16 +33,21 @@ export interface BackTopProps {
 
 /** React uses naive-icons RocketIcon. SVG filters keep the shadow on the
  * coloured silhouette rather than an unrelated rectangular/circular backing. */
-const rocketUrls = new Map<boolean, string>()
-function rocketIconUrl(hovered: boolean): string {
-  const cached = rocketUrls.get(hovered)
+const rocketArtwork = new Map<boolean, SvgDecoration>()
+// Reserve the hover shadow's full four-sigma envelope in both states so the
+// native size tween scales the 64px rocket rather than changing its padding.
+const rocketBounds = dropShadowBounds(64, 64, [{ offsetX: 0, offsetY: 4, stdDeviation: 14, color: "#5b4e1e", opacity: 0.32 }])
+export function rocketIconDecoration(hovered: boolean): SvgDecoration {
+  const cached = rocketArtwork.get(hovered)
   if (cached) return cached
   const original = Buffer.from(getIconDataUrl("Rocket").split(",")[1], "base64").toString()
   const inner = original.slice(original.indexOf(">") + 1, original.lastIndexOf("</svg>"))
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="-21 -21 90 90" fill="none" stroke="#2A2A2A" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><defs><filter id="shadow" x="-100%" y="-100%" width="300%" height="300%"><feDropShadow dx="0" dy="3" stdDeviation="${hovered ? 5.25 : 3.75}" flood-color="#5b4e1e" flood-opacity="${hovered ? 0.32 : 0.22}"/></filter></defs><g filter="url(#shadow)">${inner}</g></svg>`
-  const url = `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
-  rocketUrls.set(hovered, url)
-  return url
+  const shadow: SvgDropShadow = { offsetX: 0, offsetY: 4, stdDeviation: hovered ? 14 : 10, color: "#5b4e1e", opacity: hovered ? 0.32 : 0.22 }
+  // The rest filter can use a smaller filter region, but the image viewport
+  // must be fixed across hover to keep the artwork's actual pixel size stable.
+  const decoration = svgShadowDecoration(64, 64, `<g transform="scale(${64 / 48})" fill="none" stroke="#2A2A2A" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`, [shadow], "", rocketBounds)
+  rocketArtwork.set(hovered, decoration)
+  return decoration
 }
 
 function resolveTargetId(target: (() => BackTopTarget) | undefined): number | null {
@@ -127,7 +133,8 @@ export const BackTop = defineComponent({
     return () => {
       const size = 64, restBottom = 32, restRight = 24
       const scale = pressed.value ? 0.96 : hovered.value ? 1.08 : 1
-      const artSize = 120 * scale
+      const art = rocketIconDecoration(hovered.value)
+      const artStyle = { width: art.width * scale, height: art.height * scale, left: art.left * scale + size * (1 - scale) / 2, top: art.top * scale + size * (1 - scale) / 2 + (pressed.value ? 2 : 0) }
 
       const motionStyle: StyleDesc = {
         position: "absolute",
@@ -183,10 +190,10 @@ export const BackTop = defineComponent({
                 onMouseUp={() => (pressed.value = false)}
                 style={style}
               >
-                <img src={rocketIconUrl(hovered.value)} alt="" objectFit="fill"
+                <img src={art.src} alt="" objectFit="fill"
                   testId={props.testId ? `${props.testId}-icon` : undefined}
-                  motion={{ initial: false, animate: { width: artSize, height: artSize, left: (size - artSize) / 2, top: (size - artSize) / 2 + (pressed.value ? 2 : 0) }, transition: { duration: 0.3, ease } }}
-                  style={{ position: "absolute", width: 120, height: 120, left: -28, top: -28, pointerEvents: "none" }} />
+                  motion={{ initial: false, animate: artStyle, transition: { duration: 0.3, ease } }}
+                  style={{ position: "absolute", width: art.width, height: art.height, left: art.left, top: art.top, pointerEvents: "none" }} />
               </div>
             </motion.div>
           ) : null}

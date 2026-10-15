@@ -13,11 +13,12 @@
 import { Blob, File } from "node:buffer"
 import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNodeChild } from "vue"
 import { promptForPaths, Spinner, useGpuix, useWindowSize, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
-import { colors, fonts, radius, shadows } from "../tokens.js"
+import { colors, ease, fonts, radius, shadows } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { Icon } from "./Icon.js"
 import { renderContent } from "./content.js"
 import { matchUploadAccept, readUploadPaths, type UploadNativeFile } from "./upload-files.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type { UploadNativeFile } from "./upload-files.js"
 export type UploadFileStatus = "uploading" | "done" | "error" | "removed"
@@ -309,12 +310,16 @@ export const Upload = defineComponent({
     expose({ openFilePicker, addPaths, addFiles, remove, get fileList() { return list.value } } satisfies UploadExpose)
 
     function control(id: string, label: string, action: () => unknown, children: unknown, style: StyleDesc = {}) {
-      return <div role="button" tabIndex={props.disabled ? -1 : 0} aria-label={label} aria-disabled={props.disabled || undefined}
+      return <ColorSurface role="button" tabIndex={props.disabled ? -1 : 0} aria-label={label} aria-disabled={props.disabled || undefined}
         testId={props.testId ? `${props.testId}-${id}` : undefined}
         onClick={props.disabled ? undefined : action} onKeyDown={props.disabled ? undefined : activationKeys(action)}
         onFocus={() => { focus.value = id }} onBlur={() => { focus.value = null }}
         style={{ display: "flex", alignItems: "center", justifyContent: "center", cursor: props.disabled ? "not-allowed" : "pointer", userSelect: "none", ...style,
-          ...(focus.value === id ? { outline: { width: 2, color: "#ffd24d", offset: 2 } } : {}) }}>{children}</div>
+          ...(focus.value === id ? { outline: { width: 2, color: "#ffd24d", offset: 2 } } : {}) }} transition={{ duration: id === "trigger" ? 0.2 : 0.15, ease: id === "trigger" && !props.drag ? ease : "ease" }}>
+        {{ default: () => [
+          children
+        ] }}
+      </ColorSurface>
     }
     function fileItem(file: UploadFile, pictureCard: boolean) {
       const status = file.status ?? "uploading"
@@ -328,20 +333,22 @@ export const Upload = defineComponent({
       </div>
       const buttonStyle: StyleDesc = pictureCard ? { position: "absolute", top: 4, width: 18, height: 18, backgroundColor: "rgba(0,0,0,0.45)", borderRadius: 999 }
         : { width: 22, height: 22, borderRadius: 999, flexShrink: 0, hover: { backgroundColor: "rgba(0,0,0,0.08)" } }
-      return <div key={file.uid} testId={props.testId ? `${props.testId}-file-${file.uid}` : undefined}
+      return <ColorSurface key={file.uid} testId={props.testId ? `${props.testId}-file-${file.uid}` : undefined}
         style={pictureCard ? { position: "relative", width: 84, height: 84, flexShrink: 0, borderRadius: 16, borderWidth: 1.5,
           borderColor: status === "error" ? colors.error : status === "done" ? "#c4b89e" : "#e8dcc8", backgroundColor: "#fffdf7", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }
           : { display: "flex", alignItems: "center", gap: 8, paddingTop: 7, paddingBottom: 7, paddingLeft: 12, paddingRight: 12, borderRadius: 12, borderWidth: 1.5,
-            borderColor: status === "error" ? colors.error : "#e8dcc8", backgroundColor: status === "error" ? "#fdeeee" : "#fffdf7", hover: { backgroundColor: colors.primaryBg } }}>
-        {pictureCard ? thumb ? <img src={thumb} alt={file.name} objectFit="cover" style={{ width: "100%", height: "100%" }} /> : <Icon name="File" size={24} />
+            borderColor: status === "error" ? colors.error : "#e8dcc8", backgroundColor: status === "error" ? "#fdeeee" : "#fffdf7", hover: { backgroundColor: colors.primaryBg } }} transition={{ duration: 0.15, ease: "ease" }}>
+        {{ default: () => [
+          pictureCard ? thumb ? <img src={thumb} alt={file.name} objectFit="cover" style={{ width: "100%", height: "100%" }} /> : <Icon name="File" size={24} />
           : props.listType === "picture" ? <div style={{ width: 30, height: 30, flexShrink: 0, borderRadius: 8, overflow: "hidden", borderWidth: 1.5, borderColor: "#e8dcc8", display: "flex", alignItems: "center", justifyContent: "center" }}>
             {thumb ? <img src={thumb} alt={file.name} objectFit="cover" style={{ width: "100%", height: "100%" }} /> : <Icon name="File" size={18} />}
-          </div> : <Icon name="File" size={15} />}
-        {pictureCard ? status === "uploading" || status === "error" ? <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(15,12,8,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}>{statusView}</div> : null
-          : <><text style={{ flexGrow: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{file.name}</text><text style={{ fontSize: 11, color: colors.textDisabled, flexShrink: 0 }}>{sizeLabel(file.size)}</text>{statusView}</>}
-        {showPreview ? control(`preview-${file.uid}`, `预览 ${file.name}`, () => openPreview(file), <Icon name="Eye" size={12} />, { ...buttonStyle, ...(pictureCard ? { left: 4 } : {}) }) : null}
-        {config.showRemoveIcon !== false ? control(`remove-${file.uid}`, `删除 ${file.name}`, () => remove(file), <Icon name="Close" size={12} />, { ...buttonStyle, ...(pictureCard ? { right: 4 } : {}) }) : null}
-      </div>
+          </div> : <Icon name="File" size={15} />,
+          pictureCard ? status === "uploading" || status === "error" ? <div style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0, backgroundColor: "rgba(15,12,8,0.55)", display: "flex", alignItems: "center", justifyContent: "center" }}>{statusView}</div> : null
+          : <><text style={{ flexGrow: 1, minWidth: 0, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap", textOverflow: "ellipsis", overflow: "hidden" }}>{file.name}</text><text style={{ fontSize: 11, color: colors.textDisabled, flexShrink: 0 }}>{sizeLabel(file.size)}</text>{statusView}</>,
+          showPreview ? control(`preview-${file.uid}`, `预览 ${file.name}`, () => openPreview(file), <Icon name="Eye" size={12} />, { ...buttonStyle, ...(pictureCard ? { left: 4 } : {}) }) : null,
+          config.showRemoveIcon !== false ? control(`remove-${file.uid}`, `删除 ${file.name}`, () => remove(file), <Icon name="Close" size={12} />, { ...buttonStyle, ...(pictureCard ? { right: 4 } : {}) }) : null
+        ] }}
+      </ColorSurface>
     }
     return () => {
       const pictureCard = props.listType === "picture-card"
@@ -373,9 +380,13 @@ export const Upload = defineComponent({
             <div onClick={closePreview} style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }} />
             <img src={previewSrc(preview.value)} alt={preview.value.name} objectFit="contain"
               style={{ width: Math.min(1100, windowSize.value.width * 0.88), height: windowSize.value.height * 0.86 }} />
-            <div role="button" tabIndex={0} autoFocus aria-label="关闭预览" testId={props.testId ? `${props.testId}-preview-close` : undefined}
+            <ColorSurface role="button" tabIndex={0} autoFocus aria-label="关闭预览" testId={props.testId ? `${props.testId}-preview-close` : undefined}
               onClick={closePreview} onKeyDown={activationKeys(closePreview)} style={{ position: "absolute", top: 20, right: 20, width: 36, height: 36,
-                display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 999, backgroundColor: colors.cream, cursor: "pointer" }}><Icon name="Close" size={20} /></div>
+                display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 999, backgroundColor: colors.cream, cursor: "pointer" }} transition={{ duration: 0.15, ease: "ease" }}>
+              {{ default: () => [
+                <Icon name="Close" size={20} />
+              ] }}
+            </ColorSurface>
           </div>
         </anchored> : null}
       </div>

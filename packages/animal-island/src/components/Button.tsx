@@ -15,6 +15,7 @@ import { activationKeys } from "../interaction.js"
 import { FormContextKey } from "../form/context.js"
 import { ButtonLoadingIcon } from "./button-loading.js"
 import { DashedBorderSurface } from "./border-decoration.js"
+import { surfaceMotion } from "./surface-motion.js"
 
 export type ButtonType = "primary" | "default" | "dashed" | "text" | "link"
 export type ButtonSize = "small" | "middle" | "large"
@@ -166,6 +167,11 @@ export const Button = defineComponent({
           variant.hover = { ...variant.hover, color: c.primaryHover, borderColor: c.primaryHover, backgroundColor: "rgba(25, 200, 185, 0.08)" }
         }
       }
+      if (props.type === "primary" && props.danger && props.ghost && hovered.value && pressed.value) {
+        // React's later ghost-primary:hover fill/border have the same CSS
+        // specificity as danger-primary:active. The active shadow still wins.
+        variant.active = { ...variant.active, backgroundColor: variant.hover?.backgroundColor, borderColor: variant.hover?.borderColor }
+      }
 
       const style: StyleDesc = {
         position: "relative",
@@ -224,6 +230,7 @@ export const Button = defineComponent({
         if (style.hover) style.hover = { ...style.hover, borderColor: "transparent" }
         if (style.active) style.active = { ...style.active, borderColor: "transparent" }
       }
+      const surface = surfaceMotion(style, { hovered: hovered.value && !inactive, pressed: pressed.value && !inactive }, ["opacity"])
 
       return h(motion.div, {
           ...attrs,
@@ -246,9 +253,9 @@ export const Button = defineComponent({
           },
           onKeyUp: (event: EventPayload) => { if (event.key === "enter" || event.key === "space") pressed.value = false; forward(attrs.onKeyUp, event) },
           initial: false,
-          animate: top === null ? {} : { top: top + offset },
+          animate: { ...surface.animate, ...(top === null ? {} : { top: top + offset }) },
           transition: { duration: duration.base, ease },
-          style: { ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style },
+          style: { ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...surface.style },
         }, { default: () => [
           dashed ? h(DashedBorderSurface, { color: borderInk, width: typeof style.borderWidth === "number" ? style.borderWidth : borderWidth, radius: typeof style.borderRadius === "number" ? style.borderRadius : radius.pill }) : null,
           props.loading ? h(ButtonLoadingIcon, { testId: props.testId ? `${props.testId}-loading-icon` : undefined }) : renderIcon(props.icon ?? slots.icon?.()),

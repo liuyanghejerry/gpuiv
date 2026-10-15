@@ -1,7 +1,7 @@
 /** Tag — aligned with animal-island-ui's React Tag (MIT).
  * Palette, 24/32/40px sizing, variants and close/keyboard behavior are kept.
  * Dashed outlines use a measured SVG; clickable lift uses native top motion.
- * Shadow/colour changes remain immediate. Native clicks do not bubble, so
+ * Native motion interpolates the palette and shadows. Native clicks do not bubble, so
  * close controls naturally keep their press separate from the tag callback.
  */
 
@@ -11,6 +11,7 @@ import { colors, fontSize, fonts, radius, spacing } from "../tokens.js"
 import type { CardColor } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { DashedBorderSurface } from "./border-decoration.js"
+import { ColorSurface } from "./surface-motion.js"
 
 export type TagSize = "small" | "medium" | "large"
 export type TagVariant = "solid" | "outlined" | "dashed" | "soft"
@@ -47,7 +48,7 @@ function variantStyle(variant: TagVariant, color: TagColor): StyleDesc {
       case "solid":
         return { backgroundColor: "#f7f3df", color: "#8f734f", borderColor: "#d4c4a8" }
       case "outlined":
-      case "dashed": // solid-border approximation, see header
+      case "dashed":
         return { backgroundColor: "transparent", color: "#8f734f", borderColor: "#c4b89e" }
       case "soft":
         return { backgroundColor: "#f5f0e6", color: "#8f734f", borderColor: "transparent" }
@@ -58,7 +59,7 @@ function variantStyle(variant: TagVariant, color: TagColor): StyleDesc {
     case "solid":
       return { backgroundColor: t.base, borderColor: t.base, color: "#ffffff" }
     case "outlined":
-    case "dashed": // solid-border approximation, see header
+    case "dashed":
       return { backgroundColor: "transparent", color: t.base, borderColor: t.base }
     case "soft":
       return { backgroundColor: t.softBg, color: t.softText, borderColor: "transparent" }
@@ -128,7 +129,8 @@ export const Tag = defineComponent({
       }
 
       return (
-        <div
+        <ColorSurface
+          geometry={["opacity"]}
           {...attrs}
           role={interactive ? "button" : undefined}
           tabIndex={interactive ? ((attrs.tabIndex as number | undefined) ?? 0) : undefined}
@@ -142,13 +144,16 @@ export const Tag = defineComponent({
           onClick={interactive ? (e: EventPayload) => props.onClick?.(e) : undefined}
           onKeyDown={interactive ? activationKeys((e) => props.onClick?.(e)) : undefined}
           style={{ ...(fonts.sans ? { fontFamily: fonts.sans } : {}), ...style }}
+          transition={{ duration: 0.2, ease: "ease" }}
         >
-          {props.variant === "dashed" ? <DashedBorderSurface color={String(dashedColor)} width={style.borderWidth ?? 1.5} radius={style.borderRadius ?? radius.pill} /> : null}
-          {slots.default?.()}
-          {props.closable ? (
-            <div
+          {{ default: () => [
+            props.variant === "dashed" ? <DashedBorderSurface color={String(dashedColor)} width={style.borderWidth ?? 1.5} radius={style.borderRadius ?? radius.pill} transition={{ duration: 0.2, ease: "ease" }} /> : null,
+            slots.default?.(),
+            props.closable ? (
+            <ColorSurface
               role="button"
               aria-label="close"
+              aria-disabled={props.disabled || undefined}
               tabIndex={props.disabled ? -1 : 0}
               onClick={close}
               onKeyDown={activationKeys(close)}
@@ -172,11 +177,15 @@ export const Tag = defineComponent({
                   ? { outline: { width: 2, color: colors.warning, offset: 2 } }
                   : {}),
               }}
+              transition={{ duration: 0.15, ease: "ease" }}
             >
-              <text>×</text>
-            </div>
-          ) : null}
-        </div>
+              {{ default: () => [
+                <text>×</text>
+              ] }}
+            </ColorSurface>
+          ) : null
+          ] }}
+        </ColorSurface>
       )
     }
   },

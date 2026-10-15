@@ -29,7 +29,8 @@ assets. The gallery registers them before first paint; other apps call
 names are normalized so the original weights match. Ordinary CJK fallback
 still follows the platform cascade; registration does not force the same
 fallback face on every OS. See [font provenance and licences](assets/fonts/README.md).
-Decorative SVGs use the full-colour image pipeline. `Icon` and all 101
+Illustrations use the full-colour SVG image pipeline; dashed outlines keep
+cached monochrome geometry and animate native tint. `Icon` and all 101
 named `*Icon` components are exported, together with the original palette,
 categories and metadata. Menus and dialogs
 use GPUI deferred anchored layers. `Form.useForm()` / `useForm()` return `[form]`;
@@ -47,12 +48,26 @@ a 220px cream sidebar groups all 40 component pages, and the selected page
 appears in a large white showcase with its own heading and description.
 The sidebar and content are independent sibling scroll viewports. Selecting a
 page resets the content scroll and mounts only that page's examples.
-Buttons now lift on hover and press down using native motion; loading uses
-the original rotating Donut. Select supports search/filter/clear, input/picker
-controls accept React `value`, and Upload accepts `fileList`, while Vue models
+Buttons lift on hover and press down using native motion, with background,
+text, border and shadow transitions on the same native frame clock. Card/Tag,
+form controls, tabs, paging and table surfaces also use native color/shadow
+tracks; loading uses the original rotating Donut. Select supports search/filter/clear,
+input/picker controls accept React `value`, and Upload accepts `fileList`, while Vue models
 remain available. CountUp provides pause/resume, formatting, easing, replay,
 completion callbacks and celebration. Public component prop types use native
 styles/events and Vue nodes; React browser event and CSS types are not reused.
+
+Native `<img filter="…">` now supports `brightness`, `contrast`, `saturate`,
+`grayscale`, `sepia`, `invert`, `opacity`, `hue-rotate`, `blur` and `drop-shadow`.
+It processes and caches pixels on GPUI's background asset executor rather than
+reprocessing them during paint. The stamp photo uses `saturate(0.93) contrast(1.03)`;
+its paper SVG chains the two original alpha shadows around
+the perforated outline. Island Tooltip shadows follow their organic silhouette.
+Rocket keeps the original 64px artwork and correct 10/14px Gaussian sigmas,
+with transparent canvas expansion for its shadow. Its hover filter switches
+between two cached SVG states; only its size/position animate continuously.
+Image filter lists are not continuous motion tracks. See the
+[native image filter API](../../docs/reference.md#image-filters) for syntax and boundaries.
 
 ## Fidelity audit
 
@@ -63,26 +78,28 @@ native geometry tests, not a screenshot similarity score.
 
 | Area | Retained in the native port | Remaining adaptations |
 | --- | --- | --- |
-| Button / Card / Tag | Original palette, sizes and modifiers; real dashed outlines; hover/press motion; rotating Donut; node-valued icons | Colour/shadow transitions are immediate; letter spacing is unavailable |
-| Select and input controls | Search/filter/clear/empty states; controlled/default models, React value/fileList aliases, keyboard and composition; selection splashes and star bursts | Browser event objects and DOM accessibility references differ; path drawing and CSS transform effects use native approximations |
+| Button / Card / Tag | Original palette, sizes and modifiers; fixed dashed geometry with animated tint; native color/shadow and hover/press motion; rotating Donut; node-valued icons | Generic CSS transforms and letter spacing remain unavailable; Donut rotation uses cached SVG frames |
+| Select and input controls | Search/filter/clear/empty states; controlled/default models, React value/fileList aliases, keyboard and composition; native surface/shadow transitions, Switch handle colors, selection splashes and star bursts | Browser event objects and DOM accessibility references differ; check-path drawing and CSS transform effects use native approximations; Rate's full-colour star artwork still changes discretely |
 | CountUp / Countdown | CountUp formatting/easing/pause/replay/callbacks/celebration; Countdown's 20-face directional digit strip; island dashed outlines | CountUp uses a cancellable JS sampling clock; celebration scale/rotation use native geometry; reduced-motion preferences are not yet mapped |
 | Avatar / Badge / Progress | Actual native text fitting and gap; arbitrary count nodes; four bundled scenes, three-stop fill gradients, completion colours, dotted tracks and native inset highlights | First measurement appears after paint; typography features differ |
-| Rich content and overlays | Node-valued labels/titles/tips; Tooltip hover/focus/click; organic game/island artwork; Notification closes after native exit and destroy removes immediately | Arbitrary child content is not clipped to SVG silhouettes; mask/focus behavior follows native APIs |
-| Image / Loading / BackTop | Stamp perforations/paper texture; decode events and preview; default three-layer frame shadows; elliptical vignette; original Rocket return button | Image colour filters/stamp silhouette drop-shadows and flake rotation differ; BackTop requires a native scroll target |
-| Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging; date/range/month and time selection; active slides, autoplay and native entrances | Avoid nested scrollers; picker columns page; Carousel inactive slides unmount and lose their local state |
+| Rich content and overlays | Node-valued labels/titles/tips; Tooltip hover/focus/click and organic silhouette shadow; native copy/close-button colors; Notification closes after native exit and destroy removes immediately | Arbitrary child content is not clipped to SVG silhouettes; mask/focus behavior follows native APIs; generic subtree scale/filter effects remain separate work |
+| Image / Loading / BackTop | Stamp photo saturation/contrast, perforations/paper texture and chained SVG alpha shadows; decode events and preview; three-layer frame shadows; elliptical vignette; Rocket with correct shadow sigmas and outside canvas | Stamp-year typography and preview scale differ; Rocket swaps two cached filter states rather than continuously interpolating blur; BackTop requires a native scroll target |
+| Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging and hover colors/radii; picker double shadows and option transitions; active slides, control/dot transitions, autoplay and native entrances | Avoid nested scrollers; picker columns page; Table loading backdrop blur is not a single-image filter; Carousel inactive slides unmount and lose their local state |
 | Skeleton / Cursor | Shared breathing timer, specialised placeholders; local cursor follower and effects | Shimmer remains opacity rather than a moving gradient; the OS cursor cannot be replaced or hidden by this API |
 
 ## Verification and limits
 
-The complete run on this Linux workstation has **462 passing tests** across
-29 files: **460 host behavior cases** and **2 real-window cases**. Eleven
-platform-dependent Title layout, native IME and floating-surface pixel tests
-are skipped here. The behavior tests run through the **real Vue custom renderer, GPUIV
-mutation protocol and event registry**, backed by a test native facade. They
-cover state transitions, native key names, controlled clearing, async rules,
-upload bytes over a local HTTP server and timer/resource cleanup. They do not
-paint, resolve Taffy layout or verify GPUI hit testing. Structural assertions
-check that decorative surfaces do not register blocking pointer behavior.
+The suite combines host behavior cases with real native-window regressions.
+Platform-dependent Title layout, native IME and floating-surface pixel tests
+skip when the required native test renderer is unavailable. Host behavior
+tests run through the **real Vue custom renderer, GPUIV mutation protocol and
+event registry**, backed by a test native facade. They cover state transitions,
+native key names, controlled clearing, async rules, upload bytes over a local
+HTTP server and timer/resource cleanup. They do not paint, resolve Taffy layout
+or verify GPUI hit testing. Structural assertions check that decorative surfaces
+do not register blocking pointer behavior. Current complete-run counts and
+platform results belong in the commit/PR verification record.
+
 The multipart-upload test starts a local HTTP server, so the full run requires
 permission to listen on localhost.
 
@@ -100,8 +117,9 @@ empty text line heights and the previous floating-center calculation, and lacks
 password/image lifecycle support. The comparison layout's Linux production
 fixture verifies the 220px sidebar, white showcase dimensions, independent
 scroll viewports, resize, real navigation and controlled Input state retention.
-Native screenshot comparison remains pending; this pinned Linux renderer does
-not support screenshot readback, and no claim of pixel identity is made.
+Browser/native screenshot similarity remains unscored; this pinned Linux
+renderer does not support screenshot readback, and no claim of pixel identity
+is made.
 The React production fixture verifies intermediate hover/press positions,
 rotating loading artwork and searchable/clearable Select through real native
 input. Additional native regressions verify Countdown's directional digit
@@ -110,6 +128,18 @@ surface entrance. macOS/Windows pixel regressions cover transparent silhouettes,
 single-pass translucent fills, Tooltip backdrop opacity, inset shading and
 multiple-shadow ordering. Windows production windows lack readback in this
 binding; their pixel assertions use the headless native test renderer.
+
+New color/shadow and image-filter GPU regressions use exact pixel samples on a
+fixed matte and derive screenshot coordinates from the actual native window
+size/DPI. Coverage includes interrupted color targets, translucent/inset shadow
+layers, stamp saturation/contrast, transparent blur edges, enlarged-image CSS
+blur radius, source clipping before shadow generation, stable layout bounds,
+filter changes without repeat loads and stale-source rejection. These pixel
+checks run on supported macOS/Windows test renderers without a CI bypass;
+Linux skips do not count as successful pixel verification. Image/filter and SVG
+host tests separately check geometry caches, transition targets and event/ref
+preservation.
+
 A focused gallery type check is available with
 `tsc --noEmit -p examples/tsconfig.animal-island.json` from the repository root.
 

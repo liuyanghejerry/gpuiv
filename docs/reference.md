@@ -748,7 +748,7 @@ value, so reversing an animation does not jump.
 
 ### Targets and timing
 
-Motion currently accepts these **numeric targets**:
+Motion accepts these targets:
 
 | Target | Range or unit |
 |---|---|
@@ -756,6 +756,18 @@ Motion currently accepts these **numeric targets**:
 | `top`, `right`, `bottom`, `left` | pixels |
 | `opacity` | `0` through `1` |
 | `borderRadius` | pixels, zero or greater |
+| `backgroundColor`, `color`, `borderColor` | CSS color strings; `null` releases the track to the current base style |
+| `boxShadow` | A structured shadow or array, using the same format as `style.boxShadow`; `[]` removes shadows |
+
+Color tracks use premultiplied sRGB interpolation, including alpha. Shadow
+lengths and colors interpolate together; missing layers are padded with
+transparent zero-length shadows. Incompatible inset/outset lists switch
+discretely at the midpoint. These tracks use the same native clock and
+continuous retargeting as numeric tracks.
+
+Put the desired interaction colors in `animate`. A competing `style.hover`
+or `style.active` value for that same property can override its animated
+sample. Text children with their own explicit color also keep that color.
 
 The **transition** uses seconds, like Motion for Vue:
 
@@ -2057,6 +2069,45 @@ or an empty string; invalid upload arguments still throw synchronously.
 Dimensions are decoded bitmap pixels: GPUI rasterizes SVG at twice its logical
 size, so a 24×18 SVG reports 48×36. The image's layout and aspect ratio continue
 to use GPUI's logical dimensions.
+
+#### Image filters
+
+Use the **`filter` image prop**, independently of `style`:
+
+```tsx
+<img src={photo} filter="saturate(0.93) contrast(1.03)"
+  style={{ width: 240, height: 160, borderRadius: 12 }} />
+<img src={logo} filter="drop-shadow(0 8px 6px rgba(0,0,0,0.3))"
+  style={{ width: 96, height: 96 }} />
+```
+
+Supported functions are `brightness`, `contrast`, `saturate`, `grayscale`,
+`sepia`, `invert`, `opacity`, `hue-rotate`, `blur`, and `drop-shadow`, applied
+in order. Amounts accept numbers or percentages; angles accept `deg`, `rad`,
+`grad`, or `turn`; lengths accept `px` or unitless zero. `drop-shadow` accepts
+an explicit color or uses the image's current text color. `none` or an empty
+string uses the original image path. `url()` and font-relative lengths are
+not supported.
+
+Processing runs on GPUI's background asset executor and caches the result.
+Color-only filters share their processed image across display sizes. Blur
+and shadows rasterize the visible image at its display size and screen DPI,
+so their CSS pixel radius remains stable when a small source is enlarged.
+They retain transparent expansion outside the image's original
+layout box; a parent's overflow mask still clips that expansion. Object-fit
+and rounded source clipping precede spatial filters. Animated images keep
+their frame delays, and changing a filter does not repeat the source's
+load event. Unused work is cancelled and cached assets are released when
+their last consumer disappears, including when its window closes.
+
+Invalid or unsupported filter lists log a warning and use the original image.
+A processing failure leaves the image transparent without emitting another
+source error or briefly painting an unfiltered image. Each intermediate
+image is limited to 16,777,216 pixels, including blur/shadow expansion. Gaussian
+blur uses an exact sampled kernel up to 12 raster pixels of standard deviation
+and a three-pass box approximation above that size. Filters apply to images,
+not arbitrary child trees or the window backdrop. Filter parameters do not
+animate through `motion`; Canvas 2D's separate `filter` property remains unsupported.
 
 ```tsx
 <img src={photo} onLoad={event => {

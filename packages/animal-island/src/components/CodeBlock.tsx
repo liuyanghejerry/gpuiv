@@ -43,6 +43,7 @@ import { defineComponent, h, onBeforeUnmount, ref, type PropType } from "vue"
 import { motion, useGpuix, type EventPayload, type GpuixTheme, type StyleDesc } from "@gpuiv/vue"
 import { colors, duration, ease, fontSize, fonts, radius } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
+import { surfaceMotion } from "./surface-motion.js"
 
 export interface CodeBlockProps {
   /** 要高亮的源码 */
@@ -247,6 +248,7 @@ export const CodeBlock = defineComponent({
         hover: { backgroundColor: "#4b3b31" },
         ...(focused.value ? { outline: { width: 2, color: colors.primary, offset: 2 } } : {}),
       }
+      const copySurface = surfaceMotion(copyButtonStyle, { hovered: hovered.value, pressed: pressed.value })
 
       return (
         <div {...restAttrs} testId={props.testId} style={wrapperStyle}>
@@ -261,7 +263,7 @@ export const CodeBlock = defineComponent({
             h(motion.div, {
               role: "button", tabIndex: 0, "aria-label": statusContent.label,
               testId: props.testId ? `${props.testId}-copy` : undefined,
-              initial: false, animate: { top: hovered.value && !pressed.value ? 11 : 12 },
+              initial: false, animate: { ...copySurface.animate, top: hovered.value && !pressed.value ? 11 : 12 },
               transition: { duration: duration.base, ease },
               onMouseEnter: () => { hovered.value = true },
               onMouseLeave: () => { hovered.value = false; pressed.value = false },
@@ -270,7 +272,7 @@ export const CodeBlock = defineComponent({
               onClick: () => handleCopy(), onKeyDown: activationKeys(() => handleCopy()),
               onFocus: () => { focused.value = true },
               onBlur: () => { focused.value = false; pressed.value = false },
-              style: copyButtonStyle,
+              style: copySurface.style,
             }, { default: () => <text>{statusContent.text}</text> })
           ) : null}
         </div>

@@ -50,8 +50,8 @@ export type TooltipVariant = "default" | "island"
 const BUBBLE_BG = "#f7f3df"
 /** @tooltip-border */
 const BUBBLE_BORDER = "#c4b89e"
-/** Island drop-shadow(0 4px 14px rgba(121,79,39,0.14)) as a struct. */
-const ISLAND_SHADOW = { offsetX: 0, offsetY: 4, blurRadius: 14, spreadRadius: 0, color: "rgba(121, 79, 39, 0.14)" }
+/** React's filter follows the irregular silhouette, not the native rectangle. */
+const ISLAND_SHADOWS = [{ offsetX: 0, offsetY: 4, stdDeviation: 14, color: "#794f27", opacity: 0.14 }]
 
 /* ── Arrow geometry ────────────────────────────── */
 
@@ -196,7 +196,6 @@ function bubbleStyle(variant: TooltipVariant, bordered: boolean): StyleDesc {
       borderRadius: 0,
       borderWidth: 0,
       borderColor: BUBBLE_BORDER,
-      boxShadow: ISLAND_SHADOW,
       color: colors.warmSoft,
       fontSize: fontSize.sm,
       fontWeight: 600,
@@ -263,7 +262,7 @@ export const Tooltip = defineComponent({
     onBeforeUnmount(cancelTimers)
     watch(() => props.trigger, () => { cancelTimers(); open.value = false })
     const bubbleChildren = () => [
-      props.variant === "island" ? <OrganicSurface color={BUBBLE_BG} borderColor={props.bordered ? BUBBLE_BORDER : undefined} /> : null,
+      props.variant === "island" ? <OrganicSurface color={BUBBLE_BG} borderColor={props.bordered ? BUBBLE_BORDER : undefined} shadows={ISLAND_SHADOWS} /> : null,
       slots.title ? slots.title() : renderContent(props.title ?? props.content ?? ""),
       arrowStrip({ side: parsePlacement(props.placement).side, align: parsePlacement(props.placement).align, bordered: props.bordered, variant: props.variant }),
     ]

@@ -18,8 +18,9 @@
  *    border: none，移植同样无边框）。
  *  - variant=stamp: 四边半圆齿孔使用测量尺寸的 SVG luminance mask；孔半径
  *    5px、间距 16px 随窗口/宽高比变化保持不变。照片上的 4px 半色调纸纹也由
- *    SVG 绘制。底纸 #fbfaf5、padding 14、直角、年份字保留；照片 saturate/
- *    contrast 滤镜、两重 drop-shadow、年份字距/文字阴影仍未表达。
+ *    SVG 绘制。底纸 #fbfaf5、padding 14、直角、年份字保留；双重 drop-shadow
+ *    串联作用于透明纸轮廓，外扩画布保留柔和阴影；照片 saturate/contrast 由
+ *    原生后台图片滤镜处理。年份字距/文字阴影仍未表达。
  *  - color 调色板: 原版 variant='bordered' 和 error 态生效，色值同
  *    tokens.cardPattern。
  *  - 加载/失败: 原生 img 解码事件驱动 opacity 0→1 和原版错误图标/文字；
@@ -289,7 +290,10 @@ export const Image = defineComponent({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        overflow: "hidden",
+        // Stamp's SVG already cuts its paper silhouette and the photograph is
+        // inset 14px; keep the outside filter bleed visible without changing
+        // the frame's layout/hitbox. Other variants still clip their bitmap.
+        overflow: props.variant === "stamp" && !failed.value ? "visible" : "hidden",
         flexShrink: 0,
         ...frameSize,
         ...variantStyle,
@@ -339,6 +343,7 @@ export const Image = defineComponent({
             <img src={ERROR_MARK_URL} alt="" style={{ width: 32, height: 32, pointerEvents: "none" }} />
             <text style={{ pointerEvents: "none" }}>图片加载失败</text>
           </div> : <img key={props.src} src={props.src} alt={props.alt} objectFit="fill"
+            filter={props.variant === "stamp" ? "saturate(0.93) contrast(1.03)" : undefined}
             testId={props.testId ? `${props.testId}-img` : undefined}
             onLoad={handleLoad} onError={handleError}
             motion={{ initial: { opacity: 0 }, animate: { opacity: loaded.value ? 1 : 0 }, transition: { duration: 0.25, ease: "ease" } }}
