@@ -21,5 +21,9 @@ describeWindow('production bounds polling', () => {
     expect(metric.framesAfter).toBe(metric.framesBefore)
     expect(metric.initial.y).toBe(120)
     expect(metric.moved.y).toBe(220)
+    expect(metric.freshMounts).toHaveLength(5)
+    metric.freshMounts.forEach((bounds: { x: number; y: number; width: number; height: number; existingY: number }, key: number) => {
+      expect(bounds).toEqual({ x: 320, y: 40 + key * 35, width: 64 + key * 12, height: 32, existingY: 150 + key * 20 })
+    })
   })
 })

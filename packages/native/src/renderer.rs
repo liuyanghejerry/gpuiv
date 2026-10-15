@@ -804,6 +804,23 @@ enum WindowCommand {
     },
 }
 
+/// GPUI drains `on_next_frame` callbacks before drawing the requested frame.
+/// An automation query must observe one complete paint between its request
+/// and reply, rather than combine the current retained tree with old bounds.
+/// Both callbacks use GPUI's public scheduler, which wakes idle frame sources.
+#[cfg(any(
+    test,
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd"
+))]
+fn after_requested_paint(
+    window: &gpui::Window,
+    callback: impl FnOnce(&mut gpui::Window, &mut gpui::App) + 'static,
+) {
+    window.on_next_frame(move |window, _cx| window.on_next_frame(callback));
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 fn refresh_ui_window(
     window: gpui::WindowHandle<GpuixView>,
@@ -1170,7 +1187,7 @@ fn run_window_command(
                 let state = view.paint_state.clone();
                 cx.notify();
                 window.refresh();
-                window.on_next_frame(move |_window, _cx| {
+                after_requested_paint(window, move |_window, _cx| {
                     response.send(state.all_bounds()).ok();
                 });
             })
@@ -9300,5 +9317,91 @@ mod batch_tests {
         apply(&mut tree, r#"[["destroyElement",1]]"#).expect("valid batch");
         tree.styles.sweep();
         assert_eq!(tree.styles.len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod automation_bounds_tests {
+    use std::{cell::Cell, rc::Rc};
+
+    struct BoundsProbe {
+        top: Rc<Cell<f32>>,
+        painted: Rc<Cell<Option<f32>>>,
+    }
+
+    impl gpui::Render for BoundsProbe {
+        fn render(
+            &mut self,
+            _window: &mut gpui::Window,
+            _cx: &mut gpui::Context<Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::{InteractiveElement as _, ParentElement as _, Styled as _};
+            let painted = self.painted.clone();
+            gpui::div().size_full().child(
+                gpui::div()
+                    .id("automation_bounds_probe")
+                    .absolute()
+                    .left(gpui::px(10.0))
+                    .top(gpui::px(self.top.get()))
+                    .w(gpui::px(40.0))
+                    .h(gpui::px(30.0))
+                    .bg(gpui::rgb(0xffeea0))
+                    .on_painted(move |bounds, _, _| {
+                        painted.set(Some(f32::from(bounds.origin.y)));
+                    }),
+            )
+        }
+    }
+
+    #[test]
+    fn automation_bounds_reply_follows_the_requested_layout_paint() {
+        let mut app = gpui::TestAppContext::single();
+        let top = Rc::new(Cell::new(120.0));
+        let painted = Rc::new(Cell::new(None));
+        let window = app.add_window({
+            let top = top.clone();
+            let painted = painted.clone();
+            move |_, _| BoundsProbe { top, painted }
+        });
+        // Match GPUI's platform frame callback using only its public test
+        // support APIs: callbacks run first, then the complete layout/paint.
+        // AnyWindowHandle avoids leasing the root view while drawing it.
+        let frame = |app: &mut gpui::TestAppContext| {
+            gpui::AnyWindowHandle::from(window)
+                .update(app, |_, window, cx| {
+                    window.simulate_next_frame(cx);
+                    window.draw(cx).clear(cx);
+                })
+                .unwrap();
+        };
+        frame(&mut app);
+        assert_eq!(painted.get(), Some(120.0));
+
+        let reply = Rc::new(Cell::new(None));
+        window
+            .update(&mut app, {
+                let painted = painted.clone();
+                let reply = reply.clone();
+                move |view, window, cx| {
+                    view.top.set(220.0);
+                    cx.notify();
+                    window.refresh();
+                    super::after_requested_paint(window, move |_, _| reply.set(painted.get()));
+                }
+            })
+            .unwrap();
+
+        // GPUI runs next-frame callbacks before drawing this frame. Replying
+        // from that first callback would expose the old y=120 snapshot.
+        frame(&mut app);
+        assert_eq!(painted.get(), Some(220.0));
+        assert_eq!(
+            reply.get(),
+            None,
+            "the first frame must paint before the reply"
+        );
+        frame(&mut app);
+        assert_eq!(reply.get(), Some(220.0));
+        app.quit();
     }
 }
