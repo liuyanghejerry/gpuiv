@@ -3,7 +3,8 @@
  * needed. Original palette, per-corner radii, four placements and geometry are
  * kept. Numeric edge motion replaces CSS translation; the mask shows directly.
  * Width/height support native px/% dimensions; unsupported forms use fallback
- * animation offsets. pushBackground scale/blur is inactive. Tab trapping is a
+ * animation offsets. React pushBackground's subtree scale/rounded clipping is
+ * not connected; React deliberately omits background blur. Tab trapping is a
  * native focus correction; close and unmount restore the saved focus.
  */
 
@@ -88,7 +89,7 @@ export const Drawer = defineComponent({
     height: { type: [Number, String] as PropType<number | string>, default: 300 },
     /** 点击遮罩关闭 */
     maskClosable: { type: Boolean, default: true },
-    /** Inert：背景下沉景深效果无法移植（GPUIV 无 transform/filter，见文件头） */
+    /** Inert：尚未接入整棵背景子树的绘制缩放/圆角裁剪；React 此处不使用 blur。 */
     pushBackground: { type: Boolean, default: true },
     /** 底部区域：string 渲染为文本，VNode 直接渲染，null/undefined 不渲染 */
     footer: { type: [String, Number, Object, Array, Boolean] as PropType<VNodeChild>, default: undefined },

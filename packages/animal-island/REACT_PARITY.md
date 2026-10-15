@@ -47,7 +47,7 @@
 | --- | --- | --- |
 | Notification | 任意标题/正文/按钮/图标节点、六种位置、同 key 更新、自动关闭、close-once；可点击卡片抬升；常规关闭按 250ms 离场后回调，destroy 同步移除。 | 原生离场节点和分组由 Vue presence 管理；文字字距/阴影、完整 DOM ARIA 关系与浏览器事件冒泡不适用。 |
 | Modal | 任意 title 和 footer 数字/节点/数组，`footer=0` 不替换成默认操作；game 的 React 有机轮廓；Typewriter、关闭、焦点恢复和 deferred 层。 | 装饰 SVG 不裁剪任意原生后代；scale 入场用 opacity 代替；Tab 约束通过原生焦点修正，不能等价于浏览器 preventDefault。 |
-| Drawer | 任意 title/footer 节点；四方向、尺寸、位置动画、关闭与焦点恢复。 | `pushBackground` 的 scale/blur 没有原生 transform/filter，仍不生效；Tab 约束与 ARIA 引用仍有平台差异。 |
+| Drawer | 任意 title/footer 节点；四方向、尺寸、位置动画、关闭与焦点恢复。 | `pushBackground` 的背景子树 scale(0.94) 和 14px 圆角裁剪尚未接入；React 已主动移除该效果的 blur，不属于待移植功能。Tab 约束与 ARIA 引用仍有平台差异。 |
 | Loading | 原椭圆暗角渐变、任意 tip、50 个雪花、delay、受控显示、打断退出与卸载清理；zIndex 对应 native deferred priority。 | 文字阴影和 OS reduced-motion 偏好未自动映射；圆形雪花旋转不改变视觉。 |
 | Tooltip | 分离 hover/focus/click 模式；事件组合到实际子组件，保留原回调；100ms 关闭宽限、重新进入取消关闭、可选 delay；任意标题；island 复用 React 归一化路径；完整 deferred 表面使用 0.25s opacity 与朝触发器的 4px 位移入场。 | deferred 命中/遮挡区域为矩形，SVG 不裁剪原生后代；旋转方形箭头用三角装饰代替；无 described-by DOM 关联。 |
 | Progress | percent 钳制、showInfo、任意 infoFormat、duration；14/24/32px 轨道、2px 描边、14px 波点；默认薄荷三段渐变、100% 完成态提亮和 2px 内高光；四种场景图固定为整轨宽度，再从左侧揭开。保留 inside/top 信息位置扩展。 | 字距未映射；渐变与场景图用原生 img 和圆角裁剪；第一次填充等待轨道尺寸；resize 时会再次补间。 |
@@ -63,7 +63,7 @@
 | Badge | 数字/字符串/任意节点 count、overflowCount、showZero、dot、尺寸、调色板、独立/包裹使用；空值隐藏；原生淡入。 | CSS scale 入场改为 opacity；浏览器 title tooltip 未自动提供；宽胶囊仍使用固定角点偏移。 |
 | Collapse | 任意节点/数组的 question、answer，兼容具名插槽；0.3s AnimateHeight 开合和原受控扩展。 | 鱼/字形旋转未还原；背景直接切换；ARIA 无 DOM-id 引用。 |
 | Tabs | 任意标签与文本/数组面板；受控/default/键盘；0.25s 透明度和 4px 面板入场；按当前 React 移除旧叶子装饰，deprecated leafAnimation 仍被接受。 | 颜色直接切换；ARIA 不提供 DOM-id 关系。 |
-| Table | 列/表头/render/插槽、rows/key、stripe/loading/empty、scroll/client pagination；修复 pagination.onChange 被吞掉；PaginationProps 补齐回调类型。 | 使用 flex 而非 HTML table；无 sticky header；fixed 列在 React 源码同样未实现。纵向滚动需置于其他滚动容器之外。 |
+| Table | 列/表头/render/插槽、rows/key、stripe/loading/empty、scroll/client pagination；修复 pagination.onChange 被吞掉；PaginationProps 补齐回调类型。 | 使用 flex 而非 HTML table；无 sticky header；loading 遮罩的 backdrop-filter: blur(2px) 尚未实现；fixed 列在 React 源码同样未实现。纵向滚动需置于其他滚动容器之外。 |
 | Pagination | 受控/default 页码、pageSize、尺寸选择、jumper、总数、variants、change/showSizeChange；尺寸菜单沿用上方左对齐定位。 | 颜色直接切换；输入通过原生 valueRevision 保持受控同步。 |
 | Typewriter | speed、trigger、autoPlay、onDone、保留节点结构；原生组件默认插槽可嵌套逐字裁剪，保留组件状态、具名插槽和事件；文本总长度变化重播；autoPlay=false 显示全文并触发完成；额外 showCursor 保留。 | 与 React 一样按 UTF-16 字符截取；长度未改变的内容更新不重新播放；组件内部未通过默认插槽暴露的文本不参与裁剪。 |
 | Image | variant/color、native load/error、单轴自然比例、preview；默认三层阴影按原顺序绘制；stamp 实际齿孔按 16px 节距及 5px 半径适配任意比例，暖纸和半色调纹理。 | saturation/contrast、stamp 的两层 alpha 轮廓 drop-shadow 滤镜及文字阴影未完全还原；lazy 仍由原生后台立即解码。 |
@@ -71,6 +71,17 @@
 | Time | 实时时/分、星期/月日、冒号闪烁、透明度入场、原生 attrs。 | 闪烁遵循墙钟半秒而非 CSS 挂载相位；字距、tabular-nums 与 aria-live 元数据未全部映射。 |
 | Countdown | number/Date 目标；DD/HH/mm/ss 与字面量；prefix；尺寸/variant/bordered；250ms change、finish 一次；20 面数字条始终向下滚动，跨循环落到等价面；island 真虚线。 | 固定宽度数字格代替 tabular-nums；aria-valuetext 代替浏览器 sr-only 文本。 |
 | CountUp | 完整 start/end/duration/isCounting、暂停恢复、默认/指定小数、分组与小数分隔、内置/自定义 easing、formatter、updateInterval、prefix/suffix、size/variant/bordered、celebrate、update/complete、延时重播、渲染函数和 reset；island 真虚线。 | 数字由可取消的 16ms JS 时钟驱动，文案不变不重复提交。CSS scale/rotation 庆祝改为 native 位移、扩展光环和淡出星芒；原生状态文本代替 sr-only；OS reduced-motion 未自动映射。 |
+
+## 工程内可扩展的能力与底层边界
+
+上表记录当前实现，未实现不等于必须修改上游 GPUIX/Zed。源码核查确认以下路径，尚未据此增加对应运行时能力：
+
+- **颜色与盒阴影过渡**：本地 [MotionStyle](../vue/src/types.ts) 及 [native motion](../native/src/motion.rs) 当前只有八个数字属性。GPUI 已提供 [RGBA/HSLA 插值](../../zed/crates/gpui/src/spring.rs)，本工程可扩展颜色、阴影轨道并复用原生帧时钟。组件需将 hover/pressed 等状态解析为动画目标；透明色与阴影列表仍需遵守各自的插值规则。
+- **图片滤镜与已知 SVG 轮廓阴影**：可在本地图片后台解码后加工像素并缓存，或利用现有 resvg 的 SVG 滤镜。覆盖 Image 饱和度/对比度、图片自身模糊及邮票 alpha 轮廓阴影不需要通用子树滤镜；不应在每帧 paint 中重新加工整图。
+- **单色 SVG 变换**：GPUI 的 [Svg::with_transformation](../../zed/crates/gpui/src/elements/svg.rs) 已支持缩放、旋转和平移，可以在绑定层暴露；这不意味着普通组件树和全彩图像已有同等变换接口。
+- **任意实时组件子树滤镜、背景模糊与通用变换**：当前公开接口没有跨平台生产用的子树离屏合成和完整变换路径；`Window::paint_layer` 仅分组绘制顺序。此类功能需要进一步的底层能力或较大的本地渲染工程，并同时解决裁剪、输入命中、文本选择和 IME 坐标，不能由单图滤镜支持推断为已可直接接通。
+
+React Drawer 明确因首帧成本去掉了 blur，见[固定基线源码](https://github.com/guokaigdg/animal-island-ui/blob/c696d16167d01370f822f95db22340b05d837555/src/components/Drawer/Drawer.tsx#L145-L155)。其 pushBackground 与 Table loading 的背景模糊是两项独立差异。
 
 ## 动画生命周期与验证范围
 
