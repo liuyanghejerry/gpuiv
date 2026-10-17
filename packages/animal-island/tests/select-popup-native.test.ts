@@ -193,7 +193,12 @@ describeNative("Select popup painted corners", () => {
       // can report a padded content box on the Windows offscreen surface, so
       // sampling relative to it is not stable; the panel fill is unique here.
       let minX = image.width, minY = image.height, maxX = -1, maxY = -1
-      for (let y = 0; y < image.height; y++) {
+      // This trigger sits near the bottom, so auto placement opens the panel
+      // above it. Limit the scan to the space above the trigger: its cream
+      // border also passes the yellow threshold and would otherwise extend
+      // the recovered panel bounds down to the trigger.
+      const scanBottom = Math.min(image.height, Math.floor((triggerBounds.y - 2) * scaleY))
+      for (let y = 0; y < scanBottom; y++) {
         for (let x = 0; x < image.width; x++) {
           const [red, green, blue] = image.pixel(x, y)
           if (red > 230 && green > 210 && blue > 100 && blue < 220) {
