@@ -94,7 +94,7 @@ try {
     console.log('GALLERY_SELECT_POPUP_BOUNDS', JSON.stringify(value))
     assert(value.popup.width > 0 && value.popup.height > 0, `${label}: popup must be painted`)
     near(value.popup.x, value.trigger.x, `${label}: popup left must align with trigger left`)
-    near(value.popup.y + value.popup.height, value.trigger.y - 8, `${label}: popup bottom must be 8px above trigger`)
+    near(value.popup.y, value.trigger.y + value.trigger.height + 8, `${label}: popup top must be 8px below trigger`)
     return value
   }
 

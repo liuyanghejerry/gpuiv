@@ -41,13 +41,37 @@ describe("Select popup silhouette", () => {
       await host.fire("shape-option-forest", "mouseEnter")
       expectTransparentRows()
       expect((host.find("shape-option-forest").props.style as StyleDesc).fontWeight).toBe(700)
-      const arrow = host.find(node => node.type === "svg" && (node.props.style as StyleDesc | undefined)?.left === -14)
-      expect((arrow.props.style as StyleDesc).pointerEvents).toBe("none")
+      const arrow = host.find(node => node.type === "div" && (node.props.style as StyleDesc | undefined)?.left === -14)
+      const arrowStyle = arrow.props.style as StyleDesc
+      expect(arrowStyle).toMatchObject({ top: 0, bottom: 0, alignItems: "center", pointerEvents: "none" })
+      expect((arrow.children.find(node => node.type === "svg")!.props.style as StyleDesc).pointerEvents).toBe("none")
       await host.fire("shape-option-beach", "click")
       expect(change).toHaveBeenCalledExactlyOnceWith("beach")
       expect(host.all().some(node => node.props.testId === "shape-popup")).toBe(false)
     } finally {
       host.unmount()
     }
+  })
+
+  it("sizes the panel to the trigger and flips only when the panel does not fit", async () => {
+    const open = async (y: number) => {
+      const host = mountHost(defineComponent(() => () => h(Select, {
+        testId: "auto",
+        options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }, { key: "three", label: "Three" }],
+      })), { getElementBounds: () => ({ x: 40, y, width: 220, height: 40 }) })
+      try {
+        await host.fire("auto", "click")
+        const panel = host.find("auto-popup")
+        const layer = host.find(node => node.type === "anchored")
+        return {
+          minWidth: (panel.props.style as StyleDesc).minWidth,
+          side: layer.props.side,
+        }
+      } finally {
+        host.unmount()
+      }
+    }
+    expect(await open(100)).toEqual({ minWidth: 220, side: "bottom" })
+    expect(await open(700)).toEqual({ minWidth: 220, side: "top" })
   })
 })

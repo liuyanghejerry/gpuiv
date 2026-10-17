@@ -32,7 +32,7 @@
 | --- | --- | --- |
 | Input | React `value` 的字符串/数字受控别名、readOnly、autoFocus、tabIndex、键盘回调；VNode 前后缀；原有 defaultValue、清空、状态、阴影、password、IME、maxLength；容器颜色/阴影与清除按钮颜色的原生过渡。 | `onChange(value, nativeEvent?)` 是 Vue/原生回调；除密码外，浏览器 input type 的验证约束不适用。 |
 | Switch | checked/modelValue、defaultChecked、disabled/loading、键盘及原生滑块；完整节点 checkedChildren/unCheckedChildren；正常/选中原生内阴影；轨道颜色/内阴影与手柄边框色同滑动一起补间；disabled/loading 整体透明度沿原 0.25s 曲线补间。 | VNode 标签需要调用者提供合适宽度；字符串标签保留宽度估计。文字阴影和旋转边框加载效果仍为近似。 |
-| Select | React 搜索、清空、onSearch/onClear、clearAriaLabel；filterOption 布尔/自定义函数、optionFilterProp；任意 notFoundContent；过滤结果键盘导航、Esc 清空查询后关闭、焦点保持。普通菜单继续使用平台已挂载条目注册表；触发器背景/边框及清除按钮颜色过渡保留原生焦点引用。 | 按用户要求默认在触发器上方、左侧对齐、间隔 8px，覆盖 React 原有位置算法；可配置 side/align。长菜单不引入嵌套滚动；原生 ARIA 不具备所有 DOM 引用关系；退出立即完成。 |
+| Select | React 搜索、清空、onSearch/onClear、clearAriaLabel；filterOption 布尔/自定义函数、optionFilterProp；任意 notFoundContent；过滤结果键盘导航、Esc 清空查询后关闭、焦点保持。普通菜单继续使用平台已挂载条目注册表；触发器背景/边框及清除按钮颜色过渡保留原生焦点引用。弹层默认 `auto`：按选项数估算面板高度，下方放得下就向下，否则向上；左对齐、间隔 8px；面板最小宽度跟随测量到的触发器宽度。 | 位置由客户端估算而非浏览器碰撞检测，极端窗口高度下可能选到空间较小的一侧；可显式配置 side/align。长菜单不引入嵌套滚动；原生 ARIA 不具备所有 DOM 引用关系；退出立即完成。 |
 | DatePicker | React `value` 与 Vue 受控值；日期/范围/月模式、disabledDate、自定义 format、待确认值、清空、today、键盘和 popup 控制；触发器双层阴影、日期格/导航/操作按钮颜色补间。 | 弹层位置采用原生锚定；退出立即完成；浏览器 ARIA 引用关系不完整。 |
 | TimePicker | React `value` 与 Vue 受控值；步长、format、时间列、待确认值、当前时间、清空、popup 和键盘；触发器双层阴影及选项/操作按钮颜色补间。 | 每列以七行分页替代浏览器滚动列，避免嵌套滚动。 |
 | Checkbox | 受控/default 分组、单项 disabled、尺寸/方向、键盘、任意标签节点；选中时六点原生位置/尺寸/透明度动画；边框 0.25s、标签颜色 0.15s 原生过渡。 | 勾线描绘仍为静态 SVG；六点轨迹代替 CSS box-shadow。 |

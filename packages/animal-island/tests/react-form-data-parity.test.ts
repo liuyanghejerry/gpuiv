@@ -54,7 +54,7 @@ describe("React Select search and clear parity", () => {
     await host.fire("select", "change", { value: "森" })
     expect(onSearch).toHaveBeenLastCalledWith("森")
     expect(visibleOptions(host)).toEqual(["select-option-forest"])
-    expect(host.find(node => node.type === "anchored").props).toMatchObject({ side: "top", align: "start", gap: 8, deferred: true })
+    expect(host.find(node => node.type === "anchored").props).toMatchObject({ side: "bottom", align: "start", gap: 8, deferred: true })
     await host.fire("select", "submit")
     expect(onChange).toHaveBeenCalledExactlyOnceWith("forest")
     expect(onSearch).toHaveBeenLastCalledWith("")

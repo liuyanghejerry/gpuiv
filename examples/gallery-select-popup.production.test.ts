@@ -6,7 +6,7 @@ const linuxDisplay = process.platform !== 'linux' || Boolean(process.env.DISPLAY
 const describeWindow = linuxDisplay ? describe : describe.skip
 
 describeWindow('production gallery destination Select', () => {
-  it('navigates to Select, opens above its trigger, follows content scrolling, and selects from blank option padding', () => {
+  it('navigates to Select, opens below its trigger, follows content scrolling, and selects from blank option padding', () => {
     const result = spawnSync(process.env.BUN_EXECUTABLE ?? 'bun', [fileURLToPath(new URL('./fixtures/gallery-select-popup.ts', import.meta.url))], {
       cwd: import.meta.dirname, env: { ...process.env, GPUIX_BACKGROUND: '1' },
       encoding: 'utf8', timeout: 20_000,

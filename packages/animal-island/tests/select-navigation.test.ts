@@ -110,7 +110,7 @@ describe("Select Home/End mounted option navigation", () => {
     hosts.push(host)
     await host.fire("animal", "click")
     const layer = host.find(node => node.type === "anchored")
-    expect(layer.props.side).toBe("top")
+    expect(layer.props.side).toBe("bottom")
     expect(layer.props.align).toBe("start")
     expect(layer.props.gap).toBe(8)
     const content = host.find(node => typeof node.props.onKeyDown === "function" && node.props.autoFocus === true)

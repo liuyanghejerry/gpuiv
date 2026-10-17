@@ -38,8 +38,10 @@ use GPUI deferred anchored layers. `Form.useForm()` / `useForm()` return `[form]
 Upload selects actual filesystem paths through the native panel and accepts OS
 file drops. Its File values come from `node:buffer`, not browser input elements.
 
-Select accepts native `side`, `align` and `sideOffset` props (defaults: top,
-start, 8px). Pagination uses the same placement for its page-size popup.
+Select accepts native `side`, `align` and `sideOffset` props (defaults: auto,
+start, 8px). `auto` opens below when the estimated panel fits and above
+otherwise; the panel's minimum width follows the measured trigger. Pagination
+keeps its page-size popup above the trigger with the same left alignment.
 The rounded yellow popup panel owns the fill; transparent option rows preserve
 the rounded outline, whole-row clicks and the outside hover arrow.
 
@@ -154,7 +156,7 @@ The Pagination popup production regression checks outer-edge alignment and the
 8px gap before and during scrolling, after resize, and after window-edge fitting,
 then clicks an option and checks the selected label, callbacks and dismissal.
 The gallery Select regression navigates to the actual “选择目的地” control,
-checks its above-trigger alignment before and during scrolling, and clicks
+checks its trigger-width panel and below-trigger alignment before and during scrolling, and clicks
 the left and right blank portions of option rows. The earlier continuous
 gallery and the comparison layout both pass this native regression. The rounded-surface host test checks transparent
 interactive rows, and the macOS/Windows pixel test checks that option shoulders

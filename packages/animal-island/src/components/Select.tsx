@@ -2,7 +2,9 @@
  * Platform headless Select owns the mounted-item registry, dismissal and focus.
  * Original white trigger, yellow 28px popup, amber selection bar and hover
  * arrow are retained. The arrow changes direction without CSS rotation.
- * Popup defaults to above/start with an 8px gap; side/align remain configurable.
+ * Popup defaults to auto/start with an 8px gap: it opens below when the
+ * estimated panel fits, otherwise above. side/align remain configurable.
+ * The panel min-width follows the measured trigger width.
  * Home/End follow the platform's enabled mounted items; fade applies to popup children.
  * React's search/filter/clear APIs are retained. Search uses a native input and
  * FloatingLayer, keeps input focus, and handles native lowercase keys locally
@@ -25,6 +27,7 @@ import {
   type StyleDesc,
   type EventPayload,
   type HostNode,
+  useElementBounds,
   useGpuix,
 } from "@gpuiv/vue"
 import { activationKeys } from "../interaction.js"
@@ -38,6 +41,7 @@ export interface SelectOption {
 }
 
 export type SelectSize = "small" | "middle" | "large"
+export type SelectSide = FloatingSide | "auto"
 
 export interface SelectProps {
   value?: string
@@ -55,7 +59,7 @@ export interface SelectProps {
   onSearch?: (value: string) => void
   onClear?: () => void
   size?: SelectSize
-  side?: FloatingSide
+  side?: SelectSide
   align?: FloatingAlign
   sideOffset?: number
   ariaLabel?: string
@@ -119,8 +123,8 @@ export const Select = defineComponent({
     onSearch: { type: Function as PropType<(value: string) => void>, default: undefined },
     onClear: { type: Function as PropType<() => void>, default: undefined },
     size: { type: String as PropType<SelectSize>, default: "middle" },
-    /** 弹层相对触发器的位置；默认上方弹出，与触发器左边缘对齐。 */
-    side: { type: String as PropType<FloatingSide>, default: "top" },
+    /** 弹层相对触发器的位置；auto 在下方有空间时向下，否则向上。 */
+    side: { type: String as PropType<SelectSide>, default: "auto" },
     align: { type: String as PropType<FloatingAlign>, default: "start" },
     sideOffset: { type: Number, default: 8 },
     /** 对外暴露的无障碍标签（无可见 label 时使用） */
@@ -173,6 +177,24 @@ export const Select = defineComponent({
       if (filteredOptions.value.some(option => option.key === activeKey.value)) return
       activeKey.value = filteredOptions.value.find(option => option.key === currentValue.value)?.key ?? filteredOptions.value[0]?.key ?? null
     }, { flush: "sync" })
+
+    const triggerBox = ref<HostNode | null>(null)
+    const { bounds: triggerBounds, measure: measureTrigger } = useElementBounds(triggerBox, { intervalMs: false })
+    const triggerWidth = computed(() => triggerBounds.value?.width ?? 0)
+    const resolvedSide = computed<FloatingSide>(() => {
+      if (props.side !== "auto") return props.side
+      const bounds = triggerBounds.value
+      const windowSize = renderer?.getWindowSize?.()
+      if (!bounds || !windowSize) return "bottom"
+      const g = sizeGeometry[props.size]
+      const rows = Math.max(1, filteredOptions.value.length)
+      const panelHeight = spacing.md * 2 + rows * (g.optionPadY * 2 + g.optionFontSize * 1.5)
+      const gap = props.sideOffset
+      const below = windowSize.height - (bounds.y + bounds.height) - gap
+      const above = bounds.y - gap
+      return below >= panelHeight || below >= above ? "bottom" : "top"
+    })
+    watch(openState, (open) => { if (open) measureTrigger() }, { flush: "pre" })
 
     function handleValueChange(next: string) {
       if (!isControlled.value) innerValue.value = next || undefined
@@ -284,6 +306,7 @@ export const Select = defineComponent({
       }
 
       const panelStyle: StyleDesc = {
+        minWidth: triggerWidth.value > 0 ? triggerWidth.value : 140,
         paddingTop: spacing.md,
         paddingBottom: spacing.md,
         backgroundColor: "#ffeea0",
@@ -344,13 +367,15 @@ export const Select = defineComponent({
       const optionContent = (option: SelectOption, state: SelectItemState) => <div style={{ display: "flex", alignItems: "center", pointerEvents: "none" }}>
         {state.selected ? <div style={{ position: "absolute", left: 20, right: 20, top: (g.optionPadY * 2 + g.optionFontSize * 1.5) * 0.56 - 7, height: 14, borderRadius: 7, backgroundColor: "rgba(255, 204, 0, 0.3)", pointerEvents: "none" }} /> : null}
         <div style={{ width: 16, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {state.highlighted ? <svg src={hoverArrowUrl} style={{ position: "absolute", left: -14, top: g.optionPadY + (g.optionFontSize * 1.5 - 14) / 2, width: 10, height: 14, color: "#f5a623", pointerEvents: "none" }} /> : null}
+          {state.highlighted ? <div style={{ position: "absolute", left: -14, top: 0, bottom: 0, width: 10, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+              <svg src={hoverArrowUrl} style={{ width: 10, height: 14, color: "#f5a623", pointerEvents: "none" }} />
+            </div> : null}
         </div><text>{option.label}</text>
       </div>
 
       if (props.showSearch) {
         const displayQuery = openState.value && searchValue.value !== null ? searchValue.value : hasValue ? currentLabel.value : ""
-        return <div {...forwardAttrs} style={{ position: "relative", minWidth: 140, ...userStyle as StyleDesc }}>
+        return <div {...forwardAttrs} ref={triggerBox} style={{ position: "relative", minWidth: 140, ...userStyle as StyleDesc }}>
           <div style={{ position: "relative", width: "100%", minWidth: 140, height: g.height }}>
             <ColorSurface onMouseEnter={() => { hovered.value = true }} onMouseLeave={() => { hovered.value = false }} transition={{ duration: 0.2, ease: "ease" }}
               onClick={() => setSearchOpen(!openState.value)} style={triggerStyle({ open: openState.value, disabled: props.disabled, placeholder: !hasValue })}>{() => <>
@@ -364,7 +389,7 @@ export const Select = defineComponent({
                 style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, color: hasValue ? c.warmSoft : PLACEHOLDER_COLOR, fontSize: g.fontSize, fontWeight: hasValue ? 600 : 400, ...(props.disabled ? { pointerEvents: "none" as const } : {}) }} />
               {clearControl()}{arrow()}
             </>}</ColorSurface>
-            {openState.value ? <FloatingLayer side={props.side} align={props.align} sideOffset={props.sideOffset}
+            {openState.value ? <FloatingLayer side={resolvedSide.value} align={props.align} sideOffset={props.sideOffset}
               {...{ role: "listbox", testId: props.testId ? `${props.testId}-popup` : undefined, onMouseDownOutside: () => setSearchOpen(false), style: panelStyle }}>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease }}>
                 {filteredOptions.value.length === 0 ? notFound() : filteredOptions.value.map(option => {
@@ -398,7 +423,7 @@ export const Select = defineComponent({
         >
           {/* Keep the positioning box outside the trigger's border. Absolute
               children inside the trigger anchor to its inner border edge. */}
-          <div style={{ position: "relative", width: "100%", minWidth: 140, height: g.height }}>
+          <div ref={triggerBox} style={{ position: "relative", width: "100%", minWidth: 140, height: g.height }}>
             <SelectTrigger {...triggerAttrs} style={triggerSurface.style}>
               <text
                 style={{
@@ -423,7 +448,7 @@ export const Select = defineComponent({
                 }}
               />
             </SelectTrigger>
-            <SelectContent {...{ role: "listbox", testId: props.testId ? `${props.testId}-popup` : undefined }} side={props.side} align={props.align} sideOffset={props.sideOffset} style={panelStyle}>
+            <SelectContent {...{ role: "listbox", testId: props.testId ? `${props.testId}-popup` : undefined }} side={resolvedSide.value} align={props.align} sideOffset={props.sideOffset} style={panelStyle}>
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.2, ease }}>
                 {props.options.length === 0 ? notFound() : null}
                 {props.options.map((option) => (
@@ -440,7 +465,9 @@ export const Select = defineComponent({
                             justifyContent: "center",
                           }}
                         >
-                          {state.highlighted ? <svg src={hoverArrowUrl} style={{ position: "absolute", left: -14, top: g.optionPadY + (g.optionFontSize * 1.5 - 14) / 2, width: 10, height: 14, color: "#f5a623", pointerEvents: "none" }} /> : null}
+                          {state.highlighted ? <div style={{ position: "absolute", left: -14, top: 0, bottom: 0, width: 10, display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+              <svg src={hoverArrowUrl} style={{ width: 10, height: 14, color: "#f5a623", pointerEvents: "none" }} />
+            </div> : null}
                         </div>
                         <text>{option.label}</text>
                       </div>
