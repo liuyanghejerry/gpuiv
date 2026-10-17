@@ -248,19 +248,14 @@ describe("React visual component contracts", () => {
     expect(app.find("back").parent?.props.style).toMatchObject({ width: 64, height: 64, bottom: 32, right: 24 })
     const art = decode(String(app.find("back-icon").props.src))
     expect(art).toContain('M24 6 C 16 6 14 18 14 26')
-    expect(art).not.toContain("feDropShadow")
+    expect(art).toContain("feDropShadow")
     expect(art).not.toContain("#FFF7DE")
-    const rest = (app.find("back-icon").props.motion as { animate: { width: number; filter: string } }).animate
-    expect(rest.filter).toBe("drop-shadow(0px 4px 10px rgba(91, 78, 30, 0.22))")
     await app.fire("back", "mouseEnter")
-    const hovered = (app.find("back-icon").props.motion as { animate: { width: number; filter: string } }).animate
-    expect(hovered.width).toBeCloseTo(69.12)
-    expect(hovered.filter).toBe("drop-shadow(0px 4.32px 15.12px rgba(91, 78, 30, 0.32))")
+    expect((app.find("back-icon").props.motion as { animate: { width: number } }).animate.width).toBeCloseTo(190.08)
     await app.fire("back", "mouseDown", { button: 0 })
-    const pressed = (app.find("back-icon").props.motion as { animate: { width: number; top: number; filter: string } }).animate
-    expect(pressed.width).toBeCloseTo(61.44)
-    expect(pressed.top).toBeCloseTo(3.28)
-    expect(pressed.filter).toBe("drop-shadow(0px 3.84px 13.44px rgba(91, 78, 30, 0.32))")
+    const pressed = (app.find("back-icon").props.motion as { animate: { width: number; top: number } }).animate
+    expect(pressed.width).toBeCloseTo(168.96)
+    expect(pressed.top).toBeCloseTo(-46.64)
   })
 
   it("restores Loading's elliptical vignette and accepts rich tip lists", () => {

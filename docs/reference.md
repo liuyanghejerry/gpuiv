@@ -2107,8 +2107,12 @@ load event. Unused work is cancelled and cached assets are released when
 their last consumer disappears, including when its window closes.
 
 Invalid or unsupported filter lists log a warning and use the original image.
-A processing failure leaves the image transparent without emitting another
-source error or briefly painting an unfiltered image. Each intermediate
+For a static `filter` prop, a processing failure leaves the image transparent
+without emitting another source error or briefly painting an unfiltered image.
+A `style.filter` driven by `motion` keeps the last filtered frame visible while
+the next one is prepared, falling back to the unfiltered source before the
+first filtered frame. A retargeting filter therefore never blanks the image or
+alternates between filtered and unfiltered paint paths. Each intermediate
 image is limited to 16,777,216 pixels, including blur/shadow expansion. Gaussian
 blur uses an exact sampled kernel up to 12 raster pixels of standard deviation
 and a three-pass box approximation above that size. Filters apply to images,

@@ -204,6 +204,14 @@ struct FilterPaintState {
     revision: u64,
     lease: Option<FilterAssetLease>,
     observer: Option<gpui::Task<()>>,
+    /// Last successfully produced frame. A motion filter changes its key every
+    /// frame; painting this result until the next one is ready keeps the image
+    /// on one stable paint path instead of alternating with the unfiltered
+    /// fallback. Source and `filter` prop changes clear it.
+    last_result: Option<Arc<FilteredImage>>,
+    /// Keeps the last result's asset lease alive so its atlas image is not
+    /// dropped while a newer filter key is still being produced.
+    last_lease: Option<FilterAssetLease>,
 }
 
 impl FilterPaintState {
@@ -211,6 +219,12 @@ impl FilterPaintState {
         self.revision += 1;
         self.observer = None;
         self.lease = None;
+    }
+
+    fn reset_source(&mut self) {
+        self.reset();
+        self.last_result = None;
+        self.last_lease = None;
     }
 }
 
@@ -270,6 +284,11 @@ struct FilteredImg {
     animation: Rc<RefCell<FilterAnimation>>,
     paint_result: Option<FilterResult>,
     frame: usize,
+    /// Motion/style filters change while the background asset is still being
+    /// produced. Keep the artwork visible instead of dropping every frame that
+    /// has no filtered result yet. The static `filter` prop keeps its original
+    /// transparent-until-ready behavior.
+    fallback_while_loading: bool,
 }
 
 type ImageLookup = Arc<dyn Fn(&mut gpui::Window, &mut gpui::App) -> Option<ImageResult>>;
@@ -395,7 +414,11 @@ fn prepare_filtered_asset(
     let key = gpui::hash(&source);
     let mut state = paint_state.borrow_mut();
     if state.lease.as_ref().map(|lease| lease.key) != Some(key) {
-        state.reset();
+        state.revision += 1;
+        state.observer = None;
+        if let Some(previous) = state.lease.take() {
+            state.last_lease = Some(previous);
+        }
         state.lease = Some(FilterAssetLease::acquire(source.clone(), window, cx));
         let shared_source = state.lease.as_ref().unwrap().source.clone();
         let (task, _) = cx.fetch_asset::<FilteredImageLoader>(&shared_source);
@@ -415,7 +438,15 @@ fn prepare_filtered_asset(
         }));
     }
     drop(state);
-    window.get_asset::<FilteredImageLoader>(&source, cx)
+    let result = window.get_asset::<FilteredImageLoader>(&source, cx);
+    if let Some(Ok(filtered)) = &result {
+        let mut state = paint_state.borrow_mut();
+        state.last_result = Some(filtered.clone());
+        // The current lease now owns this result; the previous frame no longer
+        // needs its own lease.
+        state.last_lease = None;
+    }
+    result
 }
 
 impl gpui::IntoElement for FilteredImg {
@@ -561,8 +592,10 @@ impl gpui::Element for FilteredImg {
             .filters
             .as_ref()
             .is_some_and(|filters| filters.has_lengths());
+        let unfiltered = original.clone();
         let paint_data = if self.filters.is_some() {
-            self.paint_result
+            let current = self
+                .paint_result
                 .clone()
                 .and_then(Result::ok)
                 .and_then(|filtered| {
@@ -574,11 +607,32 @@ impl gpui::Element for FilteredImg {
                             filtered.raster.clone(),
                         )
                     })
-                })
+                });
+            if current.is_some() {
+                current
+            } else if self.fallback_while_loading {
+                self.state
+                    .borrow()
+                    .last_result
+                    .as_ref()
+                    .and_then(|filtered| {
+                        filtered.origins.get(frame).copied().map(|origin| {
+                            (
+                                filtered.original.clone(),
+                                filtered.image.clone(),
+                                origin,
+                                filtered.raster.clone(),
+                            )
+                        })
+                    })
+            } else {
+                None
+            }
         } else {
             Some((original.clone(), original, [0, 0], None))
         };
         let object_fit = &self.object_fit;
+        let fallback_while_loading = self.fallback_while_loading;
         self.basis.interactivity().paint(
             id,
             inspector,
@@ -588,6 +642,18 @@ impl gpui::Element for FilteredImg {
             cx,
             |style, window, _cx| {
                 let Some((original, image, origin, raster)) = paint_data else {
+                    if !fallback_while_loading || frame >= unfiltered.frame_count() {
+                        return;
+                    }
+                    let source_bounds = object_fit.get_bounds(bounds, unfiltered.size(frame));
+                    let radii = style.corner_radii.to_pixels(window.rem_size());
+                    if let Err(error) =
+                        window.paint_image(bounds, source_bounds, radii, unfiltered, frame, false)
+                    {
+                        log::error!(
+                            "failed to paint unfiltered image while its filter loads: {error}"
+                        );
+                    }
                     return;
                 };
                 if frame >= original.frame_count() {
@@ -833,7 +899,7 @@ impl ImgElement {
 
     fn begin_source(&mut self, src: &str) {
         self.load_task = None;
-        self.filter_state.borrow_mut().reset();
+        self.filter_state.borrow_mut().reset_source();
         let mut state = self.load_state.borrow_mut();
         state.generation += 1;
         state.completed = false;
@@ -1109,6 +1175,25 @@ mod tests {
         assert!(std::sync::Arc::ptr_eq(&filters, &repeated));
         let fallback = element.effective_filters(None).unwrap();
         assert_eq!(fallback.to_css(), "saturate(0.5)");
+    }
+
+    #[test]
+    fn filter_state_keeps_the_last_frame_until_the_source_or_prop_changes() {
+        use super::{FilterPaintState, FilteredImage};
+        let image = std::sync::Arc::new(gpui::RenderImage::from_bgra(1, 1, vec![0; 4]).unwrap());
+        let filtered = std::sync::Arc::new(FilteredImage {
+            original: image.clone(),
+            image,
+            origins: vec![[0, 0]],
+            raster: None,
+        });
+        let mut state = FilterPaintState::default();
+        state.last_result = Some(filtered);
+        // A motion filter key change only resets the lease, not the last frame.
+        state.reset();
+        assert!(state.last_result.is_some());
+        state.reset_source();
+        assert!(state.last_result.is_none());
     }
 
     #[test]
@@ -1479,6 +1564,7 @@ impl CustomElement for ImgElement {
         let el = crate::automation::track_own_bounds(el, ctx.id);
         let animated = lookup(window, cx)
             .is_some_and(|result| result.is_ok_and(|image| image.frame_count() > 1));
+        let style_filter = ctx.style.and_then(|style| style.filter.as_deref()).is_some();
         let filters = self.effective_filters(ctx.style);
         if filters.is_some() || animated {
             FilteredImg {
@@ -1490,6 +1576,7 @@ impl CustomElement for ImgElement {
                 animation: self.filter_animation.clone(),
                 paint_result: None,
                 frame: 0,
+                fallback_while_loading: style_filter,
             }
             .into_any_element()
         } else {
@@ -1525,7 +1612,7 @@ impl CustomElement for ImgElement {
                         None
                     }
                 };
-                self.filter_state.borrow_mut().reset();
+                self.filter_state.borrow_mut().reset_source();
             }
             _ => {}
         }
@@ -1551,7 +1638,7 @@ impl CustomElement for ImgElement {
         self.load_task = None;
         let mut filter = self.filter_state.borrow_mut();
         filter.destroyed = true;
-        filter.reset();
+        filter.reset_source();
     }
 
     fn live_image(&self) -> Option<std::sync::Arc<gpui::RenderImage>> {

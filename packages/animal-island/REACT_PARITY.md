@@ -52,7 +52,7 @@
 | Tooltip | 分离 hover/focus/click 模式；事件组合到实际子组件，保留原回调；100ms 关闭宽限、重新进入取消关闭、可选 delay；任意标题；island 复用 React 归一化路径并沿轮廓绘制 SVG alpha 阴影；完整 deferred 表面使用 0.25s opacity 与朝触发器的 4px 位移入场。 | deferred 命中/遮挡区域为矩形，SVG 不裁剪原生后代；旋转方形箭头用三角装饰代替；无 described-by DOM 关联。 |
 | Progress | percent 钳制、showInfo、任意 infoFormat、duration；14/24/32px 轨道、2px 描边、14px 波点；默认薄荷三段渐变、100% 完成态提亮和 2px 内高光；四种场景图固定为整轨宽度，再从左侧揭开。保留 inside/top 信息位置扩展。 | 字距未映射；渐变与场景图用原生 img 和圆角裁剪；第一次填充等待轨道尺寸；resize 时会再次补间。 |
 | Skeleton | loading、四种变体、active、rows、width/rowWidths/widthValue/heightValue；Button/Input/Avatar 辅助组件；原五停高光 SVG 沿原生时钟横向扫动（1.6s ease-in-out）、独立循环与卸载清理；多个实例共用 100ms 宽度查询，无逐帧 mutation，每周期完成时重启一次。 | GPUI 父级 overflow 仅矩形裁剪，扫光在圆形和圆角边缘尚不能等价于 CSS 圆角蒙版。loading=false 且无内容时输出空内容。 |
-| BackTop | React Rocket 图案、64px 尺寸、bottom 32/right 24、10px 入场、1.08 hover 尺寸、0.96 press 尺寸及 2px 位移；静止/hover 的轮廓阴影按 React 的 Gaussian σ10/14px 绘制，并由原生 filter 轨道按 transform 比例连续插值 blur、偏移和透明度。 | 原生没有隐式浏览器 window 滚动器，需要指定目标 id/ref；120ms 查询滚动位置代替浏览器滚动事件。滤镜函数列表结构不兼容时仍在中点离散切换。 |
+| BackTop | React Rocket 图案、64px 尺寸、bottom 32/right 24、10px 入场、1.08 hover 尺寸、0.96 press 尺寸及 2px 位移；静止阴影按 React 的 Gaussian σ10/22% 烘焙进 SVG，画布预留 hover σ14/32% 的四倍外扩，hover/press 时整张 artwork 随尺寸补间缩放。 | 原生没有隐式浏览器 window 滚动器，需要指定目标 id/ref；120ms 查询滚动位置代替浏览器滚动事件。为避免逐帧滤镜资源在尺寸补间中造成抖动，BackTop 不逐帧插值 hover 的 σ/alpha；原生 filter motion 仍可供不参与尺寸补间的图像使用。 |
 
 ## 数据展示
 
@@ -80,8 +80,8 @@ GPUI 的外阴影绘制在完整填充下面，透明/半透明填充可露出�
 
 - **颜色与盒阴影过渡已接入**：本地 [MotionStyle](../vue/src/types.ts) 与 [native motion](../native/src/motion.rs) 支持 `backgroundColor`、`color`、`borderColor`、`boxShadow`，和已有数字属性共享原生帧时钟及连续重定向。颜色按预乘 alpha 的 sRGB 插值；阴影长度和颜色一起补间，缺失层淡入/淡出，inset/outset 不兼容时在中点离散切换。Animal Island 的私有 `ColorSurface` / `surfaceMotion` 将交互状态转成动画目标，保留原生元素身份及事件，不通过逐帧 Vue 更新驱动颜色。文字子节点显式指定自己的颜色时不继承父级颜色轨道。
 - **`display: none` 已接入**：GPUI/Taffy 跳过该元素及其子树的布局和绘制，隐藏页仍留在 retained tree 中，Vue 局部状态及 native 元素身份不变；子级不会进入该帧的 tab stop 收集。Carousel 用它保留全部幻灯片，仅在交叉淡出窗口内临时显示旧页。
-- **图片 CSS 滤镜已接入**：原生 `<img filter="…">` 支持顺序组合 `brightness`、`contrast`、`saturate`、`grayscale`、`sepia`、`invert`、`opacity`、`hue-rotate`、`blur` 和 `drop-shadow`。加工在 GPUI 后台资源任务中完成并缓存；颜色运算保留透明 alpha，blur/阴影在原图 `objectFit` 和圆角裁切后处理，外扩像素不改变原始布局盒。`filter` 也是 `StyleDesc` 字段，`motion` 会按原生帧时钟插值同构滤镜列表（函数或长度变化时在 50% 处离散切换）；静态 `filter` prop 仍不参与补间。不支持 `url()`、字体相对长度或 Canvas 2D 的独立 filter 属性。
-- **已知 SVG 透明轮廓阴影已补齐**：stamp 将 `0 2px 3px rgba(0,0,0,.35)` 与 `0 16px 26px rgba(0,0,0,.45)` 按 CSS 顺序串联，第二层包含第一层的 alpha；Tooltip island 沿有机路径绘制阴影；Rocket 使用正确的静止/hover σ10/14px。尺寸 SVG 缓存且预留外扩画布，真实文字和交互仍在原生树中。Rocket 的阴影已拆成静态 artwork 与连续 `drop-shadow` filter 轨道，不再离散替换两张缓存 SVG。
+- **图片 CSS 滤镜已接入**：原生 `<img filter="…">` 支持顺序组合 `brightness`、`contrast`、`saturate`、`grayscale`、`sepia`、`invert`、`opacity`、`hue-rotate`、`blur` 和 `drop-shadow`。加工在 GPUI 后台资源任务中完成并缓存；颜色运算保留透明 alpha，blur/阴影在原图 `objectFit` 和圆角裁切后处理，外扩像素不改变原始布局盒。`filter` 也是 `StyleDesc` 字段，`motion` 会按原生帧时钟插值同构滤镜列表（函数或长度变化时在 50% 处离散切换）；静态 `filter` prop 仍不参与补间。motion/style 滤镜的下一帧资源尚未生成时复用上一帧滤镜结果（首帧之前才绘制未滤镜原图），避免动画过程中图像消失或在滤镜/未滤镜绘制路径间抖动；静态 `filter` prop 保持“就绪前透明”的原有行为。不支持 `url()`、字体相对长度或 Canvas 2D 的独立 filter 属性。
+- **已知 SVG 透明轮廓阴影已补齐**：stamp 将 `0 2px 3px rgba(0,0,0,.35)` 与 `0 16px 26px rgba(0,0,0,.45)` 按 CSS 顺序串联，第二层包含第一层的 alpha；Tooltip island 沿有机路径绘制阴影；Rocket 使用正确的静止/hover σ10/14px。尺寸 SVG 缓存且预留外扩画布，真实文字和交互仍在原生树中。Rocket 使用烘焙的静止阴影，并预留 hover 所需的外扩画布；BackTop 的尺寸补间缩放整张 artwork，避免逐帧 filter 资源在缩放时抖动。
 - **单色 SVG 变换仍可扩展**：GPUI 的 [Svg::with_transformation](../../zed/crates/gpui/src/elements/svg.rs) 已支持缩放、旋转和平移，但绑定层尚未提供通用对应接口。这不意味着普通组件树和全彩图像已有同等变换能力。
 - **仍受 GPUI 公共 API 限制（本轮未修改 zed/）**：
   - **任意子树圆角裁剪**：`ContentMask` 只有矩形 `bounds`（[window.rs](../../zed/crates/gpui/src/window.rs)），公开 overflow 裁剪没有圆角 mask，也没有子树离屏合成。Skeleton 的圆形/圆角扫光、Modal/Drawer/Tooltip island 的任意原生后代仍只能矩形裁剪。

@@ -63,12 +63,14 @@ It processes and caches pixels on GPUI's background asset executor rather than
 reprocessing them during paint. The stamp photo uses `saturate(0.93) contrast(1.03)`;
 its paper SVG chains the two original alpha shadows around
 the perforated outline. Island Tooltip shadows follow their organic silhouette.
-Rocket keeps the original 64px artwork and correct 10/14px Gaussian sigmas.
-Its hover shadow is a native `drop-shadow` filter track, so blur, offset and
-alpha interpolate continuously with the size tween. Matching filter lists in
-`motion` animate natively; the static `filter` prop keeps its cached-result
-behavior. See the [native image filter API](../../docs/reference.md#image-filters)
-for syntax and boundaries.
+Rocket keeps the original 64px artwork and its rest shadow is baked from the
+original σ10 / 22% silhouette, with the viewport reserving the hover σ14 / 32%
+envelope. Hover and press scale that whole baked artwork, which keeps the size
+tween smooth; BackTop deliberately does not regenerate a filter per frame.
+Matching filter lists in `motion` still animate natively for images that do not
+change size, and the static `filter` prop keeps its cached-result behavior. See
+the [native image filter API](../../docs/reference.md#image-filters) for syntax
+and boundaries.
 
 ## Fidelity audit
 
@@ -87,7 +89,7 @@ reveal shadow inside its border box; CSS outer shadows remove that interior.
 | CountUp / Countdown | CountUp formatting/easing/pause/replay/callbacks/celebration; Countdown's 20-face directional digit strip; island dashed outlines | CountUp uses a cancellable JS sampling clock; celebration scale/rotation use native geometry; reduced-motion preferences are not yet mapped |
 | Avatar / Badge / Progress | Actual native text fitting and gap; arbitrary count nodes; four bundled scenes, three-stop fill gradients, completion colours, dotted tracks and native inset highlights | First measurement appears after paint; typography features differ |
 | Rich content and overlays | Node-valued labels/titles/tips; Tooltip hover/focus/click and organic silhouette shadow; native copy/close-button colors; Notification closes after native exit and destroy removes immediately | Arbitrary child content is not clipped to SVG silhouettes; mask/focus behavior follows native APIs; generic subtree scale/filter effects remain separate work |
-| Image / Loading / BackTop | Stamp photo saturation/contrast, perforations/paper texture and chained SVG alpha shadows; decode events and preview; three-layer frame shadows; elliptical vignette; Rocket with correct shadow sigmas and continuously interpolated `drop-shadow` | Stamp-year typography and preview scale differ; BackTop requires a native scroll target; filter lists with different functions switch discretely at the midpoint |
+| Image / Loading / BackTop | Stamp photo saturation/contrast, perforations/paper texture and chained SVG alpha shadows; decode events and preview; three-layer frame shadows; elliptical vignette; Rocket with the baked rest shadow and reserved hover envelope | Stamp-year typography and preview scale differ; BackTop requires a native scroll target and scales its baked shadow rather than retargeting hover sigma per frame; filter lists with different functions switch discretely at the midpoint |
 | Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging and hover colors/radii; picker double shadows and option transitions; all slides stay mounted with `display:none` on hidden pages, crossfade on switch, control/dot transitions, autoplay and native entrances | Avoid nested scrollers; picker columns page; Table loading backdrop blur is not a single-image filter; hidden pages do not enter tab-stop collection, and an already-focused hidden descendant no longer pauses autoplay |
 | Skeleton / Cursor | Native moving five-stop shimmer, specialised placeholders; local cursor follower and effects | Shimmer overflow clipping is rectangular, with remaining rounded/circular edge differences; the OS cursor cannot be replaced or hidden by this API |
 
