@@ -4,9 +4,12 @@
  * Native adaptations: FloatingLayer replaces DOM geometry/outside listeners;
  * flex rows replace CSS grids; a border replaces today's inset ring. Popup
  * dismissal is immediate, while content fades in with native opacity motion.
+ * Range day cells cache month grids, styles and event handlers and use native
+ * hover styling, so moving the preview re-styles only the cells whose range
+ * state changed instead of the whole 84-cell grid.
  * The native renderer supports no aria-controls/labelledby/disabled mapping.
  */
-import { computed, defineComponent, h, ref, type PropType } from "vue"
+import { computed, defineComponent, h, onBeforeUnmount, ref, type PropType } from "vue"
 import { FloatingLayer, motion, useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 import { colors, ease, fonts } from "../tokens.js"
 import { normalizePickerKey, pad2, pickerButton, pickerFooterStyle, pickerIcons, pickerPanelStyle, pickerTriggerStyle, usePickerPopup, type PickerSize, type PickerStatus } from "./picker-utils.js"
@@ -42,10 +45,23 @@ function parseRange(value: DatePickerValue): [Date, Date] | null {
   const start = parseDate(value[0]), end = parseDate(value[1])
   return start && end ? [start, end] : null
 }
+const cellCache = new Map<string, Date[]>()
 function cells(date: Date): Date[] {
+  const key = `${date.getFullYear()}-${date.getMonth()}`
+  const cached = cellCache.get(key)
+  if (cached) return cached
   const first = new Date(date.getFullYear(), date.getMonth(), 1)
-  return Array.from({ length: 42 }, (_, index) => new Date(date.getFullYear(), date.getMonth(), index - first.getDay() + 1))
+  const values = Array.from({ length: 42 }, (_, index) => new Date(date.getFullYear(), date.getMonth(), index - first.getDay() + 1))
+  cellCache.set(key, values)
+  if (cellCache.size > 24) cellCache.delete(cellCache.keys().next().value!)
+  return values
 }
+const calendarColumnStyle: StyleDesc = { display: "flex", flexDirection: "column" }
+const weekdayRowStyle: StyleDesc = { display: "flex", justifyContent: "space-around", marginBottom: 4 }
+const weekdayCellStyle: StyleDesc = { width: 32, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: "#a09080", fontSize: 11, fontWeight: 700 }
+const dayGridStyle: StyleDesc = { display: "flex", flexDirection: "column", gap: 2 }
+const dayRowStyle: StyleDesc = { display: "flex", justifyContent: "space-around", gap: 2 }
+const dayTextStyle: StyleDesc = { pointerEvents: "none" }
 const weekdays = ["日", "一", "二", "三", "四", "五", "六"]
 const months = ["一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"]
 
@@ -82,7 +98,38 @@ export const DatePicker = defineComponent({
       mode.value = props.picker === "month" && !props.range ? "month" : "date"
       resetSelection()
     })
-    function resetSelection() { pending.value = null; rangeStart.value = null; rangeEnd.value = null; hovered.value = null }
+    let hoverClearTimer: ReturnType<typeof setTimeout> | undefined
+    const cancelHoverClear = () => {
+      if (hoverClearTimer !== undefined) { clearTimeout(hoverClearTimer); hoverClearTimer = undefined }
+    }
+    // Adjacent cells can deliver leave/enter in separate JS turns. Clear only
+    // on a later task so the next cell's enter can cancel it; clearing inside
+    // a parent mouseLeave collapses the preview whenever a child is entered.
+    const clearHoverSoon = () => {
+      cancelHoverClear()
+      hoverClearTimer = setTimeout(() => { hovered.value = null; hoverClearTimer = undefined }, 0)
+    }
+    const setHover = (date: Date) => { cancelHoverClear(); hovered.value = date }
+    function resetSelection() { pending.value = null; rangeStart.value = null; rangeEnd.value = null; hovered.value = null; cancelHoverClear() }
+    onBeforeUnmount(cancelHoverClear)
+    interface DayCellHandle { date: Date; value: string; unavailable: boolean; enter: () => void; click: () => void }
+    const dayHandles = new Map<number, DayCellHandle>()
+    const dayStyles = new Map<string, StyleDesc>()
+    function dayHandle(date: Date): DayCellHandle {
+      const key = date.getTime()
+      const cached = dayHandles.get(key)
+      if (cached) { cached.date = date; return cached }
+      const handle: DayCellHandle = {
+        date,
+        value: toValue(date),
+        unavailable: false,
+        enter: () => { if (props.range && !handle.unavailable) setHover(handle.date) },
+        click: () => selectDate(handle.date),
+      }
+      dayHandles.set(key, handle)
+      if (dayHandles.size > 1024) dayHandles.clear()
+      return handle
+    }
     function commit(value: DatePickerValue) {
       if (props.value === undefined && props.modelValue === undefined) innerValue.value = value
       emit("update:modelValue", value); emit("change", value)
@@ -175,37 +222,52 @@ export const DatePicker = defineComponent({
         </div>
       </div>
     }
-    function dayCell(date: Date, panelDate: Date, panelIndex: number) {
-      const endpoint = props.range ? rangeStart.value ?? selectedRange.value?.[0] : null
-      const endpointEnd = props.range ? rangeStart.value ? rangeEnd.value ?? hovered.value ?? rangeStart.value : selectedRange.value?.[1] : null
+    function dayCell(date: Date, panelDate: Date, panelIndex: number, endpointTime: number | null, endpointEndTime: number | null, now: Date) {
       const active = pending.value ?? selected.value
       const selectedCell = !props.range && !!active && sameDay(date, active)
-      const edge = !!endpoint && !!endpointEnd && (sameDay(date, endpoint) || sameDay(date, endpointEnd))
-      const inRange = !!endpoint && !!endpointEnd && date > new Date(Math.min(endpoint.getTime(), endpointEnd.getTime())) && date < new Date(Math.max(endpoint.getTime(), endpointEnd.getTime()))
+      const time = date.getTime()
+      const edge = endpointTime != null && endpointEndTime != null && (time === endpointTime || time === endpointEndTime)
+      const rangeMin = endpointTime != null && endpointEndTime != null ? Math.min(endpointTime, endpointEndTime) : null
+      const rangeMax = endpointTime != null && endpointEndTime != null ? Math.max(endpointTime, endpointEndTime) : null
+      const inRange = rangeMin != null && rangeMax != null && time > rangeMin && time < rangeMax
       const unavailable = disabled(date)
-      const isToday = sameDay(date, new Date()) && !props.range
+      const isToday = sameDay(date, now) && !props.range
       const isFocused = sameDay(date, focused.value)
-      return <ColorSurface key={toValue(date)} testId={id(`day-${panelIndex}-${toValue(date)}`)} role="button" aria-disabled={unavailable || undefined}
-        aria-label={`${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`} aria-selected={selectedCell || edge || undefined}
-        tabIndex={-1} onClick={() => selectDate(date)}
-        onMouseEnter={() => { if (props.range && !unavailable) hovered.value = date }} onMouseLeave={() => { hovered.value = null }}
-        transition={{ duration: 0.15, ease: "ease" }}
-        style={{
+      const inMonth = sameMonth(date, panelDate)
+      const handle = dayHandle(date)
+      handle.unavailable = unavailable
+      const styleKey = `${selectedCell ? 1 : 0}${edge ? 1 : 0}${inRange ? 1 : 0}${unavailable ? 1 : 0}${isToday ? 1 : 0}${isFocused ? 1 : 0}${inMonth ? 1 : 0}${props.range ? 1 : 0}`
+      let style = dayStyles.get(styleKey)
+      if (!style) {
+        style = {
           width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
           borderRadius: 999, fontSize: 13, fontWeight: selectedCell || edge || isToday ? 700 : 500,
           backgroundColor: unavailable ? undefined : selectedCell ? colors.primary : edge || inRange ? "#ffc107" : undefined,
-          color: unavailable ? "#d4c9b4" : selectedCell || edge || inRange ? "#ffffff" : isToday ? colors.primary : sameMonth(date, panelDate) ? colors.warmSoft : colors.textDisabled,
+          color: unavailable ? "#d4c9b4" : selectedCell || edge || inRange ? "#ffffff" : isToday ? colors.primary : inMonth ? colors.warmSoft : colors.textDisabled,
           borderWidth: edge || isToday ? 1.5 : undefined, borderColor: edge ? "#ffffff" : colors.primary,
           cursor: unavailable ? "not-allowed" : "pointer",
           outline: isFocused && !unavailable ? { width: 1, color: colors.primary, offset: 1 } : undefined,
           hover: unavailable ? undefined : { backgroundColor: selectedCell ? colors.primaryHover : props.range ? "#ffd54f" : colors.primaryBg, color: selectedCell ? "#ffffff" : props.range ? colors.warmSoft : colors.primary },
-        }}>{() => <text style={{ pointerEvents: "none" }}>{date.getDate()}</text>}</ColorSurface>
+        }
+        dayStyles.set(styleKey, style)
+        if (dayStyles.size > 256) dayStyles.clear()
+      }
+      return <div key={handle.value} testId={id(`day-${panelIndex}-${handle.value}`)} role="button" aria-disabled={unavailable || undefined}
+        aria-label={`${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`} aria-selected={selectedCell || edge || undefined}
+        tabIndex={-1} onClick={handle.click} onMouseEnter={handle.enter} onMouseLeave={clearHoverSoon} style={style}>
+        <text style={dayTextStyle}>{date.getDate()}</text>
+      </div>
     }
     function calendar(date: Date, panelIndex: number) {
       const days = cells(date)
-      return <div style={{ display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", justifyContent: "space-around", marginBottom: 4 }}>{weekdays.map((day) => <div key={day} style={{ width: 32, height: 24, display: "flex", alignItems: "center", justifyContent: "center", color: "#a09080", fontSize: 11, fontWeight: 700 }}><text>{day}</text></div>)}</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>{Array.from({ length: 6 }, (_, row) => <div key={row} style={{ display: "flex", justifyContent: "space-around", gap: 2 }}>{days.slice(row * 7, row * 7 + 7).map((day) => dayCell(day, date, panelIndex))}</div>)}</div>
+      const endpoint = props.range ? rangeStart.value ?? selectedRange.value?.[0] : null
+      const endpointEnd = props.range ? rangeStart.value ? rangeEnd.value ?? hovered.value ?? rangeStart.value : selectedRange.value?.[1] : null
+      const endpointTime = endpoint?.getTime() ?? null
+      const endpointEndTime = endpointEnd?.getTime() ?? null
+      const now = new Date()
+      return <div style={calendarColumnStyle}>
+        <div style={weekdayRowStyle}>{weekdays.map((day) => <div key={day} style={weekdayCellStyle}><text>{day}</text></div>)}</div>
+        <div style={dayGridStyle}>{Array.from({ length: 6 }, (_, row) => <div key={row} style={dayRowStyle}>{days.slice(row * 7, row * 7 + 7).map((day) => dayCell(day, date, panelIndex, endpointTime, endpointEndTime, now))}</div>)}</div>
       </div>
     }
     function monthYearGrid() {

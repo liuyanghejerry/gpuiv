@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { defineComponent, h, ref } from "vue"
-import type { HostNode, MotionStyle, MotionTransition } from "@gpuiv/vue"
+import type { HostNode, MotionStyle, MotionTransition, StyleDesc } from "@gpuiv/vue"
 import { Input } from "../src/components/Input.js"
 import { Switch } from "../src/components/Switch.js"
 import { Checkbox } from "../src/components/Checkbox.js"
@@ -125,9 +125,16 @@ describe("native form color and shadow transition targets", () => {
       { offsetX: 0, offsetY: 0, blurRadius: 0, spreadRadius: 3, color: "rgba(255, 204, 0, 0.15)" },
     ])
     const target = host.find(component === DatePicker ? "picker-day-0-2024-01-20" : "picker-m-31")
-    expect(motion(target).transition).toEqual({ duration: 0.15, ease: "ease" })
-    await host.fire(target, "mouseEnter")
-    expect(motion(target).animate.backgroundColor).toBe(component === DatePicker ? colors.primaryBg : "#ffd54f")
+    if (component === DatePicker) {
+      // Date cells use GPUI's native hover refinement; the range preview only
+      // re-styles cells whose range state changed.
+      expect(target.props.motion).toBeUndefined()
+      expect((target.props.style as StyleDesc).hover).toMatchObject({ backgroundColor: colors.primaryBg })
+    } else {
+      expect(motion(target).transition).toEqual({ duration: 0.15, ease: "ease" })
+      await host.fire(target, "mouseEnter")
+      expect(motion(target).animate.backgroundColor).toBe("#ffd54f")
+    }
     const confirm = host.find("picker-confirm")
     expect(motion(confirm).transition).toEqual({ duration: 0.15, ease: "ease" })
     await host.fire("picker-panel", "keyDown", { key: "escape" })

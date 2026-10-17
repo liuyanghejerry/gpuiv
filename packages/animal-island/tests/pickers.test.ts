@@ -1,5 +1,6 @@
 import { defineComponent, h, ref } from "vue"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import type { StyleDesc } from "@gpuiv/vue"
 import { DatePicker, type DatePickerValue } from "../src/components/DatePicker.js"
 import { TimePicker } from "../src/components/TimePicker.js"
 import { mountHost } from "./harness.js"
@@ -73,6 +74,33 @@ describe("DatePicker through the native mutation/event host", () => {
     await app.fire("picker", "click")
     expect(app.text()).toContain("2024年2月")
     expect(app.text()).toContain("2024年3月")
+  })
+
+  it("keeps range-preview hover on stable cells instead of re-styling the whole grid", async () => {
+    const result = mount(DatePicker, { range: true, defaultValue: ["2024-01-10", "2024-01-20"] })
+    await result.app.fire("picker", "click")
+    const day = (key: string) => result.app.find(`picker-day-0-${key}`)
+    const outside = day("2024-01-05"), inside = day("2024-01-22")
+    const outsideStyle = outside.props.style, insideStyle = inside.props.style
+    expect(outside.type).toBe("div")
+    expect(outside.props.motion).toBeUndefined()
+    await result.app.fire("picker-day-0-2024-01-10", "click")
+    result.app.operations.length = 0
+    await result.app.fire("picker-day-0-2024-01-25", "mouseEnter")
+    // Only the cells whose range state changed receive a new style object.
+    expect(day("2024-01-05").props.style).toBe(outsideStyle)
+    expect(day("2024-01-22").props.style).not.toBe(insideStyle)
+    const dayIds = new Set(result.app.all().filter(node => String(node.props.testId ?? "").startsWith("picker-day-")).map(node => node.id))
+    const styleOps = result.app.operations.filter(operation => operation[0] === "setStyle" && dayIds.has(operation[1]))
+    expect(styleOps.length).toBeGreaterThan(0)
+    expect(styleOps.length).toBeLessThan(30)
+    // Moving to another cell extends the same range without an intermediate
+    // empty preview: the previous endpoint becomes in-range, not cleared.
+    await result.app.fire("picker-day-0-2024-01-28", "mouseEnter")
+    const inRange = (key: string) => ((day(key).props.style as StyleDesc).backgroundColor)
+    expect(inRange("2024-01-26")).toBe("#ffc107")
+    expect(inRange("2024-01-28")).toBe("#ffc107")
+    expect(inRange("2024-01-29")).toBeUndefined()
   })
 
   it("does not commit an incomplete range or a disabled date", async () => {
