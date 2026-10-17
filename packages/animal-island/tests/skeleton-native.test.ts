@@ -68,6 +68,9 @@ describeNative("Skeleton native shimmer", () => {
       const firstId = band()!.id
       app.renderer.clockFastForward(800)
       await app.settle()
+      // This flush delivers native completion; its Vue update needs a
+      // subsequent commit/layout before querying the replacement band.
+      await app.settle()
       expect(band()!.id).not.toBe(firstId)
       expect(position()).toBeCloseTo(-200, 1)
       close(capture()(100, 20), [234, 229, 219])
