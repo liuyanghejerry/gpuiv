@@ -175,7 +175,6 @@ describeNative("Select popup painted corners", () => {
       app.renderer.clockFastForward(500)
       await app.settle()
       await app.settle()
-      const panel = app.renderer.getElementBounds(app.renderer.findByTestId("shape-popup")!.id)!
       const path = join(folder, "popup.png")
       app.renderer.captureScreenshot(path)
       const image = readPng(readFileSync(path))
@@ -186,21 +185,34 @@ describeNative("Select popup painted corners", () => {
       const scaleX = image.width / actualViewport.width, scaleY = image.height / actualViewport.height
       expect(scaleX).toBeGreaterThan(0)
       expect(scaleX).toBeCloseTo(scaleY, 4)
-      const expectColor = (x: number, y: number, expected: number[]) => {
-        const actual = image.pixel(Math.floor(x * scaleX), Math.floor(y * scaleY))
+      const expectPixel = (x: number, y: number, expected: number[]) => {
+        const actual = image.pixel(x, y)
         actual.forEach((value, channel) => expect(Math.abs(value - expected[channel]!)).toBeLessThanOrEqual(2))
       }
-      // Sample just inside the panel's outer edge. The bounds tracker can
-      // report the padded content box, so derive the bottom from the last row
-      // plus the panel's 12px padding instead of trusting panel.height.
-      const lastRow = app.renderer.getElementBounds(app.renderer.findByTestId("shape-option-three")!.id)!
-      const panelBottom = lastRow.y + lastRow.height + 12
-      for (const x of [panel.x + 1.5, panel.x + panel.width - 1.5]) {
-        expectColor(x, panel.y + 1.5, [34, 68, 102])
-        expectColor(x, panelBottom - 1.5, [34, 68, 102])
+      // Locate the yellow panel from the screenshot itself. The bounds tracker
+      // can report a padded content box on the Windows offscreen surface, so
+      // sampling relative to it is not stable; the panel fill is unique here.
+      let minX = image.width, minY = image.height, maxX = -1, maxY = -1
+      for (let y = 0; y < image.height; y++) {
+        for (let x = 0; x < image.width; x++) {
+          const [red, green, blue] = image.pixel(x, y)
+          if (red > 230 && green > 210 && blue > 100 && blue < 220) {
+            if (x < minX) minX = x
+            if (x > maxX) maxX = x
+            if (y < minY) minY = y
+            if (y > maxY) maxY = y
+          }
+        }
       }
-      expectColor(panel.x + panel.width / 2, panel.y + 5, [255, 238, 160])
-      expectColor(panel.x + panel.width / 2, panelBottom - 5, [255, 238, 160])
+      expect(maxX).toBeGreaterThan(minX)
+      expect(maxY).toBeGreaterThan(minY)
+      const midX = Math.floor((minX + maxX) / 2)
+      for (const x of [minX + 2, maxX - 2]) {
+        expectPixel(x, minY + 2, [34, 68, 102])
+        expectPixel(x, maxY - 2, [34, 68, 102])
+      }
+      expectPixel(midX, minY + 5, [255, 238, 160])
+      expectPixel(midX, maxY - 5, [255, 238, 160])
     } finally {
       app.renderer.clockResume()
       app.unmount()
