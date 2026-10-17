@@ -1,0 +1,40 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "shims.d.ts",
+    "animal-island.tsx",
+    "animal-island-demo-pages.tsx",
+    "animal-island.test.tsx",
+    "animal-island.production.test.ts",
+    "animal-island-react.production.test.ts",
+    "fixtures/animal-island-react.ts",
+    "bounds-query.production.test.ts",
+    "image-events.production.test.ts",
+    "image-completion-burst.production.test.ts",
+    "input-password.production.test.ts",
+    "input-max-length.production.test.ts",
+    "select-home-end.production.test.ts",
+    "pagination-popup.production.test.ts",
+    "gallery-select-popup.production.test.ts",
+    "fixtures/bounds-query.ts",
+    "fixtures/animal-island-windowing.ts",
+    "fixtures/animal-island-image.ts",
+    "fixtures/image-events.ts",
+    "fixtures/image-completion-burst.ts",
+    "fixtures/input-password.ts",
+    "fixtures/input-max-length.ts",
+    "fixtures/select-home-end.ts",
+    "fixtures/pagination-popup.ts",
+    "fixtures/gallery-select-popup.ts",
+    "profile-animal-island-scroll.ts",
+    "animal-island-fonts.production.test.ts",
+    "animal-island-image-intrinsic.production.test.ts",
+    "fixtures/animal-island-fonts.ts",
+    "fixtures/animal-island-image-intrinsic.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "screenshots"
+  ]
+}

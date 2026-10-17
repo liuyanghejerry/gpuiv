@@ -23,6 +23,7 @@
     "streaming-code": "bun --hot streaming-code.tsx",
     "spinner": "bun --hot spinner.tsx",
     "beautiful-ui": "bun --hot beautiful-ui.tsx",
+    "animal-island": "bun --hot animal-island.tsx",
     "canvas-blends": "bun --hot canvas-blends.tsx",
     "icons": "bun icons.ts",
     "package": "gpuiv-packager build",
@@ -32,6 +33,7 @@
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
+    "@gpuiv/animal-island": "workspace:*",
     "@gpuiv/beautiful-ui": "workspace:*",
     "@gpuiv/native": "workspace:*",
     "@gpuiv/packager": "workspace:*",

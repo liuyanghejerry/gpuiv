@@ -20,6 +20,7 @@ import {
   provide,
   reactive,
   ref,
+  watch,
   watchEffect,
   type ComputedRef,
   type InjectionKey,
@@ -114,8 +115,9 @@ const PresenceChild = defineComponent({
     onExit: { type: Function as unknown as PropType<(() => void) | null>, default: null },
   },
   setup(props, { slots }) {
-    // childId → its completion reporter, null while still pending.
-    const descendants = reactive(new Map<number, (() => void) | null>())
+    // Each descendant completes independently; comparing reporter function
+    // identities would never release a subtree with multiple participants.
+    const descendants = reactive(new Map<number, boolean>())
     const isPresent = ref(props.isPresent)
     watchEffect(() => {
       isPresent.value = props.isPresent
@@ -129,29 +131,26 @@ const PresenceChild = defineComponent({
       initial: props.skipEnter ? false : undefined,
       isPresent: props.isPresent,
       register(childId: number) {
-        descendants.set(childId, null)
+        descendants.set(childId, false)
         return () => {
           descendants.delete(childId)
           // A pending descendant unmounting cannot report completion anymore.
           queueMicrotask(() => {
-            if (!isPresent.value && descendants.size === 0) release()
+            if (!isPresent.value && [...descendants.values()].every(Boolean)) release()
           })
         }
       },
       onExitComplete(childId: number) {
-        if (!descendants.has(childId)) return
-        const complete = () => {
-          for (const reporter of descendants.values()) {
-            if (reporter !== complete) return
-          }
-          release()
-        }
-        descendants.set(childId, complete)
-        complete()
+        if (!descendants.has(childId) || descendants.get(childId)) return
+        descendants.set(childId, true)
+        if ([...descendants.values()].every(Boolean)) release()
       },
     })
     watchEffect(() => {
       context.isPresent = props.isPresent
+    })
+    watch(() => props.isPresent, present => {
+      if (present) for (const childId of descendants.keys()) descendants.set(childId, false)
     })
     // A child with no registered motion (e.g. a plain div) leaves immediately.
     watchEffect(() => {
@@ -215,7 +214,9 @@ export const AnimatePresence = defineComponent({
         const onExit = isPresent
           ? null
           : () => {
-              if (exitDone.has(key)) return
+              // Descendant unregister callbacks can run after this child
+              // was removed; their old completion cannot release it twice.
+              if (!rendered.has(key) || presentKeys.has(key) || exitDone.has(key)) return
               exitDone.add(key)
               // `exitComplete` fires once every rendered child is either
               // present again or finished exiting.

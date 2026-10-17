@@ -12,6 +12,14 @@ export interface MotionStyle {
   bottom?: number
   left?: number
   borderRadius?: number
+  /** Color tracks interpolate in premultiplied sRGB. Null restores the base style. */
+  backgroundColor?: string | null
+  color?: string | null
+  borderColor?: string | null
+  /** An empty list clears shadows; missing layers fade to transparent. */
+  boxShadow?: BoxShadow | BoxShadow[]
+  /** Image filter list; matching lists interpolate natively on `<img>`. */
+  filter?: string
 }
 
 export type MotionEase =
@@ -44,6 +52,8 @@ export interface BoxShadow {
   blurRadius: number
   spreadRadius: number
   color: string
+  /** Paint inside the rounded element bounds; omitted means a drop shadow. */
+  inset?: boolean
 }
 
 /** One styled segment of a `<text runs={…}>` element. Attributes left unset
@@ -173,6 +183,8 @@ export interface StyleDesc {
   backgroundColor?: string
   color?: string
   opacity?: number
+  /** CSS filter list. Currently consumed by `<img>`; other elements ignore it. */
+  filter?: string
 
   borderWidth?: number
   borderTopWidth?: number
@@ -185,7 +197,8 @@ export interface StyleDesc {
   borderTopRightRadius?: number
   borderBottomLeftRadius?: number
   borderBottomRightRadius?: number
-  boxShadow?: BoxShadow
+  /** One shadow or GPUI's ordered shadow stack; [] explicitly clears it. */
+  boxShadow?: BoxShadow | BoxShadow[]
   outline?: Outline
 
   /** Styled segments for a `<text>` element — inline runs in one node.
@@ -427,6 +440,17 @@ export interface ElementProps {
    *  non-Unicode paths never fire. Desktop only. */
   onFileDrop?: (event: EventPayload) => void
 
+  // ── Image decoding ────────────────────────────────────────────
+  /** `<img>` decoded successfully. `value` is JSON containing `src`,
+   *  `generation`, `naturalWidth` and `naturalHeight` in decoded bitmap pixels
+   *  (GPUI SVG rasterization uses 2x pixels). Fires once per source
+   *  generation, including cached images; empty sources stay idle. */
+  onLoad?: (event: EventPayload) => void
+  /** `<img>` source could not be decoded. `value` is JSON containing `src`,
+   *  `generation` and `error`. GPU upload errors remain GPUI diagnostics;
+   *  invalid live-upload arguments throw synchronously instead. */
+  onError?: (event: EventPayload) => void
+
   // ── Text search ────────────────────────────────────────────────────
   /**
    * Wash matches under this subtree. Scoped by tree position: the nearest
@@ -458,6 +482,11 @@ export interface ElementProps {
   onPinch?: (event: EventPayload) => void
 
   // ── Text editor events ─────────────────────────────────────────
+  /** Native single-line editor mode. Password changes display only; editing
+   *  and event values retain the real buffer and UTF-16 selection offsets. */
+  type?: "text" | "password"
+  /** Native input/textarea placeholder ink; default #8f8f8f. */
+  placeholderColor?: string
   onChange?: (event: EventPayload) => void
   /** `onInput` is an alias for `onChange` in Vue (`v-model` friendly). */
   onInput?: (event: EventPayload) => void

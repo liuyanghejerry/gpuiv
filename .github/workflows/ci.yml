@@ -172,6 +172,14 @@ jobs:
         run: bun run build
         working-directory: packages/beautiful-ui
 
+      - name: Build animal-island package
+        run: bun run build
+        working-directory: packages/animal-island
+
+      - name: Run animal-island tests
+        run: bun run test
+        working-directory: packages/animal-island
+
       - name: Run example tests
         run: bun run test --exclude beautiful-ui.perf.test.tsx --exclude memory-leak.test.ts
         working-directory: examples
@@ -335,6 +343,14 @@ jobs:
       - name: Build beautiful-ui package
         run: bun run build
         working-directory: packages/beautiful-ui
+
+      - name: Build animal-island package
+        run: bun run build
+        working-directory: packages/animal-island
+
+      - name: Run animal-island tests
+        run: bun run test
+        working-directory: packages/animal-island
 
       - name: Run example tests
         run: bun run test --exclude beautiful-ui.perf.test.tsx --exclude memory-leak.test.ts

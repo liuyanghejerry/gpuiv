@@ -17,6 +17,52 @@ pub struct BoxShadowValue {
     pub blur_radius: f64,
     pub spread_radius: f64,
     pub color: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub inset: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
+}
+
+impl BoxShadowValue {
+    fn resolved_shadow(&self) -> Option<gpui::BoxShadow> {
+        let color = crate::color::parse_color_rgba(&self.color)?;
+        let shadow = gpui::BoxShadow::new(
+            gpui::px(self.offset_x as f32),
+            gpui::px(self.offset_y as f32),
+            color.into(),
+        )
+        .blur_radius(gpui::px(self.blur_radius.max(0.0) as f32))
+        .spread_radius(gpui::px(self.spread_radius as f32));
+        Some(if self.inset { shadow.inset() } else { shadow })
+    }
+}
+
+/// Keep the original single-shadow wire shape while exposing GPUI's complete
+/// shadow list, including an empty list that explicitly clears base shadows.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum BoxShadowListValue {
+    Single(BoxShadowValue),
+    Multiple(Vec<BoxShadowValue>),
+}
+
+impl BoxShadowListValue {
+    pub(crate) fn resolved_shadows(&self) -> Option<Vec<gpui::BoxShadow>> {
+        match self {
+            Self::Single(shadow) => shadow.resolved_shadow().map(|shadow| vec![shadow]),
+            Self::Multiple(shadows) => Some(
+                shadows
+                    .iter()
+                    // CSS lists the top shadow first; GPUI paints Vec entries
+                    // in sequence, so the last entry sits on top in each group.
+                    .rev()
+                    .filter_map(BoxShadowValue::resolved_shadow)
+                    .collect(),
+            ),
+        }
+    }
 }
 
 /// CSS `outline`: a line outside the border box that takes no layout space.
@@ -195,6 +241,8 @@ pub struct StyleDesc {
     pub background_color: Option<String>,
     pub color: Option<String>,
     pub opacity: Option<f64>,
+    /// CSS filter list. Consumed by `<img>`; other elements ignore it.
+    pub filter: Option<String>,
 
     // Border
     pub border_width: Option<f64>,
@@ -208,7 +256,7 @@ pub struct StyleDesc {
     pub border_top_right_radius: Option<f64>,
     pub border_bottom_left_radius: Option<f64>,
     pub border_bottom_right_radius: Option<f64>,
-    pub box_shadow: Option<BoxShadowValue>,
+    pub box_shadow: Option<BoxShadowListValue>,
     pub outline: Option<OutlineValue>,
 
     // Text
@@ -441,12 +489,133 @@ pub fn bounds_insets(style: &StyleDesc) -> BoundsInsets {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::Styled;
 
     fn with_fill(fill: &str) -> StyleDesc {
         StyleDesc {
             background_color: Some(fill.to_owned()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn box_shadow_single_remains_compatible_and_inset_defaults_to_false() {
+        let legacy: StyleDesc = serde_json::from_str(
+            r##"{"boxShadow":{"offsetX":1,"offsetY":2,"blurRadius":3,"spreadRadius":-1,"color":"#112233"}}"##,
+        )
+        .unwrap();
+        let explicit: StyleDesc = serde_json::from_str(
+            r##"{"boxShadow":{"offsetX":1,"offsetY":2,"blurRadius":3,"spreadRadius":-1,"color":"#112233","inset":false}}"##,
+        )
+        .unwrap();
+        assert_eq!(legacy.box_shadow, explicit.box_shadow);
+        let shadow = legacy
+            .box_shadow
+            .as_ref()
+            .unwrap()
+            .resolved_shadows()
+            .unwrap();
+        assert_eq!(shadow.len(), 1);
+        assert_eq!(shadow[0].offset, gpui::point(gpui::px(1.), gpui::px(2.)));
+        assert_eq!(shadow[0].blur_radius, gpui::px(3.));
+        assert_eq!(shadow[0].spread_radius, gpui::px(-1.));
+        assert!(!shadow[0].inset);
+        let wire = serde_json::to_value(legacy).unwrap();
+        assert!(wire["boxShadow"].is_object());
+        assert_eq!(
+            wire["boxShadow"],
+            serde_json::json!({
+                "offsetX": 1.0, "offsetY": 2.0, "blurRadius": 3.0,
+                "spreadRadius": -1.0, "color": "#112233",
+            })
+        );
+        let round_trip: StyleDesc = serde_json::from_value(wire).unwrap();
+        assert_eq!(round_trip.box_shadow, explicit.box_shadow);
+    }
+
+    #[test]
+    fn box_shadow_single_inset_maps_to_the_gpui_builder() {
+        let style: StyleDesc = serde_json::from_str(
+            r#"{"boxShadow":{"offsetX":0,"offsetY":2,"blurRadius":4,"spreadRadius":0,"color":"rgba(114,93,66,0.15)","inset":true}}"#,
+        )
+        .unwrap();
+        let shadows = style
+            .box_shadow
+            .as_ref()
+            .unwrap()
+            .resolved_shadows()
+            .unwrap();
+        let expected = gpui::BoxShadow::new(
+            gpui::px(0.),
+            gpui::px(2.),
+            crate::color::parse_color_rgba("rgba(114,93,66,0.15)")
+                .unwrap()
+                .into(),
+        )
+        .blur_radius(gpui::px(4.))
+        .inset();
+        assert_eq!(shadows, vec![expected]);
+        assert_eq!(
+            serde_json::to_value(style).unwrap()["boxShadow"]["inset"],
+            true
+        );
+    }
+
+    #[test]
+    fn box_shadow_array_preserves_drop_and_inset_stack_order() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"boxShadow":[{"offsetX":0,"offsetY":5,"blurRadius":8,"spreadRadius":1,"color":"#00000033"},{"offsetX":0,"offsetY":2,"blurRadius":0,"spreadRadius":0,"color":"#ffffff73","inset":true}]}"##,
+        )
+        .unwrap();
+        let shadows = style
+            .box_shadow
+            .as_ref()
+            .unwrap()
+            .resolved_shadows()
+            .unwrap();
+        assert_eq!(shadows.len(), 2);
+        assert!(shadows[0].inset);
+        assert_eq!(shadows[0].offset.y, gpui::px(2.));
+        assert!(!shadows[1].inset);
+        assert_eq!(shadows[1].offset.y, gpui::px(5.));
+        let wire = serde_json::to_value(style).unwrap();
+        assert_eq!(wire["boxShadow"].as_array().unwrap().len(), 2);
+        let round_trip: StyleDesc = serde_json::from_value(wire).unwrap();
+        assert_eq!(
+            round_trip.box_shadow.unwrap().resolved_shadows().unwrap(),
+            shadows
+        );
+    }
+
+    #[test]
+    fn box_shadow_empty_array_explicitly_clears_the_stack() {
+        let style: StyleDesc = serde_json::from_str(r#"{"boxShadow":[]}"#).unwrap();
+        assert!(style
+            .box_shadow
+            .as_ref()
+            .unwrap()
+            .resolved_shadows()
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            serde_json::to_value(&style).unwrap()["boxShadow"],
+            serde_json::json!([])
+        );
+        assert!(StyleDesc::default().box_shadow.is_none());
+        let base = gpui::BoxShadow::new(gpui::px(0.), gpui::px(4.), gpui::black());
+        let mut element = crate::renderer::apply_styles(gpui::div().shadow(vec![base]), &style);
+        assert_eq!(element.style().box_shadow, Some(Vec::new()));
+    }
+
+    #[test]
+    fn box_shadow_invalid_single_keeps_the_existing_ignore_behavior() {
+        let style: StyleDesc = serde_json::from_str(
+            r#"{"boxShadow":{"offsetX":0,"offsetY":2,"blurRadius":4,"spreadRadius":0,"color":"not-a-color"}}"#,
+        ).unwrap();
+        assert!(style.box_shadow.as_ref().unwrap().resolved_shadows().is_none());
+        let base = gpui::BoxShadow::new(gpui::px(0.), gpui::px(4.), gpui::black());
+        let mut element = crate::renderer::apply_styles(gpui::div().shadow(vec![base.clone()]), &style);
+        assert_eq!(element.style().box_shadow, Some(vec![base]));
     }
 
     #[test]
@@ -461,14 +630,22 @@ mod tests {
             serde_json::from_str(r##"{"outline":{"width":2,"color":"#00ff00"}}"##).unwrap();
         assert_eq!(
             style.outline,
-            Some(OutlineValue { width: 2.0, color: "#00ff00".to_owned(), offset: 0.0 })
+            Some(OutlineValue {
+                width: 2.0,
+                color: "#00ff00".to_owned(),
+                offset: 0.0
+            })
         );
 
         let style: StyleDesc =
             serde_json::from_str(r#"{"outline":{"width":1,"color":"red","offset":-2}}"#).unwrap();
         assert_eq!(
             style.outline,
-            Some(OutlineValue { width: 1.0, color: "red".to_owned(), offset: -2.0 })
+            Some(OutlineValue {
+                width: 1.0,
+                color: "red".to_owned(),
+                offset: -2.0
+            })
         );
     }
 
@@ -533,7 +710,10 @@ mod tests {
 
     #[test]
     fn bounds_insets_defaults_to_zero() {
-        assert_eq!(bounds_insets(&StyleDesc::default()), BoundsInsets::default());
+        assert_eq!(
+            bounds_insets(&StyleDesc::default()),
+            BoundsInsets::default()
+        );
     }
 
     #[test]

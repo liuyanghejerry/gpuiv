@@ -83,14 +83,15 @@ describeNative("floating layer surfaces", () => {
       borderTopRightRadius: 8,
       borderBottomRightRadius: 12,
       borderBottomLeftRadius: 20,
-      hover: { opacity: 0.75, borderTopLeftRadius: 24, backgroundColor: null },
+      hover: { opacity: 0.75, borderTopLeftRadius: 24, backgroundColor: "#222222" },
       active: { opacity: 0.9, borderBottomRightRadius: 28 },
       occlude: false,
     })
-    // Opacity lives on the surface only; the content keeps its fill.
+    // Fill and opacity live on the surface only, preserving a single alpha.
     expect(content?.style.opacity).toBeUndefined()
     expect(content?.style.hover?.opacity).toBeNull()
-    expect(content?.style.hover?.backgroundColor).toBe("#222222")
-    expect(content?.style.backgroundColor).toBe("#1A1A1A")
+    expect(content?.style.hover?.backgroundColor).toBeNull()
+    expect(content?.style.backgroundColor).toBeUndefined()
+    expect(anchored.style.backgroundColor).toBe("#1A1A1A")
   })
 })

@@ -248,6 +248,11 @@ Dimensions must be positive, finite numbers. GPUI and the OS own size constraint
 and apply the request asynchronously; `getWindowSize()` / `useWindowSize()` report
 the resulting viewport. Runtime window positioning remains unavailable.
 
+`useWindowSize()` samples every 100ms by default. Components on the same
+renderer with the same `intervalMs` share one native query and timer, while
+receiving independent refs. The timer stops when its last subscriber unmounts.
+Set `intervalMs: false` for startup/mount readings without ongoing polling.
+
 ## Multiple windows
 
 `createWindow()` mounts a component in a **new native window** (macOS).
@@ -743,7 +748,7 @@ value, so reversing an animation does not jump.
 
 ### Targets and timing
 
-Motion currently accepts these **numeric targets**:
+Motion accepts these targets:
 
 | Target | Range or unit |
 |---|---|
@@ -751,6 +756,24 @@ Motion currently accepts these **numeric targets**:
 | `top`, `right`, `bottom`, `left` | pixels |
 | `opacity` | `0` through `1` |
 | `borderRadius` | pixels, zero or greater |
+| `backgroundColor`, `color`, `borderColor` | CSS color strings; `null` releases the track to the current base style |
+| `boxShadow` | A structured shadow or array, using the same format as `style.boxShadow`; `[]` removes shadows |
+| `filter` | An image filter list, using the same syntax as `<img filter>`; matching lists interpolate, different functions or lengths switch at the midpoint |
+
+Color tracks use premultiplied sRGB interpolation, including alpha. Shadow
+lengths and colors interpolate together; missing layers are padded with
+transparent zero-length shadows. Incompatible inset/outset lists switch
+discretely at the midpoint. These tracks use the same native clock and
+continuous retargeting as numeric tracks.
+
+GPUI paints drop shadows beneath the full surface. A translucent fill can
+reveal that shadow inside its bounds; this differs from
+[CSS's outer-shadow interior cutout](https://www.w3.org/TR/css-backgrounds-3/#shadow-shape).
+Animated colors retain this native compositing behavior.
+
+Put the desired interaction colors in `animate`. A competing `style.hover`
+or `style.active` value for that same property can override its animated
+sample. Text children with their own explicit color also keep that color.
 
 The **transition** uses seconds, like Motion for Vue:
 
@@ -1271,6 +1294,13 @@ inactive. Override its colour through the shared native theme:
 <input theme={{ caret: '#22c55e' }} />
 ```
 
+`<input type="password">` masks the painted text and accessibility value with
+one bullet per Unicode scalar. Native editing, IME, caret and selection still
+use the real buffer; `onChange.value` remains the real input value. Copy and cut
+do not export password text. The mode applies to single-line inputs only.
+Set `placeholderColor="#c4b89e"` on `<input>` or `<textarea>` to override the
+placeholder ink independently of the entered text colour.
+
 When the clipboard has no text, `Cmd+V` or `Ctrl+V` continues to `onKeyDown`
 instead of disappearing inside the editor. Applications can then handle an
 image-only or file-only clipboard themselves. Copied files also propagate even
@@ -1343,6 +1373,7 @@ Native defaults, so common elements are not silent:
 | ------------- | ----------------------- | ------------------------------------ |
 | `<text>`      | `Label`                 | content as `aria-valuetext`          |
 | `<input>`     | `TextInput`             | `value` and `placeholder`            |
+| `<input type="password">` | `PasswordInput` | masked value and `placeholder` |
 | `<textarea>`  | `MultilineTextInput`    | `value` and `placeholder`            |
 | `<img>`       | `Image`                 | `alt` as `aria-label`                |
 
@@ -1642,18 +1673,19 @@ markdown through the menu, and clicks hit the text behind it.
 </Select>
 ```
 
-Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
-`FloatingLayer` defaults to `#1A1A1A`. Item rows should use the same solid
-color, or a solid hover color. A `#00000000` child on a blurred window punches
-through Metal to the desktop.
+`FloatingLayer` defaults to the opaque fill `#1A1A1A`. Explicit transparent
+and translucent fills are preserved, including panels drawn with SVG outlines.
+When the panel owns its fill, transparent item rows preserve its rounded corners.
 
 `FloatingLayer` copies uniform and per-corner border radii to its anchored
 surface, so rounded Select, Combobox, and Tooltip content does not show square
 corners behind it. It also puts `visibility` and `opacity` on that outer surface
 so the fallback fill follows them without multiplying nested opacity.
-`pointerEvents: "none"` disables the anchored occluder. Backgrounds, borders,
-shadows, overflow, and layout remain on the inner content to avoid double paint
-or changed popup geometry.
+Backgrounds and shadows belong to that same outer surface: drop shadows paint
+behind the fill, and translucent backgrounds paint only once. The optional
+native `motion` attr also targets this complete surface. Borders, overflow,
+layout, focus and keyboard handlers remain on the inner content.
+`pointerEvents: "none"` disables the anchored occluder.
 
 A filled in-flow `div` blocks clicks and hovers behind it. The parent
 scroller still gets the wheel. `position: "absolute"` / `"fixed"` or
@@ -2033,6 +2065,73 @@ not written to a temp file.
 placeholder instead of crashing. A URL that is still loading paints an empty
 box of the declared size.
 
+`onLoad` and `onError` report decode completion once per source generation,
+including cache hits. Their `EventPayload.value` is JSON: load carries
+`{src, generation, naturalWidth, naturalHeight}`, and error carries
+`{src, generation, error}`. Source changes and unmounts reject old completions;
+an empty source stays idle without either event. This reports image decoding,
+not GPU upload success. Live image uploads report load with the current source
+or an empty string; invalid upload arguments still throw synchronously.
+Dimensions are decoded bitmap pixels: GPUI rasterizes SVG at twice its logical
+size, so a 24×18 SVG reports 48×36. The image's layout and aspect ratio continue
+to use GPUI's logical dimensions.
+
+#### Image filters
+
+Use the **`filter` image prop**, independently of `style`:
+
+```tsx
+<img src={photo} filter="saturate(0.93) contrast(1.03)"
+  style={{ width: 240, height: 160, borderRadius: 12 }} />
+<img src={logo} filter="drop-shadow(0 8px 6px rgba(0,0,0,0.3))"
+  style={{ width: 96, height: 96 }} />
+```
+
+Supported functions are `brightness`, `contrast`, `saturate`, `grayscale`,
+`sepia`, `invert`, `opacity`, `hue-rotate`, `blur`, and `drop-shadow`, applied
+in order. Amounts accept numbers or percentages; angles accept `deg`, `rad`,
+`grad`, or `turn`; lengths accept `px` or unitless zero. `drop-shadow` accepts
+an explicit color or uses the image's current text color. `none` or an empty
+string uses the original image path. `url()` and font-relative lengths are
+not supported.
+
+Processing runs on GPUI's background asset executor and caches the result.
+Color-only filters share their processed image across display sizes. Blur
+and shadows rasterize the visible image at its display size and screen DPI,
+so their CSS pixel radius remains stable when a small source is enlarged.
+They retain transparent expansion outside the image's original
+layout box; a parent's overflow mask still clips that expansion. Object-fit
+and rounded source clipping precede spatial filters. Animated images keep
+their frame delays, and changing a filter does not repeat the source's
+load event. Unused work is cancelled and cached assets are released when
+their last consumer disappears, including when its window closes.
+
+Invalid or unsupported filter lists log a warning and use the original image.
+For a static `filter` prop, a processing failure leaves the image transparent
+without emitting another source error or briefly painting an unfiltered image.
+A `style.filter` driven by `motion` keeps the last filtered frame visible while
+the next one is prepared, falling back to the unfiltered source before the
+first filtered frame. A retargeting filter therefore never blanks the image or
+alternates between filtered and unfiltered paint paths. Each intermediate
+image is limited to 16,777,216 pixels, including blur/shadow expansion. Gaussian
+blur uses an exact sampled kernel up to 12 raster pixels of standard deviation
+and a three-pass box approximation above that size. Filters apply to images,
+not arbitrary child trees or the window backdrop.
+
+`filter` is also a style field, which makes it animatable: put it in a
+`motion` target and matching function lists interpolate on the native clock
+while the background asset pipeline produces each frame's pixels. The
+`filter` prop remains a static input; use `style.filter`/`motion` when a
+filter must retarget or disappear continuously. Canvas 2D's separate `filter`
+property remains unsupported.
+
+```tsx
+<img src={photo} onLoad={event => {
+  const { naturalWidth, naturalHeight } = JSON.parse(event.value!)
+  console.log(naturalWidth, naturalHeight)
+}} onError={event => console.error(JSON.parse(event.value!).error)} />
+```
+
 ### Live images from a buffer
 
 A data URL still works, but it base64-encodes the bytes into the mutation JSON.
@@ -2328,6 +2427,7 @@ tracking.
 | Scroll | `onScroll` | `deltaX`, `deltaY`, `precise`, `touchPhase`, `modifiers` |
 | Pinch | `onPinch` | `x`, `y`, `zoomDelta`, `touchPhase`, `modifiers` — one step per event; accumulate `zoomDelta` into a scale |
 | File drop | `onFileDrop` | `paths`, `x`, `y` — Unicode filesystem paths from Finder or the OS; desktop only |
+| Image decode | `onLoad`, `onError` | `value` — JSON source generation and intrinsic dimensions or error; `<img>` only |
 | Change | `onChange` | `value` — `<input>` and `<textarea>` only |
 | Submit | `onSubmit` | `value` — `<input>` and `<textarea>` only |
 | Toggle file | `onToggleFile` | `value` (file path) — `<diff>` only |
@@ -2376,7 +2476,7 @@ apply to every binding form.
 >   but easier to miss because there is no browser DevTools to inspect.
 > - **No shorthand values.** `padding`, `margin`, and `border` take numbers.
 >   CSS strings like `"0 16px"`, `"1px solid #fff"`, or `calc()` are ignored.
-> - **`boxShadow` is a structured object**, not a CSS string. See below.
+> - **`boxShadow` is a structured object or array**, not a CSS string. See below.
 > - **No `<button>`.** Use `<div onClick>` with `cursor: "pointer"`.
 > - **Do not nest `<text>` in `<text>`.** Adjacent `<text>` siblings merge
 >   into one line. A `<text>` child of another `<text>` is a nested div.
@@ -2384,7 +2484,11 @@ apply to every binding form.
 >   style, or pad the parent wrapper. The input clips to its own
 >   `borderRadius` automatically.
 
-**Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
+**Layout:** `display` (`"flex"` | `"grid"` | `"none"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
+
+`display: "none"` keeps the element and its subtree mounted (Vue state and
+event handlers survive) while GPUI/Taffy skip layout, paint and hit-testing.
+It is the native equivalent of the CSS property for hiding a retained page.
 
 **Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
 
@@ -2392,7 +2496,7 @@ apply to every binding form.
 
 **Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
 
-**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `filter` (images only), `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
 
 ### Cursor
 
@@ -2480,8 +2584,13 @@ Limited relative-color forms can derive a new color from a base value:
 />
 ```
 
-`boxShadow` accepts one structured shadow. Its fields are `offsetX`, `offsetY`,
-`blurRadius`, `spreadRadius`, and `color`:
+`boxShadow` accepts a structured shadow or an array of shadows. Each shadow has
+`offsetX`, `offsetY`, `blurRadius`, `spreadRadius`, `color`, and optional
+`inset` (defaults to `false`). Drop shadows paint behind the element; inset
+shadows paint inside its border box over the fill. An empty array clears the
+shadow stack, including in `hover` or `active` styles.
+Within each drop/inset group, the first array entry paints on top, following
+CSS shadow ordering.
 
 ```tsx
 <div

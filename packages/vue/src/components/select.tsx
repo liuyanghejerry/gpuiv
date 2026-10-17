@@ -52,6 +52,7 @@ interface SelectContextValue {
   setOpen: (open: boolean) => void
   setActiveValue: (value: string | null) => void
   moveActive: (delta: number) => void
+  moveActiveToEdge: (edge: "first" | "last") => void
   selectValue: (value: string) => void
   registerItem: (item: SelectItemRecord & { mounted: boolean }) => void
 }
@@ -124,6 +125,7 @@ export const Select = defineComponent({
       setOpen: () => {},
       setActiveValue: () => {},
       moveActive: () => {},
+      moveActiveToEdge: () => {},
       selectValue: () => {},
       registerItem: () => {},
     }
@@ -196,6 +198,12 @@ export const Select = defineComponent({
       const nextIndex = (start + delta + enabled.length) % enabled.length
       context.activeValue = enabled[nextIndex].value
     }
+    const moveActiveToEdge = (edge: "first" | "last") => {
+      if (context.disabled || !context.open) return
+      const enabled = registeredItems.value.filter((item) => !item.disabled)
+      const item = edge === "first" ? enabled[0] : enabled.at(-1)
+      if (item) context.activeValue = item.value
+    }
 
     const selectValue = (nextValue: string) => {
       if (context.disabled) return
@@ -212,6 +220,7 @@ export const Select = defineComponent({
       context.activeValue = next
     }
     context.moveActive = moveActive
+    context.moveActiveToEdge = moveActiveToEdge
     context.selectValue = selectValue
     context.registerItem = registerItem
 
@@ -294,6 +303,8 @@ export const SelectTrigger = defineComponent({
           if (disabled) return
           if (event.key === "escape") {
             context.setOpen(false)
+          } else if (event.key === "home" || event.key === "end") {
+            context.moveActiveToEdge(event.key === "home" ? "first" : "last")
           } else if (
             event.key === "down" ||
             (event.key === "n" && event.modifiers?.ctrl)
@@ -379,7 +390,9 @@ export const SelectContent = defineComponent({
             return
           }
           if (context.disabled) return
-          if (
+          if (event.key === "home" || event.key === "end") {
+            context.moveActiveToEdge(event.key === "home" ? "first" : "last")
+          } else if (
             event.key === "down" ||
             (event.key === "n" && event.modifiers?.ctrl)
           ) {

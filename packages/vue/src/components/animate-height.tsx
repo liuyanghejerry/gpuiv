@@ -14,7 +14,7 @@
  *  ```
  */
 
-import { defineComponent, h, ref, type PropType } from "vue"
+import { computed, defineComponent, h, ref, type PropType } from "vue"
 import type { MotionStyle, MotionTransition, StyleDesc } from "../types.js"
 import type { HostNode } from "../types.js"
 import { useElementBounds } from "../hooks/use-element-bounds.js"
@@ -38,6 +38,9 @@ export const AnimateHeight = defineComponent({
   setup(props, { attrs, slots }) {
     const content = ref<HostNode | null>(null)
     const { bounds } = useElementBounds(content)
+    // Only natural height can change an auto-height target. Scroll position
+    // and width samples must not re-render or re-send the same motion track.
+    const measuredHeight = computed(() => bounds.value?.height ?? null)
     // Whether the motion prop has been attached. Once set it stays set —
     // dropping it would strand the element at its last animated value.
     let motionArmed = false
@@ -45,8 +48,7 @@ export const AnimateHeight = defineComponent({
     let generation = 0
 
     return () => {
-      const measured = bounds.value?.height ?? null
-      const target = props.height === "auto" ? measured : props.height
+      const target = props.height === "auto" ? measuredHeight.value : props.height
 
       const style: StyleDesc = {
         overflow: "hidden",

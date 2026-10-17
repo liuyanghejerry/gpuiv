@@ -30,6 +30,40 @@ behavior reviewed at
 | `packages/native/src/custom_elements/input.rs` | [caret blink sections of `crates/ui/src/composer.rs`](https://github.com/zeronsh/comet/blob/main/crates/ui/src/composer.rs) |
 | `packages/native/src/theme.rs` | `crates/ui/src/theme.rs` |
 
+## animal-island port
+
+`packages/animal-island` is a GPUIV port of
+**[animal-island-vue](https://github.com/guokaigdg/animal-island-vue)** (MIT,
+Copyright (c) 2026 guokaigdg; the author limits the project to learning and
+non-commercial use, and this port follows the same constraint). The copied
+MIT license text lives at `packages/animal-island/LICENSE.animal-island-vue`.
+Design tokens (`src/tokens.ts`) are mapped from the original
+`src/styles/variables.less`; `src/icons/svg-data.ts` and
+`assets/scene/*.svg` are copied data/assets; every component file carries a
+header naming its original `.vue` source and listing the native adaptations.
+
+The React parity pass also ports behavior, artwork and CountUp from
+[animal-island-ui](https://github.com/guokaigdg/animal-island-ui) at commit
+`c696d16167d01370f822f95db22340b05d837555` (MIT, Copyright (c) 2026 guokaigdg).
+Its licence is included in
+[`LICENSE.animal-island-ui`](packages/animal-island/LICENSE.animal-island-ui).
+The added `forest-grove.svg` and `starry-camp.svg` are the original Progress
+scene assets; `REACT_PARITY.md` records the behavior and native adaptations.
+
+The port bundles six modified TrueType faces from the original demo's Nunito
+500/700/900 and Noto Sans SC 400/500/700 web fonts, under SIL Open Font License
+1.1. Copyright 2014 The Nunito Project Authors and Copyright 2014–2021 Adobe
+are preserved in the fonts and in the complete
+[`Nunito-OFL.txt`](packages/animal-island/assets/fonts/Nunito-OFL.txt) and
+[`NotoSansSC-OFL.txt`](packages/animal-island/assets/fonts/NotoSansSC-OFL.txt)
+licenses, sourced from Google Fonts' [`ofl/nunito`](https://github.com/google/fonts/tree/main/ofl/nunito)
+and [`ofl/notosanssc`](https://github.com/google/fonts/tree/main/ofl/notosanssc)
+directories. The native families are renamed `Animal Island Nunito` and
+`Animal Island Noto Sans SC`; the latter avoids Adobe's reserved font name
+`Source`. Conversion provenance and asset hashes are recorded in
+[`assets/fonts/README.md`](packages/animal-island/assets/fonts/README.md) and
+[`sources.json`](packages/animal-island/assets/fonts/sources.json).
+
 ## Example icons
 
 The chat example uses **[Lucide](https://github.com/lucide-icons/lucide)** SVG
