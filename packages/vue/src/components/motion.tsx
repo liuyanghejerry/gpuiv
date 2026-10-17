@@ -26,6 +26,7 @@ function motionStyleKey(style: MotionStyle | false | undefined) {
     [style.color !== undefined, style.color],
     [style.borderColor !== undefined, style.borderColor],
     style.boxShadow,
+    style.filter,
   ]
 }
 

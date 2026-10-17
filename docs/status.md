@@ -31,6 +31,8 @@
 - [x] `outline` style (focus rings that take no layout space)
 - [x] Structured `boxShadow` stacks, including native inset shadows and hover/active overrides
 - [x] Native motion color and shadow tracks, with premultiplied alpha, continuous retargeting and explicit color-track release
+- [x] Native image-filter motion tracks (`style.filter`), interpolating matching filter lists on the frame clock
+- [x] `display: none` retained subtrees: Vue state and native identity survive while layout, paint and hit-testing are skipped
 - [x] Native `<img filter>` functions with cached background processing, transparent blur/shadow expansion and animated image frame preservation
 - [x] Font fallback lists (`fontSansFallbacks` / `fontMonoFallbacks` theme overrides)
 - [x] Streaming code highlighting (stable-prefix resume: appended sources re-parse only the tail)

@@ -63,11 +63,12 @@ It processes and caches pixels on GPUI's background asset executor rather than
 reprocessing them during paint. The stamp photo uses `saturate(0.93) contrast(1.03)`;
 its paper SVG chains the two original alpha shadows around
 the perforated outline. Island Tooltip shadows follow their organic silhouette.
-Rocket keeps the original 64px artwork and correct 10/14px Gaussian sigmas,
-with transparent canvas expansion for its shadow. Its hover filter switches
-between two cached SVG states; only its size/position animate continuously.
-Image filter lists are not continuous motion tracks. See the
-[native image filter API](../../docs/reference.md#image-filters) for syntax and boundaries.
+Rocket keeps the original 64px artwork and correct 10/14px Gaussian sigmas.
+Its hover shadow is a native `drop-shadow` filter track, so blur, offset and
+alpha interpolate continuously with the size tween. Matching filter lists in
+`motion` animate natively; the static `filter` prop keeps its cached-result
+behavior. See the [native image filter API](../../docs/reference.md#image-filters)
+for syntax and boundaries.
 
 ## Fidelity audit
 
@@ -86,8 +87,8 @@ reveal shadow inside its border box; CSS outer shadows remove that interior.
 | CountUp / Countdown | CountUp formatting/easing/pause/replay/callbacks/celebration; Countdown's 20-face directional digit strip; island dashed outlines | CountUp uses a cancellable JS sampling clock; celebration scale/rotation use native geometry; reduced-motion preferences are not yet mapped |
 | Avatar / Badge / Progress | Actual native text fitting and gap; arbitrary count nodes; four bundled scenes, three-stop fill gradients, completion colours, dotted tracks and native inset highlights | First measurement appears after paint; typography features differ |
 | Rich content and overlays | Node-valued labels/titles/tips; Tooltip hover/focus/click and organic silhouette shadow; native copy/close-button colors; Notification closes after native exit and destroy removes immediately | Arbitrary child content is not clipped to SVG silhouettes; mask/focus behavior follows native APIs; generic subtree scale/filter effects remain separate work |
-| Image / Loading / BackTop | Stamp photo saturation/contrast, perforations/paper texture and chained SVG alpha shadows; decode events and preview; three-layer frame shadows; elliptical vignette; Rocket with correct shadow sigmas and outside canvas | Stamp-year typography and preview scale differ; Rocket swaps two cached filter states rather than continuously interpolating blur; BackTop requires a native scroll target |
-| Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging and hover colors/radii; picker double shadows and option transitions; active slides, control/dot transitions, autoplay and native entrances | Avoid nested scrollers; picker columns page; Table loading backdrop blur is not a single-image filter; Carousel inactive slides unmount and lose their local state |
+| Image / Loading / BackTop | Stamp photo saturation/contrast, perforations/paper texture and chained SVG alpha shadows; decode events and preview; three-layer frame shadows; elliptical vignette; Rocket with correct shadow sigmas and continuously interpolated `drop-shadow` | Stamp-year typography and preview scale differ; BackTop requires a native scroll target; filter lists with different functions switch discretely at the midpoint |
+| Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging and hover colors/radii; picker double shadows and option transitions; all slides stay mounted with `display:none` on hidden pages, crossfade on switch, control/dot transitions, autoplay and native entrances | Avoid nested scrollers; picker columns page; Table loading backdrop blur is not a single-image filter; hidden pages do not enter tab-stop collection, and an already-focused hidden descendant no longer pauses autoplay |
 | Skeleton / Cursor | Native moving five-stop shimmer, specialised placeholders; local cursor follower and effects | Shimmer overflow clipping is rectangular, with remaining rounded/circular edge differences; the OS cursor cannot be replaced or hidden by this API |
 
 ## Verification and limits
@@ -109,7 +110,8 @@ permission to listen on localhost.
 The example's GPU tests use `createTestApp()` on macOS/Windows. Linux has no
 headless image readback for this pinned GPUI build, so those tests skip there.
 Earlier hidden Linux native-window checks verified the seven newly ported
-families, the Carousel's single 180px slide, image events for data/local/HTTP
+families, the Carousel's hidden-slide `display:none` behavior and 180px active
+slide, image events for data/local/HTTP
 sources, shared resources in two windows, stale-source/unmount rejection,
 Image fades/error artwork, single-axis image geometry, Avatar fallbacks,
 font loading/weights, password editing/cut protection and native Input length
@@ -201,11 +203,11 @@ draw duration of 4.08ms and maximum draw duration of 5.67ms, with a maximum
 bounds-query duration of 6.87ms. Its final offset is -1169px, so later steps
 are clamped; this run does not repeat the earlier continuous-gallery trajectory.
 
-A retained Carousel slide cache was also tested against the current renderer.
-Vue KeepAlive storage left an orphan native host after unmount, while a full
-translated track still needs reliable inactive-subtree focus/hit isolation.
-The active-only carousel remains the documented adaptation until those ownership
-and interaction constraints can be met without changing GPUI.
+A retained Carousel slide cache is no longer needed: hidden pages stay mounted
+with `display:none`, so Vue local state and native element identity survive
+without contributing layout, paint or tab stops. The outgoing page remains
+visible only for the crossfade window, and a focus handle inside a hidden page
+no longer counts as focus inside the carousel.
 
 The port stays private. Both upstream MIT licences are bundled in
 `LICENSE.animal-island-vue` and `LICENSE.animal-island-ui`; implementations and their adaptations are

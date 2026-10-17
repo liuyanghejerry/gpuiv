@@ -758,6 +758,7 @@ Motion accepts these targets:
 | `borderRadius` | pixels, zero or greater |
 | `backgroundColor`, `color`, `borderColor` | CSS color strings; `null` releases the track to the current base style |
 | `boxShadow` | A structured shadow or array, using the same format as `style.boxShadow`; `[]` removes shadows |
+| `filter` | An image filter list, using the same syntax as `<img filter>`; matching lists interpolate, different functions or lengths switch at the midpoint |
 
 Color tracks use premultiplied sRGB interpolation, including alpha. Shadow
 lengths and colors interpolate together; missing layers are padded with
@@ -2111,8 +2112,14 @@ source error or briefly painting an unfiltered image. Each intermediate
 image is limited to 16,777,216 pixels, including blur/shadow expansion. Gaussian
 blur uses an exact sampled kernel up to 12 raster pixels of standard deviation
 and a three-pass box approximation above that size. Filters apply to images,
-not arbitrary child trees or the window backdrop. Filter parameters do not
-animate through `motion`; Canvas 2D's separate `filter` property remains unsupported.
+not arbitrary child trees or the window backdrop.
+
+`filter` is also a style field, which makes it animatable: put it in a
+`motion` target and matching function lists interpolate on the native clock
+while the background asset pipeline produces each frame's pixels. The
+`filter` prop remains a static input; use `style.filter`/`motion` when a
+filter must retarget or disappear continuously. Canvas 2D's separate `filter`
+property remains unsupported.
 
 ```tsx
 <img src={photo} onLoad={event => {
@@ -2473,7 +2480,11 @@ apply to every binding form.
 >   style, or pad the parent wrapper. The input clips to its own
 >   `borderRadius` automatically.
 
-**Layout:** `display` (`"flex"` | `"grid"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
+**Layout:** `display` (`"flex"` | `"grid"` | `"none"`), `flexDirection`, `flexWrap`, `flexGrow`, `flexShrink`, `flexBasis`, `alignItems`, `alignSelf`, `alignContent`, `justifyContent`, `gap`, `rowGap`, `columnGap`, `gridTemplateColumns`, `gridTemplateRows`, `gridColumnMin`, `gridRowMin`
+
+`display: "none"` keeps the element and its subtree mounted (Vue state and
+event handlers survive) while GPUI/Taffy skip layout, paint and hit-testing.
+It is the native equivalent of the CSS property for hiding a retained page.
 
 **Sizing:** `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` — accepts pixels (number) or percentages (string like `"100%"`)
 
@@ -2481,7 +2492,7 @@ apply to every binding form.
 
 **Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
 
-**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `filter` (images only), `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
 
 ### Cursor
 

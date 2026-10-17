@@ -259,20 +259,22 @@ describe("Upload desktop files and transport", () => {
 
 describe("Carousel navigation, slots and lifecycle", () => {
   it("flattens fragments, skips comments, preserves slide semantics and keyboard navigation", async () => {
-    const host = mountHost(defineComponent({ setup: () => () => h(Carousel, { testId: "carousel" }, { default: () => [
+    const host = mountHost(defineComponent({ setup: () => () => h(Carousel, { testId: "carousel", duration: 0 }, { default: () => [
       h(Fragment, null, [h("div", [h("text", "first")]), h(Comment), h("div", [h("text", "second")])]), h("div", [h("text", "third")]),
     ] }) }))
     hosts.push(host)
     // Explicit JSX Fragments create empty text anchors in GPUIV. Their native
     // line boxes must not become in-flow children beside the viewport.
     expect(host.find("carousel").children.some((node) => node.type === "#text" && node.text === "")).toBe(false)
-    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "flex" })
-    expect(host.all().some((node) => node.props.testId === "carousel-slide-1")).toBe(false)
-    expect(host.all().some((node) => node.props.testId === "carousel-slide-2")).toBe(false)
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "flex", pointerEvents: "auto" })
+    expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "none", pointerEvents: "none" })
+    expect(host.find("carousel-slide-2").props.style).toMatchObject({ display: "none", pointerEvents: "none" })
     await host.fire("carousel", "keyDown", { key: "right" })
     expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "flex" })
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "none" })
     await host.fire("carousel", "keyDown", { key: "end" })
     expect(host.find("carousel-slide-2").props.style).toMatchObject({ display: "flex" })
+    expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "none" })
     expect(host.find("carousel-slide-2").props["aria-label"]).toBe("第 3 张，共 3 张")
     await host.fire("carousel", "keyDown", { key: "home" })
     expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "flex" })
@@ -280,14 +282,14 @@ describe("Carousel navigation, slots and lifecycle", () => {
 
   it("controlled activeIndex takes priority, emits changes and waits for external updates", async () => {
     const onChange = vi.fn(), update = vi.fn()
-    const { host, exposed } = mountCarousel({ modelValue: 0, activeIndex: 1, onChange, "onUpdate:modelValue": update })
+    const { host, exposed } = mountCarousel({ duration: 0, modelValue: 0, activeIndex: 1, onChange, "onUpdate:modelValue": update })
     await host.fire("carousel-next", "click")
     expect(update).toHaveBeenCalledWith(2)
     expect(onChange).toHaveBeenCalledWith(2)
     expect(exposed.value!.currentIndex).toBe(1)
     expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "flex" })
-    expect(host.all().some((node) => node.props.testId === "carousel-slide-0")).toBe(false)
-    expect(host.all().some((node) => node.props.testId === "carousel-slide-2")).toBe(false)
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "none" })
+    expect(host.find("carousel-slide-2").props.style).toMatchObject({ display: "none" })
   })
 
   it("supports expose methods, non-loop boundaries, dots and single-slide controls", async () => {
@@ -309,32 +311,48 @@ describe("Carousel navigation, slots and lifecycle", () => {
     expect(empty.exposed.value!.currentIndex).toBe(0)
   })
 
-  it("unmounts inactive controls, removes their keyboard hosts and ignores their stale events", async () => {
-    const firstClick = vi.fn(), secondClick = vi.fn()
-    const host = mountHost(defineComponent({ setup: () => () => h(Carousel, { testId: "carousel" }, { default: () => [
-      h("div", { key: "first", testId: "first-control", tabIndex: 0, onClick: firstClick, onKeyDown: firstClick }, [h("text", "first")]),
-      h("div", { key: "second", testId: "second-control", tabIndex: 0, onClick: secondClick, onKeyDown: secondClick }, [h("text", "second")]),
+  it("keeps inactive slides mounted with display:none so local state and native identity survive", async () => {
+    const Counter = defineComponent({
+      setup() {
+        const count = ref(0)
+        return () => h("div", { testId: "counter" }, [
+          h("text", `count ${count.value}`),
+          h("div", { testId: "counter-button", tabIndex: 0, onClick: () => { count.value++ } }, [h("text", "increment")]),
+        ])
+      },
+    })
+    const host = mountHost(defineComponent({ setup: () => () => h(Carousel, { testId: "carousel", duration: 0 }, { default: () => [
+      h(Counter, { key: "first" }),
+      h("div", { key: "second" }, [h("text", "second")]),
     ] }) }))
     hosts.push(host)
-    const oldControl = host.find("first-control")
-    const oldSlide = host.find("carousel-slide-0")
-    expect(host.all().some((node) => node.props.testId === "second-control")).toBe(false)
-    await host.fire(oldControl, "keyDown", { key: "enter" })
-    expect(firstClick).toHaveBeenCalledOnce()
+    const control = host.find("counter-button")
+    const slide = host.find("carousel-slide-0")
+    await host.fire(control, "click")
+    expect(host.text()).toContain("count 1")
     await host.fire("carousel-next", "click")
-    expect(host.all().some((node) => node.id === oldControl.id)).toBe(false)
-    // One destroy op tears down the native subtree, including the control's
-    // focus handle; descendants intentionally do not receive duplicate ops.
-    expect(host.operations).toContainEqual(["destroyElement", oldSlide.id])
-    expect(host.all().filter((node) => node.props.tabIndex === 0 && ["first-control", "second-control"].includes(String(node.props.testId))))
-      .toEqual([host.find("second-control")])
-    await host.fire(oldControl, "click")
-    await host.fire(oldControl, "keyDown", { key: "enter" })
-    expect(firstClick).toHaveBeenCalledOnce()
-    await host.fire("second-control", "keyDown", { key: "enter" })
-    expect(secondClick).toHaveBeenCalledOnce()
-    expect((host.find("carousel-slide-1").props.motion as { initial: unknown; animate: unknown }).initial).toEqual({ opacity: 0, left: 18 })
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "none", pointerEvents: "none" })
+    expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "flex", pointerEvents: "auto" })
+    expect(host.operations.some((operation) => operation[0] === "destroyElement" && operation[1] === slide.id)).toBe(false)
+    await host.fire("carousel-prev", "click")
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "flex" })
+    expect(host.find("counter-button").id).toBe(control.id)
+    expect(host.text()).toContain("count 1")
+    expect((host.find("carousel-slide-1").props.motion as { animate: unknown }).animate).toEqual({ opacity: 0, left: 18 })
+  })
+
+  it("keeps the outgoing slide visible for the crossfade window", async () => {
+    vi.useFakeTimers()
+    const { host } = mountCarousel({ duration: 0.3 })
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "flex" })
+    expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "none" })
+    await host.fire("carousel-next", "click")
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "flex", pointerEvents: "none" })
+    expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "flex", pointerEvents: "auto" })
+    expect((host.find("carousel-slide-0").props.motion as { animate: unknown }).animate).toEqual({ opacity: 0, left: 18 })
     expect((host.find("carousel-slide-1").props.motion as { animate: unknown }).animate).toEqual({ opacity: 1, left: 0 })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "none" })
   })
 
   it("autoplay loops, pauses on hover and focus, and can explicitly resume", async () => {
@@ -377,6 +395,24 @@ describe("Carousel navigation, slots and lifecycle", () => {
     await vi.advanceTimersByTimeAsync(100)
     await vi.advanceTimersByTimeAsync(1000)
     expect(exposed.value!.currentIndex).toBe(1)
+    host.unmount(); hosts.splice(hosts.indexOf(host), 1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it("stops counting focus after its slide is hidden", async () => {
+    vi.useFakeTimers()
+    const { host, exposed } = mountCarousel({ autoplay: true, interval: 1000 })
+    host.native.focusElement!(host.find("carousel-slide-0").children[0].id!)
+    await vi.advanceTimersByTimeAsync(100)
+    await host.settle()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(exposed.value!.currentIndex).toBe(0)
+    exposed.value!.goTo(1)
+    await host.settle()
+    // The crossfade window ends at 300ms; autoplay resumes after that.
+    await vi.advanceTimersByTimeAsync(400)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(exposed.value!.currentIndex).toBe(2)
     host.unmount(); hosts.splice(hosts.indexOf(host), 1)
     expect(vi.getTimerCount()).toBe(0)
   })

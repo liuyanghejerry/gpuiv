@@ -1,17 +1,19 @@
 /** Carousel — ported from animal-island-vue (MIT).
  * Native adaptation: CSS translateX becomes a native left/opacity tween; controls keep
- * their original geometry and colours. GPUIV does not implement display:none,
- * so only the current slide is mounted. Switching pages unmounts inactive
- * content and resets its local state, unlike the original mounted hidden pages.
- * The current page fades in; no hidden page can affect layout or focus. Native focus does not
- * bubble as DOM focusin does, so subtree focus is checked every 100 ms as well
- * as immediately for this component's controls. GPUIV supports role/label but
- * ignores aria-roledescription, aria-hidden, aria-current and aria-disabled;
- * mounting only the active page, disabled handlers/tabIndex and aria-selected
- * carry those states. Hover listeners also cover the viewport, controls and
- * direct slide root, since filled native children can block ancestor hitboxes.
- * A custom slide's deeper filled descendants must forward hover events to its
- * root for pauseOnHover to cover their areas.
+ * their original geometry and colours. All slides stay mounted and preserve
+ * their local state. Natural layout skips `display: none` pages, so hidden
+ * slides cannot affect size, hit-testing or tab order; the outgoing page
+ * remains visible for the crossfade window like React's visibility transition.
+ * Native focus does not bubble as DOM focusin does, so subtree focus is checked
+ * every 100 ms as well as immediately for this component's controls. A focus
+ * handle inside a hidden slide no longer counts as focus inside the carousel.
+ * GPUIV supports role/label but ignores aria-roledescription, aria-hidden,
+ * aria-current and aria-disabled; `display: none` removes hidden pages from
+ * layout and input. Hover listeners
+ * also cover the viewport, controls and direct slide root, since filled native
+ * children can block ancestor hitboxes. A custom slide's deeper filled
+ * descendants must forward hover events to its root for pauseOnHover to cover
+ * their areas.
  */
 import { Comment, Fragment, cloneVNode, computed, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType, type VNode } from "vue"
 import { motion, useElementBounds, useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
@@ -79,6 +81,7 @@ export const Carousel = defineComponent({
     const { renderer } = useGpuix()
     const count = ref(0)
     const internalIndex = ref(props.defaultActiveIndex)
+    const previousIndex = ref<number | null>(null)
     const hoverPaused = ref(false)
     const focusPaused = ref(false)
     const rotationPaused = ref(false)
@@ -87,6 +90,7 @@ export const Carousel = defineComponent({
     const paused = computed(() => hoverPaused.value || focusPaused.value || rotationPaused.value)
     let timer: ReturnType<typeof setInterval> | undefined
     let focusTimer: ReturnType<typeof setInterval> | undefined
+    let leaveTimer: ReturnType<typeof setTimeout> | undefined
     // Explicit Play is allowed while focus remains inside, as in the original.
     let focusedId: number | null | undefined
 
@@ -119,20 +123,50 @@ export const Carousel = defineComponent({
     }
     watch([() => props.autoplay, () => props.interval, paused, count, currentIndex], syncTimer, { flush: "post" })
 
-    function contains(node: HostNode | null, id: number): boolean {
-      return !!node && (node.id === id || node.children.some((child) => contains(child, id)))
+    function containsVisible(node: HostNode | null, id: number): boolean {
+      if (!node) return false
+      const style = node.props.style as StyleDesc | undefined
+      if (style?.display === "none") return false
+      return node.id === id || node.children.some((child) => containsVisible(child, id))
     }
-    function syncFocus() {
+    function syncFocus(force = false) {
       if (!renderer?.getFocusedElementId) return
       const id = renderer.getFocusedElementId()
-      if (id === focusedId) return
+      if (!force && id === focusedId) return
+      const previous = focusedId
       focusedId = id
-      focusPaused.value = id != null && contains(root.value, id)
+      if (id == null) {
+        // No native focus id is not the same as a blur. Keep an explicit
+        // onFocus pause until focus actually moves from an element to none.
+        if (previous != null) focusPaused.value = false
+        return
+      }
+      // A focused descendant of a hidden slide is no longer on screen; React's
+      // visibility transition loses that focus too. Do not let a stale native
+      // focus handle keep autoplay paused.
+      focusPaused.value = containsVisible(root.value, id)
     }
+    watch(currentIndex, (nextIndex, previous) => {
+      if (leaveTimer !== undefined) {
+        clearTimeout(leaveTimer)
+        leaveTimer = undefined
+      }
+      previousIndex.value = null
+      if (props.duration > 0 && previous !== undefined && previous !== nextIndex && count.value > 1) {
+        previousIndex.value = previous
+        leaveTimer = setTimeout(() => {
+          previousIndex.value = null
+          leaveTimer = undefined
+        }, Math.max(0, props.duration) * 1000)
+      }
+    }, { flush: "pre" })
+    // Re-evaluate after the render that applies display:none, not before it.
+    watch([currentIndex, previousIndex], () => syncFocus(true), { flush: "post" })
     onMounted(() => { syncTimer(); focusTimer = setInterval(syncFocus, 100) })
     onBeforeUnmount(() => {
       if (timer !== undefined) clearInterval(timer)
       if (focusTimer !== undefined) clearInterval(focusTimer)
+      if (leaveTimer !== undefined) clearTimeout(leaveTimer)
     })
     function onFocus(name: string) {
       focusedControl.value = name
@@ -141,8 +175,12 @@ export const Carousel = defineComponent({
     }
     function onBlur() {
       focusedControl.value = null
-      if (!renderer?.getFocusedElementId) focusPaused.value = false
-      else queueMicrotask(syncFocus)
+      if (!renderer?.getFocusedElementId) {
+        focusPaused.value = false
+        return
+      }
+      focusedId = renderer.getFocusedElementId()
+      focusPaused.value = focusedId != null && containsVisible(root.value, focusedId)
     }
     function keyDown(event: EventPayload) {
       if (event.key === "left") prev()
@@ -171,7 +209,7 @@ export const Carousel = defineComponent({
       const slides = flatten(slots.default?.() ?? [])
       count.value = slides.length
       const index = currentIndex.value
-      const activeSlide = slides[index]
+      const leaving = previousIndex.value
       const hasControls = slides.length > 1
       const compact = viewportWidth.value <= 480
       const arrowSize = compact ? 36 : 42
@@ -185,13 +223,31 @@ export const Carousel = defineComponent({
           ...(attrs.style as StyleDesc | undefined), ...(focusedControl.value === "region" ? { outline: { width: 2, color: colors.primary, offset: 3 } } : {}) }}>
         <div ref={viewport} testId={props.testId ? `${props.testId}-viewport` : undefined} onMouseEnter={hoverEnter} onMouseLeave={hoverLeave}
           style={{ position: "relative", display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 180, borderRadius: 20, backgroundColor: "rgb(247,243,223)" }}>
-          {activeSlide ? <motion.div key={activeSlide.key ?? index} initial={props.duration > 0 ? { opacity: 0, left: 18 } : false}
-            animate={{ opacity: 1, left: 0 }} transition={{ duration: Math.max(0, props.duration), ease }}
-            {...{ role: "group", "aria-roledescription": "slide", "aria-label": `第 ${index + 1} 张，共 ${slides.length} 张`,
-              testId: props.testId ? `${props.testId}-slide-${index}` : undefined, onMouseEnter: hoverEnter, onMouseLeave: hoverLeave }}
-            style={{ position: "relative", width: "100%", minHeight: 180, display: "flex", flexDirection: "column" }}>
-            {{ default: () => [cloneVNode(activeSlide, { onMouseEnter: hoverEnter, onMouseLeave: hoverLeave })] }}
-          </motion.div> : null}
+          {slides.map((slide, slideIndex) => {
+            const active = slideIndex === index
+            const visible = active || slideIndex === leaving
+            const slideStyle: StyleDesc = {
+              ...(active
+                ? { position: "relative" as const, left: 0 }
+                : { position: "absolute" as const, top: 0, right: 0, bottom: 0, left: 0 }),
+              width: "100%",
+              minHeight: 180,
+              display: visible ? "flex" : "none",
+              flexDirection: "column",
+              pointerEvents: active ? "auto" : "none",
+              userSelect: active ? "auto" : "none",
+            }
+            return <motion.div key={slide.key ?? slideIndex} initial={false}
+              animate={{ opacity: active ? 1 : 0, left: active ? 0 : 18 }}
+              transition={{ duration: Math.max(0, props.duration), ease }}
+              {...{ role: "group", "aria-roledescription": "slide", "aria-label": `第 ${slideIndex + 1} 张，共 ${slides.length} 张`,
+                "aria-hidden": active ? undefined : true,
+                testId: props.testId ? `${props.testId}-slide-${slideIndex}` : undefined,
+                onMouseEnter: hoverEnter, onMouseLeave: hoverLeave }}
+              style={slideStyle}>
+              {{ default: () => [cloneVNode(slide, { onMouseEnter: hoverEnter, onMouseLeave: hoverLeave })] }}
+            </motion.div>
+          })}
         </div>
         {hasControls && props.autoplay ? control("rotation", paused.value ? "继续自动播放" : "暂停自动播放", () => paused.value ? play() : pause(),
           { position: "absolute", top: 14, right: 14, minWidth: 58, height: 32, paddingLeft: 12, paddingRight: 12,

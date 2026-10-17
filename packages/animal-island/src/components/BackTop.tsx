@@ -1,7 +1,9 @@
 /** BackTop — aligned with animal-island-ui's React BackTop (MIT).
  * Uses the original RocketIcon, bottom 32 / right 24 placement, 10px entrance,
  * silhouette shadows and hover/press scaling through native numeric motion.
- * Native apps have no implicit browser window scroller: target returns a
+ * React's `filter: drop-shadow()` transition is a native filter track, so the
+ * blur radius and alpha interpolate continuously instead of swapping cached
+ * SVGs. Native apps have no implicit browser window scroller: target returns a
  * scrollable host id/ref. Shared scroll commands animate the return; the
  * visibility poll and controller are released on unmount.
  */
@@ -18,7 +20,7 @@ import {
 import { ease, fonts } from "../tokens.js"
 import { getIconDataUrl } from "./Icon.js"
 import { activationKeys } from "../interaction.js"
-import { dropShadowBounds, svgShadowDecoration, type SvgDecoration, type SvgDropShadow } from "./svg-effects.js"
+import { svgShadowDecoration, type SvgDecoration } from "./svg-effects.js"
 
 /** 滚动容器目标：元素 id 数字，或带数值 `id` 的 host ref / VirtualList ref。 */
 export type BackTopTarget = number | { id?: number | null } | null | undefined
@@ -31,23 +33,25 @@ export interface BackTopProps {
   testId?: string
 }
 
-/** React uses naive-icons RocketIcon. SVG filters keep the shadow on the
- * coloured silhouette rather than an unrelated rectangular/circular backing. */
-const rocketArtwork = new Map<boolean, SvgDecoration>()
-// Reserve the hover shadow's full four-sigma envelope in both states so the
-// native size tween scales the 64px rocket rather than changing its padding.
-const rocketBounds = dropShadowBounds(64, 64, [{ offsetX: 0, offsetY: 4, stdDeviation: 14, color: "#5b4e1e", opacity: 0.32 }])
-export function rocketIconDecoration(hovered: boolean): SvgDecoration {
-  const cached = rocketArtwork.get(hovered)
-  if (cached) return cached
+/** React uses naive-icons RocketIcon and paints its silhouette shadow with
+ * CSS `filter: drop-shadow()`. The native image pipeline applies the same
+ * filter after rasterizing the artwork, so the motion track can interpolate
+ * it. The SVG itself stays transparent around the 64px rocket. */
+const rocketArtwork: SvgDecoration = (() => {
   const original = Buffer.from(getIconDataUrl("Rocket").split(",")[1], "base64").toString()
   const inner = original.slice(original.indexOf(">") + 1, original.lastIndexOf("</svg>"))
-  const shadow: SvgDropShadow = { offsetX: 0, offsetY: 4, stdDeviation: hovered ? 14 : 10, color: "#5b4e1e", opacity: hovered ? 0.32 : 0.22 }
-  // The rest filter can use a smaller filter region, but the image viewport
-  // must be fixed across hover to keep the artwork's actual pixel size stable.
-  const decoration = svgShadowDecoration(64, 64, `<g transform="scale(${64 / 48})" fill="none" stroke="#2A2A2A" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`, [shadow], "", rocketBounds)
-  rocketArtwork.set(hovered, decoration)
-  return decoration
+  return svgShadowDecoration(64, 64, `<g transform="scale(${64 / 48})" fill="none" stroke="#2A2A2A" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">${inner}</g>`, [], "")
+})()
+export function rocketIconDecoration(): SvgDecoration {
+  return rocketArtwork
+}
+
+const filterNumber = (value: number) => String(Number(value.toFixed(4)))
+/** React's hover filter is scaled together with the parent's transform. */
+export function rocketShadowFilter(hovered: boolean, scale: number): string {
+  const sigma = (hovered ? 14 : 10) * scale
+  const alpha = hovered ? 0.32 : 0.22
+  return `drop-shadow(0px ${filterNumber(4 * scale)}px ${filterNumber(sigma)}px rgba(91, 78, 30, ${filterNumber(alpha)}))`
 }
 
 function resolveTargetId(target: (() => BackTopTarget) | undefined): number | null {
@@ -133,8 +137,10 @@ export const BackTop = defineComponent({
     return () => {
       const size = 64, restBottom = 32, restRight = 24
       const scale = pressed.value ? 0.96 : hovered.value ? 1.08 : 1
-      const art = rocketIconDecoration(hovered.value)
-      const artStyle = { width: art.width * scale, height: art.height * scale, left: art.left * scale + size * (1 - scale) / 2, top: art.top * scale + size * (1 - scale) / 2 + (pressed.value ? 2 : 0) }
+      const art = rocketIconDecoration()
+      const artStyle = { width: art.width * scale, height: art.height * scale,
+        left: art.left * scale + size * (1 - scale) / 2, top: art.top * scale + size * (1 - scale) / 2 + (pressed.value ? 2 : 0),
+        filter: rocketShadowFilter(hovered.value, scale) }
 
       const motionStyle: StyleDesc = {
         position: "absolute",

@@ -7753,6 +7753,7 @@ where
 
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     match style.display.as_deref() {
+        Some("none") => el = el.hidden(),
         Some("flex") => el = el.flex(),
         Some("grid") => el = el.grid(),
         _ => {}

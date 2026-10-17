@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { defineComponent, h } from "vue"
-import { BackTop, rocketIconDecoration } from "../src/components/BackTop.js"
+import { BackTop, rocketIconDecoration, rocketShadowFilter } from "../src/components/BackTop.js"
 import { Image } from "../src/components/Image.js"
 import { Tooltip } from "../src/components/Tooltip.js"
 import { stampPaperDecoration } from "../src/components/image-stamp-decoration.js"
 import { organicSurfaceDecoration } from "../src/components/organic-surface.js"
-import { dropShadowBounds } from "../src/components/svg-effects.js"
 import { mountHost } from "./harness.js"
 
 const decode = (src: string) => Buffer.from(src.split(",")[1], "base64").toString()
@@ -52,26 +51,27 @@ describe("React silhouette filters", () => {
     expect(host.all().some(node => node.type === "text" && node.children.some(child => child.text === "原生文字"))).toBe(true)
   })
 
-  it("keeps Rocket at 64px with CSS sigma 10/14 and one stable hover viewport", async () => {
-    const rest = rocketIconDecoration(false), hover = rocketIconDecoration(true)
-    const { src: restSrc, ...restBounds } = rest, { src: hoverSrc, ...hoverBounds } = hover
-    expect(restBounds).toEqual(hoverBounds)
-    expect(restBounds).toEqual(dropShadowBounds(64, 64, [{ offsetX: 0, offsetY: 4, stdDeviation: 14, color: "#5b4e1e", opacity: 0.32 }]))
-    expect(decode(restSrc)).toContain('dy="4" stdDeviation="10"')
-    expect(decode(hoverSrc)).toContain('dy="4" stdDeviation="14"')
-    expect(decode(hoverSrc)).toContain('transform="scale(1.3333333333333333)"')
-    expect(rocketIconDecoration(false)).toBe(rest)
-    expect(rocketIconDecoration(true)).toBe(hover)
+  it("keeps Rocket at 64px with a continuous CSS drop-shadow filter track", async () => {
+    const art = rocketIconDecoration()
+    const { src, ...bounds } = art
+    expect(bounds).toEqual({ left: 0, top: 0, width: 64, height: 64 })
+    expect(decode(src)).toContain('transform="scale(1.3333333333333333)"')
+    expect(decode(src)).not.toContain("feDropShadow")
+    expect(rocketIconDecoration()).toBe(art)
+    expect(rocketShadowFilter(false, 1)).toBe("drop-shadow(0px 4px 10px rgba(91, 78, 30, 0.22))")
+    expect(rocketShadowFilter(true, 1.08)).toBe("drop-shadow(0px 4.32px 15.12px rgba(91, 78, 30, 0.32))")
     vi.useFakeTimers()
     const host = mountHost(defineComponent(() => () => h(BackTop, { target: () => 42, testId: "back" })), { getScrollOffset: () => [0, -500] })
     hosts.push(host)
     await vi.advanceTimersByTimeAsync(120)
     await host.fire("back", "mouseEnter")
-    const style = host.find("back-icon").props.motion as { animate: { width: number; left: number } }
-    // Transparent bleed is scaled together with the artwork; subtracting it
-    // still gives the original 64px * 1.08 hover size and centred origin.
-    const scale = style.animate.width / hover.width
-    expect(64 * scale).toBeCloseTo(69.12)
-    expect(style.animate.left - hover.left * scale).toBeCloseTo((64 - 69.12) / 2)
+    const style = host.find("back-icon").props.motion as { animate: { width: number; left: number; filter: string } }
+    expect(style.animate.width).toBeCloseTo(69.12)
+    expect(style.animate.left).toBeCloseTo((64 - 69.12) / 2)
+    expect(style.animate.filter).toBe(rocketShadowFilter(true, 1.08))
+    await host.fire("back", "mouseDown", { button: 0 })
+    const pressed = host.find("back-icon").props.motion as { animate: { width: number; filter: string } }
+    expect(pressed.animate.width).toBeCloseTo(61.44)
+    expect(pressed.animate.filter).toBe(rocketShadowFilter(true, 0.96))
   })
 })

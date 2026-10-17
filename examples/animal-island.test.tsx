@@ -25,7 +25,7 @@ async function choosePage(app: ReturnType<typeof createTestApp>, id: string) {
 }
 
 describeNative("animal-island gallery", () => {
-  it("keeps inactive carousel slides out of native layout and input", async () => {
+  it("keeps inactive carousel slides mounted but out of native layout and paint", async () => {
     const app = createTestApp(defineComponent(() => () => h(Carousel, { testId: "native-carousel", duration: 0 }, {
       default: () => [1, 2, 3].map(index => h("div", { key: index, style: { height: 180 } }, [h("text", `slide-${index}`)])),
     })))
@@ -33,11 +33,13 @@ describeNative("animal-island gallery", () => {
     try {
       await app.settle()
       expect((await automation.getByTestId("native-carousel").bounds()).height).toBeCloseTo(180, 1)
-      expect(app.renderer.getAllText()).toContain("slide-1")
-      expect(app.renderer.getAllText()).not.toContain("slide-2")
+      // All slides stay in the retained tree so their Vue state survives.
+      expect(app.renderer.getAllText()).toEqual(expect.arrayContaining(["slide-1", "slide-2", "slide-3"]))
+      expect(app.renderer.getPaintedText().join(" ")).toContain("slide-1")
+      expect(app.renderer.getPaintedText().join(" ")).not.toContain("slide-2")
       await automation.getByTestId("native-carousel-next").click()
-      expect(app.renderer.getAllText()).toContain("slide-2")
-      expect(app.renderer.getAllText()).not.toContain("slide-1")
+      expect(app.renderer.getPaintedText().join(" ")).toContain("slide-2")
+      expect(app.renderer.getPaintedText().join(" ")).not.toContain("slide-1")
       expect((await automation.getByTestId("native-carousel").bounds()).height).toBeCloseTo(180, 1)
     } finally { app.unmount() }
   })

@@ -5,6 +5,7 @@ use std::time::Duration;
 use serde::{Deserialize, Deserializer};
 use web_time::Instant;
 
+use crate::custom_elements::img::image_filters::ImageFilters;
 use crate::style::{BoxShadowListValue, BoxShadowValue, DimensionValue, StyleDesc};
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -25,6 +26,8 @@ pub(crate) struct MotionStyle {
     #[serde(default, deserialize_with = "deserialize_color_target")]
     border_color: Option<MotionColorTarget>,
     box_shadow: Option<MotionShadows>,
+    /// Image filter list; consumed by `<img>` and painted by its filter pipeline.
+    filter: Option<ImageFilters>,
 }
 
 /// Resolve CSS colors only when a target changes. The frame clock interpolates
@@ -254,6 +257,7 @@ impl MotionStyle {
             color: self.color.or(fallback.color),
             border_color: self.border_color.or(fallback.border_color),
             box_shadow: self.box_shadow.or(fallback.box_shadow),
+            filter: self.filter.or(fallback.filter),
         }
     }
 
@@ -290,6 +294,12 @@ impl MotionStyle {
             border_color: color(self.border_color, target.border_color, progress),
             box_shadow: target.box_shadow.as_ref().map(|to| {
                 self.box_shadow
+                    .as_ref()
+                    .unwrap_or(to)
+                    .interpolate(to, progress)
+            }),
+            filter: target.filter.as_ref().map(|to| {
+                self.filter
                     .as_ref()
                     .unwrap_or(to)
                     .interpolate(to, progress)
@@ -349,6 +359,9 @@ impl MotionStyle {
             style.box_shadow = Some(BoxShadowListValue::Multiple(
                 value.0.iter().map(MotionShadow::style).collect(),
             ));
+        }
+        if let Some(value) = self.filter {
+            style.filter = Some(value.to_css());
         }
     }
 }
@@ -1134,5 +1147,65 @@ mod tests {
             state.visible_style(started).unwrap().color,
             Some(MotionColorTarget::Release)
         );
+    }
+
+    #[test]
+    fn interpolates_matching_filter_lists_and_serializes_css() {
+        let started = Instant::now();
+        let source = linear(
+            serde_json::json!({ "filter": "drop-shadow(0px 4px 10px rgba(91, 78, 30, 0.22))" }),
+            serde_json::json!({ "filter": "drop-shadow(0px 4px 14px rgba(91, 78, 30, 0.32))" }),
+        );
+        let state = MotionState::new(&source, started).unwrap();
+        let halfway = state
+            .visible_style(started + Duration::from_millis(500))
+            .unwrap()
+            .filter
+            .unwrap()
+            .to_css();
+        assert!(halfway.contains("drop-shadow(0px 4px 12px rgba(91, 78, 30, 0.27))"));
+    }
+
+    #[test]
+    fn filter_motion_targets_apply_to_the_base_style() {
+        let started = Instant::now();
+        let source = linear(
+            serde_json::json!({ "filter": "blur(2px) saturate(0.5)" }),
+            serde_json::json!({ "filter": "blur(6px) saturate(1.5)" }),
+        );
+        let mut state = MotionState::new(&source, started).unwrap();
+        let mut style = StyleDesc::default();
+        state
+            .visible_style(started + Duration::from_millis(500))
+            .unwrap()
+            .apply_to(&mut style);
+        assert_eq!(
+            style.filter.as_deref(),
+            Some("blur(4px) saturate(1)")
+        );
+    }
+
+    #[test]
+    fn mismatched_filter_lists_switch_at_the_midpoint() {
+        let started = Instant::now();
+        let source = linear(
+            serde_json::json!({ "filter": "blur(2px)" }),
+            serde_json::json!({ "filter": "saturate(0.5)" }),
+        );
+        let state = MotionState::new(&source, started).unwrap();
+        let early = state
+            .visible_style(started + Duration::from_millis(400))
+            .unwrap()
+            .filter
+            .unwrap()
+            .to_css();
+        let late = state
+            .visible_style(started + Duration::from_millis(600))
+            .unwrap()
+            .filter
+            .unwrap()
+            .to_css();
+        assert_eq!(early, "blur(2px)");
+        assert_eq!(late, "saturate(0.5)");
     }
 }

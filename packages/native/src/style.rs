@@ -241,6 +241,8 @@ pub struct StyleDesc {
     pub background_color: Option<String>,
     pub color: Option<String>,
     pub opacity: Option<f64>,
+    /// CSS filter list. Consumed by `<img>`; other elements ignore it.
+    pub filter: Option<String>,
 
     // Border
     pub border_width: Option<f64>,

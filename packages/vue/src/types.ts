@@ -18,6 +18,8 @@ export interface MotionStyle {
   borderColor?: string | null
   /** An empty list clears shadows; missing layers fade to transparent. */
   boxShadow?: BoxShadow | BoxShadow[]
+  /** Image filter list; matching lists interpolate natively on `<img>`. */
+  filter?: string
 }
 
 export type MotionEase =
@@ -181,6 +183,8 @@ export interface StyleDesc {
   backgroundColor?: string
   color?: string
   opacity?: number
+  /** CSS filter list. Currently consumed by `<img>`; other elements ignore it. */
+  filter?: string
 
   borderWidth?: number
   borderTopWidth?: number

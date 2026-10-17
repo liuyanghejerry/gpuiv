@@ -8,8 +8,10 @@ use std::{
     sync::Arc,
 };
 
-#[derive(Clone, Debug)]
-pub(super) struct ImageFilters {
+use serde::{Deserialize, Deserializer};
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ImageFilters {
     key: String,
     operations: Vec<Filter>,
 }
@@ -17,6 +19,17 @@ pub(super) struct ImageFilters {
 impl Hash for ImageFilters {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.key.hash(state);
+    }
+}
+
+impl<'de> Deserialize<'de> for ImageFilters {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        match ImageFilters::parse(&value) {
+            Ok(Some(filters)) => Ok(filters),
+            Ok(None) => Ok(ImageFilters::empty()),
+            Err(error) => Err(serde::de::Error::custom(error)),
+        }
     }
 }
 
@@ -55,7 +68,7 @@ impl Hash for SourceClip {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 enum Filter {
     Brightness(f32),
     Contrast(f32),
@@ -74,10 +87,153 @@ enum Filter {
     },
 }
 
+fn css_number(value: f32) -> String {
+    if !value.is_finite() {
+        return "0".to_string();
+    }
+    let mut value = format!("{value:.6}");
+    while value.ends_with('0') {
+        value.pop();
+    }
+    if value.ends_with('.') {
+        value.pop();
+    }
+    if value.is_empty() || value == "-0" {
+        "0".to_string()
+    } else {
+        value
+    }
+}
+
+fn interpolate_color(from: [f32; 4], to: [f32; 4], progress: f64) -> [f32; 4] {
+    let from_alpha = from[3] as f64;
+    let to_alpha = to[3] as f64;
+    let alpha = from_alpha + (to_alpha - from_alpha) * progress;
+    if alpha <= 0.0 {
+        return [0.0; 4];
+    }
+    let channel = |index: usize| {
+        ((from[index] as f64 * from_alpha
+            + ((to[index] as f64 * to_alpha) - (from[index] as f64 * from_alpha)) * progress)
+            / alpha) as f32
+    };
+    [
+        channel(0),
+        channel(1),
+        channel(2),
+        alpha as f32,
+    ]
+}
+
+impl Filter {
+    fn to_css(&self) -> String {
+        match self {
+            Filter::Brightness(value) => format!("brightness({})", css_number(*value)),
+            Filter::Contrast(value) => format!("contrast({})", css_number(*value)),
+            Filter::Saturate(value) => format!("saturate({})", css_number(*value)),
+            Filter::Grayscale(value) => format!("grayscale({})", css_number(*value)),
+            Filter::Sepia(value) => format!("sepia({})", css_number(*value)),
+            Filter::Invert(value) => format!("invert({})", css_number(*value)),
+            Filter::Opacity(value) => format!("opacity({})", css_number(*value)),
+            Filter::HueRotate(value) => format!("hue-rotate({}rad)", css_number(*value)),
+            Filter::Blur(value) => format!("blur({}px)", css_number(*value)),
+            Filter::DropShadow {
+                x,
+                y,
+                sigma,
+                color,
+            } => {
+                let color = color
+                    .map(|[blue, green, red, alpha]| {
+                        format!(
+                            "rgba({}, {}, {}, {})",
+                            css_number(red * 255.0),
+                            css_number(green * 255.0),
+                            css_number(blue * 255.0),
+                            css_number(alpha)
+                        )
+                    })
+                    .unwrap_or_else(|| "currentColor".to_string());
+                format!(
+                    "drop-shadow({}px {}px {}px {color})",
+                    css_number(*x),
+                    css_number(*y),
+                    css_number(*sigma)
+                )
+            }
+        }
+    }
+
+    fn interpolate(&self, target: &Self, progress: f64) -> Self {
+        if progress <= 0.0 {
+            return self.clone();
+        }
+        if progress >= 1.0 {
+            return target.clone();
+        }
+        let value = |from: f32, to: f32| (from as f64 + (to as f64 - from as f64) * progress) as f32;
+        let discrete = || {
+            if progress < 0.5 {
+                self.clone()
+            } else {
+                target.clone()
+            }
+        };
+        match (self, target) {
+            (Filter::Brightness(from), Filter::Brightness(to)) => {
+                Filter::Brightness(value(*from, *to))
+            }
+            (Filter::Contrast(from), Filter::Contrast(to)) => {
+                Filter::Contrast(value(*from, *to))
+            }
+            (Filter::Saturate(from), Filter::Saturate(to)) => {
+                Filter::Saturate(value(*from, *to))
+            }
+            (Filter::Grayscale(from), Filter::Grayscale(to)) => {
+                Filter::Grayscale(value(*from, *to))
+            }
+            (Filter::Sepia(from), Filter::Sepia(to)) => Filter::Sepia(value(*from, *to)),
+            (Filter::Invert(from), Filter::Invert(to)) => Filter::Invert(value(*from, *to)),
+            (Filter::Opacity(from), Filter::Opacity(to)) => Filter::Opacity(value(*from, *to)),
+            (Filter::HueRotate(from), Filter::HueRotate(to)) => {
+                Filter::HueRotate(value(*from, *to))
+            }
+            (Filter::Blur(from), Filter::Blur(to)) => Filter::Blur(value(*from, *to)),
+            (
+                Filter::DropShadow {
+                    x,
+                    y,
+                    sigma,
+                    color,
+                },
+                Filter::DropShadow {
+                    x: target_x,
+                    y: target_y,
+                    sigma: target_sigma,
+                    color: target_color,
+                },
+            ) => {
+                let color = match (color, target_color) {
+                    (Some(from), Some(to)) => Some(interpolate_color(*from, *to, progress)),
+                    (None, None) => None,
+                    _ => return discrete(),
+                };
+                Filter::DropShadow {
+                    x: value(*x, *target_x),
+                    y: value(*y, *target_y),
+                    sigma: value(*sigma, *target_sigma),
+                    color,
+                }
+            }
+            _ => discrete(),
+        }
+    }
+}
+
 impl ImageFilters {
     /// An invalid list is rejected as a whole, as with the CSS filter property.
     /// Lengths accept px and unitless zero. Angles accept deg/rad/grad/turn.
-    pub(super) fn parse(value: &str) -> Result<Option<Self>, String> {
+    pub(crate) fn parse(value: &str) -> Result<Option<Self>, String> {
         let value = value.trim();
         if value.is_empty() || value.eq_ignore_ascii_case("none") {
             return Ok(None);
@@ -157,6 +313,60 @@ impl ImageFilters {
             key: keys.join(" "),
             operations,
         }))
+    }
+
+    /// The empty list serializes as CSS `none`, so a motion target can clear a
+    /// filter that the base style or a previous target installed.
+    pub(crate) fn empty() -> Self {
+        Self {
+            key: String::new(),
+            operations: Vec::new(),
+        }
+    }
+
+    fn from_operations(operations: Vec<Filter>) -> Self {
+        let key = operations
+            .iter()
+            .map(|operation| format!("{operation:?}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        Self { key, operations }
+    }
+
+    pub(crate) fn to_css(&self) -> String {
+        if self.operations.is_empty() {
+            return "none".to_string();
+        }
+        self.operations
+            .iter()
+            .map(Filter::to_css)
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// Matching lists interpolate function by function. A changed function or
+    /// list length switches discretely at the midpoint, like box-shadow.
+    pub(crate) fn interpolate(&self, target: &Self, progress: f64) -> Self {
+        if progress <= 0.0 {
+            return self.clone();
+        }
+        if progress >= 1.0 {
+            return target.clone();
+        }
+        if self.operations.len() != target.operations.len() {
+            return if progress < 0.5 {
+                self.clone()
+            } else {
+                target.clone()
+            };
+        }
+        Self::from_operations(
+            self.operations
+                .iter()
+                .zip(&target.operations)
+                .map(|(from, to)| from.interpolate(to, progress))
+                .collect(),
+        )
     }
 
     pub(super) fn has_lengths(&self) -> bool {

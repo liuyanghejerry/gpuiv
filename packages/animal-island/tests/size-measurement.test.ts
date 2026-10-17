@@ -105,8 +105,8 @@ describe("size-dependent decoration and controls", () => {
     expect(host.find("carousel-prev").props.style).toMatchObject({ width: 36, height: 36, top: 112, left: 8 })
     expect(host.find("carousel-next").props.style).toMatchObject({ width: 36, height: 36, top: 112, right: 8 })
     await host.fire("carousel-next", "click")
-    expect(host.text()).toContain("two")
-    expect(host.text()).not.toContain("one")
+    expect(host.find("carousel-slide-1").props.style).toMatchObject({ display: "flex" })
+    expect(host.find("carousel-slide-0").props.style).toMatchObject({ display: "none" })
   })
 
   it("keeps AnimateHeight idle for position or width samples and still retargets natural or explicit height", async () => {

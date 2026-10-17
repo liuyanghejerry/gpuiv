@@ -11,7 +11,7 @@ use base64::Engine as _;
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 #[path = "image_filters.rs"]
-mod image_filters;
+pub(crate) mod image_filters;
 use image_filters::{FilteredImage, ImageFilters, RasterGeometry, SourceClip};
 
 type FilterResult = Result<Arc<FilteredImage>, gpui::ImageCacheError>;
@@ -805,6 +805,8 @@ pub struct ImgElement {
     load_state: Rc<RefCell<ImageLoadState>>,
     load_task: Option<gpui::Task<()>>,
     filters: Option<Arc<ImageFilters>>,
+    /// Parsed `style.filter`, which native motion rewrites every frame.
+    style_filter: Option<(String, Option<Arc<ImageFilters>>)>,
     filter_state: Rc<RefCell<FilterPaintState>>,
     filter_animation: Rc<RefCell<FilterAnimation>>,
 }
@@ -836,6 +838,33 @@ impl ImgElement {
         state.generation += 1;
         state.completed = false;
         state.src = src.to_string();
+    }
+
+    /// A style filter comes from native motion or from the caller's style and
+    /// overrides the `filter` prop. Cache the parse so a still target does not
+    /// rebuild the asset key every frame.
+    fn effective_filters(
+        &mut self,
+        style: Option<&crate::style::StyleDesc>,
+    ) -> Option<Arc<ImageFilters>> {
+        let Some(value) = style.and_then(|style| style.filter.as_deref()) else {
+            return self.filters.clone();
+        };
+        if let Some((cached, filters)) = &self.style_filter {
+            if cached == value {
+                return filters.clone();
+            }
+        }
+        let parsed = match ImageFilters::parse(value) {
+            Ok(Some(filters)) => Some(Arc::new(filters)),
+            Ok(None) => None,
+            Err(error) => {
+                log::warn!("ignoring invalid style filter: {error}");
+                None
+            }
+        };
+        self.style_filter = Some((value.to_string(), parsed.clone()));
+        parsed
     }
 
     fn observe_asset<A: gpui::Asset<Output = ImageResult>>(
@@ -1066,6 +1095,20 @@ mod tests {
             .is_none());
         element.destroy();
         assert!(element.filter_state.borrow().destroyed);
+    }
+
+    #[test]
+    fn style_filter_overrides_the_prop_and_is_cached_by_value() {
+        let mut element = ImgElement::default();
+        element.set_prop("filter", serde_json::json!("saturate(0.5)"));
+        let style: crate::style::StyleDesc =
+            serde_json::from_value(serde_json::json!({ "filter": "blur(2px)" })).unwrap();
+        let filters = element.effective_filters(Some(&style)).unwrap();
+        assert_eq!(filters.to_css(), "blur(2px)");
+        let repeated = element.effective_filters(Some(&style)).unwrap();
+        assert!(std::sync::Arc::ptr_eq(&filters, &repeated));
+        let fallback = element.effective_filters(None).unwrap();
+        assert_eq!(fallback.to_css(), "saturate(0.5)");
     }
 
     #[test]
@@ -1436,11 +1479,12 @@ impl CustomElement for ImgElement {
         let el = crate::automation::track_own_bounds(el, ctx.id);
         let animated = lookup(window, cx)
             .is_some_and(|result| result.is_ok_and(|image| image.frame_count() > 1));
-        if self.filters.is_some() || animated {
+        let filters = self.effective_filters(ctx.style);
+        if filters.is_some() || animated {
             FilteredImg {
                 basis: el,
                 original: lookup,
-                filters: self.filters.clone(),
+                filters,
                 object_fit: self.object_fit.as_gpui(),
                 state: self.filter_state.clone(),
                 animation: self.filter_animation.clone(),
