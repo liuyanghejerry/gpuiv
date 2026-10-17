@@ -191,14 +191,16 @@ describeNative("Select popup painted corners", () => {
         actual.forEach((value, channel) => expect(Math.abs(value - expected[channel]!)).toBeLessThanOrEqual(2))
       }
       // Sample just inside the panel's outer edge. The bounds tracker can
-      // report the padded content box, so 1.5px from its top/bottom remains
-      // outside the panel's 28px circular arc; a square fill would still fail.
+      // report the padded content box, so derive the bottom from the last row
+      // plus the panel's 12px padding instead of trusting panel.height.
+      const lastRow = app.renderer.getElementBounds(app.renderer.findByTestId("shape-option-three")!.id)!
+      const panelBottom = lastRow.y + lastRow.height + 12
       for (const x of [panel.x + 1.5, panel.x + panel.width - 1.5]) {
         expectColor(x, panel.y + 1.5, [34, 68, 102])
-        expectColor(x, panel.y + panel.height - 1.5, [34, 68, 102])
+        expectColor(x, panelBottom - 1.5, [34, 68, 102])
       }
       expectColor(panel.x + panel.width / 2, panel.y + 5, [255, 238, 160])
-      expectColor(panel.x + panel.width / 2, panel.y + panel.height - 5, [255, 238, 160])
+      expectColor(panel.x + panel.width / 2, panelBottom - 5, [255, 238, 160])
     } finally {
       app.renderer.clockResume()
       app.unmount()
