@@ -162,7 +162,7 @@ describeNative("Select popup painted corners", () => {
     const app = createTestApp(defineComponent(() => () => h("div", {
       style: { ...viewport, paddingLeft: 100, paddingTop: 260, backgroundColor: "#224466" },
     }, h(Select, {
-      testId: "shape", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }, { key: "three", label: "Three" }],
+      testId: "shape", side: "top", options: [{ key: "one", label: "One" }, { key: "two", label: "Two" }, { key: "three", label: "Three" }],
       style: { width: 220 },
     }))), viewport)
     const folder = mkdtempSync(join(tmpdir(), "gpuiv-select-corners-"))
