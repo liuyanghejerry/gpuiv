@@ -267,10 +267,11 @@ export const Pagination = defineComponent({
             style={itemStyle({ active: false, itemDisabled, focusKey: dir })}
             transition={{ duration: 0.15, ease: "ease" }}
           >
-            {{ default: () => [
+            {{ default: ({ animate }: { animate: { color?: string | null } }) => [
               <svg
               aria-hidden={true}
               src={dir === "prev" ? prevChevronUrl : nextChevronUrl}
+              motion={{ initial: false, animate: { color: animate.color }, transition: { duration: 0.15, ease: "ease" } }}
               style={{
                 width: 14,
                 height: 14,

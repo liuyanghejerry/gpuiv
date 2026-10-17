@@ -6,8 +6,8 @@ import { Skeleton, SkeletonAvatar, SkeletonButton, SkeletonInput } from '../src/
 import { mountHost } from './harness.js';
 
 const cleanups: (() => void)[] = [];
-function mount(component: Parameters<typeof mountHost>[0]) {
-    const app = mountHost(component);
+function mount(component: Parameters<typeof mountHost>[0], overrides: Parameters<typeof mountHost>[1] = {}) {
+    const app = mountHost(component, overrides);
     cleanups.push(app.unmount);
     return app;
 }
@@ -76,85 +76,85 @@ describe('Loading snowfall lifecycle', () => {
 });
 
 describe('Skeleton public helpers', () => {
-    it('samples five active skeletons on one timer and emits one mutation batch per 50ms', async () => {
+    it('shares width polling without emitting JS animation-frame mutations', async () => {
         vi.useFakeTimers();
         const active = ref(true);
-        const app = mount(defineComponent({ setup: () => () => h('div', [0, 1, 2, 3, 4].map(index =>
+        let width = 200;
+        const app = mount(defineComponent(() => () => h('div', [0, 1, 2, 3, 4].map(index =>
             h(Skeleton, { key: index, active: active.value, testId: `skeleton-${index}` })
-        )) }));
+        ))), { getElementBounds: () => ({ x: 0, y: 0, width, height: 40 }) });
         await app.settle();
         expect(vi.getTimerCount()).toBe(1);
+        for (const index of [0, 1, 2, 3, 4]) expect(app.find(`skeleton-${index}-shimmer`).props.motion).toMatchObject({
+            initial: { left: -200 }, animate: { left: 200 }, transition: { duration: 1.6, ease: 'easeInOut' },
+        });
         const apply = vi.spyOn(app.native, 'applyBatch');
         try {
-            await vi.advanceTimersByTimeAsync(50);
+            await vi.advanceTimersByTimeAsync(800);
+            await app.settle();
+            expect(apply).not.toHaveBeenCalled();
+            width = 320;
+            await vi.advanceTimersByTimeAsync(100);
             await app.settle();
             expect(apply).toHaveBeenCalledOnce();
-            const opacities = [0, 1, 2, 3, 4].map(index => (app.find(`skeleton-${index}`).props.style as { opacity: number }).opacity);
-            expect(opacities[0]).toBeLessThan(1);
-            expect(new Set(opacities).size).toBe(1);
-            apply.mockClear();
-            await vi.advanceTimersByTimeAsync(50);
-            await app.settle();
-            expect(apply).toHaveBeenCalledOnce();
-
+            expect(app.find('skeleton-0-shimmer').props.motion).toMatchObject({ initial: { left: -320 }, animate: { left: 320 } });
             active.value = false;
             await app.settle();
             expect(vi.getTimerCount()).toBe(0);
-            for (const index of [0, 1, 2, 3, 4]) expect(app.find(`skeleton-${index}`).props.style).toMatchObject({ opacity: 1 });
+            expect(app.all().some(node => String(node.props.testId).endsWith('-shimmer'))).toBe(false);
             apply.mockClear();
-            await vi.advanceTimersByTimeAsync(100);
+            await vi.advanceTimersByTimeAsync(200);
             await app.settle();
             expect(apply).not.toHaveBeenCalled();
-        } finally {
-            apply.mockRestore();
-        }
+        } finally { apply.mockRestore(); }
     });
-    it('preserves independent phase and resets newly active or reloading instances while releasing the last timer on unmount', async () => {
+    it('repeats independently on native completion and resets on reactivation/reloading', async () => {
         vi.useFakeTimers();
         const secondActive = ref(false), secondLoading = ref(true);
-        const app = mount(defineComponent({ setup: () => () => h('div', [
+        const app = mount(defineComponent(() => () => h('div', [
             h(Skeleton, { testId: 'first' }),
-            h(Skeleton, { testId: 'second', active: secondActive.value, loading: secondLoading.value }, { default: () => h('text', 'loaded second') }),
-        ]) }));
-        const opacity = (id: string) => (app.find(id).props.style as { opacity: number }).opacity;
-        await vi.advanceTimersByTimeAsync(150);
+            h(Skeleton, { testId: 'second', active: secondActive.value, loading: secondLoading.value }, () => h('text', 'loaded second')),
+        ])));
         await app.settle();
-        expect(opacity('second')).toBe(1);
-        const firstBefore = opacity('first');
+        const first = app.find('first-shimmer');
+        await app.fire(first, 'motionComplete', { motionGeneration: 99 });
+        expect(app.find('first-shimmer').id).toBe(first.id);
+        await app.fire(first, 'motionComplete', { motionGeneration: 1 });
+        expect(app.find('first-shimmer').id).not.toBe(first.id);
+        expect(app.find('first-shimmer').props.motion).toMatchObject({ generation: 2 });
         secondActive.value = true;
         await app.settle();
-        expect(vi.getTimerCount()).toBe(1);
-        expect(opacity('first')).toBe(firstBefore);
-        expect(opacity('second')).toBe(1);
-        await vi.advanceTimersByTimeAsync(50);
-        await app.settle();
-        const firstSample = opacity('second');
-        expect(firstSample).toBeLessThan(opacity('first'));
-        expect(firstSample).toBeGreaterThanOrEqual(0.45);
-
+        expect(app.find('second-shimmer').props.motion).toMatchObject({ generation: 1 });
+        expect(app.find('first-shimmer').props.motion).toMatchObject({ generation: 2 });
+        await app.fire('second-shimmer', 'motionComplete', { motionGeneration: 1 });
+        expect(app.find('second-shimmer').props.motion).toMatchObject({ generation: 2 });
         secondActive.value = false;
         await app.settle();
-        expect(opacity('second')).toBe(1);
         expect(vi.getTimerCount()).toBe(1);
         secondActive.value = true;
         await app.settle();
-        await vi.advanceTimersByTimeAsync(50);
-        await app.settle();
-        expect(opacity('second')).toBe(firstSample);
-
+        expect(app.find('second-shimmer').props.motion).toMatchObject({ generation: 1 });
         secondLoading.value = false;
         await app.settle();
         expect(app.text()).toContain('loaded second');
-        expect(vi.getTimerCount()).toBe(1);
         secondLoading.value = true;
         await app.settle();
-        expect(opacity('second')).toBe(1);
-        await vi.advanceTimersByTimeAsync(50);
-        await app.settle();
-        expect(opacity('second')).toBe(firstSample);
-        app.unmount();
-        cleanups.pop();
+        expect(app.find('second-shimmer').props.motion).toMatchObject({ generation: 1 });
+        app.unmount(); cleanups.pop();
         expect(vi.getTimerCount()).toBe(0);
+    });
+    it('waits for painted positive bounds before starting the band', async () => {
+        vi.useFakeTimers();
+        let width = 0;
+        const app = mount(defineComponent(() => () => h(Skeleton, { testId: 'waiting' })), {
+            getElementBounds: () => ({ x: 0, y: 0, width, height: 40 }),
+        });
+        await app.settle();
+        expect(app.all().some(node => node.props.testId === 'waiting-shimmer')).toBe(false);
+        width = 180;
+        await vi.advanceTimersByTimeAsync(100);
+        await app.settle();
+        expect(app.find('waiting-shimmer').props.motion).toMatchObject({ initial: { left: -180 }, animate: { left: 180 } });
     });
     it.each([
         [SkeletonButton, 'small', 80, 32, 50],
@@ -180,7 +180,7 @@ describe('Skeleton public helpers', () => {
         const app = mount(defineComponent({ setup: () => () => h(SkeletonInput, { active: active.value, testId: 'input' }) }));
         await vi.advanceTimersByTimeAsync(100);
         await app.settle();
-        expect((app.find('input').props.style as { opacity: number }).opacity).toBeLessThan(1);
+        expect(app.find('input-shimmer').props.motion).toMatchObject({ animate: { left: 600 } });
         active.value = false;
         await app.settle();
         expect(app.find('input').props.style).toMatchObject({ opacity: 1 });
@@ -190,7 +190,7 @@ describe('Skeleton public helpers', () => {
         vi.useFakeTimers();
         const loading = ref(true);
         const app = mount(defineComponent({ setup: () => () => h(Skeleton, { loading: loading.value, variant: 'paragraph', rows: 3, rowWidths: [100, '50%'], testId: 'paragraph' }, () => h('text', 'Loaded content')) }));
-        expect(app.find('paragraph').children.map(node => (node.props.style as { width: unknown }).width)).toEqual([100, '50%', '50%']);
+        expect(app.find('paragraph').children.filter(node => (node.props.style as { backgroundColor?: string })?.backgroundColor === '#dfd9ce').map(node => (node.props.style as { width: unknown }).width)).toEqual([100, '50%', '50%']);
         loading.value = false;
         await app.settle();
         expect(app.text()).toContain('Loaded content');

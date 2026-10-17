@@ -88,13 +88,14 @@ export const ColorSurface = defineComponent({
       const original = attrs.style as StyleDesc | undefined ?? {}
       const surface = surfaceMotion(original, { hovered: hovered.value && !inactive(), pressed: pressed.value && !inactive() }, props.geometry)
       const prior = attrs.motion as { initial?: MotionStyle | false; animate?: MotionStyle; transition?: MotionTransition } | undefined
+      const animate = { ...surface.animate, ...prior?.animate }
       const pseudo = !inactive() && (original.hover !== undefined || original.active !== undefined)
       const keyboard = pseudo && ["button", "switch", "checkbox", "radio", "tab", "option"].includes(String(attrs.role))
       return h("div", {
         ...attrs,
         ref: props.hostRef,
         style: surface.style,
-        motion: { ...prior, initial: prior?.initial ?? false, animate: { ...surface.animate, ...prior?.animate }, transition: prior?.transition ?? props.transition ?? { duration: duration.base, ease } },
+        motion: { ...prior, initial: prior?.initial ?? false, animate, transition: prior?.transition ?? props.transition ?? { duration: duration.base, ease } },
         ...(pseudo ? {
           onMouseEnter: (event: EventPayload) => { hovered.value = true; forward(attrs.onMouseEnter, event) },
           onMouseLeave: (event: EventPayload) => { hovered.value = false; pressed.value = false; forward(attrs.onMouseLeave, event) },
@@ -106,7 +107,7 @@ export const ColorSurface = defineComponent({
           onKeyUp: (event: EventPayload) => { if (event.key === "enter" || event.key === "space") pressed.value = false; forward(attrs.onKeyUp, event) },
           onBlur: (event: EventPayload) => { pressed.value = false; forward(attrs.onBlur, event) },
         } : {}),
-      }, slots.default?.())
+      }, slots.default?.({ animate }))
     }
   },
 }) as DefineComponent<ColorSurfaceProps>

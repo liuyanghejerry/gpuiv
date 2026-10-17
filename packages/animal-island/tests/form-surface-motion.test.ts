@@ -54,6 +54,25 @@ describe("native form color and shadow transition targets", () => {
     expect(host.find("switch").props["aria-checked"]).toBe(true)
   })
 
+  it("fades Switch disabled/loading states while blocking interaction immediately", async () => {
+    const disabled = ref(false), loading = ref(false), change = vi.fn()
+    const host = mount(() => h(Switch, { testId: "switch", disabled: disabled.value, loading: loading.value, onChange: change }))
+    expect(motion(host.find("switch")).animate.opacity).toBe(1)
+    for (const [nextDisabled, nextLoading, opacity] of [[true, false, 0.5], [false, true, 0.7], [false, false, 1]] as const) {
+      disabled.value = nextDisabled; loading.value = nextLoading; await host.settle()
+      expect(motion(host.find("switch")).animate.opacity).toBe(opacity)
+      expect(motion(host.find("switch")).transition.duration).toBe(0.25)
+      if (nextDisabled || nextLoading) {
+        expect(host.find("switch").props.tabIndex).toBe(nextDisabled ? -1 : 0)
+        await host.fire("switch", "keyDown", { key: "space" })
+        await host.fire("switch", "click")
+        expect(change).not.toHaveBeenCalled()
+      }
+    }
+    await host.fire("switch", "keyDown", { key: "space" })
+    expect(change).toHaveBeenCalledExactlyOnceWith(true)
+  })
+
   it.each([Checkbox, Radio])("keeps selection fill/splash while animating border .25s and label .15s", async component => {
     const host = mount(() => h(component, { testId: "group", options: [{ label: "Apple", value: "apple" }, { label: "Pear", value: "pear" }] }))
     const role = component === Checkbox ? "checkbox" : "radio"

@@ -3,11 +3,10 @@
  *  Ported from animal-island-vue (https://github.com/guokaigdg/animal-island-vue, MIT).
  *
  *  Fidelity notes (see issue #164):
- *  - The shimmer — a `linear-gradient` band sweeping via `transform` — cannot
- *    be expressed in GPUIV (no background images, no transforms, two-stop
- *    gradients only). `active` degrades to an opacity breath: a shared 50ms clock
- *    drives opacity between 0.45 and 1 with an ease-in-out-quad curve over
- *    1.6s, the original shimmer period. `active={false}` paints statically.
+ *  - The original five-stop silver band is an SVG image, clipped by the
+ *    skeleton and translated by the native clock over 1.6s ease-in-out.
+ *    Completion restarts the offscreen band; a shared 100ms bounds poll
+ *    tracks responsive widths, without sampling animation frames in JS.
  *  - Length props take `number` (px) or `string`; 'px'-suffixed and plain
  *    numeric strings are normalised to numbers, percentages pass through —
  *    GPUIV dimensions accept only numbers / percent strings / 'auto'.
@@ -15,8 +14,8 @@
  *    base #eae5db, paragraph lines #dfd9ce.
  */
 
-import { computed, createCommentVNode, defineComponent, onUnmounted, ref, watch, type PropType } from "vue"
-import type { StyleDesc } from "@gpuiv/vue"
+import { computed, createCommentVNode, defineComponent, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue"
+import { useGpuix, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
 
 export type SkeletonVariant = "text" | "circle" | "rect" | "paragraph"
 export interface SkeletonProps {
@@ -40,26 +39,21 @@ const BG_LINE = "#dfd9ce"
 
 const DEFAULT_PARAGRAPH_WIDTHS = ["100%", "92%", "84%", "76%", "68%"]
 
-const BREATH_PERIOD = 1600
-const BREATH_TICK = 50
-const BREATH_MIN = 0.45
+// One tiny, cached strip supplies all five React gradient stops.
+const SHIMMER_URL = `data:image/svg+xml;base64,${Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="256" height="2" viewBox="0 0 256 2" preserveAspectRatio="none"><defs><linearGradient id="shimmer" x1="0" y1="0" x2="1" y2="0" color-interpolation="sRGB"><stop offset="0" stop-color="#fffaeb" stop-opacity="0"/><stop offset=".25" stop-color="#fffaeb" stop-opacity=".18"/><stop offset=".5" stop-color="#fffcf2" stop-opacity=".55"/><stop offset=".75" stop-color="#fffaeb" stop-opacity=".18"/><stop offset="1" stop-color="#fffaeb" stop-opacity="0"/></linearGradient></defs><rect width="256" height="2" fill="url(#shimmer)"/></svg>').toString("base64")}`
 
-// Advance every active instance in one JS turn so Vue naturally emits one
-// mutation batch per cadence. Each subscriber owns its phase and reset state.
-const breathSamples = new Set<() => void>()
-let breathTimer: ReturnType<typeof setInterval> | undefined
-function subscribeBreath(sample: () => void): () => void {
-  breathSamples.add(sample)
-  if (breathTimer === undefined) {
-    breathTimer = setInterval(() => {
-      for (const current of breathSamples) current()
-    }, BREATH_TICK)
-  }
+const measurements = new Set<() => void>()
+let measurementTimer: ReturnType<typeof setInterval> | undefined
+function subscribeMeasurement(sample: () => void): () => void {
+  measurements.add(sample)
+  if (measurementTimer === undefined) measurementTimer = setInterval(() => {
+    for (const current of measurements) current()
+  }, 100)
   return () => {
-    breathSamples.delete(sample)
-    if (breathSamples.size === 0 && breathTimer !== undefined) {
-      clearInterval(breathTimer)
-      breathTimer = undefined
+    measurements.delete(sample)
+    if (measurements.size === 0 && measurementTimer !== undefined) {
+      clearInterval(measurementTimer)
+      measurementTimer = undefined
     }
   }
 }
@@ -87,35 +81,46 @@ export const Skeleton = defineComponent({
     testId: { type: String, default: undefined },
   },
   setup(props, { attrs, slots }) {
-    const breath = ref(1)
+    const surface = ref<HostNode | null>(null)
+    const width = ref(0)
+    const cycle = ref(0)
+    const { renderer } = useGpuix()
+    let mounted = false
     let release: (() => void) | undefined
-    let elapsed = 0
-
-    function stopBreath() {
+    const measure = () => {
+      if (surface.value?.id == null) return
+      try {
+        const next = renderer?.getElementBounds?.(surface.value.id)?.width
+        if (next !== undefined && Number.isFinite(next)) width.value = Math.max(0, next)
+      } catch { /* The native window may not have painted its first bounds yet. */ }
+    }
+    function syncMeasurement() {
       release?.()
       release = undefined
-      breath.value = 1
+      cycle.value = 0
+      if (mounted && props.active && props.loading) {
+        measure()
+        release = subscribeMeasurement(measure)
+      }
     }
+    watch(() => props.active && props.loading, syncMeasurement, { flush: "post" })
+    onMounted(() => { mounted = true; syncMeasurement() })
+    onBeforeUnmount(() => { mounted = false; release?.() })
 
-    watch(
-      () => props.active && props.loading,
-      (on) => {
-        if (on) {
-          elapsed = 0
-          release = subscribeBreath(() => {
-            elapsed = (elapsed + BREATH_TICK) % BREATH_PERIOD
-            const t = elapsed / BREATH_PERIOD
-            const tri = t < 0.5 ? t * 2 : 2 - t * 2 // ping-pong 0→1→0
-            const eased = tri < 0.5 ? 2 * tri * tri : 1 - Math.pow(-2 * tri + 2, 2) / 2 // easeInOutQuad
-            breath.value = BREATH_MIN + (1 - BREATH_MIN) * eased
-          })
-        } else {
-          stopBreath()
-        }
-      },
-      { immediate: true },
-    )
-    onUnmounted(stopBreath)
+    const shimmer = () => {
+      if (!props.active || width.value <= 0) return null
+      const generation = cycle.value + 1
+      return <div key={`${width.value}:${cycle.value}`} aria-hidden="true"
+        testId={props.testId ? `${props.testId}-shimmer` : undefined}
+        motion={{ initial: { left: -width.value }, animate: { left: width.value },
+          transition: { duration: 1.6, ease: "easeInOut" }, generation }}
+        onMotionComplete={(event: EventPayload) => {
+          if (props.active && props.loading && event.motionGeneration === generation && cycle.value + 1 === generation) cycle.value++
+        }}
+        style={{ position: "absolute", top: 0, left: -width.value, width: width.value, height: "100%", pointerEvents: "none" }}>
+        <img src={SHIMMER_URL} objectFit="fill" style={{ width: "100%", height: "100%", pointerEvents: "none" }} />
+      </div>
+    }
 
     const paragraphWidths = computed<(number | string)[]>(() => {
       const widths = Array.isArray(props.rowWidths) ? props.rowWidths : DEFAULT_PARAGRAPH_WIDTHS
@@ -127,16 +132,19 @@ export const Skeleton = defineComponent({
       // loading=false 时不显示骨架屏，有 children 则渲染插槽内容
       if (!props.loading) return slots.default?.() ?? createCommentVNode()
 
-      const opacity = props.active ? breath.value : 1
+      const opacity = 1
 
       // paragraph 段落模式：根节点无底色，每行独立骨架条
       if (props.variant === "paragraph") {
         return (
           <div
             {...attrs}
+            ref={surface}
             aria-hidden="true"
             testId={props.testId}
             style={{
+              position: "relative",
+              overflow: "hidden",
               display: "flex",
               flexDirection: "column",
               gap: 10,
@@ -146,6 +154,7 @@ export const Skeleton = defineComponent({
             {paragraphWidths.value.map((w, i) => (
               <div key={i} style={{ width: dim(w), height: 14, borderRadius: 12, backgroundColor: BG_LINE, opacity }} />
             ))}
+            {shimmer()}
           </div>
         )
       }
@@ -178,6 +187,7 @@ export const Skeleton = defineComponent({
       return (
         <div
           {...attrs}
+          ref={surface}
           aria-hidden="true"
           testId={props.testId}
           style={{
@@ -190,7 +200,7 @@ export const Skeleton = defineComponent({
             ...sizeStyle,
             ...(attrs.style as StyleDesc | undefined),
           }}
-        />
+        >{shimmer()}</div>
       )
     }
   },

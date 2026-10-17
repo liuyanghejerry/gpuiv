@@ -139,6 +139,7 @@ export const Switch = defineComponent({
       return (
         <ColorSurface
           {...forwardAttrs}
+          geometry={["opacity"]}
           role="switch"
           aria-checked={checked}
           aria-busy={props.loading || undefined}

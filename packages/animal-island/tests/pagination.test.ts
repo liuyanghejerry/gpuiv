@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { defineComponent, h, ref } from "vue"
+import { colors } from "../src/tokens.js"
 import type { HostNode } from "@gpuiv/vue"
 import { Pagination } from "../src/components/Pagination.js"
 import { mountHost } from "./harness.js"
@@ -17,6 +18,24 @@ describe("Pagination", () => {
     expect(layer.props.align).toBe("start")
     expect(layer.props.gap).toBe(8)
     expect(host.find(node => node.props.testId === "pager-size-changer-popup")).toBeDefined()
+  })
+
+  it("animates arrow SVG tint with the button through hover and disabled states", async () => {
+    const disabled = ref(false)
+    const host = mountHost(defineComponent(() => () => h(Pagination, { total: 100, defaultCurrent: 2, variant: "teal", disabled: disabled.value })))
+    hosts.push(host)
+    const edge = () => host.find(node => node.props["aria-label"] === "下一页")
+    const target = (node: HostNode) => (node.props.motion as { animate: { color: string } }).animate.color
+    const icon = () => edge().children.find(node => node.type === "svg")!
+    expect(target(icon())).toBe(colors.warmSoft)
+    await host.fire(edge(), "mouseEnter")
+    expect(target(edge())).toBe(colors.primary)
+    expect(target(icon())).toBe(target(edge()))
+    await host.fire(edge(), "mouseLeave")
+    expect(target(icon())).toBe(colors.warmSoft)
+    disabled.value = true; await host.settle()
+    expect(target(icon())).toBe(colors.shadowSoft)
+    expect(target(icon())).toBe(target(edge()))
   })
 
   it("emits change for an uncontrolled size update and clamps the page", async () => {

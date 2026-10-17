@@ -88,7 +88,7 @@ reveal shadow inside its border box; CSS outer shadows remove that interior.
 | Rich content and overlays | Node-valued labels/titles/tips; Tooltip hover/focus/click and organic silhouette shadow; native copy/close-button colors; Notification closes after native exit and destroy removes immediately | Arbitrary child content is not clipped to SVG silhouettes; mask/focus behavior follows native APIs; generic subtree scale/filter effects remain separate work |
 | Image / Loading / BackTop | Stamp photo saturation/contrast, perforations/paper texture and chained SVG alpha shadows; decode events and preview; three-layer frame shadows; elliptical vignette; Rocket with correct shadow sigmas and outside canvas | Stamp-year typography and preview scale differ; Rocket swaps two cached filter states rather than continuously interpolating blur; BackTop requires a native scroll target |
 | Form / Table / pickers / Carousel | Form instance replacement and subscription cleanup; table paging and hover colors/radii; picker double shadows and option transitions; active slides, control/dot transitions, autoplay and native entrances | Avoid nested scrollers; picker columns page; Table loading backdrop blur is not a single-image filter; Carousel inactive slides unmount and lose their local state |
-| Skeleton / Cursor | Shared breathing timer, specialised placeholders; local cursor follower and effects | Shimmer remains opacity rather than a moving gradient; the OS cursor cannot be replaced or hidden by this API |
+| Skeleton / Cursor | Native moving five-stop shimmer, specialised placeholders; local cursor follower and effects | Shimmer overflow clipping is rectangular, with remaining rounded/circular edge differences; the OS cursor cannot be replaced or hidden by this API |
 
 ## Verification and limits
 
@@ -163,7 +163,9 @@ and synchronously waiting for another frame. Automation queries still wait for
 fresh layout. A production regression checks that 120 consecutive bounds reads
 produce no additional frames, then verifies freshness after a layout change.
 Size-dependent decoration, progress and height animations ignore position-only
-samples; active Skeletons share one 50ms timer and one Vue flush. Components
+samples; active Skeletons share one 100ms width poll. Their shimmer uses native motion,
+with no Vue animation-frame updates. Only width changes and one native
+completion per 1.6s cycle update the band; completion starts the next offscreen sweep. Components
 with the same window-size polling interval also share one query per renderer.
 Image decode completion follows GPUI's next-frame notification schedule so a
 burst of completed assets does not repaint the entire window once per image.
