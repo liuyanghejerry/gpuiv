@@ -190,11 +190,12 @@ describeNative("Select popup painted corners", () => {
         const actual = image.pixel(Math.floor(x * scaleX), Math.floor(y * scaleY))
         actual.forEach((value, channel) => expect(Math.abs(value - expected[channel]!)).toBeLessThanOrEqual(2))
       }
-      // paddingY=12 places the old rectangular row fill at y=13.5, while
-      // x=1.5 is still safely outside the panel's 28px circular corner.
+      // Sample just inside the panel's outer edge. The bounds tracker can
+      // report the padded content box, so 1.5px from its top/bottom remains
+      // outside the panel's 28px circular arc; a square fill would still fail.
       for (const x of [panel.x + 1.5, panel.x + panel.width - 1.5]) {
-        expectColor(x, panel.y + 13.5, [34, 68, 102])
-        expectColor(x, panel.y + panel.height - 13.5, [34, 68, 102])
+        expectColor(x, panel.y + 1.5, [34, 68, 102])
+        expectColor(x, panel.y + panel.height - 1.5, [34, 68, 102])
       }
       expectColor(panel.x + panel.width / 2, panel.y + 5, [255, 238, 160])
       expectColor(panel.x + panel.width / 2, panel.y + panel.height - 5, [255, 238, 160])
