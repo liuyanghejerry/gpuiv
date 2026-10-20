@@ -23,8 +23,12 @@ futures = "0.3"
 # nothing on either.
 rustc-hash = "2"
 
-# Use the GPUI fork checked out in the zed submodule.
-gpui = { path = "../../zed/crates/gpui", default-features = false, features = ["font-kit", "profiler"] }
+# Use the GPUI fork checked out in the zed submodule. gpui's own wayland/x11
+# features compile compositor selection in; our builds already inherited them
+# through gpui_linux's feature forwarding (and test-support), but pin them
+# explicitly so no-default-features release builds keep working if that chain
+# changes — the same hardening as upstream cd9493a.
+gpui = { path = "../../zed/crates/gpui", default-features = false, features = ["font-kit", "profiler", "wayland", "x11"] }
 gpui_platform = { path = "../../zed/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
 thiserror = "2"
 syntect = { version = "5.3", default-features = false, features = ["regex-fancy"] }
