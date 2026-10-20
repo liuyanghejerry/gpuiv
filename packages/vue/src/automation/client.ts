@@ -972,6 +972,10 @@ export async function launch(options: {
       child.kill()
     },
   })
+  // The child's stderr carries its own console output (frame-loop passes,
+  // runtime errors). Without this it vanished into an unread pipe, so a
+  // misbehaving live child was invisible in test output.
+  child.stderr.pipe(process.stderr)
   return app
 }
 

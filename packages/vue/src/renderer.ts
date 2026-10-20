@@ -177,6 +177,9 @@ export function startFrameLoop(
   const stop = (): void => {
     if (stopped) return
     stopped = true
+    if (!process.env.VITEST) {
+      console.error(`[frameloop] stop t=${performance.now().toFixed(0)}`)
+    }
     if (frameWake) renderer.setFrameWakeCallback?.(null)
     if (timer !== null) clearTimeout(timer)
     timer = null
