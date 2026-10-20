@@ -4,10 +4,12 @@
 the event-driven host wakeup. `515df19` + zed `2565b8a3e` add
 `gpui_macos::set_frame_wake_hook` and the `setFrameWakeCallback()` napi method;
 `startFrameLoop` in `packages/vue/src/renderer.ts` now wakes from GPUI's
-display link (vsync) through a weak, coalesced callback, with a 100ms fallback
-timer for a lost wake. The fixed-rate leftover-budget poll survives only as
-the fallback for an explicit `frameMs` or a renderer without wake support
-(macOS default 8ms, other platforms 16ms).
+display link (vsync) through a weak, coalesced callback. The fallback timer is
+the platform's default poll rate, not upstream's 100ms: macOS stops
+display-link delivery to occluded windows, and CI's live automation reads
+last-painted bounds — a 100ms fallback let clicks land between a commit and
+its first paint (fixed in PR #170 after instrumented CI runs showed ~100ms
+wake gaps). An explicit `frameMs` keeps fixed-rate timer polling.
 
 The original divergence, for the record:
 

@@ -111,10 +111,14 @@ const automationBackends = new WeakMap<NativeRenderer, InProcessBackend>()
  *  need the slower shutdown poll. */
 const DEFAULT_FRAME_MS = process.platform === "darwin" ? 8 : 16
 
-/** While a display link drives the loop, this timer only catches a lost wake
- *  (a hidden window's display link stops firing); one fallback tick per 100ms
- *  keeps AppKit responsive without busy-polling. */
-const FRAME_WAKE_FALLBACK_MS = 100
+/** While a display link drives the loop, this timer catches a lost wake.
+ *  macOS stops display-link delivery to occluded or hidden windows, and an
+ *  automation click reads *last-painted* bounds — a 100ms fallback made a
+ *  click that lands right after a commit see no paint yet. The fallback is
+ *  the platform's default poll rate, so a wake-starved window paces exactly
+ *  like the pre-display-link loop; while wakes flow they keep clearing the
+ *  fallback timer and idle cost stays at wake rate. */
+const FRAME_WAKE_FALLBACK_MS = DEFAULT_FRAME_MS
 
 /** Clears the frame-wake callback. The native side coalesces wakes and never
  *  blocks; `null` releases the hook on the renderer. */
@@ -177,9 +181,6 @@ export function startFrameLoop(
   const stop = (): void => {
     if (stopped) return
     stopped = true
-    if (!process.env.VITEST) {
-      console.error(`[frameloop] stop t=${performance.now().toFixed(0)}`)
-    }
     if (frameWake) renderer.setFrameWakeCallback?.(null)
     if (timer !== null) clearTimeout(timer)
     timer = null
@@ -199,12 +200,6 @@ export function startFrameLoop(
     // pass may be scheduled at a time.
     if (timer !== null) clearTimeout(timer)
     timer = null
-    // TEMPORARY CI DIAGNOSTIC (frame-loop wake path): first passes + stop.
-    const debug = !process.env.VITEST
-    if (debug && debugPasses < 40) {
-      debugPasses += 1
-      console.error(`[frameloop] pass=${debugPasses} t=${performance.now().toFixed(0)} wake=${frameWake ? 1 : 0}`)
-    }
     const started = performance.now()
     let running = true
     for (const current of renderers) {
@@ -214,7 +209,6 @@ export function startFrameLoop(
         scheduleRuntimeError(error, "frame loop tick", undefined, current)
       }
     }
-    if (debug && !running) console.error("[frameloop] tick reported not running")
     if (!running) {
       stop()
       options.onTerminated?.()
@@ -231,10 +225,6 @@ export function startFrameLoop(
   // Wakes only pace a loop the caller did not pin to a fixed rate.
   const frameWake =
     options.frameMs === undefined && renderer.setFrameWakeCallback?.(loop) === true
-  let debugPasses = 0
-  if (!process.env.VITEST) {
-    console.error(`[frameloop] start wake=${frameWake ? 1 : 0} frameMs=${frameMs}`)
-  }
   loop()
 
   return { stop, addRenderer, removeRenderer }

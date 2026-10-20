@@ -150,13 +150,15 @@ describe("frame loop (vue)", () => {
       // Registered before the first synchronous pass, which ticks once.
       expect(wake).toBeTypeOf("function")
       expect(ticks).toBe(1)
-      // No fallback tick before FRAME_WAKE_FALLBACK_MS elapses.
-      vi.advanceTimersByTime(50)
+      // No fallback tick before FRAME_WAKE_FALLBACK_MS (the platform default
+      // poll rate) elapses.
+      const fallback = process.platform === "darwin" ? 8 : 16
+      vi.advanceTimersByTime(fallback - 1)
       expect(ticks).toBe(1)
       // A display wake ticks immediately and re-arms only the fallback.
       wake!()
       expect(ticks).toBe(2)
-      vi.advanceTimersByTime(99)
+      vi.advanceTimersByTime(fallback - 1)
       expect(ticks).toBe(2)
       vi.advanceTimersByTime(1)
       expect(ticks).toBe(3)
