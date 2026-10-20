@@ -36,6 +36,11 @@ two-face = { version = "0.5.2", default-features = false, features = ["syntect-f
 web-time = "1"
 pulldown-cmark = { version = "0.12", default-features = false }
 unicode-segmentation = "1"
+# `text::search` treats every Unicode mark category as a word character, so
+# combining accents do not split whole-word matches. Both already sit in the
+# lockfile as transitive deps; memchr backs the per-keystroke search needle.
+unicode-properties = { version = "0.1.4", default-features = false, features = ["general-category"] }
+memchr = "2"
 # Same client GPUI's image examples and Zed use. `img(SharedUri)` fetches
 # through `App::http_client`; without this, GPUI's NullHttpClient fails every URL.
 reqwest_client = { path = "../../zed/crates/reqwest_client" }

@@ -94,7 +94,10 @@ describeNative("text search highlight (vue)", () => {
     expect(textsOf(app.renderer.getPaintedHighlights())).toEqual(["greet", "greet"])
     app.unmount()
   })
+})
 
+// Pure-JS halves of the matcher contract — no renderer needed.
+describe("findRanges matcher (vue)", () => {
   it("keeps the JS matcher in parity with the native one", () => {
     const text = "Needle nest: néedle here, NEEDLE there. one_needle_two"
     // é is not e, so "néedle" is not a match; the rest are.
@@ -110,5 +113,34 @@ describeNative("text search highlight (vue)", () => {
     ])
     // Case-sensitive narrows to exact.
     expect(findRanges({ text, query: "NEEDLE", caseSensitive: true })).toEqual([[26, 32]])
+  })
+
+  it("keeps Unicode ranges on the original text through sigma and expansions", () => {
+    const cases: Array<[string, string, Array<[number, number]>]> = [
+      ["ΟΣ", "ΟΣ", [[0, 2]]],
+      ["ΟΣ ΟΣ", "ος", [[0, 2], [3, 5]]],
+      ["ΟΣΑ", "οσα", [[0, 3]]],
+      ["İ", "i", [[0, 1]]],
+      ["xİx", "xi", [[0, 2]]],
+      ["İ", "\u{307}", [[0, 1]]],
+      ["İ", "i\u{307}", [[0, 1]]],
+      ["İİİ", "\u{307}i", [[0, 2]]],
+      ["\u{10400}İ fox", "i", [[2, 3]]],
+      ["\u{10400}İ fox", "\u{10428}", [[0, 2]]],
+    ]
+    for (const [text, query, expected] of cases) {
+      expect(findRanges({ text, query }), `${text} / ${query}`).toEqual(expected)
+    }
+  })
+
+  it("marks continue a whole word in the JS matcher too", () => {
+    for (const mark of ["\u{301}", "\u{93e}", "\u{20dd}"]) {
+      expect(findRanges({ text: `cafe${mark}`, query: "cafe", wholeWord: true }), mark).toEqual([])
+      expect(findRanges({ text: `${mark}cafe`, query: "cafe", wholeWord: true }), mark).toEqual([])
+      expect(
+        findRanges({ text: `cafe${mark}`, query: `cafe${mark}`, wholeWord: true }),
+        mark
+      ).toEqual([[0, 4 + mark.length]])
+    }
   })
 })
