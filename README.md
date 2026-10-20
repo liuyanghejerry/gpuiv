@@ -183,7 +183,10 @@ exploring native desktop UIs; check platform-specific APIs and the
 | Windows | DirectX | ARM64 and x64 | Available |
 | Linux | Vulkan | ARM64 and x64 (GNU) | Not yet |
 
-Menus and vibrancy are macOS-specific. Nested scrolling is currently
+Menus and vibrancy are macOS-specific. On Linux the native addon enables
+both Wayland and X11: GPUI selects Wayland when `WAYLAND_DISPLAY` is
+non-empty, otherwise X11 when `DISPLAY` is; to force X11 under XWayland start
+with `env -u WAYLAND_DISPLAY`. Nested scrolling is currently
 unsupported. App packaging is a workspace tool for macOS `.app` bundles and
 Windows portable executables; signing, notarization, and Linux packaging are
 still pending. See [packaging](docs/reference.md#packaging) and
