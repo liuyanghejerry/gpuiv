@@ -140,6 +140,9 @@ Not in AGENTS.md — these are local-environment facts:
   `packages/vue`'s tsc. After a Linux `bun run build`, restore
   `packages/native/index.d.ts` from git and hand-add new symbols exactly as
   napi printed them; a macOS build regenerates the full file.
+- **`gh` defaults to the wrong repo here**: its default-repo resolution
+  pointed at `remorses/gpuix`, and a bare `gh pr create` opened the PR
+  upstream (had to close it). Always pass `--repo liuyanghejerry/gpuiv`.
 - On this Linux box the GPU suites (`hasNativeTestRenderer` files) and
   `.production.test` real-window tests are the only examples failures to
   expect; `.production` spawns can flake under full-suite parallel load —
