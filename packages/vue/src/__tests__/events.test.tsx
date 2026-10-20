@@ -598,6 +598,44 @@ describeNative("events (vue)", () => {
     app.unmount()
   })
 
+  it("ends hover when the pointer leaves the window", async () => {
+    const hovered = ref<string>("none")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 30 }}>
+            <div
+              style={{ padding: 24, backgroundColor: "#333" }}
+              onMouseEnter={() => (hovered.value = "enter")}
+              onMouseLeave={() => (hovered.value = "leave")}
+            >
+              <text>edge</text>
+            </div>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const box = app.renderer.findByText("edge")!
+    const bounds = app.renderer.getElementBounds(box.id)!
+    app.renderer.nativeSimulateMouseMove(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2
+    )
+    await app.settle()
+    expect(hovered.value).toBe("enter")
+
+    // The platform reports the window exit with no final mouse move; hover
+    // must end instead of sticking to the last hit element.
+    app.renderer.nativeSimulateMouseExit(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2
+    )
+    await app.settle()
+    expect(hovered.value).toBe("leave")
+    app.unmount()
+  })
+
   it("fires mouseDownOutside when clicking outside the element", async () => {
     const outside = ref(0)
     const App = defineComponent({
