@@ -415,7 +415,13 @@ function collect(node: TreeNode | null, selector: Selector): TreeNode[] {
     ? collect(node, selector.parent)
     : [node]
   const found: TreeNode[] = []
+  // Overlapping parent matches walk a shared subtree once: without the visit
+  // set, a nested parent selector lists descendants twice and `element()`
+  // reports a false ambiguity. Depth-first order is preserved.
+  const visited = new Set<number>()
   const walk = (current: TreeNode) => {
+    if (visited.has(current.id)) return
+    visited.add(current.id)
     if (matches(current, selector)) found.push(current)
     for (const child of current.children ?? []) walk(child)
   }

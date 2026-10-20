@@ -133,4 +133,43 @@ describeNative("automation surface (vue)", () => {
     expect(log.value).toEqual(["auxClick"])
     app.unmount()
   })
+
+  // Overlapping parent selectors must walk a shared subtree once: nested
+  // elements that both match the parent would otherwise list descendants
+  // twice and turn element() into a false ambiguity.
+  it("overlapping locators list each descendant once", async () => {
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div testId="group" style={{ display: "flex", width: "100%", height: "100%", padding: 20 }}>
+            <div testId="group" style={{ padding: 10 }}>
+              <text testId="label">inner</text>
+            </div>
+            <div testId="sibling" style={{ padding: 10 }}>
+              <text testId="label">outer</text>
+            </div>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const automation = await connectTest(app.renderer, app.settle)
+    const group = automation.getByTestId("group")
+    // Both nested labels under the overlapping group: deduped, tree order.
+    const labels = await group.getByTestId("label").all()
+    expect(labels.map((node) => node.testId)).toEqual(["label", "label"])
+    expect(await group.getByTestId("label").count()).toBe(2)
+    // A single descendant under a doubly-matching parent is listed once and
+    // resolves without an ambiguity error.
+    const inner = automation.getByTestId("group").getByText("inner")
+    expect(await inner.count()).toBe(1)
+    const resolved = await inner.element()
+    expect(resolved.text).toBe("inner")
+    // Genuine ambiguity still throws.
+    const anyLabel = automation.getByTestId("group").getByTestId("label")
+    await expect(anyLabel.element()).rejects.toMatchObject({
+      code: "Ambiguous",
+    })
+    app.unmount()
+  })
 })
