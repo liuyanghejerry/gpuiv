@@ -196,6 +196,12 @@ export function startFrameLoop(
     // pass may be scheduled at a time.
     if (timer !== null) clearTimeout(timer)
     timer = null
+    // TEMPORARY CI DIAGNOSTIC (frame-loop wake path): first passes + stop.
+    const debug = !process.env.VITEST
+    if (debug && debugPasses < 40) {
+      debugPasses += 1
+      console.error(`[frameloop] pass=${debugPasses} t=${performance.now().toFixed(0)} wake=${frameWake ? 1 : 0}`)
+    }
     const started = performance.now()
     let running = true
     for (const current of renderers) {
@@ -205,6 +211,7 @@ export function startFrameLoop(
         scheduleRuntimeError(error, "frame loop tick", undefined, current)
       }
     }
+    if (debug && !running) console.error("[frameloop] tick reported not running")
     if (!running) {
       stop()
       options.onTerminated?.()
@@ -221,6 +228,10 @@ export function startFrameLoop(
   // Wakes only pace a loop the caller did not pin to a fixed rate.
   const frameWake =
     options.frameMs === undefined && renderer.setFrameWakeCallback?.(loop) === true
+  let debugPasses = 0
+  if (!process.env.VITEST) {
+    console.error(`[frameloop] start wake=${frameWake ? 1 : 0} frameMs=${frameMs}`)
+  }
   loop()
 
   return { stop, addRenderer, removeRenderer }
