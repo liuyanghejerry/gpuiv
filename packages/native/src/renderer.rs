@@ -7,11 +7,8 @@
 //! Desktop lifecycle:
 //!   const renderer = new GpuixRenderer(eventCallback)
 //!   renderer.init({ title: 'My App', width: 800, height: 600 })
-//!   renderer.applyBatch(json)             // one atomic React commit
-//!   setTimeout(function loop() {         // macOS pumps AppKit; Win/Linux polls UI thread
-//!     if (!renderer.tick()) process.exit(0)
-//!     setTimeout(loop, 8)
-//!   })
+//!   renderer.applyBatch(json)             // one atomic Vue commit
+//!   startFrameLoop(renderer)              // macOS wakes on vsync; Win/Linux polls UI thread
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 use futures::{channel::mpsc, StreamExt as _};
 use gpui::AppContext as _;
@@ -2342,6 +2339,52 @@ impl GpuixRenderer {
     #[napi]
     pub fn is_initialized(&self) -> bool {
         *self.initialized.lock().unwrap()
+    }
+
+    /// Wake JavaScript after the display link queues a frame. Returns true on macOS,
+    /// false on other platforms. Call tick() in the callback; it never blocks.
+    /// Wakes coalesce while JavaScript is busy and do not keep the process alive.
+    /// Pass null to clear the callback. Already queued callbacks may still arrive.
+    #[napi]
+    pub fn set_frame_wake_callback(&self, callback: Option<Function<(), ()>>) -> Result<bool> {
+        #[cfg(target_os = "macos")]
+        {
+            use std::sync::atomic::{AtomicBool, Ordering};
+
+            let Some(callback) = callback else {
+                gpui_macos::set_frame_wake_hook(None);
+                return Ok(true);
+            };
+            if !self.is_initialized() {
+                return Err(Error::from_reason(
+                    "Call init() before setting a frame wake callback",
+                ));
+            }
+            let pending = Arc::new(AtomicBool::new(false));
+            let handled = pending.clone();
+            let wake = callback
+                .build_threadsafe_function::<()>()
+                .callee_handled::<false>()
+                .weak::<true>()
+                .build_callback(move |_| {
+                    handled.store(false, Ordering::Release);
+                    Ok(())
+                })?;
+            gpui_macos::set_frame_wake_hook(Some(Arc::new(move || {
+                if !pending.swap(true, Ordering::AcqRel)
+                    && wake.call((), ThreadsafeFunctionCallMode::NonBlocking) != napi::Status::Ok
+                {
+                    pending.store(false, Ordering::Release);
+                }
+            })));
+            return Ok(true);
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = callback;
+            Ok(false)
+        }
     }
 
     /// Whether JavaScript must call tick() until it returns false.
@@ -5042,9 +5085,19 @@ impl WebGpuixRenderer {
     }
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "freebsd"
+))]
 impl Drop for GpuixRenderer {
     fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        if *self.initialized.lock().unwrap() {
+            gpui_macos::set_frame_wake_hook(None);
+        }
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         self.ui_commands.lock().unwrap().take();
     }
 }

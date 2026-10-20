@@ -104,14 +104,25 @@ export function createNativeRenderer(): GpuixRenderer {
 
 const automationBackends = new WeakMap<NativeRenderer, InProcessBackend>()
 
-/** AppKit input and display-link callbacks share this pump. A 16ms interval
- *  limits trackpad input to ~60Hz even when drawing takes only a few ms, and
- *  can miss a display deadline before delivering the queued input. Pump at
- *  8ms on macOS; GPUI still draws only dirty frames. Other platforms own
- *  their input loop and only need the slower shutdown poll. */
+/** AppKit input and display-link callbacks share this pump. When the renderer
+ *  cannot wake on vsync (explicit `frameMs`, or no display-link support), macOS
+ *  polls at 8ms — a 16ms interval would limit trackpad input to ~60Hz even when
+ *  drawing takes only a few ms. Other platforms own their input loop and only
+ *  need the slower shutdown poll. */
 const DEFAULT_FRAME_MS = process.platform === "darwin" ? 8 : 16
 
-type Tickable = Pick<GpuixRenderer, "requiresTick" | "tick">
+/** While a display link drives the loop, this timer only catches a lost wake
+ *  (a hidden window's display link stops firing); one fallback tick per 100ms
+ *  keeps AppKit responsive without busy-polling. */
+const FRAME_WAKE_FALLBACK_MS = 100
+
+/** Clears the frame-wake callback. The native side coalesces wakes and never
+ *  blocks; `null` releases the hook on the renderer. */
+type FrameWakeSetter = (callback: (() => void) | null) => boolean
+
+type Tickable = Pick<GpuixRenderer, "requiresTick" | "tick"> & {
+  setFrameWakeCallback?: FrameWakeSetter
+}
 
 export interface FrameLoop {
   stop: () => void
@@ -121,25 +132,34 @@ export interface FrameLoop {
 }
 
 /**
- * Drive GPUI's embedded macOS event loop at a fixed rate.
+ * Drive GPUI's embedded macOS event loop.
  *
  * On **macOS**, `renderer.tick()` pumps AppKit and asks GPUI for a frame, so it
- * must be called repeatedly. Do NOT call it from a `setImmediate` loop: that
- * spins the CPU at tens of thousands of ticks per second.
+ * must be called repeatedly. When the renderer supports it, the loop is woken
+ * by GPUI's display link (vsync — 120Hz on ProMotion) through a weak, coalesced
+ * native callback, with a `FRAME_WAKE_FALLBACK_MS` timer in case no wake
+ * arrives. An explicit `frameMs`, or a renderer without wake support, falls
+ * back to fixed-rate timer polling at that interval. Do NOT call `tick()` from
+ * a `setImmediate` loop: that spins the CPU at tens of thousands of ticks per
+ * second.
+ *
+ * The wake paces the shared pump for every renderer in the loop: all macOS
+ * windows share one AppKit main thread, and any window's display link fires
+ * the same hook.
  *
  * On **Windows and Linux**, GPUI owns a blocking event loop on a Rust UI thread
  * and `tick()` only reports whether that loop is still running. The JS loop
  * polls the flag at the same fixed rate so the process exits once the last
  * window closes.
  *
- * Each frame is scheduled only after the previous one finishes, so a slow frame
+ * Each pass is scheduled only after the previous one finishes, so a slow frame
  * delays the next one instead of letting timers pile up.
  *
  * `tick()` returning false means the application stopped — the last window
  * closed. All renderers share one application, so the first false stops the
  * loop and `onTerminated` runs. `createApp()` uses that to exit the process.
  *
- * A throw from `tick()` must not stop the timer. On macOS that timer is the
+ * A throw from `tick()` must not stop the loop. On macOS that loop is the
  * AppKit pump; if it dies the window freezes while bun may still be alive.
  */
 export function startFrameLoop(
@@ -150,13 +170,14 @@ export function startFrameLoop(
     return { stop: () => {}, addRenderer: () => {}, removeRenderer: () => {} }
   }
 
-  const frameMs = options.frameMs ?? DEFAULT_FRAME_MS
   const renderers = new Set<Tickable>([renderer])
   let timer: ReturnType<typeof setTimeout> | null = null
   let stopped = false
 
   const stop = (): void => {
+    if (stopped) return
     stopped = true
+    if (frameWake) renderer.setFrameWakeCallback?.(null)
     if (timer !== null) clearTimeout(timer)
     timer = null
   }
@@ -171,6 +192,10 @@ export function startFrameLoop(
 
   const loop = (): void => {
     if (stopped) return
+    // A wake may arrive while a fallback timer is still pending; only one
+    // pass may be scheduled at a time.
+    if (timer !== null) clearTimeout(timer)
+    timer = null
     const started = performance.now()
     let running = true
     for (const current of renderers) {
@@ -185,9 +210,17 @@ export function startFrameLoop(
       options.onTerminated?.()
       return
     }
-    const wait = Math.max(0, frameMs - (performance.now() - started))
-    timer = setTimeout(loop, wait)
+    if (stopped) return
+    const delay = frameWake
+      ? FRAME_WAKE_FALLBACK_MS
+      : Math.max(0, frameMs - (performance.now() - started))
+    timer = setTimeout(loop, delay)
   }
+
+  const frameMs = options.frameMs ?? DEFAULT_FRAME_MS
+  // Wakes only pace a loop the caller did not pin to a fixed rate.
+  const frameWake =
+    options.frameMs === undefined && renderer.setFrameWakeCallback?.(loop) === true
   loop()
 
   return { stop, addRenderer, removeRenderer }

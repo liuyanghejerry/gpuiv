@@ -124,6 +124,160 @@ describe("frame loop (vue)", () => {
     expect(terminated).toBe(0)
   })
 
+  // ── Display-link wakes ──────────────────────────────────────────────
+
+  it("wakes from the display link instead of polling", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] })
+    let ticks = 0
+    let wake: (() => void) | undefined
+    const cleared: (((() => void) | null))[] = []
+    const loop = startFrameLoop({
+      requiresTick: () => true,
+      tick: () => {
+        ticks += 1
+        return true
+      },
+      setFrameWakeCallback: (callback) => {
+        if (callback === null) {
+          cleared.push(null)
+          return true
+        }
+        wake = callback
+        return true
+      },
+    })
+    try {
+      // Registered before the first synchronous pass, which ticks once.
+      expect(wake).toBeTypeOf("function")
+      expect(ticks).toBe(1)
+      // No fallback tick before FRAME_WAKE_FALLBACK_MS elapses.
+      vi.advanceTimersByTime(50)
+      expect(ticks).toBe(1)
+      // A display wake ticks immediately and re-arms only the fallback.
+      wake!()
+      expect(ticks).toBe(2)
+      vi.advanceTimersByTime(99)
+      expect(ticks).toBe(2)
+      vi.advanceTimersByTime(1)
+      expect(ticks).toBe(3)
+      loop.stop()
+      expect(cleared).toEqual([null])
+      // Stopped: neither a wake nor the fallback can tick again.
+      wake!()
+      vi.advanceTimersByTime(300)
+      expect(ticks).toBe(3)
+      // stop() is idempotent.
+      loop.stop()
+      expect(cleared).toEqual([null])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("an explicit frameMs keeps timer polling and never registers a wake", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] })
+    let ticks = 0
+    const registered = vi.fn(() => true)
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          return true
+        },
+        setFrameWakeCallback: registered,
+      },
+      { frameMs: 5 },
+    )
+    try {
+      expect(registered).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(20)
+      expect(ticks).toBeGreaterThanOrEqual(3)
+    } finally {
+      loop.stop()
+      vi.useRealTimers()
+    }
+  })
+
+  it("a renderer without wake support falls back to fixed-rate polling", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] })
+    let ticks = 0
+    const loop = startFrameLoop({
+      requiresTick: () => true,
+      tick: () => {
+        ticks += 1
+        return true
+      },
+    })
+    try {
+      vi.advanceTimersByTime(40)
+      expect(ticks).toBeGreaterThanOrEqual(2)
+    } finally {
+      loop.stop()
+      vi.useRealTimers()
+    }
+  })
+
+  it("a throwing wake tick reports the error and keeps the loop alive", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] })
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {})
+    let ticks = 0
+    let wake: (() => void) | undefined
+    const loop = startFrameLoop({
+      requiresTick: () => true,
+      tick: () => {
+        ticks += 1
+        if (ticks === 1) throw new Error("wake boom")
+        return true
+      },
+      setFrameWakeCallback: (callback) => {
+        if (callback) wake = callback
+        return true
+      },
+    })
+    try {
+      wake!()
+      expect(ticks).toBe(2)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(errors).toHaveBeenCalled()
+    } finally {
+      loop.stop()
+      errors.mockRestore()
+      vi.useRealTimers()
+    }
+  })
+
+  it("a wake-driven loop exits once when tick reports shutdown", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "performance"] })
+    let ticks = 0
+    let terminated = 0
+    let cleared = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          return ticks < 2
+        },
+        setFrameWakeCallback: (callback) => {
+          if (callback === null) cleared += 1
+          return true
+        },
+      },
+      { onTerminated: () => { terminated += 1 } },
+    )
+    try {
+      expect(ticks).toBe(1)
+      vi.advanceTimersByTime(200)
+      expect(terminated).toBe(1)
+      expect(cleared).toBe(1)
+    } finally {
+      loop.stop()
+      vi.useRealTimers()
+    }
+  })
+
   it("keeps the process alive after an uncaught exception", () => {
     const rendererPath = fileURLToPath(new URL("../renderer.ts", import.meta.url))
     const script = [

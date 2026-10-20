@@ -158,6 +158,13 @@ export declare class GpuixRenderer {
   tick(): boolean
   isInitialized(): boolean
   /**
+   * Wake JavaScript after the display link queues a frame. Returns true on macOS,
+   * false on other platforms. Call tick() in the callback; it never blocks.
+   * Wakes coalesce while JavaScript is busy and do not keep the process alive.
+   * Pass null to clear the callback. Already queued callbacks may still arrive.
+   */
+  setFrameWakeCallback(callback?: (() => void) | undefined | null): boolean
+  /**
    * Whether JavaScript must call tick() until it returns false.
    *
    * macOS: tick() pumps AppKit. Windows/Linux: tick() only reports whether
