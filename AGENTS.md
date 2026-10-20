@@ -301,6 +301,8 @@ xcodebuild -downloadComponent MetalToolchain   # macOS, Xcode 26+: gpui_apple co
 ```
 
 - macOS uses `MacPlatform::new_embedded()` and pumps AppKit on Node's main thread;
+  the JS frame loop is woken by GPUI's display link (`setFrameWakeCallback`) with a
+  100ms fallback timer — an explicit `frameMs` falls back to fixed-rate polling;
   Windows and Linux run `gpui_platform::application().run()` on a dedicated UI thread
 - Keep `core-text = 21.0.0` / `core-graphics = 0.24.0` on macOS — they avoid the
   core-graphics 0.24 vs 0.25 conflict between `core-text` and Zed's `font-kit` fork

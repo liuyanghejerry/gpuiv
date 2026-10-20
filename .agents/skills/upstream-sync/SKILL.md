@@ -122,6 +122,28 @@ Not in AGENTS.md — these are local-environment facts:
 - Known fork bug (unfixed): a function child (`() => h("text", …)`) produces
   no text node — JSX and string children are fine. Write tests with string
   children.
+- **Linux release builds need the local sysroot** (discovered 2026-10-21): the
+  system lacks the fontconfig/xcb/xkbcommon/freetype dev packages, so
+  `yeslogic-fontconfig-sys`'s build script and the final link fail. Debs are
+  extracted under `tmp/sysroot-debs/sysroot` (rebuild it with
+  `apt-get download libfontconfig-dev libfontconfig1 libfreetype-dev
+  libfreetype6 libexpat1-dev libexpat1 libbz2-dev libbz2-1.0 libpng-dev
+  libpng16-16t64 libxkbcommon-dev libxkbcommon0 libxkbcommon-x11-dev
+  libxkbcommon-x11-0 zlib1g-dev zlib1g libbrotli-dev libbrotli1 libxcb1-dev
+  libxcb1` + `dpkg -x` each into `sysroot`, then rewrite
+  `^prefix=/usr$`/`^libdir=/usr/lib`/`^includedir=/usr/include` in
+  `sysroot/usr/lib/x86_64-linux-gnu/pkgconfig/*.pc` to the sysroot path, plus a
+  `bzip2.pc` shim). Prefix every native build with
+  `export PKG_CONFIG_PATH="$PWD/tmp/sysroot-debs/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig"`.
+- **Never commit an `index.d.ts` regenerated on Linux**: the Linux stub drops
+  the whole GPU-platform `TestGpuixRenderer` surface (~550 lines), breaking
+  `packages/vue`'s tsc. After a Linux `bun run build`, restore
+  `packages/native/index.d.ts` from git and hand-add new symbols exactly as
+  napi printed them; a macOS build regenerates the full file.
+- On this Linux box the GPU suites (`hasNativeTestRenderer` files) and
+  `.production.test` real-window tests are the only examples failures to
+  expect; `.production` spawns can flake under full-suite parallel load —
+  rerun a failing file alone before investigating.
 
 ## Decision checklist for a topic
 
