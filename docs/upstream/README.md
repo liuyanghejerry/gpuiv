@@ -254,6 +254,10 @@ from upstream through `367ef48`:
 | #151 | Runtime window resizing through GPUI `Window::resize`, validated dimensions, per-window command routing and two-window live automation — fork-local desktop work |
 | #152 | Selectable ANSI text and streaming virtualized logs, incremental SGR parsing and short-list append mounting — fork-local Vue desktop work |
 | #153 | Headless Collapsible Root/Trigger/Panel controls with keyboard operation, retained state, focus restoration and interruptible height animation — fork-local Vue desktop work |
+| #167 | Automation locator descendants dedupe: per-collection visit set in `collect`, depth-first order preserved; GPU regression for count/element/ordering/genuine ambiguity — upstream `8c70b7a` |
+| #168 | Linux compositor selection pinned: `wayland`+`x11` on the `gpui` dep; verified our builds already inherited them (X11 window opens with and without), hardening parity — upstream `cd9493a` |
+| #169 | Text search Unicode fixes: final-sigma/expansion-safe ranges mapped back to whole original characters, overlap rejection, mark categories in word chars (Rust + JS), `memmem` needle per query; JS matcher tests moved out of the GPU gate — upstream `80f43b3` + `be82b36` |
+| #170 | Hover ends at the window edge: `TestGpuixRenderer.simulateMouseExit` + Vue `nativeSimulateMouseExit` facade and no-final-move regression (GPUI fix `74a3f0ff8` came with #166's bump) — upstream `d8fd814` |
 | #166 | Display-link frame wakes: zed `ea042f2`→`f77e5cf` (+ Taffy patch re-applied as parented `579d48ea`), `setFrameWakeCallback()` napi + Drop release, `startFrameLoop` wake-driven with 100ms fallback; resolves the 8ms-pump divergence; ledger round `4ecca30..2e31b47` records 14 new rows (terminal mode pending with topic file, scrollbar/onScrollChange/onLayout/style/registerFont/getElementsAt/perf-batch/React-perf/createPortal pending, README-docs round declined, release/ARM64/CLI/disktree/example folded into existing declined rows) — upstream `515df19` + zed `2565b8a3e` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
