@@ -675,13 +675,15 @@ Native `.node` edits still need a rebuild. See [Developing the Rust side](develo
 
 On **macOS**, `startFrameLoop` is woken by GPUI's display link (vsync — up to
 120Hz on ProMotion) through a weak, coalesced native callback, so AppKit input
-is delivered at display rate and nothing polls while idle. A 100ms fallback
-timer catches a lost wake (for example a hidden window's display link stops
-firing). Each tick drains only ready AppKit events and Core Foundation sources,
+is delivered at display rate and nothing polls while idle. A fallback timer at
+the default poll rate (8ms) catches a lost wake — macOS stops display-link
+delivery to occluded or hidden windows, and automation reads last-painted
+bounds, so a slower fallback would leave a fresh tree unpainted for too long.
+Each tick drains only ready AppKit events and Core Foundation sources,
 then returns without waiting for the next native wake. Bun timers, sockets,
 promises, and PTY callbacks can run between ticks. Pass `{ frameMs }` to pin
-the loop to fixed-rate timer polling instead (8ms on macOS, 16ms elsewhere),
-and call `.stop()` on the returned handle to end it.
+the loop to fixed-rate timer polling instead, and call `.stop()` on the
+returned handle to end it.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
 dedicated Rust UI thread. `renderer.tick()` only reports whether that loop is

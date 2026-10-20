@@ -150,13 +150,15 @@ describe("frame loop (vue)", () => {
       // Registered before the first synchronous pass, which ticks once.
       expect(wake).toBeTypeOf("function")
       expect(ticks).toBe(1)
-      // No fallback tick before FRAME_WAKE_FALLBACK_MS elapses.
-      vi.advanceTimersByTime(50)
+      // No fallback tick before FRAME_WAKE_FALLBACK_MS (the platform default
+      // poll rate) elapses.
+      const fallback = process.platform === "darwin" ? 8 : 16
+      vi.advanceTimersByTime(fallback - 1)
       expect(ticks).toBe(1)
       // A display wake ticks immediately and re-arms only the fallback.
       wake!()
       expect(ticks).toBe(2)
-      vi.advanceTimersByTime(99)
+      vi.advanceTimersByTime(fallback - 1)
       expect(ticks).toBe(2)
       vi.advanceTimersByTime(1)
       expect(ticks).toBe(3)
@@ -593,6 +595,44 @@ describeNative("events (vue)", () => {
     expect(hovered.value).toBe("enter")
 
     app.renderer.nativeSimulateMouseMove(cx + 400, cy + 200)
+    await app.settle()
+    expect(hovered.value).toBe("leave")
+    app.unmount()
+  })
+
+  it("ends hover when the pointer leaves the window", async () => {
+    const hovered = ref<string>("none")
+    const App = defineComponent({
+      setup() {
+        return () => (
+          <div style={{ display: "flex", width: "100%", height: "100%", padding: 30 }}>
+            <div
+              style={{ padding: 24, backgroundColor: "#333" }}
+              onMouseEnter={() => (hovered.value = "enter")}
+              onMouseLeave={() => (hovered.value = "leave")}
+            >
+              <text>edge</text>
+            </div>
+          </div>
+        )
+      },
+    })
+    const app = createTestApp(App)
+    const box = app.renderer.findByText("edge")!
+    const bounds = app.renderer.getElementBounds(box.id)!
+    app.renderer.nativeSimulateMouseMove(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2
+    )
+    await app.settle()
+    expect(hovered.value).toBe("enter")
+
+    // The platform reports the window exit with no final mouse move; hover
+    // must end instead of sticking to the last hit element.
+    app.renderer.nativeSimulateMouseExit(
+      bounds.x + bounds.width / 2,
+      bounds.y + bounds.height / 2
+    )
     await app.settle()
     expect(hovered.value).toBe("leave")
     app.unmount()

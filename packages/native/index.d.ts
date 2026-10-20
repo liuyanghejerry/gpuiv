@@ -772,6 +772,11 @@ export declare class TestGpuixRenderer {
    */
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null, modifiers?: string | undefined | null): void
   /**
+   * Simulate the pointer leaving the window, as the platform reports it when
+   * the cursor crosses the window edge: there is no final mouse move.
+   */
+  simulateMouseExit(x: number, y: number): void
+  /**
    * Focus an element by its numeric ID.
    * If its FocusHandle is not painted yet, the request stays pending until
    * a later frame creates it, unless another focus move happens first.

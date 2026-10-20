@@ -111,10 +111,14 @@ const automationBackends = new WeakMap<NativeRenderer, InProcessBackend>()
  *  need the slower shutdown poll. */
 const DEFAULT_FRAME_MS = process.platform === "darwin" ? 8 : 16
 
-/** While a display link drives the loop, this timer only catches a lost wake
- *  (a hidden window's display link stops firing); one fallback tick per 100ms
- *  keeps AppKit responsive without busy-polling. */
-const FRAME_WAKE_FALLBACK_MS = 100
+/** While a display link drives the loop, this timer catches a lost wake.
+ *  macOS stops display-link delivery to occluded or hidden windows, and an
+ *  automation click reads *last-painted* bounds — a 100ms fallback made a
+ *  click that lands right after a commit see no paint yet. The fallback is
+ *  the platform's default poll rate, so a wake-starved window paces exactly
+ *  like the pre-display-link loop; while wakes flow they keep clearing the
+ *  fallback timer and idle cost stays at wake rate. */
+const FRAME_WAKE_FALLBACK_MS = DEFAULT_FRAME_MS
 
 /** Clears the frame-wake callback. The native side coalesces wakes and never
  *  blocks; `null` releases the hook on the renderer. */
