@@ -96,25 +96,16 @@ export function useWindowSize(options: WindowSizeOptions = {}): Ref<WindowSize> 
     })
     return size
   }
+  // Fallback path: the renderer cannot report a size, or the caller passed
+  // `intervalMs: false` for a one-shot read. Either way there is nothing to
+  // poll — re-read once on mount in case the window opened after setup.
   const size = shallowRef<WindowSize>(readWindowSize(renderer))
-  let timer: ReturnType<typeof setInterval> | null = null
-
   onMounted(() => {
-    const update = () => {
-      const next = readWindowSize(renderer)
-      if (next.width !== size.value.width || next.height !== size.value.height) {
-        size.value = next
-      }
+    const next = readWindowSize(renderer)
+    if (next.width !== size.value.width || next.height !== size.value.height) {
+      size.value = next
     }
-    update()
-    if (intervalMs === false || !renderer?.getWindowSize) return
-    timer = setInterval(update, Math.max(16, intervalMs))
   })
-
-  onBeforeUnmount(() => {
-    if (timer !== null) clearInterval(timer)
-  })
-
   return size
 }
 

@@ -618,6 +618,27 @@ describe("markdown-editor edge paths", () => {
     expect(t.clipboard.at(-1)).toBe("**b**")
   })
 
+  it("no-ops clipboard events arriving on a stale row after a doc-shrinking edit", async () => {
+    // Two events in one JS tick share the previous render's handlers: the
+    // first cut deletes the cross-block selection (collapsing both blocks to
+    // "aa"), so block B's cut/paste closures still carry its pre-edit doc
+    // position — ProseMirror's nodeAt throws RangeError for those.
+    const t = harness({ source: "aaaa\n\nbbbb" })
+    await t.settle()
+    const [a, b] = t.blockIds()
+    t.fire(a, "selectionChange", { startIndex: 0, endIndex: 2 })
+    t.fire(b, "click", { modifiers: { shift: true } })
+    t.fire(a, "cut", {})
+    // No settle: the registry still holds the pre-edit handler closures.
+    expect(() => t.fire(b, "cut", { startIndex: 0, endIndex: 2 })).not.toThrow()
+    // The stale cut falls back to the row's mirrored plain text.
+    expect(t.clipboard.at(-1)).toBe("bb")
+    expect(() => t.fire(b, "paste", { value: "Z" })).not.toThrow()
+    await t.settle()
+    // Neither stale event touched the doc.
+    expect(t.editor().getMarkdown()).toBe("aa\n")
+  })
+
   it("anchors the context menu to the editor bounds", async () => {
     const t = harness({ source: "x" })
     await t.settle()

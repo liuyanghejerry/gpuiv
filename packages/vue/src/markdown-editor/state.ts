@@ -18,6 +18,15 @@ import type { MarkerStyle } from "./model.js"
 
 type MarkName = "em" | "strong" | "code" | "strikethrough" | "highlight"
 
+/** nodeAt without the RangeError. A native event queued before an edit can
+ *  reach its handler after the doc shrank past the event's captured block
+ *  position; ProseMirror throws for those, where a no-op is the right
+ *  answer — the re-rendered row's own events carry fresh positions. */
+export function nodeAtOrNull(doc: PMNode, pos: number): PMNode | null {
+  if (!Number.isInteger(pos) || pos < 0 || pos > doc.content.size) return null
+  return doc.nodeAt(pos)
+}
+
 function ensureBlock(doc: PMNode): PMNode {
   if (doc.childCount === 0) {
     return doc.type.createAndFill(null, editorSchema.nodes.paragraph.create()) ?? doc
@@ -363,7 +372,7 @@ export class MarkdownEditorCore {
    *  which cost one doc position each — text offsets map 1:1. */
   editBlock(blockPos: number, prevText: string, nextText: string): void {
     if (prevText === nextText) return
-    const node = this.state.doc.nodeAt(blockPos)
+    const node = nodeAtOrNull(this.state.doc, blockPos)
     if (!node || !node.isTextblock) return
     const contentStart = blockPos + 1
     const contentEnd = blockPos + node.nodeSize - 1
@@ -422,7 +431,7 @@ export class MarkdownEditorCore {
    *  cell would corrupt table geometry. */
   splitBlockAt(blockPos: number, caret: number): number | null {
     const doc = this.state.doc
-    const node = doc.nodeAt(blockPos)
+    const node = nodeAtOrNull(doc, blockPos)
     if (!node?.isTextblock) return null
     const splitPos = Math.min(blockPos + 1 + caret, blockPos + node.nodeSize - 1)
     const $ = doc.resolve(splitPos)
@@ -466,7 +475,7 @@ export class MarkdownEditorCore {
    *  Returns null only when there is no previous sibling. */
   joinWithPreviousBlock(blockPos: number): number | null {
     const doc = this.state.doc
-    const node = doc.nodeAt(blockPos)
+    const node = nodeAtOrNull(doc, blockPos)
     if (!node) return null
     const $ = doc.resolve(blockPos)
     const prev = $.nodeBefore
@@ -507,7 +516,7 @@ export class MarkdownEditorCore {
    *  authoritative resync once the doc diverges from its content.
    *  Code-block targets take the text literally — no parsing, no split. */
   insertMarkdownAt(blockPos: number, caret: number, markdown: string): void {
-    const node = this.state.doc.nodeAt(blockPos)
+    const node = nodeAtOrNull(this.state.doc, blockPos)
     if (!node || !node.isTextblock) return
     const tr = this.state.tr
     if (node.type.spec.code) {
@@ -531,7 +540,7 @@ export class MarkdownEditorCore {
 
   /** Flip the task state of the list item at itemPos. */
   toggleTaskItemAt(itemPos: number): void {
-    const node = this.state.doc.nodeAt(itemPos)
+    const node = nodeAtOrNull(this.state.doc, itemPos)
     if (!node || node.type.name !== "list_item") return
     const tr = this.state.tr
     tr.setNodeMarkup(itemPos, null, {
