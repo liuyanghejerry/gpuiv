@@ -4,11 +4,26 @@
  *  state, unmount, and assert the custom renderer drives that pipeline. */
 
 import { defineComponent, h, ref } from "vue"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
-import { installDevtoolsShims } from "../devtools.js"
+import { connectVueDevtools, installDevtoolsShims } from "../devtools.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
+
+const devtoolsMock = vi.hoisted(() => ({
+  connectCalls: [] as Array<[string | undefined, number | undefined | null]>,
+  fail: false,
+}))
+vi.mock("@vue/devtools", () => ({
+  devtools: {
+    // Upstream's connect() installs the hook synchronously; the await stands
+    // in for it here.
+    connect: async (host?: string, port?: number | null) => {
+      devtoolsMock.connectCalls.push([host, port ?? null])
+      if (devtoolsMock.fail) throw new Error("simulated client failure")
+    },
+  },
+}))
 
 interface HookCall {
   event: string
@@ -70,6 +85,14 @@ describe("devtools shims", () => {
       expect(doc.querySelectorAll()).toEqual([])
       expect(doc.getElementById()).toBeNull()
       expect(doc.createElement().style).toEqual({})
+
+      // The user-app measures hook targets with createRange + getBoundingClientRect.
+      const range = (g.document as { createRange: () => {
+        selectNode: (node: unknown) => void
+        getBoundingClientRect: () => { top: number; bottom: number; left: number; right: number; width: number; height: number }
+      } }).createRange()
+      expect(() => range.selectNode(doc.createElement())).not.toThrow()
+      expect(range.getBoundingClientRect()).toEqual({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 })
 
       // `scrollToComponent` in @vue/devtools-electron@8.2.1
       // (dist/user-app.js, inlined in dist/index.js) falls back to exactly
@@ -150,5 +173,79 @@ describeNative("vue devtools event pipeline", () => {
     app.unmount()
     expect(events()).toContain("component:removed")
     expect(events()).toContain("app:unmount")
+  })
+})
+
+describe("connectVueDevtools", () => {
+  const SHIM_KEYS = ["window", "document", "location", "addEventListener", "removeEventListener"]
+  const CONNECTED_KEY = "__gpuivDevtoolsConnected"
+  let warn: ReturnType<typeof vi.spyOn>
+  let previous: Map<string, unknown>
+
+  const snapshot = (): Map<string, unknown> => {
+    const g = globalThis as Record<string, unknown>
+    return new Map([...SHIM_KEYS, CONNECTED_KEY].map((key) => [key, g[key]]))
+  }
+  const restore = (state: Map<string, unknown>): void => {
+    const g = globalThis as Record<string, unknown>
+    for (const [key, value] of state) {
+      if (value === undefined) delete g[key]
+      else g[key] = value
+    }
+  }
+
+  beforeEach(() => {
+    previous = snapshot()
+    const g = globalThis as Record<string, unknown>
+    delete g[CONNECTED_KEY]
+    for (const key of SHIM_KEYS) delete g[key]
+    devtoolsMock.connectCalls.length = 0
+    devtoolsMock.fail = false
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    warn.mockRestore()
+    restore(previous)
+  })
+
+  it("connects once, keeps the shims, and short-circuits a later call", async () => {
+    await expect(connectVueDevtools()).resolves.toBe(true)
+    expect(devtoolsMock.connectCalls).toEqual([[undefined, null]])
+    const g = globalThis as Record<string, unknown>
+    expect(g[CONNECTED_KEY]).toBe(true)
+    expect(g.window).toBe(g)
+
+    // A hot reload reconnects through the flag, never a second client.
+    await expect(connectVueDevtools()).resolves.toBe(true)
+    expect(devtoolsMock.connectCalls).toHaveLength(1)
+  })
+
+  it("passes the host and port through, including a null port", async () => {
+    await expect(connectVueDevtools({ host: "http://localhost", port: 1234 })).resolves.toBe(true)
+    // A fresh process for the second call: the connected flag short-circuits.
+    delete (globalThis as Record<string, unknown>)[CONNECTED_KEY]
+    await expect(connectVueDevtools({ host: "http://gpuiv.dev", port: null })).resolves.toBe(true)
+    expect(devtoolsMock.connectCalls).toEqual([
+      ["http://localhost", 1234],
+      ["http://gpuiv.dev", null],
+    ])
+  })
+
+  it("warns, rolls every shim back, and leaves the process unconnected on failure", async () => {
+    devtoolsMock.fail = true
+    const g = globalThis as Record<string, unknown>
+    await expect(connectVueDevtools()).resolves.toBe(false)
+    expect(warn).toHaveBeenCalledWith(
+      "[gpuiv] connectVueDevtools: could not start the devtools client.",
+      expect.any(Error),
+    )
+    for (const key of SHIM_KEYS) expect(g[key], `${key} was not rolled back`).toBeUndefined()
+    expect(g[CONNECTED_KEY]).toBeUndefined()
+
+    // The rollback leaves a retry exactly as it found the process.
+    devtoolsMock.fail = false
+    await expect(connectVueDevtools()).resolves.toBe(true)
+    expect(devtoolsMock.connectCalls).toHaveLength(2)
   })
 })

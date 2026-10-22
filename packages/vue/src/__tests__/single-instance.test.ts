@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { createConnection, createServer, type Server } from "node:net"
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { once } from "node:events"
@@ -236,4 +236,79 @@ describe("single instance", () => {
     await acquireSingleInstance({ ...opts, launch: { argv: ["after-crash"], cwd: opts.directory } })
     expect((await replacement.nextRequest())!.argv).toEqual(["after-crash"])
   }, 20_000)
+})
+
+describe("single instance protocol edges", () => {
+  it("validates timeoutMs before any I/O", async () => {
+    const opts = await options()
+    for (const timeoutMs of [50, 60_001, Number.NaN]) {
+      await expect(acquireSingleInstance({ ...opts, timeoutMs })).rejects.toThrow("between 100 and 60000")
+    }
+  })
+
+  it("rejects data directories with loose permissions", async () => {
+    const opts = await options()
+    const instance = path.join(opts.directory, "gpuiv-instance")
+    await mkdir(instance, { recursive: true, mode: 0o755 })
+    await expect(acquireSingleInstance(opts)).rejects.toThrow("mode 0700")
+  })
+
+  // Needs a non-root user: root bypasses write permissions.
+  it.skipIf(process.getuid?.() === 0)("refuses ownership when the token write is denied", async () => {
+    const opts = await options()
+    const instance = path.join(opts.directory, "gpuiv-instance")
+    await mkdir(instance, { recursive: true, mode: 0o700 })
+    await chmod(instance, 0o500)
+    try {
+      await expect(acquireSingleInstance(opts)).rejects.toThrow()
+    } finally {
+      await chmod(instance, 0o700)
+    }
+  })
+
+  it("destroys malformed, non-object and oversized handshake messages", async () => {
+    const opts = await options()
+    const owner = await primary(opts)
+    const payloads = [
+      "[1,2]\n", // valid JSON, not an object
+      "{not json}\n", // not JSON at all
+      `${"A".repeat(132_000)}\n`, // over the 128 KiB bound, in one chunk
+    ]
+    for (const payload of payloads) {
+      const attacker = createConnection({ host: "127.0.0.1", port: owner.port })
+      const closed = once(attacker, "close")
+      attacker.once("data", () => attacker.write(payload))
+      await closed
+    }
+    // The owner survives and still accepts a legitimate launch.
+    await acquireSingleInstance({ ...opts, launch: { argv: ["still-works"], cwd: opts.directory } })
+    expect((await owner.nextRequest())!.argv).toEqual(["still-works"])
+  })
+
+  it("reassembles a handshake split across chunks before rejecting it", async () => {
+    const opts = await options()
+    const owner = await primary(opts)
+    const attacker = createConnection({ host: "127.0.0.1", port: owner.port })
+    const closed = once(attacker, "close")
+    attacker.once("data", () => {
+      attacker.write("{not")
+      setTimeout(() => attacker.write(" json}\n"), 20)
+    })
+    await closed
+    await acquireSingleInstance({ ...opts, launch: { argv: ["after-split"], cwd: opts.directory } })
+    expect((await owner.nextRequest())!.argv).toEqual(["after-split"])
+  })
+
+  it("retries election when a squatter answers but no token exists", async () => {
+    const opts = await options()
+    const nonce = "b".repeat(64)
+    const squatter = createServer((socket) => {
+      socket.on("error", () => {})
+      socket.write(JSON.stringify({ version: 1, appId: opts.appId, nonce, proof: "0".repeat(64) }) + "\n")
+    })
+    const port = await listen(squatter)
+    // The squatter speaks a valid hello but no token file backs it, so the
+    // forwarder must treat the port as unowned and keep retrying to timeout.
+    await expect(acquireSingleInstance({ ...opts, port, timeoutMs: 150 })).rejects.toThrow("timed out")
+  })
 })

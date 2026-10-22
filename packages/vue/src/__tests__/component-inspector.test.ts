@@ -4,7 +4,7 @@
 /// integration tests need the native test renderer, like the rest of the
 /// automation surface.
 
-import { computed, defineComponent, h, ref, watchEffect } from "vue"
+import { computed, defineComponent, h, ref, watchEffect, type App as VueApp } from "vue"
 import { describe, expect, it } from "vitest"
 import {
   AutomationError,
@@ -12,6 +12,7 @@ import {
   type TestAutomationRenderer,
 } from "../automation/client.js"
 import { createComponentInspector } from "../automation/component-inspector.js"
+import type { HostNode } from "../types.js"
 import { createTestApp, hasNativeTestRenderer, type TestApp } from "../testing.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -48,6 +49,273 @@ describe("component inspector (wire)", () => {
     const tree = await app.components.tree()
     expect(tree).toEqual([])
     await app.close()
+  })
+})
+
+describe("component inspector (fake instance tree)", () => {
+  /** Structural stand-ins for Vue internals; only the fields the walker
+   *  touches exist, cast to the shapes `createComponentInspector` reads. */
+  interface FakeInstance {
+    type: { name?: string; __name?: string; __file?: string } | Function
+    subTree?: unknown
+    setupState?: unknown
+    props?: unknown
+    attrs?: unknown
+    data?: unknown
+    isUnmounted?: boolean
+  }
+
+  function hostEl(id: number | null): HostNode {
+    return { id, type: "div", text: "", props: {}, parent: null, children: [], created: true }
+  }
+
+  function vnode(parts: Record<string, unknown> = {}): Record<string, unknown> {
+    return parts
+  }
+
+  function instance(init: FakeInstance): FakeInstance {
+    return { subTree: null, ...init }
+  }
+
+  function inspectorFor(root: unknown) {
+    return createComponentInspector({
+      _instance: root,
+    } as unknown as VueApp<HostNode>)
+  }
+
+  it("names function components and reports no file for them", () => {
+    function Named() {}
+    const inspector = inspectorFor(instance({ type: Named, subTree: vnode() }))
+    const [node] = inspector.getComponentTree()!
+    expect(node!.name).toBe("Named")
+    expect(node!.file).toBeUndefined()
+  })
+
+  it("names anonymous and options-defined components", () => {
+    const anonymous = inspectorFor(
+      instance({ type: (0, function () {}), subTree: vnode() })
+    )
+    expect(anonymous.getComponentTree()![0]!.name).toBe("Anonymous")
+
+    const unnamed = inspectorFor(instance({ type: {}, subTree: vnode() }))
+    expect(unnamed.getComponentTree()![0]!.name).toBe("Anonymous")
+
+    const options = inspectorFor(
+      instance({
+        type: { __name: "Sfc", __file: "/tmp/Sfc.vue" },
+        subTree: vnode(),
+      })
+    )
+    const [sfc] = options.getComponentTree()!
+    expect(sfc!.name).toBe("Sfc")
+    expect(sfc!.file).toBe("/tmp/Sfc.vue")
+  })
+
+  it("serializes every value kind within the protocol bounds", () => {
+    const shared = { n: 1 }
+    const circular: Record<string, unknown> = {}
+    circular.self = circular
+    const throwingRef = {
+      __v_isRef: true,
+      get value(): unknown {
+        throw new Error("ref boom")
+      },
+    }
+    const throwingGetter: Record<string, unknown> = { safe: 1 }
+    Object.defineProperty(throwingGetter, "boom", {
+      enumerable: true,
+      get() {
+        throw new Error("getter boom")
+      },
+    })
+    const inspector = inspectorFor(
+      instance({
+        type: { name: "Fat" },
+        subTree: vnode(),
+        setupState: {
+          refValue: ref(7),
+          nestedRefs: ref({ inner: ref("x") }),
+          throwingRef,
+          nothing: undefined,
+          gone: null,
+          long: "x".repeat(600),
+          big: 10n,
+          flag: true,
+          handler: function onTick() {},
+          anonymous: (0, () => {}),
+          tag: Symbol("tag"),
+          failure: new Error("bad"),
+          deep: { l1: { l2: { l3: { l4: "x" } } } },
+          circular,
+          sharedTwice: { a: shared, b: shared },
+          fatArray: Array.from({ length: 55 }, (_, i) => i),
+          fatMap: new Map(
+            Array.from({ length: 55 }, (_, i) => [`k${i}`, i] as const)
+          ),
+          fatSet: new Set([1, 2]),
+          fatObject: Object.fromEntries(
+            Array.from({ length: 60 }, (_, i) => [`k${i}`, i])
+          ),
+          throwingGetter,
+        },
+      })
+    )
+    const state = inspector.getComponentTree()![0]!.state!
+
+    expect(state.refValue).toBe(7)
+    expect(state.nestedRefs).toEqual({ inner: "x" })
+    expect(state.throwingRef).toBe("[threw: Error: ref boom]")
+    expect(state.nothing).toBeNull()
+    expect(state.gone).toBeNull()
+    expect(state.long).toBe("x".repeat(500) + "…")
+    expect(state.big).toBe("10")
+    expect(state.flag).toBe(true)
+    expect(state.handler).toBe("ƒ onTick()")
+    expect(state.anonymous).toBe("ƒ anonymous()")
+    expect(state.tag).toBe("Symbol(tag)")
+    expect(state.failure).toBe("Error: bad")
+    expect(state.deep).toEqual({ l1: { l2: { l3: "…" } } })
+    expect(state.circular).toEqual({ self: "[circular]" })
+    expect(state.sharedTwice).toEqual({ a: { n: 1 }, b: { n: 1 } })
+    expect(state.fatArray).toHaveLength(51)
+    expect(state.fatArray![50]).toBe("…+5 more")
+    expect(Object.keys(state.fatMap as object)).toHaveLength(51)
+    expect((state.fatMap as Record<string, unknown>)["…"]).toBe("+5 more")
+    expect(state.fatSet).toEqual([1, 2])
+    expect(Object.keys(state.fatObject as object)).toHaveLength(50)
+    expect(state.throwingGetter).toEqual({
+      safe: 1,
+      boom: "[threw: Error: getter boom]",
+    })
+  })
+
+  it("omits records that are null or undefined", () => {
+    const inspector = inspectorFor(
+      instance({
+        type: { name: "Empty" },
+        subTree: vnode(),
+        setupState: null,
+        props: undefined,
+      })
+    )
+    const [node] = inspector.getComponentTree()!
+    expect(node!.state).toBeUndefined()
+    expect(node!.props).toBeUndefined()
+  })
+
+  it("degrades to an unavailable marker when a record cannot be read", () => {
+    const hostile = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("hostile")
+        },
+      }
+    )
+    const inspector = inspectorFor(
+      instance({ type: { name: "Hostile" }, subTree: vnode(), setupState: hostile })
+    )
+    expect(inspector.getComponentTree()![0]!.state).toEqual({
+      "[unavailable]": "Error: hostile",
+    })
+  })
+
+  it("collects host ids from children and dynamic children", () => {
+    const child = instance({ type: { name: "Child" }, subTree: vnode() })
+    const empty = instance({ type: { name: "Empty" }, subTree: null })
+    const inspector = inspectorFor(
+      instance({
+        type: { name: "Root" },
+        subTree: vnode({
+          el: hostEl(1),
+          children: [
+            null,
+            "plain text",
+            vnode({ el: hostEl(2) }),
+            vnode({ el: hostEl(null) }),
+            vnode({ component: child }),
+            vnode({ component: empty }),
+          ],
+          dynamicChildren: [vnode({ el: hostEl(3) })],
+        }),
+      })
+    )
+    const [node] = inspector.getComponentTree()!
+    expect(node!.hostIds).toEqual([1, 2, 3])
+    expect(node!.children).toHaveLength(2)
+    expect(node!.children![0]!.name).toBe("Child")
+    expect(node!.children![0]!.id).toBe(2)
+    expect(node!.children![1]!.name).toBe("Empty")
+    expect(node!.children![1]!.hostIds).toEqual([])
+  })
+
+  it("skips unmounted children and walks a repeated child once", () => {
+    const alive = instance({
+      type: { name: "Alive" },
+      subTree: vnode({ el: hostEl(10) }),
+    })
+    const dead = instance({
+      type: { name: "Dead" },
+      subTree: vnode(),
+      isUnmounted: true,
+    })
+    const inspector = inspectorFor(
+      instance({
+        type: { name: "Root" },
+        subTree: vnode({
+          children: [
+            vnode({ component: alive }),
+            vnode({ component: dead }),
+            vnode({ component: alive }),
+          ],
+        }),
+      })
+    )
+    const [node] = inspector.getComponentTree()!
+    expect(node!.children!.map((child) => child.name)).toEqual(["Alive"])
+  })
+
+  it("finds the component that owns a host element", () => {
+    const leaf = instance({
+      type: { name: "Leaf" },
+      subTree: vnode({ el: hostEl(10) }),
+    })
+    const root = instance({
+      type: { name: "Root", __file: "Root.vue" },
+      subTree: vnode({
+        el: hostEl(1),
+        children: [vnode({ component: leaf })],
+      }),
+    })
+    const inspector = inspectorFor(root)
+    const leafState = inspector.getComponentState(10)
+    expect(leafState).toMatchObject({ name: "Leaf" })
+    expect(leafState!.children).toBeUndefined()
+    expect(inspector.getComponentState(1)!.name).toBe("Root")
+    expect(inspector.getComponentState(999)).toBeNull()
+  })
+
+  it("returns null when there is no live root instance", () => {
+    const inspector = inspectorFor(undefined)
+    expect(inspector.getComponentTree()).toBeNull()
+    expect(inspector.getComponentState(1)).toBeNull()
+    const unmounted = inspectorFor(
+      instance({ type: { name: "Gone" }, subTree: vnode(), isUnmounted: true })
+    )
+    expect(unmounted.getComponentTree()).toBeNull()
+    expect(unmounted.getComponentState(1)).toBeNull()
+  })
+
+  it("returns null when walking Vue internals throws", () => {
+    const hostile = instance({ type: { name: "Hostile" } })
+    Object.defineProperty(hostile, "subTree", {
+      get() {
+        throw new Error("internals moved")
+      },
+    })
+    const inspector = inspectorFor(hostile)
+    expect(inspector.getComponentTree()).toBeNull()
+    expect(inspector.getComponentState(1)).toBeNull()
   })
 })
 
