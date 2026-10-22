@@ -58,7 +58,8 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@gpuiv/native": "workspace:^",
@@ -83,6 +84,7 @@
   "devDependencies": {
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^25.3.3",
+    "@vitest/coverage-v8": "4.0.18",
     "@vue/devtools": "^8.2.1",
     "@vue/devtools-kit": "^8.2.1",
     "h3": "^1.15.0",

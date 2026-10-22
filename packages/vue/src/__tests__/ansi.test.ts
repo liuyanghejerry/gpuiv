@@ -62,4 +62,13 @@ describe("ANSI log decoding", () => {
     expect(parser.write("normal")[0]).toMatchObject({ text: "normal", color: "#aaaaaa", fontWeight: 400 })
     expect(() => createAnsiParser({ palette: [] })).toThrow(/sixteen/)
   })
+
+  it("resumes OSC and string payloads after a stray escape inside them", () => {
+    // An ESC followed by something other than a terminator drops back into the
+    // payload instead of ending it; only ESC \, ST or (for OSC) BEL ends it.
+    expect(text(parseAnsi("a\x1b]0;title\x1bXstill-osc\x07b"))).toBe("ab")
+    expect(text(parseAnsi("c\x1bPpayload\x1bXstill-string\x1b\\d"))).toBe("cd")
+    expect(text(parseAnsi("e\x1b]0;t\x1b\x07f"))).toBe("ef")
+    expect(text(parseAnsi("g\x1bPt\x9ch"))).toBe("gh")
+  })
 })

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createScrollController } from "../scroll-controller.js"
+import { defineComponent, h } from "vue"
+import { createScrollController, useScrollController } from "../scroll-controller.js"
+import { GPUIV_CONTEXT } from "../hooks/use-gpuix.js"
+import { createGpuivRendererHost } from "../reconciler/vue-renderer.js"
 
 afterEach(() => vi.useRealTimers())
 
@@ -105,5 +108,52 @@ describe("scroll controller", () => {
     renderer.scrollTo.mockImplementation(() => { throw new Error("closed") })
     await expect(controller.scrollTo(1)).rejects.toThrow("closed")
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe("useScrollController", () => {
+  it("throws outside a GpuivProvider", () => {
+    const host = createGpuivRendererHost({ applyBatch: () => [] }, { nextElementId: 0 })
+    const app = host.vue.createApp(
+      defineComponent(() => {
+        useScrollController()
+        return () => h("div")
+      }),
+    )
+    expect(() => app.mount(host.container)).toThrow(/GpuivProvider/)
+    host.detach()
+  })
+
+  it("binds the injected renderer and cancels pending scrolls on unmount", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] })
+    const offsets = new Map([[1, [0, 0]]])
+    const renderer = {
+      applyBatch: () => [],
+      getScrollOffset: (id: number) => offsets.get(id) ?? null,
+      scrollTo: vi.fn((id: number, x: number, y: number) => offsets.set(id, [Math.min(0, x), Math.max(-500, Math.min(0, y))])),
+    }
+    const controllers: ReturnType<typeof useScrollController>[] = []
+    const Child = defineComponent({
+      setup() {
+        controllers.push(useScrollController())
+        return () => h("div")
+      },
+    })
+    const host = createGpuivRendererHost(renderer as never, { nextElementId: 0 })
+    const app = host.vue.createApp(defineComponent(() => () => h(Child)))
+    app.provide(GPUIV_CONTEXT, { renderer: renderer as never })
+    app.mount(host.container)
+    host.flushMutations()
+
+    const controller = controllers[0]!
+    const done = controller.scrollTo(1, { y: -300, behavior: "smooth" })
+    await vi.advanceTimersByTimeAsync(48)
+    expect(renderer.scrollTo).toHaveBeenCalled()
+
+    app.unmount()
+    host.flushMutations()
+    expect((await done).status).toBe("cancelled")
+    expect(vi.getTimerCount()).toBe(0)
+    expect((await controller.scrollTo(1)).status).toBe("cancelled")
   })
 })

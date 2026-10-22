@@ -120,6 +120,99 @@ describe("transformHmrSource", () => {
     expect(out.match(/__gpuivHmrComponent\(/g)).toHaveLength(1)
   })
 
+  it("registers components declared with let, var, and a type annotation", () => {
+    const source = [
+      'import { defineComponent } from "vue"',
+      "let L = defineComponent({ setup: () => () => null })",
+      "var V = defineComponent({ setup: () => () => null })",
+      "const Typed: Foo<Bar> = defineComponent({ setup: () => () => null })",
+    ].join("\n")
+    const out = transform(source)
+    expect(out).toContain(";L.__hmrId =")
+    expect(out).toContain(";V.__hmrId =")
+    expect(out).toContain(";Typed.__hmrId =")
+  })
+
+  it("blanks escaped characters inside quoted strings", () => {
+    const source = [
+      'import { defineComponent } from "vue"',
+      'const S = "a\\"b { ( < /"',
+      "const View = defineComponent({ setup: () => () => null })",
+    ].join("\n")
+    const out = transform(source)
+    expect(out).toContain(";View.__hmrId =")
+  })
+
+  it("returns sources with unterminated literals unchanged", () => {
+    const tails = [
+      // String that never closes (end of file).
+      'const View = defineComponent({ setup: () => () => null })\nconst S = "open',
+      // Regex literal hit by a newline.
+      "const View = defineComponent({\n  setup() {\n    const re = /ab\ncd\n    return () => null\n  },\n})",
+      // Regex literal left open at end of file.
+      "const View = defineComponent({\n  setup() {\n    const re = /ab",
+    ]
+    for (const source of tails) {
+      expect(transform(source)).toBe(source)
+    }
+  })
+
+  it("scans JSX attributes: names, quoted values, expression holes, comments, self-close", () => {
+    const source = [
+      'import { defineComponent } from "vue"',
+      "const View = defineComponent({",
+      "  setup: () => () => (",
+      '    <div className="row" /* between attrs */ onClick={() => { bump() }} disabled>',
+      "      <input id=\"q\" onChange={handleChange} />",
+      "      <div // trailing note",
+      '        className="inner">',
+      "        <mod.Widget />",
+      "        <>{hi}</>",
+      "      </div>",
+      "    </div>",
+      "  ),",
+      "})",
+    ].join("\n")
+    const out = transform(source)
+    expect(out).not.toBe(source)
+    expect(out).toContain(";View.__hmrId =")
+  })
+
+  it("opens fragments and member tags from expression position", () => {
+    const source = [
+      'import { defineComponent } from "vue"',
+      "const View = defineComponent({",
+      "  setup: () => {",
+      "    const ordered = a<b",
+      "    const W = <mod.Widget />",
+      "    return (<>{ordered}{W}</>)",
+      "  },",
+      "})",
+    ].join("\n")
+    const out = transform(source)
+    expect(out).toContain(";View.__hmrId =")
+  })
+
+  it("tracks array brackets in module-level code", () => {
+    const source = [
+      'import { defineComponent } from "vue"',
+      "const list = [1, 2]",
+      "const View = defineComponent({ setup: () => () => list.length })",
+    ].join("\n")
+    const out = transform(source)
+    expect(out).toContain(";View.__hmrId =")
+  })
+
+  it("tolerates a stray closing tag in expression position", () => {
+    const source = [
+      'import { defineComponent } from "vue"',
+      "const View = defineComponent({ setup: () => () => null })",
+      "const stray = </div>",
+    ].join("\n")
+    const out = transform(source)
+    expect(out).toContain(";View.__hmrId =")
+  })
+
   it("does not treat comparisons as JSX", () => {
     const source = [
       'import { defineComponent } from "vue"',
@@ -189,6 +282,15 @@ describe("transformHmrSource", () => {
       expect(transform(source)).toContain(";A.__hmrId =")
       expect(transform(source)).toContain(";__gpuivHmrComponent(")
     }
+  })
+
+  it("still registers when the next token cannot start or continue an expression", () => {
+    // A digit after the closing paren is neither an expression tail nor an
+    // identifier, so it can only begin a new (here, nonsensical) statement.
+    // The `}` the code comments mention cannot reach this line: sanitize()
+    // rejects an unbalanced closing brace first.
+    const source = "const A = defineComponent({ setup: () => () => null })\n5\n"
+    expect(transform(source)).toContain(";A.__hmrId =")
   })
 
   it("declines expression tails that keep the statement open", () => {

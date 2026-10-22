@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest"
 import { createRequire } from "node:module"
-import { defineComponent, h, onErrorCaptured, ref, nextTick } from "vue"
+import { defineComponent, h, onErrorCaptured, ref, nextTick, Suspense } from "vue"
 import type { NativeRenderer } from "../types.js"
 import { createGpuivRendererHost, toGpuixStyle } from "../reconciler/vue-renderer.js"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
@@ -41,8 +41,16 @@ class MockRenderer implements NativeRenderer {
   }
 }
 
-function mountApp(component: unknown) {
-  const mock = new MockRenderer()
+/** Reports every destroyElement op back as a destroyed id, like the Rust side. */
+class DestroyReportingRenderer extends MockRenderer {
+  applyBatch(json: string): number[] {
+    const batch = JSON.parse(json) as Op[]
+    this.applied.push(...batch)
+    return batch.filter((op) => op[0] === "destroyElement").map((op) => op[1] as number)
+  }
+}
+
+function mountApp(component: unknown, mock: MockRenderer = new MockRenderer()) {
   const host = createGpuivRendererHost(mock, { nextElementId: 0 })
   const app = host.vue.createApp(component as never)
   app.mount(host.container)
@@ -376,5 +384,213 @@ describe("vue renderer lifecycle semantics", () => {
     const { mock } = mountApp(Comp)
     expect(mock.applied.some((o) => o[0] === "setCustomProp")).toBe(false)
     expect(mock.applied).toContainEqual(["setStyle", 2, { width: 10 }])
+  })
+})
+
+describe("renderer edge paths", () => {
+  it("maps onInput to the native change event", () => {
+    const Comp = defineComponent({
+      setup: () => () => h("input", { onInput: () => {}, placeholder: "p" }),
+    })
+    const { mock } = mountApp(Comp)
+    expect(mock.applied).toContainEqual(["setEventListener", 2, "change", true])
+  })
+
+  it("drops the listener wiring when an on-prop stops being a handler", async () => {
+    const value = ref<unknown>(() => {})
+    const Comp = defineComponent({
+      setup: () => () => h("input", { onClick: value.value }),
+    })
+    const { mock, host } = mountApp(Comp)
+    expect(mock.applied).toContainEqual(["setEventListener", 2, "click", true])
+
+    value.value = "not a handler"
+    await nextTick()
+    mock.applied.length = 0
+    host.flushMutations()
+    // Neither a listener update nor a forwarded custom prop: the prop is an
+    // event name holding a non-handler, so nothing crosses the protocol.
+    expect(mock.applied).toEqual([])
+  })
+
+  it("ignores the reserved children prop", () => {
+    const Comp = defineComponent({
+      setup: () => () => h("div", { children: undefined, style: { width: 1 } }),
+    })
+    const { mock } = mountApp(Comp)
+    expect(mock.applied.some((o) => o[0] === "setCustomProp")).toBe(false)
+    expect(mock.applied).toContainEqual(["setStyle", 2, { width: 1 }])
+  })
+
+  it("exposes scrollIntoView and the img bitmap pushers on element refs", () => {
+    let divEl: { scrollIntoView: () => void }
+    let imgEl: { setImage: (bytes: Uint8Array) => void; setImagePixels: (width: number, height: number, pixels: Uint8Array) => void }
+    const Comp = defineComponent({
+      setup: () => () =>
+        h("div", [
+          h("div", { ref: (el: unknown) => { divEl = el as never } }),
+          h("img", { ref: (el: unknown) => { imgEl = el as never } }),
+        ]),
+    })
+    const calls: string[] = []
+    const mock = new MockRenderer()
+    mock.scrollIntoView = (id) => calls.push(`scroll:${id}`)
+    mock.setImage = (id, bytes) => calls.push(`image:${id}:${bytes.length}`)
+    mock.setImagePixels = (id, w, h, pixels) => calls.push(`pixels:${id}:${w}x${h}:${pixels.length}`)
+    mountApp(Comp, mock)
+
+    divEl!.scrollIntoView()
+    imgEl!.setImage(new Uint8Array([1, 2]))
+    imgEl!.setImagePixels(2, 3, new Uint8Array(4))
+    expect(calls).toEqual(["scroll:3", "image:4:2", "pixels:4:2x3:4"])
+  })
+
+  it("dispatches a bare render()'s listeners without a Vue instance", () => {
+    const clicks: string[] = []
+    const mock = new MockRenderer()
+    const host = createGpuivRendererHost(mock, { nextElementId: 0 })
+    // host.vue.render() mounts with no owning component instance, so the
+    // registry handler is the plain loop and a throw escapes synchronously.
+    host.vue.render(
+      h("div", {
+        onClick: () => {
+          clicks.push("one")
+          throw new Error("boom")
+        },
+        onMouseDown: [() => clicks.push("arr")],
+      }),
+      host.container
+    )
+    host.flushMutations()
+    const divId = host.container.children[0].id!
+    expect(() =>
+      handleGpuixEvent({ elementId: divId, eventType: "click" } as never, mock)
+    ).toThrowError("boom")
+    handleGpuixEvent({ elementId: divId, eventType: "mouseDown" } as never, mock)
+    expect(clicks).toEqual(["one", "arr"])
+    host.vue.render(null, host.container)
+    host.flushMutations()
+    host.detach()
+  })
+
+  it("moves a keyed item past a null placeholder through the anchor path", async () => {
+    // The falsy child leaves a comment anchor (never sent to Rust); moving
+    // item 1 behind it resolves past the comment to an append.
+    const slots = ref<Array<number | null>>([1, 2, 3, null])
+    const Comp = defineComponent({
+      setup: () => () =>
+        h("div", slots.value.map((slot) => (slot === null ? null : h("span", { key: slot }, String(slot))))),
+    })
+    const { mock, host } = mountApp(Comp)
+    mock.applied.length = 0
+
+    slots.value = [2, 3, 1, null]
+    await nextTick()
+    host.flushMutations()
+    // Spans were created 3, 4, 5; item 1's span moves to the end.
+    expect(mock.applied).toContainEqual(["appendChild", 2, 3])
+    const realIds = host.container.children[0].children
+      .filter((child) => child.id != null)
+      .map((child) => child.id)
+    expect(realIds).toEqual([4, 5, 3])
+  })
+
+  it("moves multi-root fragment items before their later siblings", async () => {
+    const items = ref([1, 2, 3])
+    const Item = defineComponent({
+      props: { id: Number },
+      setup: (props) => () => [h("span", `a${props.id}`), h("span", `b${props.id}`)],
+    })
+    const Comp = defineComponent({
+      setup: () => () => h("div", items.value.map((i) => h(Item, { key: i, id: i }))),
+    })
+    const { mock, host } = mountApp(Comp)
+    mock.applied.length = 0
+
+    items.value = [2, 1, 3]
+    await nextTick()
+    host.flushMutations()
+    // Item 2's nodes (anchors 7-8, spans 9-10) all move before item 1's
+    // first anchor (3); a move of an existing child is insertBefore, not
+    // destroy + recreate.
+    expect(mock.applied.some((op) => op[0] === "destroyElement")).toBe(false)
+    const moves = mock.applied.filter((op) => op[0] === "insertBefore" || op[0] === "appendChild")
+    expect(moves).toEqual([
+      ["insertBefore", 2, 7, 3],
+      ["insertBefore", 2, 9, 3],
+      ["insertBefore", 2, 10, 3],
+      ["insertBefore", 2, 8, 3],
+    ])
+  })
+
+  it("moves resolved suspense content across parents", async () => {
+    let resolveAsync: (() => void) | undefined
+    const Async = defineComponent({
+      async setup() {
+        await new Promise<void>((resolve) => {
+          resolveAsync = resolve
+        })
+        return () => h("span", "loaded")
+      },
+    })
+    const Comp = defineComponent({
+      setup: () => () =>
+        h("div", { style: { width: 10 } }, [
+          h(Suspense, null, {
+            default: () => h(Async),
+            fallback: () => h("em", "loading"),
+          }),
+        ]),
+    })
+    const { mock, host, app } = mountApp(Comp)
+    resolveAsync!()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    await nextTick()
+    host.flushMutations()
+
+    // The fallback subtree is destroyed and the async span re-parents into
+    // the main container from suspense's hidden container.
+    const ops = mock.applied.filter((op) => op[0] === "destroyElement" || op[0] === "appendChild")
+    expect(ops).toContainEqual(["destroyElement", 4])
+    const texts = host.container.children[0].children.map((child) => child.text)
+    expect(texts).toContain("loaded")
+    expect(texts).not.toContain("loading")
+    app.unmount()
+    host.detach()
+  })
+
+  it("reports false from a second detach once the root is gone", () => {
+    const { host, app } = mountApp(defineComponent({ setup: () => () => h("div") }))
+    app.unmount()
+    expect(host.detach()).toBe(true)
+    expect(host.detach()).toBe(false)
+  })
+})
+
+describe("batch destruction bookkeeping", () => {
+  it("unregisters handlers for every id applyBatch reports destroyed", async () => {
+    const shown = ref(true)
+    const Comp = defineComponent({
+      setup: () => () => h("div", shown.value ? [h("span", { onClick: () => {} }, "a")] : []),
+    })
+    const mock = new DestroyReportingRenderer()
+    const host = createGpuivRendererHost(mock, { nextElementId: 0 })
+    const app = host.vue.createApp(Comp)
+    app.mount(host.container)
+    host.flushMutations()
+    const spanId = host.container.children[0].children[0].id!
+    expect(host.registryContainer.eventHandlers.get(spanId)).toBeTruthy()
+
+    shown.value = false
+    mock.applied.length = 0
+    await nextTick()
+    host.flushMutations()
+    expect(mock.applied).toContainEqual(["destroyElement", spanId])
+    // The destroy id loops back from applyBatch and clears the event map.
+    expect(host.registryContainer.eventHandlers.has(spanId)).toBe(false)
+
+    app.unmount()
+    host.flushMutations()
+    host.detach()
   })
 })
