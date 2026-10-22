@@ -246,15 +246,17 @@ describe("single instance protocol edges", () => {
     }
   })
 
-  it("rejects data directories with loose permissions", async () => {
+  // Permission bits are Unix-only; the implementation skips the check on win32.
+  it.skipIf(process.platform === "win32")("rejects data directories with loose permissions", async () => {
     const opts = await options()
     const instance = path.join(opts.directory, "gpuiv-instance")
     await mkdir(instance, { recursive: true, mode: 0o755 })
     await expect(acquireSingleInstance(opts)).rejects.toThrow("mode 0700")
   })
 
-  // Needs a non-root user: root bypasses write permissions.
-  it.skipIf(process.getuid?.() === 0)("refuses ownership when the token write is denied", async () => {
+  // Needs a non-root user (root bypasses write permissions) and a platform
+  // with Unix permission bits (Windows has no chmod-enforced denial).
+  it.skipIf(process.getuid?.() === 0 || process.platform === "win32")("refuses ownership when the token write is denied", async () => {
     const opts = await options()
     const instance = path.join(opts.directory, "gpuiv-instance")
     await mkdir(instance, { recursive: true, mode: 0o700 })

@@ -439,7 +439,10 @@ describe("updater engine and apply mechanics (no native code)", () => {
       const { updater } = engineFixture()
       await expect(updater.downloadUpdate()).rejects.toThrow("checkForUpdates() found nothing to download")
 
-      stubResponses(jsonResponse(pointer), jsonResponse({ version: "0.3.0", platforms: { "darwin-arm64": entryFor(Buffer.alloc(8)) } }))
+      // The manifest serves a platform the current one is not: pick a key
+      // that differs from the host's, or the artifact fetch runs unstubbed.
+      const otherPlatform = platformKey() === "darwin-arm64" ? "linux-x64" : "darwin-arm64"
+      stubResponses(jsonResponse(pointer), jsonResponse({ version: "0.3.0", platforms: { [otherPlatform]: entryFor(Buffer.alloc(8)) } }))
       const { updater: second } = engineFixture()
       await second.checkForUpdates()
       await expect(second.downloadUpdate()).rejects.toThrow(`The release has no build for ${platformKey()}.`)
@@ -484,6 +487,9 @@ describe("updater engine and apply mechanics (no native code)", () => {
     })
 
     it("streams the artifact, reports progress and stages the verified zip", async () => {
+      // The staging path is platform-specific; pin Linux so the .local/share
+      // expectation holds on macOS and Windows runners too.
+      osStub.platform = "linux"
       const bytes = Buffer.alloc(1000, 7)
       const { updater, events } = engineFixture()
       const zipPath = await stageDownload(updater, bytes)
@@ -518,6 +524,7 @@ describe("updater engine and apply mechanics (no native code)", () => {
 
   describe("applyAndRelaunch and queueApplyOnQuit", () => {
     it("reports that Linux self-update is not implemented", async () => {
+      osStub.platform = "linux"
       expect(() => applyUpdateSync("/tmp/never.zip", bundleId)).toThrow("Linux self-update is not implemented")
       const { updater } = engineFixture()
       await stageDownload(updater, Buffer.alloc(50, 7))
@@ -590,6 +597,8 @@ describe("updater engine and apply mechanics (no native code)", () => {
     })
 
     it("applies on exit and logs a failed apply", async () => {
+      // Linux has no apply path, so the exit handler lands in the error log.
+      osStub.platform = "linux"
       const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
       trackExitListeners()
       const { updater } = engineFixture()
@@ -773,7 +782,13 @@ describe("updater engine and apply mechanics (no native code)", () => {
         cpStub.spawn = vi.fn(() => ({ unref() {} }))
 
         expect(applyWindowsHandoff(zip, productDir)).toBeNull()
-        const staging = path.join(root, ".gpuiv-update-staging")
+        // The staging dir beside the product is platform-named: win32 derives
+        // it from the exec dir (`.Product-update`); elsewhere it falls back to
+        // `.gpuiv-update-staging` (updater.ts `windowsStagingDir`).
+        const staging =
+          osStub.platform === "win32"
+            ? path.join(root, ".Product-update")
+            : path.join(root, ".gpuiv-update-staging")
         expect(existsSync(path.join(staging, "Inner", exeName))).toBe(true)
         expect(cpStub.spawn).toHaveBeenCalledWith(
           path.join(staging, "Inner", exeName),
@@ -804,7 +819,12 @@ describe("updater engine and apply mechanics (no native code)", () => {
         cpStub.spawn = vi.fn(() => ({ unref() {} }))
 
         expect(applyWindowsHandoff(zip, productDir)).toBeNull()
-        expect(cpStub.spawn).toHaveBeenCalledWith(path.join(root, ".gpuiv-update-staging", exeName), [], expect.anything())
+        // Same platform-named staging split as the single-entry case above.
+        const staging =
+          osStub.platform === "win32"
+            ? path.join(root, ".Product-update")
+            : path.join(root, ".gpuiv-update-staging")
+        expect(cpStub.spawn).toHaveBeenCalledWith(path.join(staging, exeName), [], expect.anything())
       } finally {
         rmSync(root, { recursive: true, force: true })
       }

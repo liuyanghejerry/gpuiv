@@ -8,6 +8,12 @@ import type { NativeRenderer } from "../types.js"
 
 type NativeCallback = ((error: Error | null, urls: string[]) => void) | null
 
+// Windows file URLs need a drive letter, so the fixtures carry one there and
+// expect the decoded backslash form back.
+const windows = process.platform === "win32"
+const tmpFileUrl = (suffix: string) => (windows ? `file:///C:/tmp/${suffix}` : `file:///tmp/${suffix}`)
+const tmpPath = (name: string) => (windows ? `C:\\tmp\\${name}` : `/tmp/${name}`)
+
 /** A renderer mock that records every callback armed on its onOpenUrls. */
 function rendererWithOpenUrls(arm?: (callback: NativeCallback) => void) {
   const armed: NativeCallback[] = []
@@ -27,26 +33,29 @@ describe("parseOpenRequest", () => {
   })
 
   it("decodes file URLs to absolute local paths", () => {
-    const request = parseOpenRequest(["file:///tmp/%E4%B8%AD%E6%96%87.md", "FILE:///tmp/notes.txt"])
-    expect(request.paths).toEqual(["/tmp/中文.md", "/tmp/notes.txt"])
+    const request = parseOpenRequest([tmpFileUrl("%E4%B8%AD%E6%96%87.md"), tmpFileUrl("notes.txt").replace("file:", "FILE:")])
+    expect(request.paths).toEqual([tmpPath("中文.md"), tmpPath("notes.txt")])
     expect(request.errors).toEqual([])
   })
 
   it("rejects file URLs with a query, fragment or NUL byte, keeping valid siblings", () => {
-    const request = parseOpenRequest(["file:///tmp/a?version=2", "file:///tmp/b#anchor", "file:///a%00b", "file:///tmp/ok"])
-    expect(request.paths).toEqual(["/tmp/ok"])
+    const request = parseOpenRequest([tmpFileUrl("a?version=2"), tmpFileUrl("b#anchor"), windows ? "file:///C:/a%00b" : "file:///a%00b", tmpFileUrl("ok")])
+    expect(request.paths).toEqual([tmpPath("ok")])
     expect(request.errors.map((error) => error.url)).toEqual([
-      "file:///tmp/a?version=2",
-      "file:///tmp/b#anchor",
-      "file:///a%00b",
+      tmpFileUrl("a?version=2"),
+      tmpFileUrl("b#anchor"),
+      windows ? "file:///C:/a%00b" : "file:///a%00b",
     ])
     expect(request.errors[0]!.error.message).toContain("query or fragment")
-    expect(request.errors[2]!.error.message).toContain("NUL")
+    // On Windows fileURLToPath rejects the encoded NUL before the explicit
+    // check runs, with Node's own wording; both must error, either wording.
+    expect(request.errors[2]!.error).toBeInstanceOf(Error)
+    if (!windows) expect(request.errors[2]!.error.message).toContain("NUL")
   })
 
   it("reports individually file URLs that do not parse", () => {
-    const request = parseOpenRequest(["file://[broken", "file:///tmp/fine"])
-    expect(request.paths).toEqual(["/tmp/fine"])
+    const request = parseOpenRequest(["file://[broken", tmpFileUrl("fine")])
+    expect(request.paths).toEqual([tmpPath("fine")])
     expect(request.errors).toHaveLength(1)
     expect(request.errors[0]!.url).toBe("file://[broken")
     expect(request.errors[0]!.error).toBeInstanceOf(Error)
@@ -140,10 +149,10 @@ describe("onOpenRequests", () => {
     const requests: unknown[] = []
     onOpenRequests(renderer, (request) => requests.push(request))
 
-    armed[0]!(null, ["file:///tmp/%E4%B8%AD.md", "myapp://thread/42", "file:///bad?x=1"])
+    armed[0]!(null, [tmpFileUrl("%E4%B8%AD.md"), "myapp://thread/42", "file:///bad?x=1"])
     expect(requests).toEqual([
       {
-        paths: ["/tmp/中.md"],
+        paths: [tmpPath("中.md")],
         urls: ["myapp://thread/42"],
         errors: [{ url: "file:///bad?x=1", error: expect.any(Error) }],
       },
