@@ -123,11 +123,20 @@ describe("parseColor", () => {
 
   it("parses color(srgb r g b) with a trailing alpha channel and percentages", () => {
     expect(parseColor("color(srgb 1 0 0)")).toEqual({ r: 255, g: 0, b: 0, a: 1 })
-    // The alpha travels as a fourth bare channel; the CSS `/`-separated form
-    // is not accepted (see the parser's channel splitting).
+    // The alpha also travels as a fourth bare channel (pre-CSS Color 4 form).
     expect(parseColor("color(srgb 1 0 0 0.5)")).toEqual({ r: 255, g: 0, b: 0, a: 0.5 })
     expect(parseColor("color(srgb 100% 0% 0%)")).toEqual({ r: 255, g: 0, b: 0, a: 1 })
     expect(parseColor("color(srgb 0.5 0.25 0)")).toEqual({ r: 127.5, g: 63.75, b: 0, a: 1 })
+  })
+
+  it("parses the CSS Color 4 slash alpha in color(srgb)", () => {
+    expect(parseColor("color(srgb 1 0 0 / 0.5)")).toEqual({ r: 255, g: 0, b: 0, a: 0.5 })
+    expect(parseColor("color(srgb 1 0 0 / 50%)")).toEqual({ r: 255, g: 0, b: 0, a: 0.5 })
+    // The slash needs no surrounding whitespace.
+    expect(parseColor("color(srgb 1 0 0/0.25)")).toEqual({ r: 255, g: 0, b: 0, a: 0.25 })
+    expect(parseColor("color(srgb 100% 0% 0% / 100%)")).toEqual({ r: 255, g: 0, b: 0, a: 1 })
+    // Alpha is clamped into 0–1 like every other channel.
+    expect(parseColor("color(srgb 1 0 0 / 2)")).toEqual({ r: 255, g: 0, b: 0, a: 1 })
   })
 
   it("rejects color() in unsupported spaces and shapes", () => {
@@ -137,6 +146,7 @@ describe("parseColor", () => {
     expect(parseColor("color(srgb 1 0 xyz)")).toBeNull()
     expect(parseColor("color(srgb 1 0 0 / abc)")).toBeNull()
     expect(parseColor("color(srgb 1 0 0 abc)")).toBeNull()
+    expect(parseColor("color(srgb 1 0 0 /)")).toBeNull()
     expect(parseColor("color(srgb 1 0 0")).toBeNull()
     expect(parseColor("color(srgb)")).toBeNull()
   })

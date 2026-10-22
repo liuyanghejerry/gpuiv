@@ -12,7 +12,7 @@ import {
 import type { Mark, Node as PMNode } from "prosemirror-model"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import { editorSchema, parseMarkdown, serializeMarkdown } from "./model.js"
-import { MarkdownEditorCore } from "./state.js"
+import { MarkdownEditorCore, nodeAtOrNull } from "./state.js"
 
 /**
  * `<markdown-editor>` — WYSIWYG Markdown editing on gpuiv.
@@ -964,7 +964,9 @@ export const MarkdownEditor = defineComponent({
      *  silently turn `**bold**`, links, and inline code into plain text. */
     const serializeBlockSelection = (row: EditableRow, start: number, end: number): string | null => {
       if (end <= start) return null
-      const node = core.state.doc.nodeAt(row.pos)
+      // The row comes from an event closure and can predate the latest edit;
+      // a position the doc no longer contains must no-op, not throw.
+      const node = nodeAtOrNull(core.state.doc, row.pos)
       if (!node?.isTextblock) return null
       const from = Math.max(0, Math.min(start, node.content.size))
       const to = Math.max(from, Math.min(end, node.content.size))
@@ -1079,7 +1081,7 @@ export const MarkdownEditor = defineComponent({
         core.editBlock(row.pos, prev, without)
         prev = without
       }
-      const node = core.state.doc.nodeAt(row.pos)
+      const node = nodeAtOrNull(core.state.doc, row.pos)
       if (!node || !node.isTextblock) return
       const isCode = node.type.spec.code === true
       // Structure beats a newline heuristic: parse the text and insert as

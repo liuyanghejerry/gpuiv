@@ -109,12 +109,21 @@ function parseColorFunc(spec: string): RgbaColor | null {
   const open = spec.indexOf("(")
   const close = spec.lastIndexOf(")")
   if (open < 0 || close < open) return null
-  const parts = spec
-    .slice(open + 1, close)
-    .split(/\s+/)
-    .filter((p) => p.length > 0)
-  if (parts.length < 4 || parts[0]!.toLowerCase() !== "srgb") return null
+  let inner = spec.slice(open + 1, close)
   let alpha = 1
+  // The CSS Color 4 slash form: `color(srgb r g b / a)`. Split it off before
+  // the whitespace tokenisation, or `/` lands in the channel list.
+  const slash = inner.lastIndexOf("/")
+  if (slash >= 0) {
+    const alphaToken = inner.slice(slash + 1).trim()
+    if (!alphaToken) return null
+    const a = parseChannel(alphaToken, 1)
+    if (a == null) return null
+    alpha = a
+    inner = inner.slice(0, slash)
+  }
+  const parts = inner.split(/\s+/).filter((p) => p.length > 0)
+  if (parts.length < 4 || parts[0]!.toLowerCase() !== "srgb") return null
   const channels = parts.slice(1)
   if (channels.length === 4) {
     const a = parseChannel(channels[3]!, 1)

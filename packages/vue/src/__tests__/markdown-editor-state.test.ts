@@ -580,3 +580,39 @@ describe("editor core: input rule gating", () => {
     expect(c.getMarkdown()).toBe("- [ ] abc\n")
   })
 })
+
+describe("editor core: stale block positions", () => {
+  // A native event queued before an edit can reach its handler after the doc
+  // shrank past the event's captured position. Every position-taking method
+  // must no-op on those, never throw ProseMirror's RangeError.
+  it("no-ops on positions beyond the doc end", () => {
+    const c = core("hello\n\nworld")
+    const before = c.getMarkdown()
+    const beyond = c.state.doc.content.size + 10
+    expect(() => c.editBlock(beyond, "x", "y")).not.toThrow()
+    expect(c.splitBlockAt(beyond, 0)).toBeNull()
+    expect(c.joinWithPreviousBlock(beyond)).toBeNull()
+    expect(() => c.insertMarkdownAt(beyond, 0, "text")).not.toThrow()
+    expect(() => c.toggleTaskItemAt(beyond)).not.toThrow()
+    expect(c.getMarkdown()).toBe(before)
+  })
+
+  it("no-ops on negative and fractional positions", () => {
+    const c = core("hello")
+    const before = c.getMarkdown()
+    expect(() => c.editBlock(-1, "x", "y")).not.toThrow()
+    expect(c.splitBlockAt(0.5, 0)).toBeNull()
+    expect(c.joinWithPreviousBlock(-5)).toBeNull()
+    expect(() => c.insertMarkdownAt(Number.NaN, 0, "text")).not.toThrow()
+    expect(() => c.toggleTaskItemAt(-2)).not.toThrow()
+    expect(c.getMarkdown()).toBe(before)
+  })
+
+  it("still edits at the exact doc-end boundary", () => {
+    const c = core("ab")
+    // Position 0 is always the first block; the last valid position is
+    // content.size (the doc's closing boundary).
+    expect(() => c.editBlock(0, "ab", "abc")).not.toThrow()
+    expect(c.getMarkdown()).toBe("abc\n")
+  })
+})

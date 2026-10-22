@@ -376,8 +376,10 @@ export const ComboboxValue = defineComponent({
           ? ""
           : context.itemToString(context.value)
       const slot = slots.default
-      const content =
-        slot && slot.length ? slot(context.value) : undefined
+      // A Vue slot is a function — its `length` is the declared parameter
+      // count, not a child count (the React idiom). Its presence is the
+      // override signal; a zero-parameter slot must still render.
+      const content = slot ? slot(context.value) : undefined
       const fallback = value || (attrs.placeholder as unknown) || ""
       return h("div", attrs as Record<string, unknown>, [
         (content ?? fallback) as never,
@@ -464,7 +466,6 @@ export const ComboboxItem = defineComponent({
         highlighted: context.activeIndex === index,
         disabled: props.disabled,
       }
-      ;(context as unknown as { _mounted?: boolean })._mounted
       const itemProps: Record<string, unknown> = {
         ...(attrs as Record<string, unknown>),
         style: resolveStyle(

@@ -547,10 +547,7 @@ describe("Combobox (headless)", () => {
     app.unmount()
   })
 
-  it("ComboboxValue falls back through the value and the placeholder", () => {
-    // NOTE: the scoped-slot branch is dead code in Vue — `slot.length` is
-    // always 0 because Vue normalizes slot functions to arity-0 wrappers
-    // (combobox.tsx:380, a React idiom). Reported; not asserted here.
+  it("ComboboxValue renders the scoped slot, then falls back through value and placeholder", () => {
     const app = mountHeadless(
       defineComponent({
         setup: () => () => (
@@ -562,8 +559,24 @@ describe("Combobox (headless)", () => {
         ),
       })
     )
-    expect(app.renderer.allTexts()).toContain("Banana")
+    expect(app.renderer.allTexts()).toContain("chosen: Banana")
+    expect(app.renderer.allTexts()).not.toContain("Banana")
     app.unmount()
+
+    // A slot that ignores the value declares zero parameters — it must still
+    // override (Vue normalizes slot functions to arity-0 wrappers, so any
+    // arity check on the function itself is meaningless).
+    const staticSlot = mountHeadless(
+      defineComponent({
+        setup: () => () => (
+          <Combobox items={["Banana"]} value="Banana">
+            <ComboboxValue placeholder="empty">{() => "static override"}</ComboboxValue>
+          </Combobox>
+        ),
+      })
+    )
+    expect(staticSlot.renderer.allTexts()).toContain("static override")
+    staticSlot.unmount()
 
     const bare = mountHeadless(
       defineComponent({
