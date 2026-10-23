@@ -37,7 +37,7 @@ lives at `.agents/skills/upstream-sync/SKILL.md`.
 
 ## Ledger
 
-Inventoried range: `9fcd628..4ecca30` (2026-09-29). Earlier history is in
+Inventoried range: `9fcd628..a53b294` (2026-10-23). Earlier history is in
 [Sync log](#sync-log) below.
 
 | Topic | Upstream commits | Status | Notes |
@@ -148,7 +148,7 @@ Inventoried range: `9fcd628..4ecca30` (2026-09-29). Earlier history is in
 | Browser boot fixes | `af9c8bb` | declined | [browser-boot-fixes.md](./browser-boot-fixes.md) — browser-only `process` guards and Wasm key-event queue; its CSS `OVERLAY_MONO` stack would un-mono our desktop overlay |
 | README intro rewrites | `9b02323` `d85a31e` | declined | their marketing/SEO copy (plus a website hero tweak); our README is fork-specific |
 | gitignore `idle-hello.cjs` | `3920a5e` | declined | their hermes experiment artifact; nothing here generates that file |
-| Disktree example → standalone npm package | `ad218e7` `cbc4065` `b3c2823` `193f9c9` `0846f89` `e8efacb` `4ecca30` `b552197` `0689c73` | declined | [disktree-example-package.md](./disktree-example-package.md) — their disk-treemap example extracted into upstream's own `disktree` npm product (CLI + embeddable app, local publish); upstream-only surface, no binding-layer changes in the range; `b552197`/`0689c73` (fixture paths, record compaction) are that package's own tests/perf |
+| Disktree example → standalone npm package | `ad218e7` `cbc4065` `b3c2823` `193f9c9` `0846f89` `e8efacb` `4ecca30` `b552197` `0689c73` `a53b294` | declined | [disktree-example-package.md](./disktree-example-package.md) — their disk-treemap example extracted into upstream's own `disktree` npm product (CLI + embeddable app, local publish); upstream-only surface, no binding-layer changes in the range; `b552197`/`0689c73` (fixture paths, record compaction) are that package's own tests/perf; `a53b294` is their disktree@0.2.2 release — version bump, product changelog, a terminal-mode traffic-light fix inside `disktree/src/app.tsx`, and a `GPUIX_TERMINAL=1 npx disktree` README note — all product-side; the pending binding-layer terminal-mode topic is unchanged |
 
 Already accounted for: `4006d99` (thin-layer-first docs) was ported with the
 AGENTS.md batch in PR #8. `8d3ec09` (Windows `bun -e` `fileURLToPath`) matched
@@ -165,12 +165,9 @@ perf harness (our `chat.perf.test.tsx` corpus already covers this ground).
 metadata reconcile) are merge/bookkeeping commits whose content is captured by
 the rows above.
 
-**Last inventoried upstream head:** `2e31b47` (2026-10-21; 62 commits since
-`4ecca30` grouped into the rows above. The `zed` submodule moved
-`ea042f2` → `f77e5cf`; the bump + our re-applied Taffy patch landed in PR
-#166. git-over-SSH to both github.com remotes worked this round; note `gh`
-needed `--repo liuyanghejerry/gpuiv` — its default resolution pointed at
-`remorses/gpuix`.)
+**Last inventoried upstream head:** `a53b294` (2026-10-23; 1 commit since
+`2e31b47`, the disktree@0.2.2 release — folded into the declined disktree row
+above. No `zed` submodule movement in the range.)
 
 ### Fork-local desktop follow-ups
 
@@ -259,6 +256,7 @@ from upstream through `367ef48`:
 | #169 | Text search Unicode fixes: final-sigma/expansion-safe ranges mapped back to whole original characters, overlap rejection, mark categories in word chars (Rust + JS), `memmem` needle per query; JS matcher tests moved out of the GPU gate — upstream `80f43b3` + `be82b36` |
 | #170 | Hover ends at the window edge: `TestGpuixRenderer.simulateMouseExit` + Vue `nativeSimulateMouseExit` facade and no-final-move regression (GPUI fix `74a3f0ff8` came with #166's bump) — upstream `d8fd814` |
 | #166 | Display-link frame wakes: zed `ea042f2`→`f77e5cf` (+ Taffy patch re-applied as parented `579d48ea`), `setFrameWakeCallback()` napi + Drop release, `startFrameLoop` wake-driven (fallback rate tightened by #170 after CI diagnosis); resolves the 8ms-pump divergence; ledger round `4ecca30..2e31b47` records 14 new rows (terminal mode pending with topic file, scrollbar/onScrollChange/onLayout/style/registerFont/getElementsAt/perf-batch/React-perf/createPortal pending, README-docs round declined, release/ARM64/CLI/disktree/example folded into existing declined rows) — upstream `515df19` + zed `2565b8a3e` |
+| — | Ledger round `2e31b47..a53b294`: single commit `a53b294` (disktree@0.2.2 release, product-only files) folded into the declined disktree row; no new topics, no `zed` submodule movement |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
