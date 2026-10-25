@@ -83,10 +83,18 @@ counts, rather than these machine-specific wall-clock thresholds.
 
 ## Remaining GPUIV memory work (no fork needed, mid-term)
 
-- Canvas memory is unchanged at ~12B/px per context (premul 4 + coverage 8);
-  PR #66's full-frame BGRA mirror replaced the retained whole-frame copy.
-- Rasterization-buffer tiling and GPU rasterization remain the mid-term path
-  (issue #49 P0-2's "中期" scope).
+- Regional coverage now removes the retained full-frame 8B/px scratch from
+  every context. Raster scratch is allocated by covered bbox, reused within
+  one materialization and released afterward; clip snapshots use bbox-local
+  `f64` regions with the old `Arc` sharing semantics. An identity-transform,
+  full-canvas `clearRect` with no clip bypasses coverage entirely.
+- An unclipped context now retains 4B/px of premultiplied pixels rather than
+  the old 12B/px (premul 4 + coverage 8). The store's last-upload BGRA mirror
+  remains a separate 4B/px; full-canvas operations other than the direct clear
+  can still allocate a full-size region transiently.
+- Premultiplied-pixel and last-upload mirror tiling, plus GPU rasterization,
+  remain the mid-term path (issue #49 P0-2's "中期" scope). Dense tiles alone
+  do not reduce bytes/pixel, and `readPixels` must keep its last-upload meaning.
 
 ## Revisit triggers
 
