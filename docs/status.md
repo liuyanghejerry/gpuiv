@@ -59,6 +59,7 @@
 - [x] Dock relaunch observer (`onReopen`, macOS)
 - [x] Single-instance election and authenticated launch forwarding (`acquireSingleInstance`, startup queue, cwd preservation and crash recovery)
 - [x] Runtime menu bars (`setMenus`; macOS)
+- [x] Tray icons and native tray menus (`setTray`, `setTrayMenu`, `clearTray`; macOS/Windows; normal, separator and disabled items with action callbacks)
 - [x] File dialogs (`promptForPaths`, `promptForNewPath`)
 - [x] Clipboard images (`writeClipboardImage`, `readClipboardImage`)
 - [x] Clipboard text (`writeClipboardText`, `readClipboardText`)

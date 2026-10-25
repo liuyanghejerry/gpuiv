@@ -38,7 +38,7 @@ use super::geom::matrix::{
 };
 use super::geom::path::{flatten_path, PathBuilder, Poly};
 use super::geom::raster::{
-    coverage_bbox, point_in_polys, rasterize_coverage, CoveredBBox, CoverageBuffer, FillRule,
+    coverage_bbox, point_in_polys, rasterize_coverage_region, CoveredBBox, CoverageRegion, FillRule,
 };
 use super::geom::stroke::{build_stroke_geometry, StrokeCap, StrokeJoin, StrokeParams};
 
@@ -465,7 +465,7 @@ fn unpremultiply(p: f64, a: f64) -> u8 {
 #[derive(Clone, Debug)]
 struct DrawingState {
     m: Matrix2D,
-    clip: Option<Arc<Vec<f64>>>,
+    clip: Option<Arc<CoverageRegion>>,
     fill: Paint,
     stroke: Paint,
     global_alpha: f64,
@@ -587,20 +587,24 @@ enum Op {
     Paint {
         polys: Vec<Poly>,
         rule: FillRule,
+        bbox: CoveredBBox,
         paint: Paint,
         alpha: f64,
         composite: Composite,
-        clip: Option<Arc<Vec<f64>>>,
+        clip: Option<Arc<CoverageRegion>>,
         /// Draw-time CTM — gradients evaluate in user space through it.
         m: Matrix2D,
     },
     ClearRect {
         polys: Vec<Poly>,
-        clip: Option<Arc<Vec<f64>>>,
+        bbox: CoveredBBox,
+        clip: Option<Arc<CoverageRegion>>,
     },
+    ClearAll,
     DrawImage {
         snap: SourceSnapshot,
         quad: Vec<Poly>,
+        bbox: CoveredBBox,
         inv: Matrix2D,
         src_x: f64,
         src_y: f64,
@@ -613,7 +617,7 @@ enum Op {
         smoothing: bool,
         alpha: f64,
         composite: Composite,
-        clip: Option<Arc<Vec<f64>>>,
+        clip: Option<Arc<CoverageRegion>>,
     },
     PutImage {
         /// Straight RGBA of the full source `ImageData`, row-major.
@@ -654,10 +658,6 @@ struct ContextCore {
     width: usize,
     height: usize,
     premul: Vec<u8>,
-    cover: CoverageBuffer,
-    /// Scratch coverage left by the last rasterization. Clear only this
-    /// region before reusing the buffer; every other pixel is already zero.
-    cover_dirty: Option<CoveredBBox>,
     state: DrawingState,
     stack: Vec<DrawingState>,
     path: PathBuilder,
@@ -675,8 +675,6 @@ impl ContextCore {
             width: w,
             height: h,
             premul: vec![0; w * h * 4],
-            cover: CoverageBuffer { width: w, height: h, data: vec![0.0; w * h] },
-            cover_dirty: None,
             state: DrawingState::default(),
             stack: Vec::new(),
             path: PathBuilder::default(),
@@ -694,8 +692,6 @@ impl ContextCore {
         self.width = w;
         self.height = h;
         self.premul = vec![0; w * h * 4];
-        self.cover = CoverageBuffer { width: w, height: h, data: vec![0.0; w * h] };
-        self.cover_dirty = None;
         self.state = DrawingState::default();
         self.stack.clear();
         self.path = PathBuilder::default();
@@ -710,7 +706,6 @@ impl ContextCore {
     fn reset(&mut self) {
         self.ops.clear();
         self.premul.fill(0);
-        self.clear_coverage();
         self.state = DrawingState::default();
         self.stack.clear();
         self.path = PathBuilder::default();
@@ -719,7 +714,7 @@ impl ContextCore {
     }
 
     /// Mark a device-space bbox (inclusive pixel bounds, already clamped to
-    /// the buffer by `rasterize_coverage`) as pending upload.
+    /// the buffer by the coverage scan) as pending upload.
     fn mark_dirty_bbox(&mut self, bbox: &CoveredBBox) {
         let next = (
             bbox.min_x as usize,
@@ -734,44 +729,34 @@ impl ContextCore {
         self.pending_dirty.mark(rect);
     }
 
-    fn clear_coverage(&mut self) {
-        let Some(bbox) = self.cover_dirty.take() else { return };
-        let x0 = (bbox.min_x as usize).min(self.width);
-        let x1 = (bbox.max_x as usize).saturating_add(1).min(self.width);
-        let y0 = (bbox.min_y as usize).min(self.height);
-        let y1 = (bbox.max_y as usize).saturating_add(1).min(self.height);
-        if x0 >= x1 || y0 >= y1 { return; }
-        for row in y0..y1 {
-            self.cover.data[row * self.width + x0..row * self.width + x1].fill(0.0);
-        }
-    }
-
-    fn rasterize(&mut self, polys: &[Poly], rule: FillRule) -> Option<CoveredBBox> {
-        self.clear_coverage();
-        let bbox = rasterize_coverage(polys, rule, &mut self.cover);
-        self.cover_dirty = bbox;
-        bbox
-    }
-
     /// Replay pending ops into the buffer. Idempotent between mutations.
     fn materialize(&mut self) {
         if !self.dirty {
             return;
         }
         self.dirty = false;
+        // Reuse one regional allocation within this frame, then drop it even
+        // if an op covered the whole canvas. Contexts never retain scratch.
+        let mut coverage = CoverageRegion::default();
         for op in std::mem::take(&mut self.ops) {
-            self.apply(op);
+            self.apply(op, &mut coverage);
         }
     }
 
-    fn apply(&mut self, op: Op) {
+    fn apply(&mut self, op: Op, coverage: &mut CoverageRegion) {
         match op {
-            Op::Paint { polys, rule, paint, alpha, composite, clip, m } => {
-                self.apply_paint(polys, rule, &paint, alpha, composite, clip, &m)
+            Op::Paint { polys, rule, bbox, paint, alpha, composite, clip, m } => {
+                self.apply_paint(polys, rule, bbox, &paint, alpha, composite, clip, coverage, &m)
             }
-            Op::ClearRect { polys, clip } => self.apply_clear_rect(polys, clip),
-            Op::DrawImage { snap, quad, inv, src_x, src_y, src_w, src_h, dst_x, dst_y, dst_w, dst_h, smoothing, alpha, composite, clip } => {
-                self.apply_draw_image(snap, quad, &inv, src_x, src_y, src_w, src_h, dst_x, dst_y, dst_w, dst_h, smoothing, alpha, composite, clip)
+            Op::ClearRect { polys, bbox, clip } => {
+                self.apply_clear_rect(polys, bbox, clip, coverage)
+            }
+            Op::ClearAll => {
+                self.premul.fill(0);
+                self.mark_dirty_rect((0, 0, self.width, self.height));
+            }
+            Op::DrawImage { snap, quad, bbox, inv, src_x, src_y, src_w, src_h, dst_x, dst_y, dst_w, dst_h, smoothing, alpha, composite, clip } => {
+                self.apply_draw_image(snap, quad, bbox, &inv, src_x, src_y, src_w, src_h, dst_x, dst_y, dst_w, dst_h, smoothing, alpha, composite, clip, coverage)
             }
             Op::PutImage { data, img_w, img_h, dx, dy, x0, y0, x1, y1 } => {
                 self.apply_put_image(&data, img_w, img_h, dx, dy, x0, y0, x1, y1)
@@ -787,19 +772,19 @@ impl ContextCore {
         &mut self,
         polys: Vec<Poly>,
         rule: FillRule,
+        bbox: CoveredBBox,
         paint: &Paint,
         alpha: f64,
         composite: Composite,
-        clip: Option<Arc<Vec<f64>>>,
+        clip: Option<Arc<CoverageRegion>>,
+        coverage: &mut CoverageRegion,
         m: &Matrix2D,
     ) {
-        if polys.is_empty() {
+        if polys.is_empty()
+            || !rasterize_coverage_region(&polys, rule, self.width, self.height, bbox, coverage)
+        {
             return;
         }
-        let bbox = match self.rasterize(&polys, rule) {
-            Some(bbox) => bbox,
-            None => return,
-        };
         if composite == Composite::Copy {
             self.premul.fill(0);
             self.mark_dirty_rect((0, 0, self.width, self.height));
@@ -807,21 +792,20 @@ impl ContextCore {
             self.mark_dirty_bbox(&bbox);
         }
 
-        let width = self.cover.width;
-        let data = &self.cover.data;
+        let width = self.width;
         // `CoveredBBox` keeps f64 fields (TS numbers); when Some they are
         // clamped to the buffer, so the integer casts are exact.
         for row in bbox.min_y as i64..=bbox.max_y as i64 {
             let base = row as usize * width;
             for col in bbox.min_x as i64..=bbox.max_x as i64 {
                 let idx = base + col as usize;
-                let cov = data[idx];
+                let cov = coverage.get_in_bbox(col, row, &bbox);
                 if cov <= 0.0 {
                     continue;
                 }
                 let mut e = cov * alpha;
                 if let Some(clip) = &clip {
-                    e *= clip[idx];
+                    e *= clip.get(col, row);
                 }
                 if e <= 1.0 / 510.0 {
                     continue;
@@ -856,24 +840,28 @@ impl ContextCore {
 
     /// `clearRect`: scale the destination toward zero through the coverage,
     /// honoring the clip. A `copy`-mode fill already handled its own clear.
-    fn apply_clear_rect(&mut self, polys: Vec<Poly>, clip: Option<Arc<Vec<f64>>>) {
-        let bbox = match self.rasterize(&polys, FillRule::NonZero) {
-            Some(bbox) => bbox,
-            None => return,
-        };
+    fn apply_clear_rect(
+        &mut self,
+        polys: Vec<Poly>,
+        bbox: CoveredBBox,
+        clip: Option<Arc<CoverageRegion>>,
+        coverage: &mut CoverageRegion,
+    ) {
+        if !rasterize_coverage_region(&polys, FillRule::NonZero, self.width, self.height, bbox, coverage) {
+            return;
+        }
         self.mark_dirty_bbox(&bbox);
-        let width = self.cover.width;
-        let data = &self.cover.data;
+        let width = self.width;
         for row in bbox.min_y as i64..=bbox.max_y as i64 {
             let base = row as usize * width;
             for col in bbox.min_x as i64..=bbox.max_x as i64 {
                 let idx = base + col as usize;
-                let mut e = data[idx];
+                let mut e = coverage.get_in_bbox(col, row, &bbox);
                 if e <= 0.0 {
                     continue;
                 }
                 if let Some(clip) = &clip {
-                    e *= clip[idx];
+                    e *= clip.get(col, row);
                 }
                 if e <= 0.0 {
                     continue;
@@ -893,6 +881,7 @@ impl ContextCore {
         &mut self,
         snap: SourceSnapshot,
         quad: Vec<Poly>,
+        bbox: CoveredBBox,
         inv: &Matrix2D,
         src_x: f64,
         src_y: f64,
@@ -905,12 +894,12 @@ impl ContextCore {
         smoothing: bool,
         alpha: f64,
         composite: Composite,
-        clip: Option<Arc<Vec<f64>>>,
+        clip: Option<Arc<CoverageRegion>>,
+        coverage: &mut CoverageRegion,
     ) {
-        let bbox = match self.rasterize(&quad, FillRule::NonZero) {
-            Some(bbox) => bbox,
-            None => return,
-        };
+        if !rasterize_coverage_region(&quad, FillRule::NonZero, self.width, self.height, bbox, coverage) {
+            return;
+        }
         if composite == Composite::Copy {
             self.premul.fill(0);
             self.mark_dirty_rect((0, 0, self.width, self.height));
@@ -918,19 +907,18 @@ impl ContextCore {
             self.mark_dirty_bbox(&bbox);
         }
 
-        let width = self.cover.width;
-        let data = &self.cover.data;
+        let width = self.width;
         for row in bbox.min_y as i64..=bbox.max_y as i64 {
             let base = row as usize * width;
             for col in bbox.min_x as i64..=bbox.max_x as i64 {
                 let idx = base + col as usize;
-                let cov = data[idx];
+                let cov = coverage.get_in_bbox(col, row, &bbox);
                 if cov <= 0.0 {
                     continue;
                 }
                 let mut e = cov * alpha;
                 if let Some(clip) = &clip {
-                    e *= clip[idx];
+                    e *= clip.get(col, row);
                 }
                 if e <= 1.0 / 510.0 {
                     continue;
@@ -1016,14 +1004,15 @@ impl ContextCore {
         }
         // An empty coverage box (off-bitmap geometry) records nothing, but
         // only rasterization can tell — ask the bbox-only scan, which costs
-        // no buffer writes. The op replays the full rasterization at
-        // materialize time.
-        if coverage_bbox(&polys, rule, self.width, self.height).is_none() {
+        // no buffer writes. The op replays the rasterization into this region
+        // at materialize time.
+        let Some(bbox) = coverage_bbox(&polys, rule, self.width, self.height) else {
             return false;
-        }
+        };
         let op = Op::Paint {
             polys,
             rule,
+            bbox,
             paint: paint.clone(),
             alpha: self.state.global_alpha,
             composite: self.state.composite,
@@ -1074,19 +1063,29 @@ impl ContextCore {
     }
 
     /// `clip()`: intersect the current path's coverage with the existing
-    /// mask into a fresh snapshot. Without a bbox the clip path was empty
-    /// and the region becomes empty too (all-zero mask).
+    /// mask into a fresh bbox-local snapshot. Without a bbox the clip path
+    /// becomes an empty region, which still differs from having no clip.
     fn apply_clip(&mut self, rule: FillRule) {
         let polys = flatten_path(&self.path.subpaths, 0.15);
-        let bbox = self.rasterize(&polys, rule);
-        let mut next = vec![0.0f64; self.width * self.height];
-        if let Some(_bbox) = bbox {
-            if let Some(current) = &self.state.clip {
-                for i in 0..next.len() {
-                    next[i] = current[i] * self.cover.data[i];
+        let Some(bbox) = coverage_bbox(&polys, rule, self.width, self.height) else {
+            self.state.clip = Some(Arc::new(CoverageRegion::default()));
+            return;
+        };
+        let mut next = CoverageRegion::default();
+        if !rasterize_coverage_region(&polys, rule, self.width, self.height, bbox, &mut next) {
+            self.state.clip = Some(Arc::new(CoverageRegion::default()));
+            return;
+        }
+        if let Some(current) = &self.state.clip {
+            for row in bbox.min_y as i64..=bbox.max_y as i64 {
+                for col in bbox.min_x as i64..=bbox.max_x as i64 {
+                    let local_x = (col - bbox.min_x as i64) as usize;
+                    let local_y = (row - bbox.min_y as i64) as usize;
+                    let idx = local_y * next.width + local_x;
+                    if let Some(value) = next.data.get_mut(idx) {
+                        *value = current.get(col, row) * *value;
+                    }
                 }
-            } else {
-                next.copy_from_slice(&self.cover.data);
             }
         }
         self.state.clip = Some(Arc::new(next));
@@ -1132,12 +1131,13 @@ impl ContextCore {
         // An empty destination quad (fully off-bitmap or degenerate) records
         // nothing, same as an empty fill — asked of the bbox-only scan so
         // the check costs no buffer writes.
-        if coverage_bbox(&quad, FillRule::NonZero, self.width, self.height).is_none() {
+        let Some(bbox) = coverage_bbox(&quad, FillRule::NonZero, self.width, self.height) else {
             return false;
-        }
+        };
         self.ops.push(Op::DrawImage {
             snap,
             quad,
+            bbox,
             inv,
             src_x,
             src_y,
@@ -1841,16 +1841,29 @@ impl GpuixCanvas2DCore {
     #[napi]
     pub fn clear_rect(&self, x: f64, y: f64, w: f64, h: f64) -> bool {
         let mut core = self.lock();
+        if core.width > 0
+            && core.height > 0
+            && core.state.clip.is_none()
+            && core.state.m == identity_matrix()
+            && x == 0.0
+            && y == 0.0
+            && w == core.width as f64
+            && h == core.height as f64
+        {
+            core.ops.push(Op::ClearAll);
+            core.dirty = true;
+            return true;
+        }
         let builder = rect_builder(x, y, w, h, core.state.m);
         let polys = flatten_path(&builder.subpaths, 0.15);
         if polys.is_empty() {
             return false;
         }
-        if coverage_bbox(&polys, FillRule::NonZero, core.width, core.height).is_none() {
+        let Some(bbox) = coverage_bbox(&polys, FillRule::NonZero, core.width, core.height) else {
             return false;
-        }
+        };
         let clip = core.state.clip.clone();
-        core.ops.push(Op::ClearRect { polys, clip });
+        core.ops.push(Op::ClearRect { polys, bbox, clip });
         core.dirty = true;
         true
     }
@@ -1970,46 +1983,86 @@ mod tests {
     }
 
     #[test]
-    fn scratch_coverage_matches_full_clears_for_mixed_operations() {
-        let mut sparse = core_8x8();
-        let mut reference = core_8x8();
+    fn regional_scratch_matches_fresh_regions_for_mixed_operations() {
+        let mut reused = core_8x8();
+        let mut fresh = core_8x8();
         let mut source = core_8x8();
         source.apply_put_image(&[200, 40, 80, 128].repeat(64), 8, 8, 0, 0, 0, 0, 8, 8);
+        let mut scratch = CoverageRegion::default();
         for step in 0..24 {
-            for (full_clear, core) in [(false, &mut sparse), (true, &mut reference)] {
-                if full_clear {
-                    core.cover.data.fill(0.0);
-                    core.cover_dirty = None;
-                }
-                let x = (step % 6) as f64 + 0.25;
-                let polys = flatten_path(&rect_builder(x, 1.3, 1.5, 2.4, identity_matrix()).subpaths, 0.15);
-                match step % 4 {
-                    0 => core.apply_paint(polys, FillRule::NonZero,
+            let x = (step % 6) as f64 + 0.25;
+            let polys = flatten_path(&rect_builder(x, 1.3, 1.5, 2.4, identity_matrix()).subpaths, 0.15);
+            let bbox = coverage_bbox(&polys, FillRule::NonZero, 8, 8).unwrap();
+            match step % 4 {
+                0 => {
+                    reused.apply_paint(polys.clone(), FillRule::NonZero, bbox,
                         &Paint::Solid { r: 80.0, g: 160.0, b: 240.0, a: 0.5 },
-                        1.0, Composite::SourceOver, core.state.clip.clone(), &identity_matrix()),
-                    1 => core.apply_clear_rect(polys, core.state.clip.clone()),
-                    2 => {
+                        1.0, Composite::SourceOver, reused.state.clip.clone(), &mut scratch, &identity_matrix());
+                    fresh.apply_paint(polys, FillRule::NonZero, bbox,
+                        &Paint::Solid { r: 80.0, g: 160.0, b: 240.0, a: 0.5 },
+                        1.0, Composite::SourceOver, fresh.state.clip.clone(), &mut CoverageRegion::default(), &identity_matrix());
+                }
+                1 => {
+                    reused.apply_clear_rect(polys.clone(), bbox, reused.state.clip.clone(), &mut scratch);
+                    fresh.apply_clear_rect(polys, bbox, fresh.state.clip.clone(), &mut CoverageRegion::default());
+                }
+                2 => {
+                    for core in [&mut reused, &mut fresh] {
                         core.record_draw_image(&source, 0.0, 0.0, 8.0, 8.0, x, 1.3, 1.5, 2.4);
                         core.materialize();
                     }
-                    _ => {
+                }
+                _ => {
+                    for core in [&mut reused, &mut fresh] {
                         core.state.clip = None;
                         core.path = rect_builder(x, 1.3, 1.5, 2.4, identity_matrix());
                         core.apply_clip(FillRule::NonZero);
                     }
                 }
             }
-            assert_eq!(sparse.premul, reference.premul, "pixels after operation {step}");
-            assert_eq!(sparse.state.clip, reference.state.clip, "clip after operation {step}");
+            assert_eq!(reused.premul, fresh.premul, "pixels after operation {step}");
+            assert_eq!(reused.state.clip, fresh.state.clip, "clip after operation {step}");
         }
-        // Empty/off-canvas coverage must also discard the previous scratch.
-        sparse.rasterize(&[], FillRule::NonZero);
-        assert!(sparse.cover.data.iter().all(|value| *value == 0.0));
-        sparse.reset();
-        assert!(sparse.cover_dirty.is_none());
-        sparse.resize(3.0, 5.0);
-        assert!(sparse.cover_dirty.is_none());
-        assert!(sparse.cover.data.iter().all(|value| *value == 0.0));
+        reused.reset();
+        assert!(reused.premul.iter().all(|value| *value == 0));
+        assert!(reused.state.clip.is_none());
+        reused.resize(3.0, 5.0);
+        assert!(reused.premul.iter().all(|value| *value == 0));
+        assert!(reused.state.clip.is_none());
+    }
+
+    #[test]
+    fn clip_storage_tracks_its_bbox_instead_of_canvas_area() {
+        let mut core = ContextCore::new(1024.0, 1024.0);
+        core.path = rect_builder(256.0, 256.0, 3.0, 4.0, identity_matrix());
+        core.apply_clip(FillRule::NonZero);
+        let clip = core.state.clip.as_ref().unwrap();
+        assert!(clip.data.len() <= 64, "clip allocated {} values", clip.data.len());
+        assert!(clip.get(257, 257) > 0.0);
+        assert_eq!(clip.get(0, 0), 0.0);
+        assert_eq!(clip.get(1023, 1023), 0.0);
+
+        core.path = rect_builder(-100.0, -100.0, 2.0, 2.0, identity_matrix());
+        core.apply_clip(FillRule::NonZero);
+        let empty = core.state.clip.as_ref().unwrap();
+        assert!(empty.data.is_empty());
+        assert_eq!(empty.get(257, 257), 0.0);
+    }
+
+    #[test]
+    fn full_identity_clear_uses_direct_clear_in_display_list_order() {
+        let core = GpuixCanvas2DCore::new(8.0, 8.0);
+        {
+            let mut guard = core.lock();
+            let polys = flatten_path(&rect_builder(0.0, 0.0, 8.0, 8.0, identity_matrix()).subpaths, 0.15);
+            assert!(guard.record_paint(polys, FillRule::NonZero, &Paint::Solid { r: 255.0, g: 0.0, b: 0.0, a: 1.0 }));
+        }
+        assert!(core.clear_rect(0.0, 0.0, 8.0, 8.0));
+        let mut guard = core.lock();
+        assert_eq!(guard.ops.len(), 2);
+        assert!(matches!(guard.ops.last(), Some(Op::ClearAll)));
+        guard.materialize();
+        assert!(guard.premul.iter().all(|value| *value == 0));
     }
 
     #[test]

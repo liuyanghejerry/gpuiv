@@ -30,6 +30,7 @@ import type {
   PathPromptOutcome,
   SystemNotificationOptions,
   SystemNotificationResponse,
+  TrayMenuItem,
   WindowKeyEventHandlers,
 } from "./types.js"
 export type { ElementBounds }
@@ -1046,6 +1047,15 @@ export class TestRenderer implements NativeRenderer {
     this.native.setTray?.(desc, onClick, callback)
   }
 
+  /** Replace the recorded tray menu through the test bridge. */
+  setTrayMenu(
+    items: TrayMenuItem[] | null,
+    onAction: ((error: Error | null, id: string) => void) | null,
+    callback: (error: Error | null) => void
+  ): void {
+    this.native.setTrayMenu?.(items, onAction, callback)
+  }
+
   /** Remove the tray through the test bridge. */
   clearTray(callback: (error: Error | null) => void): void {
     this.native.clearTray?.(callback)
@@ -1059,10 +1069,22 @@ export class TestRenderer implements NativeRenderer {
     return native.getTrayDesc?.() ?? null
   }
 
+  /** The current tray menu, if one is installed (test bridge). */
+  getTrayMenu(): TrayMenuItem[] | null {
+    const native = this.native as { getTrayMenu?(): TrayMenuItem[] | null }
+    return native.getTrayMenu?.() ?? null
+  }
+
   /** Fire the recorded tray click callback, as the OS tray would. */
   simulateTrayClick(): void {
     const native = this.native as { simulateTrayClick?(): void }
     native.simulateTrayClick?.()
+  }
+
+  /** Fire a normal enabled item in the recorded tray menu. */
+  simulateTrayMenuAction(id: string): void {
+    const native = this.native as { simulateTrayMenuAction?(id: string): void }
+    native.simulateTrayMenuAction?.(id)
   }
 
   /** Register a hotkey through the test bridge: validates via the real
