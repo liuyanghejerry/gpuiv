@@ -37,8 +37,10 @@ from main independently and does not require that PR's APIs.
   an owner crash. Five-process elections and abrupt-kill recovery pass under
   Node, Bun and a compiled Bun executable on macOS.
 - [x] Standalone example and [documented delivery guarantees](./single-instance.md).
-- [ ] Windows/Linux OS file-association registration and packaged acceptance.
-- [ ] Native multi-window lifecycle; this API elects processes, not windows.
+- [x] Windows/Linux file-association registration (#140); packaged acceptance
+  remains a separate target-machine check below.
+- [x] Native multi-window lifecycle (#144/#146/#148) and per-window automation
+  (#149); process election is a separate concern (#105).
 
 Validation: Vue TypeScript build and complete suite (60 files, 977 passed,
 141 existing skips; two workers, unrelated untracked debug file excluded).
@@ -51,19 +53,20 @@ second-launch argv to file-opening logic and reveals the existing window on an
 empty launch. The reusable API carries that input without adopting ColaMD's
 Markdown filtering, window selection or save queues.
 
-### HTML clipboard upstream findings (2026-09-19)
+### HTML clipboard upstream findings (2026-10-24 status)
 
-Zed already has three open implementations of actual HTML clipboard flavors:
-[#56452](https://github.com/zed-industries/zed/pull/56452),
-[#62706](https://github.com/zed-industries/zed/pull/62706), and
-[#64112](https://github.com/zed-industries/zed/pull/64112), associated with
-[#61966](https://github.com/zed-industries/zed/issues/61966). They modify GPUI and
-the platform clipboard backends rather than storing HTML in string metadata.
-Per `docs/agents/zed-workflow.md`, follow those PRs instead of maintaining a
-competing GPUI workaround. Revisit when one merges into the GPUI fork: audit
-**read** support as well as the advertised HTML **write** path, bump the
-submodule, then add napi/Vue APIs and editor integration. This does not mark
-HTML clipboard complete.
+Two implementations of actual HTML clipboard flavors remain OPEN:
+[#56452](https://github.com/zed-industries/zed/pull/56452) and
+[#62706](https://github.com/zed-industries/zed/pull/62706);
+[#64112](https://github.com/zed-industries/zed/pull/64112) is CLOSED without
+merging. They are associated with
+[#61966](https://github.com/zed-industries/zed/issues/61966) and modify GPUI
+and the platform clipboard backends rather than storing HTML in string
+metadata. Per `docs/agents/zed-workflow.md`, follow those PRs instead of
+maintaining a competing GPUI workaround. Revisit when one merges into the GPUI
+fork: audit **read** support as well as the advertised HTML **write** path,
+bump the submodule, then add napi/Vue APIs and editor integration. This does
+not mark HTML clipboard complete.
 
 
 ## Remaining P1 queue and acceptance
@@ -72,15 +75,16 @@ HTML clipboard complete.
 | --- | --- | --- |
 | HTML clipboard | GPUI first: current `ClipboardEntry` supports String/Image/ExternalPaths only. Add real HTML flavor beside plain text in GPUI platform backends, following `docs/agents/zed-workflow.md`; then napi + Vue. Never use String metadata as external HTML. | Native HTML/plain round-trip on macOS/Windows/Linux; external rich-text paste; plain fallback; then safe HTML→MD import and styled export in editor layer. |
 | Popup context menus | ColaMD main `tab-context-menu` / `entry-context-menu` use `Menu.popup`. GPUIV `setMenus` is a macOS menubar, not a popup. Audit native GPUI popup support before a framework API; any FloatingLayer alternative must be explicitly called an app-rendered menu. | Pointer and keyboard invocation, disabled items, separators, submenu focus, Escape/outside close, callback ownership and cleanup; platform scope documented. |
-| Multi-window | Renderer/window lifecycle and per-window state isolation first. Do not simply call singleton `createApp` twice. | Independent roots, input focus/IME, event maps, scroll/selection, close veto, and final-window exit; app owns save queues and tabs. |
-| File association / open-file | **macOS OS delivery + bundle declarations delivered below.** Windows/Linux association registration, CLI parsing and single-instance IPC remain pending. | macOS packaged cold/warm delivery passed; still needs Windows/Linux packaged acceptance and cross-platform second-instance argument/cwd forwarding. |
+| File association / open-file | macOS delivery and bundle declarations delivered below; Windows/Linux registration delivered in #140; portable single-instance IPC delivered in #105. Packaged target-machine acceptance remains. | macOS packaged cold/warm delivery passed; Windows/Linux packaged acceptance still pending. Second-instance argv/cwd forwarding is covered by #105; CLI policy stays application-owned. |
 | PDF/printing | Decide vector document export vs platform printing; requires layout/font/image policy. A screenshot PDF is not text PDF. | Selectable/searchable Unicode text, page breaks, table splits, images and links; cancellable export and error reporting. |
 | Native scroll completion | Inspect GPUI wheel/touch-phase and frame lifecycle, rather than synthesizing a native event from timers. | Momentum/no-op/interruption/removed element; exactly-once completion; no unnecessary polling after teardown. |
 
 HTML clipboard requires an upstream GPUI change and PR before a submodule
-bump, not OS-specific clipboard calls hidden in `packages/native`. Multi-window
-and file association are coupled infrastructure, not MarkdownEditor props.
-Math/Mermaid remain P0 and are outside this P1 delivery.
+bump, not OS-specific clipboard calls hidden in `packages/native`. File
+association and single-instance delivery are shell infrastructure, not
+MarkdownEditor props. Multi-window is delivered in #144/#146/#148/#149. Display
+and inline math (#128/#136) and Mermaid fallback/injection (#135) are also
+delivered and are outside this remaining P1 queue.
 
 ## Second delivery: reusable file opening
 
@@ -113,12 +117,13 @@ claim the combined issue #101 file-association/single-instance item is complete.
   cold launch with two files before a deliberately delayed subscription;
   warm launch of another file plus a deep link; repeated file intent; paths
   containing Chinese, spaces, `#` and `%`; exactly one process; cleanup.
-- [ ] Windows/Linux file association registration and packaged acceptance.
-- [ ] Portable single-instance lock/IPC, including concurrent startups, stale
-  owner recovery and second-instance argv/cwd delivery. macOS Launch Services
-  reusing a running app is **not** a portable single-instance guarantee.
-- [ ] CLI argument policy remains application-owned; do not guess executable
-  and entry-point positions or treat arbitrary option values as documents.
+- [x] Windows/Linux file-association registration (#140).
+- [ ] Windows/Linux packaged file-association acceptance on target machines.
+- [x] Portable single-instance lock/IPC (#105), including concurrent startups,
+  stale owner recovery and second-instance argv/cwd delivery. macOS Launch
+  Services reusing a running app alone was not treated as the portable guarantee.
+- CLI argument policy remains application-owned; do not guess executable and
+  entry-point positions or treat arbitrary option values as documents.
 
 No GPUI fork change is needed: `gpui::Application::on_open_urls` is wired before
 `run_embedded`, and `gpui_macos/src/platform.rs` implements
@@ -130,8 +135,10 @@ and [UTI declaration rules](https://developer.apple.com/library/archive/document
 
 Next P1 work: HTML clipboard in GPUI first; native popup support also needs
 a platform API, since the checked-out GPUI Platform/Window interface has no
-OS popup-menu command. Multi-window and single-instance routing need a separate
-lifecycle design. PDF layout/export remains independent of these shell APIs.
+OS popup-menu command. PDF layout/export and native scroll completion remain
+independent. Multi-window and portable single-instance routing are delivered;
+remaining acceptance includes Windows/Linux packaged file associations and
+OS drag/snap/double-click checks on the target platforms.
 
 ## Third delivery: markdown math (display formulas)
 
