@@ -6,7 +6,7 @@
 /// would otherwise leak into the next message.
 
 import { createParser, type EventSourceMessage } from "eventsource-parser"
-import { z } from "zod"
+import * as z from "zod"
 
 export const PROTOCOL_VERSION = 1 as const
 

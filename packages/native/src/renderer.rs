@@ -654,6 +654,10 @@ enum UiCommand {
         request: crate::tray::TrayRequest,
         callback: ThreadsafeFunction<()>,
     },
+    SetTrayMenu {
+        request: crate::tray::TrayMenuRequest,
+        callback: ThreadsafeFunction<()>,
+    },
     ClearTray {
         callback: ThreadsafeFunction<()>,
     },
@@ -1017,6 +1021,13 @@ async fn run_ui_commands(
                     // Main thread (the UI loop) is where the tray lives on
                     // both platforms; the work is small and synchronous.
                     let result = crate::tray::set(request)
+                        .map_err(napi::Error::from_reason);
+                    callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+                })
+            }
+            UiCommand::SetTrayMenu { request, callback } => {
+                window.update(cx, move |_view, _window, _cx| {
+                    let result = crate::tray::set_menu(request)
                         .map_err(napi::Error::from_reason);
                     callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
                 })
@@ -2822,6 +2833,47 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::SetTray { request, callback });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = request;
+            Err(Error::from_reason(
+                "The production GPUIX renderer does not support this operating system",
+            ))
+        }
+    }
+
+    /// Replace the installed tray's popup menu. Null or an empty list removes
+    /// it; `on_action` receives the selected item id. The tray must exist.
+    #[napi]
+    pub fn set_tray_menu(
+        &self,
+        items: Option<Vec<crate::tray::TrayMenuItemDesc>>,
+        on_action: Option<ThreadsafeFunction<String>>,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        let request = crate::tray::TrayMenuRequest { items, on_action };
+
+        #[cfg(target_os = "macos")]
+        return GPUI_APP.with(|app| {
+            let app = app.borrow();
+            let app = app
+                .as_ref()
+                .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+            app.update(|_cx| {
+                let result = crate::tray::set_menu(request).map_err(Error::from_reason);
+                callback.call(result, ThreadsafeFunctionCallMode::NonBlocking);
+            });
+            Ok(())
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::SetTrayMenu { request, callback });
 
         #[cfg(not(any(
             target_os = "macos",

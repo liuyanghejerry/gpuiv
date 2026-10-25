@@ -226,6 +226,11 @@ export declare class GpuixRenderer {
    * click; `callback` reports whether installation succeeded.
    */
   setTray(desc: TrayDesc, onClick: (((err: Error | null, ) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
+  /**
+   * Replace the installed tray's popup menu. Null or an empty list removes
+   * it; `on_action` receives the selected item id. The tray must exist.
+   */
+  setTrayMenu(items: Array<TrayMenuItemDesc> | undefined | null, onAction: (((err: Error | null, arg: string) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
   /** Remove the tray installed by `set_tray`. */
   clearTray(callback: ((err: Error | null, ) => any)): void
   /**
@@ -635,12 +640,24 @@ export declare class TestGpuixRenderer {
    * and the click callback instead of touching the OS status area.
    */
   setTray(desc: TrayDesc, onClick: (((err: Error | null, ) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
+  /**
+   * Test stand-in for `setTrayMenu`: validates and records the menu only
+   * when a tray exists, preserving the previous menu on validation errors.
+   */
+  setTrayMenu(items: Array<TrayMenuItemDesc> | undefined | null, onAction: (((err: Error | null, arg: string) => any)) | undefined | null, callback: ((err: Error | null, ) => any)): void
   /** Test stand-in for `clearTray`. */
   clearTray(callback: ((err: Error | null, ) => any)): void
   /** The descriptor of the live tray, if `setTray` ran. */
   getTrayDesc(): TrayDesc | null
+  /** The current tray menu, if one is installed. */
+  getTrayMenu(): Array<TrayMenuItemDesc> | null
   /** Fire the recorded click callback, as the OS tray would. */
   simulateTrayClick(): void
+  /**
+   * Fire a normal, enabled menu item with this id; unknown, disabled, and
+   * cleared items deliberately do nothing, as they cannot fire in the OS.
+   */
+  simulateTrayMenuAction(id: string): void
   /**
    * Test stand-in for the production `registerGlobalShortcut`: validates
    * the accelerator through the real parser, records the trigger, and
@@ -1456,6 +1473,17 @@ export interface TrayDesc {
    * menu-bar appearance. Default false.
    */
   template?: boolean
+}
+
+export interface TrayMenuItemDesc {
+  /** Displayed title of a normal item. */
+  label?: string
+  /** Stable id delivered to the menu action callback. */
+  id?: string
+  /** Gray the item out and suppress its action. */
+  disabled?: boolean
+  /** A horizontal rule instead of an actionable item. */
+  separator?: boolean
 }
 
 /**

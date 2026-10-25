@@ -13,7 +13,7 @@ import {
   setAppIdentity,
   showSystemNotification,
 } from "../notifications.js"
-import { clearTray, setTray } from "../tray.js"
+import { clearTray, setTray, setTrayMenu } from "../tray.js"
 import type {
   MenuBarMenu,
   NewPathPromptOutcome,
@@ -21,6 +21,7 @@ import type {
   PathPromptOutcome,
   SystemNotificationOptions,
   SystemNotificationResponse,
+  TrayMenuItem,
 } from "../types.js"
 
 class ChromeRenderer extends HeadlessRenderer {
@@ -41,7 +42,10 @@ class ChromeRenderer extends HeadlessRenderer {
   // tray
   trayDesc: { iconPath: string; tooltip?: string | null; template?: boolean | null } | null = null
   trayClick: (() => void) | null = null
+  trayMenu: TrayMenuItem[] | null = null
+  trayMenuAction: ((error: Error | null, id: string) => void) | null = null
   trayError: Error | null = null
+  trayMenuError: Error | null = null
   clearTrayError: Error | null = null
 
   promptForPaths(
@@ -107,9 +111,37 @@ class ChromeRenderer extends HeadlessRenderer {
       callback(error)
       return
     }
+    this.trayMenu = null
+    this.trayMenuAction = null
     this.trayDesc = desc
     this.trayClick = onClick
     callback(null)
+  }
+
+  setTrayMenu(
+    items: TrayMenuItem[] | null,
+    onAction: ((error: Error | null, id: string) => void) | null,
+    callback: (error: Error | null) => void
+  ): void {
+    const error = this.trayMenuError
+    this.trayMenuError = null
+    if (error) {
+      callback(error)
+      return
+    }
+    if (!this.trayDesc) {
+      callback(new Error("install the tray before setting its menu"))
+      return
+    }
+    this.trayMenu = items?.length ? items : null
+    this.trayMenuAction = this.trayMenu ? onAction : null
+    callback(null)
+  }
+
+  fireTrayMenu(id: string): void {
+    const item = this.trayMenu?.find((item) => item.id === id)
+    if (!item || item.disabled || item.separator) return
+    this.trayMenuAction?.(null, id)
   }
 
   clearTray(callback: (error: Error | null) => void): void {
@@ -120,6 +152,8 @@ class ChromeRenderer extends HeadlessRenderer {
       return
     }
     this.trayDesc = null
+    this.trayMenu = null
+    this.trayMenuAction = null
     callback(null)
   }
 }
@@ -301,11 +335,63 @@ describe("tray (headless)", () => {
     )
   })
 
-  it("clearTray removes the tray, rejects on error, and guards missing renderers", async () => {
+  it("setTrayMenu replaces actions, ignores disabled and unknown ids, and clears", async () => {
     const renderer = new ChromeRenderer()
     await setTray(renderer, { iconPath: "/icons/tray.png" })
+    const onOpen = vi.fn()
+    const onQuit = vi.fn()
+    await setTrayMenu(renderer, [
+      { id: "open", label: "Open" },
+      { separator: true },
+      { id: "disabled", label: "Disabled", disabled: true },
+    ], onOpen)
+    expect(renderer.trayMenu).toHaveLength(3)
+
+    renderer.fireTrayMenu("open")
+    renderer.fireTrayMenu("disabled")
+    renderer.fireTrayMenu("missing")
+    expect(onOpen).toHaveBeenCalledExactlyOnceWith("open")
+
+    await setTrayMenu(renderer, [{ id: "quit", label: "Quit" }], onQuit)
+    renderer.fireTrayMenu("open")
+    renderer.fireTrayMenu("quit")
+    expect(onOpen).toHaveBeenCalledTimes(1)
+    expect(onQuit).toHaveBeenCalledExactlyOnceWith("quit")
+
+    await setTrayMenu(renderer, null)
+    expect(renderer.trayMenu).toBeNull()
+    expect(renderer.trayMenuAction).toBeNull()
+    renderer.fireTrayMenu("quit")
+    expect(onQuit).toHaveBeenCalledTimes(1)
+  })
+
+  it("setTrayMenu rejects missing handlers, absent trays, native errors, and old renderers", async () => {
+    const renderer = new ChromeRenderer()
+    await expect(setTrayMenu(renderer, [{ id: "open", label: "Open" }], () => {})).rejects.toThrow(
+      "install the tray"
+    )
+    await setTray(renderer, { iconPath: "/icons/tray.png" })
+    await expect(setTrayMenu(renderer, [{ id: "open", label: "Open" }])).rejects.toThrow(
+      "action handler"
+    )
+
+    renderer.trayMenuError = new Error("menu failed")
+    await expect(setTrayMenu(renderer, [{ id: "open", label: "Open" }], () => {})).rejects.toThrow(
+      "menu failed"
+    )
+    await expect(setTrayMenu(new HeadlessRenderer(), null)).rejects.toThrow(
+      /does not implement setTrayMenu/
+    )
+  })
+
+  it("clearTray removes the tray and menu, rejects on error, and guards missing renderers", async () => {
+    const renderer = new ChromeRenderer()
+    await setTray(renderer, { iconPath: "/icons/tray.png" })
+    await setTrayMenu(renderer, [{ id: "open", label: "Open" }], () => {})
     await clearTray(renderer)
     expect(renderer.trayDesc).toBeNull()
+    expect(renderer.trayMenu).toBeNull()
+    expect(renderer.trayMenuAction).toBeNull()
 
     renderer.clearTrayError = new Error("no tray")
     await expect(clearTray(renderer)).rejects.toThrow("no tray")

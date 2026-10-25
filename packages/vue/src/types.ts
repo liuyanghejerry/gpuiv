@@ -913,6 +913,13 @@ export interface NativeRenderer {
     onClick: (() => void) | null,
     callback: (error: Error | null) => void
   ): void
+  /** Replace the installed tray's popup menu. Null or an empty list removes
+   *  it. `onAction` receives `(null, id)` for normal enabled items. */
+  setTrayMenu?(
+    items: TrayMenuItem[] | null,
+    onAction: ((error: Error | null, id: string) => void) | null,
+    callback: (error: Error | null) => void
+  ): void
   /** Remove the tray installed by `setTray`. */
   clearTray?(callback: (error: Error | null) => void): void
 
@@ -932,6 +939,17 @@ export interface NativeRenderer {
     accelerator: string,
     callback: (error: Error | null) => void
   ): void
+}
+
+/** One entry of a tray popup menu. A normal item needs a stable id and label;
+ *  a separator has only `separator: true`. */
+export interface TrayMenuItem {
+  label?: string
+  id?: string
+  /** Gray the item out and suppress its action. */
+  disabled?: boolean
+  /** A horizontal rule instead of an actionable item. */
+  separator?: boolean
 }
 
 /** One entry of a [`MenuBarMenu`]. Exactly one of `separator`, `submenu`, or
