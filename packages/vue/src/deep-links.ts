@@ -26,6 +26,7 @@ export function parseOpenRequest(urls: readonly string[]): OpenRequest {
       continue
     }
     try {
+      if (/%(?![0-9A-Fa-f]{2})/.test(url)) throw new Error("File URL contains an invalid percent escape")
       const parsed = new URL(url)
       if (parsed.search || parsed.hash) throw new Error("File URLs must not contain a query or fragment")
       const path = fileURLToPath(parsed)

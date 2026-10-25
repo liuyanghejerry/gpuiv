@@ -1,7 +1,4 @@
-import { applyMacCpuThrottleFromEnv } from '@gpuiv/vue'
 import { configDefaults, defineConfig } from 'vitest/config'
-
-applyMacCpuThrottleFromEnv()
 
 // Chat perf budgets assert wall-clock draw/mount times, and the live
 // automation test opens a real GPU window. Running test files in parallel
@@ -10,6 +7,7 @@ applyMacCpuThrottleFromEnv()
 export default defineConfig({
   test: {
     fileParallelism: false,
+    setupFiles: ['./vitest.setup.ts'],
     exclude: [...configDefaults.exclude, 'memory-leak.test.ts'],
   },
 })
