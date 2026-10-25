@@ -285,22 +285,40 @@ through `app.window(index)`.
 ## Tray
 
 `setTray` / `clearTray` manage the process tray (macOS status item, Windows
-notify icon). One tray per process — a second `setTray` replaces the first —
-and the third argument fires on a tray click:
+notify icon). One tray per process — a second `setTray` replaces the first.
+The third argument fires on a tray click. `setTrayMenu` installs a native popup
+on the existing tray, with stable item ids, separators, and disabled items:
 
 ```tsx
-import { setTray, clearTray } from '@gpuiv/vue'
+import { setTray, setTrayMenu, clearTray } from '@gpuiv/vue'
 
 await setTray(renderer, { iconPath: trayPng, tooltip: 'Chat', template: true }, () => {
   showMainWindow()
 })
+await setTrayMenu(renderer, [
+  { id: 'open', label: 'Open' },
+  { separator: true },
+  { id: 'quit', label: 'Quit' },
+], id => {
+  if (id === 'open') showMainWindow()
+  if (id === 'quit') closeApp()
+})
+await setTrayMenu(renderer, null) // remove the menu
 await clearTray(renderer)
 ```
 
+A non-empty menu requires an action handler and unique, non-empty item ids.
+Null or an empty array clears it. Replacing the tray with `setTray` also clears
+its menu; `clearTray` removes the tray, menu, and callbacks.
+
+With no menu, a status-item click on macOS and a left click on Windows invoke
+`onClick`. With a menu installed, macOS opens it on a status-item click;
+Windows preserves left-click activation and opens the menu on the context-menu
+gesture.
+
 `template: true` renders the icon as a monochrome macOS menu-bar template.
 Windows loads `.ico` (other formats best-effort). Linux reports unsupported —
-StatusNotifierItem over DBus is not implemented. A tray menu is not offered
-yet; clicks are the whole surface.
+StatusNotifierItem over DBus is not implemented.
 
 ## Global shortcuts
 
@@ -2240,9 +2258,13 @@ skips the repaint.
 
 The 2D core tracks dirty bounds separately in each tile, so simultaneous
 strokes far apart do not upload the clean space between them. Changes on a
-tile edge also refresh the neighboring tiles' 1px sampling borders. The
-rasterizer clears only the previous operation's coverage region between
-draws; coverage precision and full-size pixel buffers stay the same.
+tile edge also refresh the neighboring tiles' 1px sampling borders. Coverage
+keeps its `f64` precision but is stored only inside its covered bounding box:
+raster scratch is reused within one materialization and then released, and
+clip masks use the same bbox-local storage. Unclipped contexts therefore do
+not retain a full-frame coverage buffer. An identity-transform, full-canvas
+`clearRect` with no clip clears pixels directly. The full premultiplied pixel
+buffer and the store's upload mirror remain.
 
 Run `bun examples/bench-canvas-paint.ts --output tmp/canvas-paint.json`
 against a release native build for large layered painting measurements.
