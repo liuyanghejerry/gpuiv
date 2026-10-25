@@ -62,11 +62,16 @@ gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, f
 # workspace so cargo unifies them with gpui_macos's own copies.
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSButton",
     "NSControl",
     "NSImage",
+    "NSMenu",
+    "NSMenuItem",
+    "NSResponder",
     "NSStatusBar",
     "NSStatusBarButton",
     "NSStatusItem",
+    "NSView",
     "objc2-core-foundation",
 ] }
 objc2-foundation = { version = "=0.3.2", default-features = false, features = [

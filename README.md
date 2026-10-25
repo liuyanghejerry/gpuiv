@@ -26,7 +26,7 @@ diffs, and animated panels. [Explore the source](examples/chat.tsx) or
 - **Interactive interfaces:** inputs and IME support, keyboard navigation,
   headless Select / Combobox / Tooltip / Collapsible controls, and animations.
 - **Desktop workflows:** multiple windows, file dialogs, clipboard access,
-  menus, tray icons, global shortcuts, and file / deep-link delivery.
+  menus, tray icons with native popup menus, global shortcuts, and file / deep-link delivery.
 - **Custom visuals:** images, SVGs, and a Canvas 2D API with paths, gradients,
   compositing, and PNG export.
 - **Testable apps:** drive native input with a Playwright-like automation API,

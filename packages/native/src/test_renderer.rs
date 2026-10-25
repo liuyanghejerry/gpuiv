@@ -288,6 +288,8 @@ pub struct TestGpuixRenderer {
     url_scheme_errors: RefCell<VecDeque<Option<String>>>,
     tray: RefCell<Option<crate::tray::TrayDesc>>,
     tray_click: RefCell<Option<ThreadsafeFunction<()>>>,
+    tray_menu: RefCell<Option<Vec<crate::tray::TrayMenuItemDesc>>>,
+    tray_menu_action: RefCell<Option<ThreadsafeFunction<String>>>,
     hotkeys: RefCell<std::collections::HashMap<String, Option<ThreadsafeFunction<()>>>>,
     hotkey_errors: RefCell<VecDeque<Option<String>>>,
 }
@@ -401,6 +403,8 @@ impl TestGpuixRenderer {
             url_scheme_errors: RefCell::new(Default::default()),
             tray: RefCell::new(None),
             tray_click: RefCell::new(None),
+            tray_menu: RefCell::new(None),
+            tray_menu_action: RefCell::new(None),
             hotkeys: RefCell::new(Default::default()),
             hotkey_errors: RefCell::new(Default::default()),
         })
@@ -1036,9 +1040,49 @@ impl TestGpuixRenderer {
         on_click: Option<ThreadsafeFunction<()>>,
         callback: ThreadsafeFunction<()>,
     ) {
+        *self.tray_menu.borrow_mut() = None;
+        *self.tray_menu_action.borrow_mut() = None;
         *self.tray.borrow_mut() = Some(desc);
         *self.tray_click.borrow_mut() = on_click;
         callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+
+    /// Test stand-in for `setTrayMenu`: validates and records the menu only
+    /// when a tray exists, preserving the previous menu on validation errors.
+    #[napi]
+    pub fn set_tray_menu(
+        &self,
+        items: Option<Vec<crate::tray::TrayMenuItemDesc>>,
+        on_action: Option<ThreadsafeFunction<String>>,
+        callback: ThreadsafeFunction<()>,
+    ) -> Result<()> {
+        if self.tray.borrow().is_none() {
+            callback.call(
+                Err(Error::from_reason("install the tray before setting its menu")),
+                ThreadsafeFunctionCallMode::NonBlocking,
+            );
+            return Ok(());
+        }
+        if let Err(error) = crate::tray::validate_menu(
+            items.as_deref().unwrap_or(&[]),
+            on_action.is_some(),
+        ) {
+            callback.call(Err(Error::from_reason(error)), ThreadsafeFunctionCallMode::NonBlocking);
+            return Ok(());
+        }
+        let next = if items.as_ref().map_or(true, Vec::is_empty) {
+            None
+        } else {
+            items
+        };
+        *self.tray_menu.borrow_mut() = next;
+        *self.tray_menu_action.borrow_mut() = if self.tray_menu.borrow().is_some() {
+            on_action
+        } else {
+            None
+        };
+        callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+        Ok(())
     }
 
     /// Test stand-in for `clearTray`.
@@ -1046,6 +1090,8 @@ impl TestGpuixRenderer {
     pub fn clear_tray(&self, callback: ThreadsafeFunction<()>) {
         *self.tray.borrow_mut() = None;
         *self.tray_click.borrow_mut() = None;
+        *self.tray_menu.borrow_mut() = None;
+        *self.tray_menu_action.borrow_mut() = None;
         callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
     }
 
@@ -1055,11 +1101,36 @@ impl TestGpuixRenderer {
         self.tray.borrow().clone()
     }
 
+    /// The current tray menu, if one is installed.
+    #[napi]
+    pub fn get_tray_menu(&self) -> Option<Vec<crate::tray::TrayMenuItemDesc>> {
+        self.tray_menu.borrow().clone()
+    }
+
     /// Fire the recorded click callback, as the OS tray would.
     #[napi]
     pub fn simulate_tray_click(&self) {
         if let Some(callback) = self.tray_click.borrow().as_ref() {
             callback.call(Ok(()), ThreadsafeFunctionCallMode::NonBlocking);
+        }
+    }
+
+    /// Fire a normal, enabled menu item with this id; unknown, disabled, and
+    /// cleared items deliberately do nothing, as they cannot fire in the OS.
+    #[napi]
+    pub fn simulate_tray_menu_action(&self, id: String) {
+        let can_fire = self.tray_menu.borrow().as_ref().is_some_and(|items| {
+            items.iter().any(|item| {
+                item.id.as_deref() == Some(id.as_str())
+                    && !item.separator.unwrap_or(false)
+                    && !item.disabled.unwrap_or(false)
+            })
+        });
+        if !can_fire {
+            return;
+        }
+        if let Some(callback) = self.tray_menu_action.borrow().as_ref() {
+            callback.call(Ok(id), ThreadsafeFunctionCallMode::NonBlocking);
         }
     }
 

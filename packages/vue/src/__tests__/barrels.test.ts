@@ -101,6 +101,7 @@ describe("public entry", () => {
       "registerUrlScheme",
       "setTray",
       "clearTray",
+      "setTrayMenu",
       "registerGlobalShortcut",
       "unregisterGlobalShortcut",
     ])
