@@ -13,14 +13,17 @@ import path from "node:path"
 
 /** True when running inside a bun-compiled executable produced by
  * `@gpuiv/packager` (or any `bun build --compile` product). */
-export function isPackaged(): boolean {
-  // globalThis probe, not the `Bun` global type: this package also compiles
-  // under a plain node tsconfig. `isStandaloneExecutable` only exists on
-  // bun ≥1.4; on 1.3.x the compiled entry lives in the $bunfs virtual
-  // filesystem, which is the version-independent signal.
-  const bun = globalThis as unknown as { Bun?: { isStandaloneExecutable?: boolean; main?: string } }
-  if (bun.Bun?.isStandaloneExecutable === true) return true
-  return typeof bun.Bun?.main === "string" && bun.Bun.main.startsWith("/$bunfs")
+export interface PackagedRuntime {
+  Bun?: { isStandaloneExecutable?: boolean; main?: string }
+}
+
+export function isPackaged(runtime: PackagedRuntime = globalThis as unknown as PackagedRuntime): boolean {
+  // `isStandaloneExecutable` only exists on bun ≥1.4; on 1.3.x the compiled
+  // entry lives in the $bunfs virtual filesystem, which is the
+  // version-independent signal. The optional runtime keeps tests from having
+  // to replace Bun's read-only global object.
+  if (runtime.Bun?.isStandaloneExecutable === true) return true
+  return typeof runtime.Bun?.main === "string" && runtime.Bun.main.startsWith("/$bunfs")
 }
 
 export interface ResourcesPathInput {
@@ -52,11 +55,11 @@ export function resolveResourcesPath(input: ResourcesPathInput): string {
 
 /** Directory holding the app's shipped read-only resources
  * (`extraResources` in `gpuiv.package.ts`). */
-export function resourcesPath(): string {
+export function resourcesPath(runtime?: PackagedRuntime): string {
   return resolveResourcesPath({
     execPath: process.execPath,
     platform: process.platform,
     cwd: process.cwd(),
-    packaged: isPackaged(),
+    packaged: isPackaged(runtime),
   })
 }

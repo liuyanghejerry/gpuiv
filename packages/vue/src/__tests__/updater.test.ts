@@ -23,6 +23,12 @@ import {
   type UpdaterOptions,
 } from "../updater.js"
 
+const packagedStub = vi.hoisted(() => ({ value: true }))
+vi.mock("../packaged.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../packaged.js")>()
+  return { ...actual, isPackaged: () => packagedStub.value }
+})
+
 function keyMaterial() {
   const { privateKey, publicKey } = generateKeyPairSync("ed25519")
   const der = publicKey.export({ type: "spki", format: "der" }) as Buffer
@@ -246,7 +252,6 @@ describe("updater engine and apply mechanics (no native code)", () => {
   }
 
   function engineFixture(options: Partial<UpdaterOptions> = {}) {
-    ;(globalThis as { Bun?: unknown }).Bun = { isStandaloneExecutable: true }
     const events: UpdaterEvent[] = []
     const updater = createUpdater({
       feedUrl: "https://feed.example/stable.json",
@@ -286,6 +291,7 @@ describe("updater engine and apply mechanics (no native code)", () => {
   }
 
   beforeEach(() => {
+    packagedStub.value = true
     osStub.platform = process.platform
     osStub.arch = process.arch
     osStub.homedir = mkdtempSync(path.join(tmpdir(), "gpuiv-updater-home-"))
@@ -294,7 +300,7 @@ describe("updater engine and apply mechanics (no native code)", () => {
   })
 
   afterEach(() => {
-    delete (globalThis as { Bun?: unknown }).Bun
+    packagedStub.value = true
     Object.defineProperty(process, "execPath", { value: realExecPath, writable: true, configurable: true })
     delete process.env.GPUIV_FINISH_UPDATE
     vi.unstubAllGlobals()
@@ -369,7 +375,7 @@ describe("updater engine and apply mechanics (no native code)", () => {
 
     it("refuses to run in development", async () => {
       const { updater } = engineFixture()
-      delete (globalThis as { Bun?: unknown }).Bun
+      packagedStub.value = false
       await expect(updater.checkForUpdates()).rejects.toThrow("development runs never update")
     })
 
@@ -657,7 +663,6 @@ describe("updater engine and apply mechanics (no native code)", () => {
         writeFileSync(path.join(staging, "payload"), "stale handoff")
 
         osStub.platform = "win32"
-        ;(globalThis as { Bun?: unknown }).Bun = { isStandaloneExecutable: true }
         setExecPath(path.join(productDir, "Fake.exe"))
         createUpdater({ feedUrl: "https://feed.example/stable.json", publicKeys: ["k"], currentVersion: "1.0.0", bundleId })
 
@@ -679,7 +684,6 @@ describe("updater engine and apply mechanics (no native code)", () => {
         mkdirSync(productDir)
         writeFileSync(path.join(productDir, "in-flight.old"), "still needed")
         osStub.platform = "win32"
-        ;(globalThis as { Bun?: unknown }).Bun = { isStandaloneExecutable: true }
         setExecPath(path.join(productDir, "Fake.exe"))
         process.env.GPUIV_FINISH_UPDATE = productDir
         createUpdater({ feedUrl: "https://feed.example/stable.json", publicKeys: ["k"], currentVersion: "1.0.0", bundleId })
