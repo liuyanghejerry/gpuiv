@@ -73,7 +73,7 @@
 - [x] Canvas 2D context (`getContext("2d")`: paths, transforms, gradients, AA strokes, clip, composite incl. all W3C blend modes, image data — text APIs throw `NotSupported`)
 - [x] Canvas PNG export (`toDataURL`, `toBlob`, renderer `canvasToPng`)
 - [x] Pointer capture (`setPointerCapture` / `releasePointerCapture`) and `contextMenu`
-- [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe, embedded napi binding, automation smoke test in CI; signing/notarization and Linux packaging pending)
+- [x] App packaging (`@gpuiv/packager`: macOS `.app` + Windows portable exe + Linux x64/ARM64 `.tar.gz`, embedded napi binding and automation smoke tests; signing/notarization, Linux AppImage output and Linux self-update pending)
 - [x] Multiple windows (`createWindow()`: one renderer per window, ids/events/selection/automation stay per-window; on Windows/Linux later windows open on the process's single UI thread)
 - [x] JS remount under `bun --hot` (`createApp()` keeps the native window)
 - [x] Vue Fast Refresh during `bun --hot` (HMR preload: edited components reload in place, the rest of the tree keeps `ref` state)

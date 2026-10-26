@@ -77,9 +77,9 @@ Full diagrams and explanation: [Architecture](./docs/architecture.md#architectur
   VirtualList, Select, FloatingLayer), `automation/`, `packaged.ts`,
   `testing.ts`, `__tests__/`
 - `packages/packager` — `@gpuiv/packager`, app packaging (workspace-only for
-  now): `bun run package` → macOS `.app` + Windows portable exe, plus the
-  publish/promote auto-update feed. Design: `docs/packaging-plan.md`,
-  `docs/auto-update-plan.md`
+  now): `bun run package` → macOS `.app` + Windows portable exe + Linux
+  x64/ARM64 `.tar.gz`, plus the publish/promote auto-update feed. Design:
+  `docs/packaging-plan.md`, `docs/auto-update-plan.md`
 - `packages/beautiful-ui` — `@gpuiv/beautiful-ui` (private, not published):
   beautiful-ui primitives ported to GPUIV (issue #110). `tokens.ts`/`colors.ts`/
   `theme.ts` are the design-token layer (`provideTheme`/`useTheme`, oklch
@@ -306,8 +306,9 @@ xcodebuild -downloadComponent MetalToolchain   # macOS, Xcode 26+: gpui_apple co
   Windows and Linux run `gpui_platform::application().run()` on a dedicated UI thread
 - Keep `core-text = 21.0.0` / `core-graphics = 0.24.0` on macOS — they avoid the
   core-graphics 0.24 vs 0.25 conflict between `core-text` and Zed's `font-kit` fork
-- The default cargo feature is `test-support`, so published binaries include
-  `TestGpuixRenderer` and users can write GPU-backed tests for their own apps
+- The default cargo feature is `test-support`; published macOS and Windows
+  binaries include `TestGpuixRenderer` for GPU-backed app tests. Linux release
+  builds disable it because GPUI's wgpu renderer cannot read images back yet
 - `rust-toolchain.toml` pins the same channel as `zed/rust-toolchain.toml`; when
   the submodule moves, update ours to match or GPUI may not compile
 

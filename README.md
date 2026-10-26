@@ -175,11 +175,11 @@ GPUIV is an experimental, self-maintained Vue 3 fork. It is suitable for explori
 |---|---|---|---|
 | macOS | Metal | Apple Silicon and Intel | Available |
 | Windows | DirectX | ARM64 and x64 | Available |
-| Linux | Vulkan | ARM64 and x64 (GNU) | Not yet |
+| Linux | Vulkan | ARM64 and x64 (GNU) | Not yet; live-window automation works |
 
-Menus and vibrancy are macOS-specific; global shortcuts and tray menus currently support macOS and Windows. On Linux the native addon enables both Wayland and X11: GPUI selects Wayland when `WAYLAND_DISPLAY` is non-empty, otherwise X11 when `DISPLAY` is; to force X11 under XWayland start with `env -u WAYLAND_DISPLAY`.
+Menus and vibrancy are macOS-specific; global shortcuts and tray icons/menus currently support macOS and Windows. On Linux the native addon enables both Wayland and X11: GPUI selects Wayland when `WAYLAND_DISPLAY` is non-empty, otherwise X11 when `DISPLAY` is; to force X11 under XWayland start with `env -u WAYLAND_DISPLAY`. Application windows and live-window automation work on both backends, but the offscreen GPU test renderer and its PNG capture remain unavailable on Linux. Wayland also supports layer-shell surfaces for panels, docks, and wallpapers.
 
-Nested scrolling is currently unsupported. App packaging is a workspace tool for macOS `.app` bundles and Windows portable executables; signing, notarization, and Linux packaging are still pending. See [packaging](docs/reference.md#packaging) and the [full feature checklist](docs/status.md) for current boundaries.
+Nested scrolling is currently unsupported. App packaging is a workspace tool for macOS `.app` bundles, Windows portable executables, and Linux x64/ARM64 `.tar.gz` archives; signing, notarization, Linux AppImage output, and Linux self-update are still pending. See [packaging](docs/reference.md#packaging) and the [full feature checklist](docs/status.md) for current boundaries.
 
 ## Documentation
 
