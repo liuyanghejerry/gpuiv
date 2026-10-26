@@ -175,7 +175,7 @@ GPUIV is an experimental, self-maintained Vue 3 fork. It is suitable for explori
 |---|---|---|---|
 | macOS | Metal | Apple Silicon and Intel | Available |
 | Windows | DirectX | ARM64 and x64 | Available |
-| Linux | Vulkan | ARM64 and x64 (GNU) | Not yet; live-window automation works |
+| Linux | Vulkan | ARM64 and x64 (GNU) | Live-window automation available; offscreen GPU tests/screenshots unavailable |
 
 Menus and vibrancy are macOS-specific; global shortcuts and tray icons/menus currently support macOS and Windows. On Linux the native addon enables both Wayland and X11: GPUI selects Wayland when `WAYLAND_DISPLAY` is non-empty, otherwise X11 when `DISPLAY` is; to force X11 under XWayland start with `env -u WAYLAND_DISPLAY`. Application windows and live-window automation work on both backends, but the offscreen GPU test renderer and its PNG capture remain unavailable on Linux. Wayland also supports layer-shell surfaces for panels, docks, and wallpapers.
 
