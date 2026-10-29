@@ -119,6 +119,12 @@ pub struct EventPayload {
     pub width: Option<f64>,
     pub height: Option<f64>,
 
+    /// Scroll offset of the element, the pair `getScrollOffset` returns: 0 at
+    /// the start and negative as the content moves. Populated for:
+    /// scrollChange.
+    pub scroll_x: Option<f64>,
+    pub scroll_y: Option<f64>,
+
     /// Matches found by this element's `highlight` prop. Counted once per match
     /// even when it is split across several painted runs, and it counts every
     /// retained match, not only the ones currently on screen.
@@ -164,6 +170,8 @@ impl Default for EventPayload {
             end_index: None,
             width: None,
             height: None,
+            scroll_x: None,
+            scroll_y: None,
             match_count: None,
             motion_generation: None,
             paths: None,
