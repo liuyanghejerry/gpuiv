@@ -72,15 +72,16 @@ pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
 }
 
 /// Called with an element's painted border box on every paint, from inside
-/// paint. `onLayout` compares sizes through it and defers its event from
-/// inside — never emitting synchronously from paint.
-pub type LayoutReporter = Rc<dyn Fn(Bounds<Pixels>, &mut App)>;
+/// paint. It is how `onLayout` and `onScrollChange` see what the frame
+/// produced; each defers its own event from inside — never emitting
+/// synchronously from paint.
+pub type PaintReporter = Rc<dyn Fn(Bounds<Pixels>, &mut App)>;
 
 pub fn bounds_tracker(
     id: u64,
     selection_start: Option<bool>,
     insets: crate::style::BoundsInsets,
-    layout: Option<LayoutReporter>,
+    report: Option<PaintReporter>,
 ) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,
@@ -112,8 +113,8 @@ pub fn bounds_tracker(
             if let Some(selectable) = selection_start {
                 crate::text::record_start_region(real, selectable);
             }
-            if let Some(layout) = &layout {
-                layout(real, cx);
+            if let Some(report) = &report {
+                report(real, cx);
             }
         },
     )

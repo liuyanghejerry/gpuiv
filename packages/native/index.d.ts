@@ -1145,6 +1145,12 @@ export interface EventPayload {
   width?: number
   height?: number
   /**
+   * Scroll offset of the element, the pair `getScrollOffset` returns: 0 at
+   * the start and negative as the content moves. Populated for: scrollChange.
+   */
+  scrollX?: number
+  scrollY?: number
+  /**
    * Matches found by this element's `highlight` prop. Counted once per match
    * even when it is split across several painted runs, and it counts every
    * retained match, not only the ones currently on screen.
