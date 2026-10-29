@@ -131,6 +131,7 @@ pub(crate) fn custom_surface(
         ctx.style
             .map(crate::style::bounds_insets)
             .unwrap_or_default(),
+        None,
     ));
     el = crate::accessibility::apply_accessibility(el, ctx.props, None);
     wire_standard_events(el, ctx)

@@ -641,6 +641,7 @@ pub(crate) fn build_canvas(
             style
                 .map(crate::style::bounds_insets)
                 .unwrap_or_default(),
+            None,
         ));
         let fallback =
             crate::renderer::wire_host_events(fallback, element, event_callback, arm_pointer_capture);
