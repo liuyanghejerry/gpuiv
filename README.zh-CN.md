@@ -175,11 +175,11 @@ GPUIV 是一个实验性、独立维护的 Vue 3 分支，适合探索基于 GPU
 |---|---|---|---|
 | macOS | Metal | Apple Silicon 和 Intel | 已支持 |
 | Windows | DirectX | ARM64 和 x64 | 已支持 |
-| Linux | Vulkan | ARM64 和 x64（GNU） | 暂未支持 |
+| Linux | Vulkan | ARM64 和 x64（GNU） | 真实窗口自动化已支持；离屏 GPU 测试/截图暂未支持 |
 
-菜单和窗口毛玻璃效果仅支持 macOS；全局快捷键和托盘菜单目前支持 macOS 与 Windows。Linux 原生扩展同时启用 Wayland 和 X11：`WAYLAND_DISPLAY` 非空时 GPUI 选择 Wayland，否则在 `DISPLAY` 非空时选择 X11；如需在 XWayland 下强制使用 X11，请通过 `env -u WAYLAND_DISPLAY` 启动。
+菜单和窗口毛玻璃效果仅支持 macOS；全局快捷键和托盘图标/菜单目前支持 macOS 与 Windows。Linux 原生扩展同时启用 Wayland 和 X11：`WAYLAND_DISPLAY` 非空时 GPUI 选择 Wayland，否则在 `DISPLAY` 非空时选择 X11；如需在 XWayland 下强制使用 X11，请通过 `env -u WAYLAND_DISPLAY` 启动。应用窗口和基于真实窗口的自动化测试在两种后端上均可运行，但 Linux 仍没有离屏 GPU 测试渲染器及其 PNG 截图能力。Wayland 还支持用于面板、Dock 和壁纸的 layer-shell 表面。
 
-目前不支持嵌套滚动。应用打包工具位于仓库 workspace 中，可生成 macOS `.app` 和 Windows 便携可执行文件；签名、公证及 Linux 打包仍待完成。更多边界请查阅[打包文档](docs/reference.md#packaging)和[完整功能清单](docs/status.md)。
+目前不支持嵌套滚动。应用打包工具位于仓库 workspace 中，可生成 macOS `.app`、Windows 便携可执行文件，以及 Linux x64/ARM64 `.tar.gz` 压缩包；签名、公证、Linux AppImage 输出和 Linux 自更新仍待完成。更多边界请查阅[打包文档](docs/reference.md#packaging)和[完整功能清单](docs/status.md)。
 
 ## 文档导航
 
