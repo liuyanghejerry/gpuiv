@@ -47,8 +47,13 @@ Inventoried range: `9fcd628..a53b294` (2026-10-23). Earlier history is in
 | Terminal rendering mode (`terminal: true`) | `eae33e8` `4aa2fca` `2d274f5` `4bf7ae6` `a6c4fda` `8dfbcaa` `ca1c94c` `9b100ef` | pending | [terminal-mode.md](./terminal-mode.md) — apps inside kitty-graphics terminals incl. SSH, wgpu offscreen Linux, embedded mode; whole new platform surface, nothing here asks for it yet |
 | Virtual-list scrollbar thumb + padding | `d789ba4` `a064295` `8a75170` `3c991f2` `90c6ad0` `447ade9` | pending | `scrollbarColor` paints a native thumb (regular scrollers and virtual lists, unmeasured-row thumb sizing from measured ones, padding insets rows on all four sides); touches the virtual-list paths we have diverged — hand-port |
 | `onScrollChange` | `5ab017a` | pending | new host event reporting every scroll of a scroll container; needs Vue event-registry wiring + renderer arms |
+<<<<<<< HEAD
 | `onLayout` | `c7dd862` | pending | new host event reporting an element's size when it changes |
 | Style expansion: aspectRatio, dashed borders, shadow lists, inset shadows, alignment | `a650681` | synced | PR #180 — shadow lists, inset shadows and a superset `alignContent` were already local (`BoxShadowListValue`), so the port is `aspectRatio`, `borderStyle: dashed/solid`, `alignItems: stretch/baseline`, `justifyContent: space-evenly`; no submodule bump (gpui `border_dashed`/`aspect_ratio` already pinned). Upstream's screenshot pixel-diff tests skipped (no pixel harness, PR #29 precedent); Rust wire tests + GPU layout assertions instead |
+=======
+| `onLayout` | `c7dd862` | synced | PR #181 — fork delta: the reporter hooks our canvas `bounds_tracker` paint (our host bounds still come from the canvas child; upstream's `on_painted` migration is the pending native-perf topic), everything else upstream's shape (`App::defer` emit, epsilon size compare, listener-based prune of the last-size map); all seven upstream test cases ported to `createTestApp` |
+| Style expansion: aspectRatio, dashed borders, shadow lists, inset shadows, alignment | `a650681` | pending | user-facing style keys; mechanical `style.rs`/renderer mapping plus Vue types |
+>>>>>>> 9d0bce6 (docs(upstream): record onLayout sync in the ledger)
 | `registerFont` | `f3eede6` | pending | loads a font file `fontFamily` can then name (zed `7bc43009e` invalidates failed lookups when fonts are added); animal-island's font work would consume it |
 | `getElementsAt` | `5d86e4f` | pending | testing/automation: list the elements under a point |
 | Native perf batch | `782607b` `d8cf51a` `720e975` `c027782` `4f62248` | pending | repaint only when a batch changed something, host bounds from paint (no extra child node), focus sync over focusable ids only, sparse host metadata out of line, `collectGarbageWhenIdle`; measure warm mounts before/after per the profiling playbook |
@@ -258,6 +263,7 @@ from upstream through `367ef48`:
 | #166 | Display-link frame wakes: zed `ea042f2`→`f77e5cf` (+ Taffy patch re-applied as parented `579d48ea`), `setFrameWakeCallback()` napi + Drop release, `startFrameLoop` wake-driven (fallback rate tightened by #170 after CI diagnosis); resolves the 8ms-pump divergence; ledger round `4ecca30..2e31b47` records 14 new rows (terminal mode pending with topic file, scrollbar/onScrollChange/onLayout/style/registerFont/getElementsAt/perf-batch/React-perf/createPortal pending, README-docs round declined, release/ARM64/CLI/disktree/example folded into existing declined rows) — upstream `515df19` + zed `2565b8a3e` |
 | — | Ledger round `2e31b47..a53b294`: single commit `a53b294` (disktree@0.2.2 release, product-only files) folded into the declined disktree row; no new topics, no `zed` submodule movement |
 | #180 | Style expansion: `aspectRatio`, `borderStyle: dashed/solid`, `alignItems: stretch/baseline`, `justifyContent: space-evenly` (shadow lists/inset/`alignContent` already local) — upstream `a650681` |
+| #181 | `onLayout` host event on `<div>`/`<text>`: border box after first paint + on size change, `EventPayload.width/height`, reporter hooked into the canvas `bounds_tracker` paint (upstream uses `on_painted`; that migration is the pending native-perf topic) — upstream `c7dd862` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
