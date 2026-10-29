@@ -479,6 +479,14 @@ export interface ElementProps {
   // ── Scroll events ──────────────────────────────────────────────
   onScroll?: (event: EventPayload) => void
 
+  // ── Layout events ──────────────────────────────────────────────
+  /** The element's border box, reported after the first paint that has the
+   *  listener and again each time its size changes: `width` and `height`,
+   *  plus `x` and `y` in window coordinates. Moving without resizing reports
+   *  nothing; a hidden element is never painted, so it reports nothing until
+   *  shown. `<div>` and `<text>` only. */
+  onLayout?: (event: EventPayload) => void
+
   // ── Pinch (trackpad zoom, touchscreen pinch) ────────────────────
   /** One step of a pinch gesture. `zoomDelta` is the per-step zoom delta
    *  (0.1 ≈ +10%); accumulate it into a scale like a browser zoom handler.

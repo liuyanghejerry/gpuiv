@@ -1139,6 +1139,12 @@ export interface EventPayload {
    */
   endIndex?: number
   /**
+   * Border-box size of the element, in pixels. With `x` and `y`, its position
+   * in window coordinates. Populated for: layout.
+   */
+  width?: number
+  height?: number
+  /**
    * Matches found by this element's `highlight` prop. Counted once per match
    * even when it is split across several painted runs, and it counts every
    * retained match, not only the ones currently on screen.

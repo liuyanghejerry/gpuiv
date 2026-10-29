@@ -114,6 +114,11 @@ pub struct EventPayload {
     /// Populated for: visibleRange, selectionChange, selectionDrag, taskToggle.
     pub end_index: Option<f64>,
 
+    /// Border-box size of the element, in pixels. With `x` and `y`, its
+    /// position in window coordinates. Populated for: layout.
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+
     /// Matches found by this element's `highlight` prop. Counted once per match
     /// even when it is split across several painted runs, and it counts every
     /// retained match, not only the ones currently on screen.
@@ -157,6 +162,8 @@ impl Default for EventPayload {
             new_line: None,
             start_index: None,
             end_index: None,
+            width: None,
+            height: None,
             match_count: None,
             motion_generation: None,
             paths: None,

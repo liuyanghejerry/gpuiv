@@ -5211,6 +5211,10 @@ fn window_key_events(
     .h(gpui::px(0.0))
 }
 
+/// Last `onLayout` size per listening element, shared into paint closures.
+/// See `GpuixView::layout_sizes`.
+pub(crate) type LayoutSizes = Rc<RefCell<HashMap<u64, (f32, f32)>>>;
+
 pub(crate) struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) event_callback: Option<EventCallback>,
@@ -5262,6 +5266,9 @@ pub(crate) struct GpuixView {
     /// Resolved `highlight` state, keyed by the element that declared it.
     /// Empty in every app that does not use search.
     highlights: HashMap<u64, HighlightCacheEntry>,
+    /// Last size reported through `onLayout`, for elements that have the
+    /// listener. Shared with the paint closures that compare against it.
+    layout_sizes: LayoutSizes,
     /// Whether the JS renderer asked for window-level key events, and the
     /// event id (generation) they belong to. A queued event from an old root
     /// carries a stale id and must not enter its replacement.
@@ -5310,6 +5317,7 @@ impl GpuixView {
             selection_scroll_task: None,
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
+            layout_sizes: LayoutSizes::default(),
             window_key_down: false,
             window_key_up: false,
             window_key_event_id: 0,
@@ -5581,6 +5589,7 @@ impl GpuixView {
             inherited,
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
+            layout_sizes: &self.layout_sizes,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -5969,6 +5978,8 @@ pub(crate) struct BuildCtx<'a> {
     /// would re-enter the build and emit again. They are flushed once the root
     /// build has returned.
     highlight_events: &'a mut Vec<(u64, usize)>,
+    /// Last `onLayout` size per element, shared with the paint closures.
+    layout_sizes: &'a LayoutSizes,
 }
 
 /// Style properties that cascade into descendants.
@@ -6796,6 +6807,18 @@ impl gpui::Render for GpuixView {
                 .get(id)
                 .is_some_and(|element| element.custom_props.contains_key("highlight"))
         });
+        // Pruned by listener, not existence: dropping `onLayout` and adding it
+        // back reports the size again, like a fresh observer.
+        {
+            let mut sizes = self.layout_sizes.borrow_mut();
+            if !sizes.is_empty() {
+                sizes.retain(|id, _| {
+                    tree.elements
+                        .get(id)
+                        .is_some_and(|element| element.events.contains("layout"))
+                });
+            }
+        }
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
         // are different fields of self, so Rust allows borrowing all simultaneously.
@@ -6822,6 +6845,7 @@ impl gpui::Render for GpuixView {
                     inherited: Inherited::root(&theme),
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
+                    layout_sizes: &self.layout_sizes,
                 };
                 let built = build_element(root_id, &mut ctx, window, cx);
                 emit_highlight_events(&callback, &highlight_events);
@@ -7311,6 +7335,7 @@ pub(crate) fn build_host_container(
         style
             .map(crate::style::bounds_insets)
             .unwrap_or_default(),
+        layout_reporter(element.id, &element.events, ctx),
     ));
 
     if !pass_through {
@@ -8249,6 +8274,53 @@ pub(crate) fn emit_event_full(
         cb(payload);
     }
 }
+
+/// `onLayout` for one element: its painted box after the first paint with the
+/// listener, then again each time its size changes. A move without a resize
+/// reports nothing, so scrolling a list does not queue an event per row.
+///
+/// The event is queued after the paint that saw the change, never from inside
+/// it: a handler that sets state would re-enter the frame being painted.
+fn layout_reporter(
+    id: u64,
+    events: &std::collections::HashSet<String>,
+    ctx: &BuildCtx,
+) -> Option<crate::automation::LayoutReporter> {
+    if !events.contains("layout") {
+        return None;
+    }
+    let callback = ctx.event_callback.clone()?;
+    let sizes = ctx.layout_sizes.clone();
+    Some(Rc::new(move |bounds, cx| {
+        let size = (
+            f32::from(bounds.size.width),
+            f32::from(bounds.size.height),
+        );
+        {
+            let mut sizes = sizes.borrow_mut();
+            let unchanged = sizes.get(&id).is_some_and(|last| {
+                (last.0 - size.0).abs() < LAYOUT_EPSILON && (last.1 - size.1).abs() < LAYOUT_EPSILON
+            });
+            if unchanged {
+                return;
+            }
+            sizes.insert(id, size);
+        }
+        let callback = callback.clone();
+        cx.defer(move |_| {
+            emit_event_full(&Some(callback), id, "layout", |payload| {
+                payload.x = Some(f64::from(f32::from(bounds.origin.x)));
+                payload.y = Some(f64::from(f32::from(bounds.origin.y)));
+                payload.width = Some(f64::from(size.0));
+                payload.height = Some(f64::from(size.1));
+            });
+        });
+    }))
+}
+
+/// Sizes closer than this are the same size. Layout is deterministic, so this
+/// only absorbs float noise from fractional scale factors.
+const LAYOUT_EPSILON: f32 = 0.01;
 
 // ── Batch processing ─────────────────────────────────────────────
 

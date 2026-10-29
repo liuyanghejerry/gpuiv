@@ -605,6 +605,7 @@ impl CustomElement for TextEditorElement {
             ctx.style
                 .map(crate::style::bounds_insets)
                 .unwrap_or_default(),
+            None,
         ));
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
@@ -640,6 +641,7 @@ impl CustomElement for TextEditorElement {
             ctx.style
                 .map(crate::style::bounds_insets)
                 .unwrap_or_default(),
+            None,
         ));
         editor =
             crate::accessibility::apply_a11y_click(editor, ctx.events, ctx.id, ctx.event_callback);

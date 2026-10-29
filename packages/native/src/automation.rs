@@ -9,6 +9,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -70,14 +71,20 @@ pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
     crate::text::paint::current_paint_state().record_bounds(id, bounds);
 }
 
+/// Called with an element's painted border box on every paint, from inside
+/// paint. `onLayout` compares sizes through it and defers its event from
+/// inside — never emitting synchronously from paint.
+pub type LayoutReporter = Rc<dyn Fn(Bounds<Pixels>, &mut App)>;
+
 pub fn bounds_tracker(
     id: u64,
     selection_start: Option<bool>,
     insets: crate::style::BoundsInsets,
+    layout: Option<LayoutReporter>,
 ) -> impl IntoElement {
     canvas(
         |bounds, _, _| bounds,
-        move |bounds, _, _, _| {
+        move |bounds, _, _, cx| {
             // The canvas is absolute at the parent's content-box origin
             // (border + padding inside) with the padding-box size (border box
             // minus border). Convert back to the border box — the box GPUI's
@@ -104,7 +111,11 @@ pub fn bounds_tracker(
             record_bounds(id, real);
             if let Some(selectable) = selection_start {
                 crate::text::record_start_region(real, selectable);
-            }        },
+            }
+            if let Some(layout) = &layout {
+                layout(real, cx);
+            }
+        },
     )
     .absolute()
     .size_full()
