@@ -7904,6 +7904,8 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("center") => el = el.items_center(),
         Some("start") | Some("flex-start") => el = el.items_start(),
         Some("end") | Some("flex-end") => el = el.items_end(),
+        Some("stretch") => el = el.items_stretch(),
+        Some("baseline") => el = el.items_baseline(),
         _ => {}
     }
     match style.align_content.as_deref() {
@@ -7923,6 +7925,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         Some("end") | Some("flex-end") => el = el.justify_end(),
         Some("between") | Some("space-between") => el = el.justify_between(),
         Some("around") | Some("space-around") => el = el.justify_around(),
+        Some("evenly") | Some("space-evenly") => el = el.justify_evenly(),
         _ => {}
     }
     match style.align_self.as_deref() {
@@ -8035,6 +8038,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
     if let Some(left) = style.left {
         el = el.left(gpui::px(left as f32));
     }
+    if let Some(ratio) = style.aspect_ratio {
+        if ratio > 0.0 && ratio.is_finite() {
+            el = el.aspect_ratio(ratio as f32);
+        }
+    }
     if let Some(background) = style.resolved_background() {
         el = el.bg(background);
     }
@@ -8118,6 +8126,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc) -> E {
         if let Some(color) = crate::color::parse_color_rgba(color) {
             el = el.border_color(color);
         }
+    }
+    match style.border_style.as_deref() {
+        Some("dashed") => el = el.border_dashed(),
+        Some("solid") => el.style().border_style = Some(gpui::BorderStyle::Solid),
+        _ => {}
     }
     if let Some(ref shadow) = style.box_shadow {
         if let Some(shadows) = shadow.resolved_shadows() {

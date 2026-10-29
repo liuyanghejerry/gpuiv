@@ -156,6 +156,8 @@ export interface StyleDesc {
 
   width?: DimensionValue
   height?: DimensionValue
+  /** Width divided by height; fills in whichever axis has no definite size. */
+  aspectRatio?: number
   minWidth?: DimensionValue
   minHeight?: DimensionValue
   maxWidth?: DimensionValue
@@ -192,6 +194,8 @@ export interface StyleDesc {
   borderBottomWidth?: number
   borderLeftWidth?: number
   borderColor?: string
+  /** Applies to every side. */
+  borderStyle?: "solid" | "dashed"
   borderRadius?: number
   borderTopLeftRadius?: number
   borderTopRightRadius?: number

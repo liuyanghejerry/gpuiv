@@ -210,6 +210,8 @@ pub struct StyleDesc {
     // Sizing - now supports both numbers and strings like "100%" or "auto"
     pub width: Option<DimensionValue>,
     pub height: Option<DimensionValue>,
+    /// Width divided by height, applied to whichever axis is not definite.
+    pub aspect_ratio: Option<f64>,
     pub min_width: Option<DimensionValue>,
     pub min_height: Option<DimensionValue>,
     pub max_width: Option<DimensionValue>,
@@ -251,6 +253,8 @@ pub struct StyleDesc {
     pub border_bottom_width: Option<f64>,
     pub border_left_width: Option<f64>,
     pub border_color: Option<String>,
+    /// `"solid"` or `"dashed"`, for every side.
+    pub border_style: Option<String>,
     pub border_radius: Option<f64>,
     pub border_top_left_radius: Option<f64>,
     pub border_top_right_radius: Option<f64>,
@@ -559,6 +563,20 @@ mod tests {
             serde_json::to_value(style).unwrap()["boxShadow"]["inset"],
             true
         );
+    }
+
+    #[test]
+    fn aspect_ratio_and_border_style_parse_off_the_wire() {
+        let style: StyleDesc = serde_json::from_str(
+            r#"{"aspectRatio":2.5,"borderStyle":"dashed"}"#,
+        )
+        .unwrap();
+        assert_eq!(style.aspect_ratio, Some(2.5));
+        assert_eq!(style.border_style.as_deref(), Some("dashed"));
+        // Round trip keeps the keys, so a style patch does not drop them.
+        let wire = serde_json::to_value(&style).unwrap();
+        assert_eq!(wire["aspectRatio"], 2.5);
+        assert_eq!(wire["borderStyle"], "dashed");
     }
 
     #[test]
