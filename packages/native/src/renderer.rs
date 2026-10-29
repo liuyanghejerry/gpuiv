@@ -7348,14 +7348,6 @@ pub(crate) fn build_host_container(
     if style.and_then(|style| style.position.as_deref()).is_none() {
         el = el.relative();
     }
-    el = el.child(crate::automation::bounds_tracker(
-        element.id,
-        selection_start_flag(style),
-        style
-            .map(crate::style::bounds_insets)
-            .unwrap_or_default(),
-        paint_reporter(element.id, &element.events, ctx),
-    ));
 
     if !pass_through {
         if let Some(handle) = ctx.focus_handles.get(&element.id) {
@@ -7458,6 +7450,22 @@ pub(crate) fn build_host_container(
             el.child(child)
         };
     }
+
+    // Attached AFTER the user children: gpui indexes a scroll container's
+    // children for `ScrollHandle::scroll_to_item` by paint-tree order, and our
+    // `scroll_target` hands it the retained-tree child index. A leading canvas
+    // would shift every index by one, so `scrollIntoView` on a plain scroller
+    // resolved the neighbouring child and computed a no-op offset. The canvas
+    // is pinned to the content origin (see `bounds_tracker`), so trailing
+    // changes neither layout nor paint order.
+    el = el.child(crate::automation::bounds_tracker(
+        element.id,
+        selection_start_flag(style),
+        style
+            .map(crate::style::bounds_insets)
+            .unwrap_or_default(),
+        paint_reporter(element.id, &element.events, ctx),
+    ));
 
     el.into_any_element()
 }

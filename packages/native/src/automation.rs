@@ -118,7 +118,17 @@ pub fn bounds_tracker(
             }
         },
     )
+    // Pinned to the content origin, not a bare `absolute()`: an absolute child
+    // without explicit insets sits at its static position, which follows the
+    // in-flow children — the bottom of a scroller's content when this canvas
+    // paints last (it must paint last: gpui indexes scroll children for
+    // `scroll_to_item` by paint-tree order). `top`/`left` are relative to the
+    // containing block's padding box, so the content origin is one padding in;
+    // this matches the static position the border-box reconstruction below
+    // (`real = canvas − padding − border`) was written for.
     .absolute()
+    .top(px(insets.padding.top))
+    .left(px(insets.padding.left))
     .size_full()
 }
 
