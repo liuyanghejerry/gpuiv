@@ -151,6 +151,21 @@ describeNative("onScrollChange (vue)", () => {
 
       app.renderer.scrollIntoView(app.renderer.findByTestId("target")!.id)
       await app.settle()
+      // eslint-disable-next-line no-console
+      console.log("DIAG after settle 1:", {
+        offsets: JSON.stringify(offsets),
+        scrollOffset: app.renderer.getScrollOffset(
+          app.renderer.findByTestId("scroller")!.id,
+        ),
+      })
+      await app.settle()
+      // eslint-disable-next-line no-console
+      console.log("DIAG after settle 2:", {
+        offsets: JSON.stringify(offsets),
+        scrollOffset: app.renderer.getScrollOffset(
+          app.renderer.findByTestId("scroller")!.id,
+        ),
+      })
       expect(offsets).toHaveLength(1)
       expect((offsets[0] as number[])[1]).toBeLessThan(0)
     } finally {
