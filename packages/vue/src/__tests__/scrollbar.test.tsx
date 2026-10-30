@@ -6,7 +6,7 @@ import path from "path"
 import { defineComponent } from "vue"
 import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
-import { readLogicalPixels, SHOTS_DIR, type Pixels } from "./test-utils.js"
+import { readPixels, readLogicalPixels, SHOTS_DIR, type Pixels } from "./test-utils.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -61,7 +61,33 @@ async function shoot(
 describeNative("scrollbarColor (vue)", () => {
   it("paints a thumb along the right edge, as long as the viewport is of the content", async () => {
     // 100px of a 300px content: a third of the track.
-    const rows = thumbRows(readLogicalPixels(await shoot(300)), 97)
+    const file = await shoot(300)
+    // eslint-disable-next-line no-console
+    console.log(
+      "DIAG raw png:",
+      (() => {
+        const raw = readPixels(file)
+        let minX = Infinity
+      let maxX = -Infinity
+      let minY = Infinity
+      let maxY = -Infinity
+      let count = 0
+      for (let y = 0; y < raw.height; y++) {
+        for (let x = 0; x < raw.width; x++) {
+          const [r, g, b] = raw.at(x, y)
+          if (r > 200 && g < 60 && b < 60) {
+            count++
+            minX = Math.min(minX, x)
+            maxX = Math.max(maxX, x)
+            minY = Math.min(minY, y)
+            maxY = Math.max(maxY, y)
+          }
+        }
+      }
+      return JSON.stringify({ w: raw.width, h: raw.height, red: count, box: [minX, minY, maxX, maxY] })
+      })(),
+    )
+    const rows = thumbRows(readLogicalPixels(file), 97)
     expect(rows[0]).toBe(0)
     expect(rows.at(-1)).toBe(32)
     expect(thumbRows(readLogicalPixels(await shoot(300)), 80), "only along the edge").toEqual([])
