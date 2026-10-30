@@ -6,11 +6,37 @@ import path from "path"
 import { defineComponent } from "vue"
 import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
-import { readLogicalPixels, SHOTS_DIR, type Pixels } from "./test-utils.js"
+import { readLogicalPixelsMarked, SHOTS_DIR, type Pixels } from "./test-utils.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 const THUMB = "#ff0000"
+
+/** A uniquely-coloured 40x40 square, painted at a known position so
+ *  `readLogicalPixelsMarked` can measure the capture's scale. A capture's
+ *  pixel size follows the display, not the window (CI virtual displays clamp
+ *  it), so the scale must be measured, not guessed from the window size. */
+const MARKER_COLOR = "#0000ff"
+const MARKER = {
+  w: 40,
+  h: 40,
+  match: ([r, g, b]: [number, number, number, number]) => b > 200 && r < 60 && g < 60,
+}
+const withMarker = (...children: unknown[]) => (
+  <div style={{ position: "relative", width: 200, height: 200 }}>
+    {children}
+    <div
+      style={{
+        position: "absolute",
+        left: 150,
+        top: 10,
+        width: MARKER.w,
+        height: MARKER.h,
+        backgroundColor: MARKER_COLOR,
+      }}
+    />
+  </div>
+)
 
 /** Rows (within the scroller's 100px) holding thumb-coloured pixels in a column. */
 function thumbRows(pixels: Pixels, x: number, top = 0) {
@@ -31,20 +57,21 @@ async function shoot(
   // 1280x800 default, and the capture would be clamped to it.
   const WINDOW = { width: 200, height: 200 }
   const App = defineComponent({
-    setup: () => () => (
-      <div
-        testId="scroller"
-        style={{
-          width: 100,
-          height: 100,
-          overflow: "scroll",
-          scrollbarColor: THUMB,
-          ...scroller,
-        }}
-      >
-        <div style={{ width: 100, height: contentHeight, backgroundColor: "#202020" }} />
-      </div>
-    ),
+    setup: () => () =>
+      withMarker(
+        <div
+          testId="scroller"
+          style={{
+            width: 100,
+            height: 100,
+            overflow: "scroll",
+            scrollbarColor: THUMB,
+            ...scroller,
+          }}
+        >
+          <div style={{ width: 100, height: contentHeight, backgroundColor: "#202020" }} />
+        </div>,
+      ),
   })
   const app = createTestApp(App, WINDOW)
   try {
@@ -55,7 +82,7 @@ async function shoot(
     }
     const file = path.join(SHOTS_DIR, `scrollbar-${contentHeight}-${scrollTo ?? "top"}.png`)
     app.renderer.captureScreenshot(file)
-    return readLogicalPixels(file, WINDOW.width)
+    return readLogicalPixelsMarked(file, MARKER)
   } finally {
     app.unmount()
   }
@@ -94,26 +121,27 @@ describeNative("scrollbarColor (vue)", () => {
 
   it("draws a thumb along the bottom for sideways scrolling, and leaves the corner when both show", async () => {
     const App = defineComponent({
-      setup: () => () => (
-        <div
-          style={{
-            width: 100,
-            height: 100,
-            overflow: "scroll",
-            scrollbarColor: THUMB,
-            scrollbarWidth: 6,
-          }}
-        >
-          <div style={{ width: 300, height: 300, backgroundColor: "#202020" }} />
-        </div>
-      ),
+      setup: () => () =>
+        withMarker(
+          <div
+            style={{
+              width: 100,
+              height: 100,
+              overflow: "scroll",
+              scrollbarColor: THUMB,
+              scrollbarWidth: 6,
+            }}
+          >
+            <div style={{ width: 300, height: 300, backgroundColor: "#202020" }} />
+          </div>,
+        ),
     })
     const app = createTestApp(App, { width: 200, height: 200 })
     try {
       await app.settle()
       const file = path.join(SHOTS_DIR, "scrollbar-both.png")
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file, 200)
+      const pixels = readLogicalPixelsMarked(file, MARKER)
       const isThumb = (x: number, y: number) => {
         const [r, g, b] = pixels.at(x, y)
         return r > 200 && g < 60 && b < 60
@@ -133,7 +161,7 @@ describeNative("scrollbarColor (vue)", () => {
   })
 
   it("never shortens a thumb below a grabbable length", async () => {
-    const rows = thumbRows(readLogicalPixels(await shoot(5000)), 97)
+    const rows = thumbRows(await shoot(5000), 97)
     expect(rows.length).toBe(20)
   })
 })
@@ -142,23 +170,24 @@ describeNative("scrollbarColor on a <virtual-list> (vue)", () => {
   /** 30 rows of 40px in a 160px list: 1200px of content. */
   async function shootList(scrollToRow?: number, scrollbarColor: string | null = THUMB) {
     const App = defineComponent({
-      setup: () => () => (
-        <virtual-list
-          testId="list"
-          overdraw={0}
-          estimatedItemHeight={40}
-          style={{
-            width: 100,
-            height: 160,
-            backgroundColor: "#202020",
-            scrollbarColor: scrollbarColor ?? undefined,
-          }}
-        >
-          {Array.from({ length: 30 }, (_, index) => (
-            <div key={index} style={{ height: 40, flexShrink: 0 }} />
-          ))}
-        </virtual-list>
-      ),
+      setup: () => () =>
+        withMarker(
+          <virtual-list
+            testId="list"
+            overdraw={0}
+            estimatedItemHeight={40}
+            style={{
+              width: 100,
+              height: 160,
+              backgroundColor: "#202020",
+              scrollbarColor: scrollbarColor ?? undefined,
+            }}
+          >
+            {Array.from({ length: 30 }, (_, index) => (
+              <div key={index} style={{ height: 40, flexShrink: 0 }} />
+            ))}
+          </virtual-list>,
+        ),
     })
     const app = createTestApp(App, { width: 200, height: 220 })
     try {
@@ -172,7 +201,7 @@ describeNative("scrollbarColor on a <virtual-list> (vue)", () => {
         `scrollbar-list-${scrollToRow ?? "top"}-${scrollbarColor ? "on" : "off"}.png`,
       )
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file, 200)
+      const pixels = readLogicalPixelsMarked(file, MARKER)
       const rows: number[] = []
       for (let y = 0; y < 160; y++) {
         const [r, g, b] = pixels.at(97, y)
@@ -206,30 +235,31 @@ describeNative("scrollbarColor on a <virtual-list> (vue)", () => {
 
   it("sizes the rows it has not measured from the ones it has, not from the estimate", async () => {
     const App = defineComponent({
-      setup: () => () => (
-        <virtual-list
-          testId="list"
-          overdraw={0}
-          estimatedItemHeight={40}
-          style={{
-            width: 100,
-            height: 400,
-            backgroundColor: "#202020",
-            scrollbarColor: THUMB,
-          }}
-        >
-          {Array.from({ length: 20 }, (_, index) => (
-            <div key={index} style={{ height: 200, flexShrink: 0 }} />
-          ))}
-        </virtual-list>
-      ),
+      setup: () => () =>
+        withMarker(
+          <virtual-list
+            testId="list"
+            overdraw={0}
+            estimatedItemHeight={40}
+            style={{
+              width: 100,
+              height: 400,
+              backgroundColor: "#202020",
+              scrollbarColor: THUMB,
+            }}
+          >
+            {Array.from({ length: 20 }, (_, index) => (
+              <div key={index} style={{ height: 200, flexShrink: 0 }} />
+            ))}
+          </virtual-list>,
+        ),
     })
     const app = createTestApp(App, { width: 200, height: 440 })
     try {
       await app.settle()
       const file = path.join(SHOTS_DIR, "scrollbar-list-tall-rows.png")
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file, 200)
+      const pixels = readLogicalPixelsMarked(file, MARKER)
       const rows: number[] = []
       for (let y = 0; y < 400; y++) {
         const [r, g, b] = pixels.at(97, y)
@@ -251,32 +281,33 @@ describeNative("padding on a <virtual-list> (vue)", () => {
 
   it("insets the rows on every side and keeps the thumb at the list's own edge", async () => {
     const App = defineComponent({
-      setup: () => () => (
-        <virtual-list
-          overdraw={0}
-          estimatedItemHeight={40}
-          style={{
-            width: 100,
-            height: 160,
-            paddingTop: 20,
-            paddingLeft: 10,
-            paddingRight: 30,
-            backgroundColor: "#202020",
-            scrollbarColor: THUMB,
-          }}
-        >
-          {Array.from({ length: 30 }, (_, index) => (
-            <div key={index} style={{ height: 40, flexShrink: 0, backgroundColor: ROW }} />
-          ))}
-        </virtual-list>
-      ),
+      setup: () => () =>
+        withMarker(
+          <virtual-list
+            overdraw={0}
+            estimatedItemHeight={40}
+            style={{
+              width: 100,
+              height: 160,
+              paddingTop: 20,
+              paddingLeft: 10,
+              paddingRight: 30,
+              backgroundColor: "#202020",
+              scrollbarColor: THUMB,
+            }}
+          >
+            {Array.from({ length: 30 }, (_, index) => (
+              <div key={index} style={{ height: 40, flexShrink: 0, backgroundColor: ROW }} />
+            ))}
+          </virtual-list>,
+        ),
     })
     const app = createTestApp(App, { width: 200, height: 220 })
     try {
       await app.settle()
       const file = path.join(SHOTS_DIR, "scrollbar-list-padded.png")
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file, 200)
+      const pixels = readLogicalPixelsMarked(file, MARKER)
       const rows = { left: Infinity, right: -Infinity, top: Infinity }
       let thumbX = -1
       for (let y = 0; y < 160; y++) {

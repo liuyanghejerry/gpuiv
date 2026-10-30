@@ -120,14 +120,39 @@ export function readPixels(file: string): Pixels {
   }
 }
 
-/** `readPixels` addressed in logical pixels, the units styles are written in,
- *  sampling the centre of each. `windowWidth` is the offscreen test window's
- *  logical width — the scale to divide by. A capture can be narrower than the
- *  window when the CI runner's virtual display is smaller than the window
- *  (the surface is clamped to it), so this is per-call, not a constant. */
-export function readLogicalPixels(file: string, windowWidth: number): Pixels {
+/** Derive the capture's logical-to-pixel scale from a uniquely-coloured
+ *  rectangle of known logical size, then address pixels in logical units.
+ *
+ *  A capture's pixel size follows the display, not the window: it is the
+ *  window at the device scale on a big enough display, or the whole (smaller)
+ *  virtual display clamped around the window on a CI runner. Dividing by
+ *  either guess lands off; measuring a painted marker is right in both. */
+export function readLogicalPixelsMarked(
+  file: string,
+  marker: {
+    w: number
+    h: number
+    match: (pixel: [number, number, number, number]) => boolean
+  },
+): Pixels {
   const pixels = readPixels(file)
-  const scale = pixels.width / windowWidth
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (let y = 0; y < pixels.height; y++) {
+    for (let x = 0; x < pixels.width; x++) {
+      if (marker.match(pixels.at(x, y))) {
+        minX = Math.min(minX, x)
+        minY = Math.min(minY, y)
+        maxX = Math.max(maxX, x)
+        maxY = Math.max(maxY, y)
+      }
+    }
+  }
+  expect(Number.isFinite(minX), "scale marker not found in capture").toBe(true)
+  const scale =
+    ((maxX - minX + 1) / marker.w + (maxY - minY + 1) / marker.h) / 2
   return {
     width: pixels.width / scale,
     height: pixels.height / scale,
