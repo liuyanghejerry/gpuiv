@@ -6,7 +6,7 @@ import path from "path"
 import { defineComponent } from "vue"
 import { describe, expect, it } from "vitest"
 import { createTestApp, hasNativeTestRenderer } from "../testing.js"
-import { readPixels, readLogicalPixels, SHOTS_DIR, type Pixels } from "./test-utils.js"
+import { readLogicalPixels, SHOTS_DIR, type Pixels } from "./test-utils.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -27,6 +27,9 @@ async function shoot(
   scrollTo?: number,
   scroller: Record<string, unknown> = {},
 ) {
+  // A small window: the CI runner's virtual display can be smaller than the
+  // 1280x800 default, and the capture would be clamped to it.
+  const WINDOW = { width: 200, height: 200 }
   const App = defineComponent({
     setup: () => () => (
       <div
@@ -43,7 +46,7 @@ async function shoot(
       </div>
     ),
   })
-  const app = createTestApp(App)
+  const app = createTestApp(App, WINDOW)
   try {
     await app.settle()
     if (scrollTo !== undefined) {
@@ -52,7 +55,7 @@ async function shoot(
     }
     const file = path.join(SHOTS_DIR, `scrollbar-${contentHeight}-${scrollTo ?? "top"}.png`)
     app.renderer.captureScreenshot(file)
-    return file
+    return readLogicalPixels(file, WINDOW.width)
   } finally {
     app.unmount()
   }
@@ -61,63 +64,32 @@ async function shoot(
 describeNative("scrollbarColor (vue)", () => {
   it("paints a thumb along the right edge, as long as the viewport is of the content", async () => {
     // 100px of a 300px content: a third of the track.
-    const file = await shoot(300)
-    // eslint-disable-next-line no-console
-    console.log(
-      "DIAG raw png:",
-      (() => {
-        const raw = readPixels(file)
-        let minX = Infinity
-      let maxX = -Infinity
-      let minY = Infinity
-      let maxY = -Infinity
-      let count = 0
-      for (let y = 0; y < raw.height; y++) {
-        for (let x = 0; x < raw.width; x++) {
-          const [r, g, b] = raw.at(x, y)
-          if (r > 200 && g < 60 && b < 60) {
-            count++
-            minX = Math.min(minX, x)
-            maxX = Math.max(maxX, x)
-            minY = Math.min(minY, y)
-            maxY = Math.max(maxY, y)
-          }
-        }
-      }
-      return JSON.stringify({ w: raw.width, h: raw.height, red: count, box: [minX, minY, maxX, maxY] })
-      })(),
-    )
-    const rows = thumbRows(readLogicalPixels(file), 97)
+    const rows = thumbRows(await shoot(300), 97)
     expect(rows[0]).toBe(0)
     expect(rows.at(-1)).toBe(32)
-    expect(thumbRows(readLogicalPixels(await shoot(300)), 80), "only along the edge").toEqual([])
-    expect(thumbRows(readLogicalPixels(await shoot(300)), 93), "6px wide: x 94 to 99").toEqual([])
-    expect(thumbRows(readLogicalPixels(await shoot(300)), 94).length).toBeGreaterThan(0)
+    expect(thumbRows(await shoot(300), 80), "only along the edge").toEqual([])
+    expect(thumbRows(await shoot(300), 93), "6px wide: x 94 to 99").toEqual([])
+    expect(thumbRows(await shoot(300), 94).length).toBeGreaterThan(0)
   })
 
   it("follows the scroll offset", async () => {
-    const rows = thumbRows(readLogicalPixels(await shoot(300, 200)), 97)
+    const rows = thumbRows(await shoot(300, 200), 97)
     expect(rows[0]).toBe(67)
     expect(rows.at(-1)).toBe(99)
-    const middle = thumbRows(readLogicalPixels(await shoot(300, 100)), 97)
+    const middle = thumbRows(await shoot(300, 100), 97)
     expect(middle[0]).toBeGreaterThan(25)
     expect(middle[0]).toBeLessThan(45)
   })
 
   it("paints nothing when the content fits", async () => {
-    expect(thumbRows(readLogicalPixels(await shoot(80)), 97)).toEqual([])
+    expect(thumbRows(await shoot(80), 97)).toEqual([])
   })
 
   it("is off without a colour, and takes the thickness from scrollbarWidth", async () => {
-    expect(
-      thumbRows(readLogicalPixels(await shoot(300, undefined, { scrollbarColor: undefined })), 97),
-    ).toEqual([])
+    expect(thumbRows(await shoot(300, undefined, { scrollbarColor: undefined }), 97)).toEqual([])
     const wide = await shoot(300, undefined, { scrollbarWidth: 12 })
-    expect(
-      thumbRows(readLogicalPixels(wide), 89).length,
-      "12px wide: x 88 to 99",
-    ).toBeGreaterThan(0)
-    expect(thumbRows(readLogicalPixels(wide), 87)).toEqual([])
+    expect(thumbRows(wide, 89).length, "12px wide: x 88 to 99").toBeGreaterThan(0)
+    expect(thumbRows(wide, 87)).toEqual([])
   })
 
   it("draws a thumb along the bottom for sideways scrolling, and leaves the corner when both show", async () => {
@@ -136,12 +108,12 @@ describeNative("scrollbarColor (vue)", () => {
         </div>
       ),
     })
-    const app = createTestApp(App)
+    const app = createTestApp(App, { width: 200, height: 200 })
     try {
       await app.settle()
       const file = path.join(SHOTS_DIR, "scrollbar-both.png")
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file)
+      const pixels = readLogicalPixels(file, 200)
       const isThumb = (x: number, y: number) => {
         const [r, g, b] = pixels.at(x, y)
         return r > 200 && g < 60 && b < 60
@@ -188,7 +160,7 @@ describeNative("scrollbarColor on a <virtual-list> (vue)", () => {
         </virtual-list>
       ),
     })
-    const app = createTestApp(App)
+    const app = createTestApp(App, { width: 200, height: 220 })
     try {
       await app.settle()
       if (scrollToRow !== undefined) {
@@ -200,7 +172,7 @@ describeNative("scrollbarColor on a <virtual-list> (vue)", () => {
         `scrollbar-list-${scrollToRow ?? "top"}-${scrollbarColor ? "on" : "off"}.png`,
       )
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file)
+      const pixels = readLogicalPixels(file, 200)
       const rows: number[] = []
       for (let y = 0; y < 160; y++) {
         const [r, g, b] = pixels.at(97, y)
@@ -252,12 +224,12 @@ describeNative("scrollbarColor on a <virtual-list> (vue)", () => {
         </virtual-list>
       ),
     })
-    const app = createTestApp(App)
+    const app = createTestApp(App, { width: 200, height: 440 })
     try {
       await app.settle()
       const file = path.join(SHOTS_DIR, "scrollbar-list-tall-rows.png")
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file)
+      const pixels = readLogicalPixels(file, 200)
       const rows: number[] = []
       for (let y = 0; y < 400; y++) {
         const [r, g, b] = pixels.at(97, y)
@@ -299,12 +271,12 @@ describeNative("padding on a <virtual-list> (vue)", () => {
         </virtual-list>
       ),
     })
-    const app = createTestApp(App)
+    const app = createTestApp(App, { width: 200, height: 220 })
     try {
       await app.settle()
       const file = path.join(SHOTS_DIR, "scrollbar-list-padded.png")
       app.renderer.captureScreenshot(file)
-      const pixels = readLogicalPixels(file)
+      const pixels = readLogicalPixels(file, 200)
       const rows = { left: Infinity, right: -Infinity, top: Infinity }
       let thumbX = -1
       for (let y = 0; y < 160; y++) {

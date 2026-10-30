@@ -120,16 +120,14 @@ export function readPixels(file: string): Pixels {
   }
 }
 
-/** The test window's width in logical pixels (`DEFAULT_WINDOW_WIDTH` in the
- *  native test renderer). On a 2x display the window captures twice that. */
-const TEST_WINDOW_WIDTH = 1280
-
 /** `readPixels` addressed in logical pixels, the units styles are written in,
- *  sampling the centre of each. The same geometry reads the same on a 1x and
- *  a 2x display. */
-export function readLogicalPixels(file: string): Pixels {
+ *  sampling the centre of each. `windowWidth` is the offscreen test window's
+ *  logical width — the scale to divide by. A capture can be narrower than the
+ *  window when the CI runner's virtual display is smaller than the window
+ *  (the surface is clamped to it), so this is per-call, not a constant. */
+export function readLogicalPixels(file: string, windowWidth: number): Pixels {
   const pixels = readPixels(file)
-  const scale = pixels.width / TEST_WINDOW_WIDTH
+  const scale = pixels.width / windowWidth
   return {
     width: pixels.width / scale,
     height: pixels.height / scale,
