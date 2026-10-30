@@ -1,8 +1,7 @@
 {
   "name": "@gpuiv/packager",
   "version": "0.1.0",
-  "private": true,
-  "description": "Package GPUIV apps into distributable desktop products (macOS .app, Windows portable exe) with bun compile.",
+  "description": "Package GPUIV apps into distributable desktop products (macOS .app, Windows portable exe, Linux tarballs) with bun compile. Requires bun: the CLI and library are TypeScript executed directly.",
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
@@ -16,8 +15,17 @@
     "bin",
     "src"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liuyanghejerry/gpuiv"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuiv/packager locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\""
   },
   "dependencies": {
     "@gpuiv/vue": "workspace:^",

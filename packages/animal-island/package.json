@@ -1,7 +1,6 @@
 {
   "name": "@gpuiv/animal-island",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,11 +11,24 @@
       "default": "./dist/index.js"
     }
   },
+  "files": [
+    "dist",
+    "assets"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/liuyanghejerry/gpuiv"
+  },
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuiv/animal-island locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\""
   },
   "dependencies": {
     "@gpuiv/vue": "workspace:*"

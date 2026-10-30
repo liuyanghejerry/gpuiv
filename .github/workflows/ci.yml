@@ -771,3 +771,95 @@ jobs:
             npm publish --access public --provenance
           fi
         working-directory: packages/vue
+
+  publish-animal-island:
+    name: publish @gpuiv/animal-island
+    if: github.repository == 'liuyanghejerry/gpuiv'
+    runs-on: ubuntu-latest
+    needs:
+      - publish-vue
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      # animal-island's tsc resolves @gpuiv/vue types from the workspace link,
+      # which point at packages/vue/dist — build it first.
+      - name: Build @gpuiv/vue
+        run: bun run build
+        working-directory: packages/vue
+
+      - name: Build @gpuiv/animal-island
+        run: bun run build
+        working-directory: packages/animal-island
+
+      - name: Publish @gpuiv/animal-island
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@gpuiv/animal-island@${CURRENT_VERSION}" version 2>/dev/null; then
+            echo "@gpuiv/animal-island@${CURRENT_VERSION} already published, skipping"
+          else
+            echo "Publishing @gpuiv/animal-island@${CURRENT_VERSION}"
+            node -e "
+              const fs = require('fs')
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+              const vue = require('../vue/package.json').version
+              pkg.dependencies['@gpuiv/vue'] = '^' + vue
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
+            "
+            npm publish --access public --provenance
+          fi
+        working-directory: packages/animal-island
+
+  publish-packager:
+    name: publish @gpuiv/packager
+    if: github.repository == 'liuyanghejerry/gpuiv'
+    runs-on: ubuntu-latest
+    needs:
+      - publish-vue
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup node
+        uses: actions/setup-node@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      # A source package by design: the CLI and library are TypeScript that
+      # bun runs directly, so there is nothing to build.
+      - name: Publish @gpuiv/packager
+        run: |
+          CURRENT_VERSION=$(node -p "require('./package.json').version")
+          if npm view "@gpuiv/packager@${CURRENT_VERSION}" version 2>/dev/null; then
+            echo "@gpuiv/packager@${CURRENT_VERSION} already published, skipping"
+          else
+            echo "Publishing @gpuiv/packager@${CURRENT_VERSION}"
+            node -e "
+              const fs = require('fs')
+              const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+              const vue = require('../vue/package.json').version
+              pkg.dependencies['@gpuiv/vue'] = '^' + vue
+              fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
+            "
+            npm publish --access public --provenance
+          fi
+        working-directory: packages/packager

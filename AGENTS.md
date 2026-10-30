@@ -76,17 +76,18 @@ Full diagrams and explanation: [Architecture](./docs/architecture.md#architectur
   config, batching, event registry), `components/` (motion, AnimateHeight,
   VirtualList, Select, FloatingLayer), `automation/`, `packaged.ts`,
   `testing.ts`, `__tests__/`
-- `packages/packager` — `@gpuiv/packager`, app packaging (workspace-only for
-  now): `bun run package` → macOS `.app` + Windows portable exe + Linux
-  x64/ARM64 `.tar.gz`, plus the publish/promote auto-update feed. Design:
+- `packages/packager` — `@gpuiv/packager`, app packaging: `bun run package` →
+  macOS `.app` + Windows portable exe + Linux x64/ARM64 `.tar.gz`, plus the
+  publish/promote auto-update feed. Published as a source package (bun runs
+  its TypeScript directly — the CLI requires bun). Design:
   `docs/packaging-plan.md`, `docs/auto-update-plan.md`
 - `packages/beautiful-ui` — `@gpuiv/beautiful-ui` (private, not published):
   beautiful-ui primitives ported to GPUIV (issue #110). `tokens.ts`/`colors.ts`/
   `theme.ts` are the design-token layer (`provideTheme`/`useTheme`, oklch
   light/dark maps, `mix`/`withAlpha` for `color-mix`), `atoms/` the shared
   building blocks, `primitives/` the components. Gallery: `examples/beautiful-ui.tsx`
-- `packages/animal-island` — `@gpuiv/animal-island` (private, not published):
-  animal-island-vue components ported to GPUIV (issue #164). `tokens.ts` maps
+- `packages/animal-island` — `@gpuiv/animal-island`: animal-island-vue
+  components ported to GPUIV (issue #164). `tokens.ts` maps
   the original Less variables (cream/warm-brown palette, hard-press shadow
   structs), `components/` all 39 original Vue families plus React's CountUp, `icons/` the 101-icon
   data set, `assets/scene/` the bundled scene SVGs. Each file header lists
@@ -277,11 +278,12 @@ If the change fixes a GitHub issue or should close a PR, put `Fixes #N` / `Close
 
 ## Publishing
 
-**Never publish from a local machine — CI is the only release path.** Both
-packages' `prepublishOnly` scripts exit if `CI` is unset. Publish order is
-required (per-platform napi packages → `@gpuiv/native` → `@gpuiv/vue`), because
-`@gpuiv/vue` depends on the exact published native version. Full pipeline:
-[docs/agents/publishing.md](./docs/agents/publishing.md).
+**Never publish from a local machine — CI is the only release path.** Every
+published package's `prepublishOnly` script exits if `CI` is unset. Publish
+order is required (per-platform napi packages → `@gpuiv/native` →
+`@gpuiv/vue` → `@gpuiv/animal-island` + `@gpuiv/packager`), because each
+package depends on the exact published version of the one before it. Full
+pipeline: [docs/agents/publishing.md](./docs/agents/publishing.md).
 
 ## Building
 
