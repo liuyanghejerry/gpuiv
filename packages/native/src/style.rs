@@ -277,6 +277,11 @@ pub struct StyleDesc {
     pub overflow: Option<String>,
     pub overflow_x: Option<String>,
     pub overflow_y: Option<String>,
+    /// Thumb colour for a container that scrolls (`overflow: "scroll"`).
+    /// Setting it is what turns the native scrollbar on.
+    pub scrollbar_color: Option<String>,
+    /// Thickness of that thumb in px. Defaults to 6.
+    pub scrollbar_width: Option<f64>,
 
     // Cursor
     pub cursor: Option<String>,
