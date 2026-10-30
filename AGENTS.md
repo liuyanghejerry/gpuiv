@@ -399,6 +399,19 @@ a **microtask**: after simulating input, `await app.settle()` before asserting.
 paint inside gpui — use `getPaintedText()` and `dragSelect(x1, y1, x2, y2)`.
 Screenshots go to `packages/vue/screenshots/` (gitignored).
 
+**Run GUI regressions headless unless there is no other way.** A real-window
+test opens a window on the host machine that steals the pointer and focus from
+whoever is using it — that alone makes it disruptive, before it is even slow.
+The GPU test renderer (`createTestApp` / `TestGpuixRenderer` and the
+`*-headless.test` files) covers layout, paint, events and screenshots with no
+window on screen. Reach for a real-window suite (`.production.test`,
+`bun --hot`) only when what is under test exists only in a live window —
+window chrome, live AppKit/Win32/Wayland behavior, real display timing — or
+when explicitly asked. When one is justified, run that single file
+(`bunx vitest run <file>`) instead of the full suite: every extra run is
+another window fighting the user for the machine, and the suites flake under
+full-suite parallel load.
+
 Integration: `cd examples && bun --hot chat.tsx`. Use tuistory for the
 long-running process; do not use `tsx` or raw `tmux`.
 
