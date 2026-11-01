@@ -52,7 +52,7 @@ Inventoried range: `a53b294..0ce4f41` (2026-11-01). Earlier history is in
 | `registerFont` | `f3eede6` | pending | loads a font file `fontFamily` can then name (zed `7bc43009e` invalidates failed lookups when fonts are added); animal-island's font work would consume it |
 | `getElementsAt` | `5d86e4f` | pending | testing/automation: list the elements under a point; selected to ride with the published-frame read port |
 | Published-frame bounds and window-size reads | `0ce4f41` | pending | selected for the next native PR: publish bounds/viewport after paint, nonblocking Win/Linux reads, optional `forceRender`, retain the last good JS window size |
-| `app.recordVideo()` | `776d12d` | pending | selected for a Vue automation-client PR: paused-clock frames encoded by ffmpeg into MP4/WebM/GIF |
+| `app.recordVideo()` | `776d12d` | synced | PR #187 — Vue automation client: paused-clock screenshots at exact frame timestamps, `frame()`/`wait(ms)`/`nowMs`, ffmpeg MP4/WebM/GIF encoding, frame cleanup and clock resume; finite positive frame rates validated |
 | Additional ARIA state/value props | `4226ffc` `76f79ea` | synced | PR #186 — `aria-keyshortcuts`, `aria-placeholder`, set positions, table indexes/counts, finite-number validation and generic `aria-*` forwarding; checked/pressed, numeric ranges and orientation were already local |
 | External Rust custom-element registration | `2f3ee31` `5273ce2` `d4ac80d` | pending | public Rust factory registry plus generic event `detail`; needs Vue element-typing/event API and external-addon example design |
 | OS notifications and responses | `9805f65` `72f4fb8` `403b155` | diverged | already local as `showSystemNotification`/`dismissSystemNotification`/`onSystemNotificationResponse`, with generated tags and test doubles; keep the published Vue API rather than rename to upstream's `notify` |
@@ -269,6 +269,7 @@ from upstream through `367ef48`:
 | #182 | `onScrollChange` host event on `overflow: "scroll"` elements: offset after any cause (wheel/scrollbar drag/`scrollTo`/`scrollIntoView`), `EventPayload.scrollX/scrollY`, PR #181's reporter generalized to `PaintReporter`/`PaintReports` — upstream `5ab017a` |
 | #184 | Scrollbar thumb + virtual-list padding: `scrollbarColor`/`scrollbarWidth` on plain scrollers and `<virtual-list>` (`ListWithScrollbar` wrapper, averaged unmeasured-row sizing), list padding insets rows; dependency-free PNG pixel reader lands in `__tests__/test-utils.ts` — upstream `d789ba4` `a064295` `90c6ad0` `447ade9` + `f15c044` (test reads) |
 | #186 | Additional ARIA keyboard shortcuts, placeholders, set positions, table indexes/counts, finite-number validation and generic `aria-*` forwarding; checked/pressed, numeric ranges and orientation were already local. Ledger round `a53b294..0ce4f41` records the video/custom-element/published-frame pending topics, notification/clipboard/updater divergences, terminal extension, and declined upstream-only docs/tests — upstream `4226ffc` `76f79ea` |
+| #187 | Frame-exact `app.recordVideo()` in the Vue automation client: paused-clock screenshots, `frame()`/`wait(ms)`/`nowMs`, ffmpeg MP4/WebM/GIF encoding, frame cleanup and clock resume — upstream `776d12d` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
