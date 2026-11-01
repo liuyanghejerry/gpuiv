@@ -12,7 +12,7 @@
 - [x] Click outside (`onMouseDownOutside`)
 - [x] Scroll wheel events with delta and touch phase
 - [x] Scrollable containers (`overflow: "scroll"`) with persistent scroll state
-- [x] Accessibility: `role` + `aria-*` props onto the AccessKit tree (macOS AX / Windows UIA / Linux AT-SPI), with per-element default roles and `getA11yTree()` test dumps
+- [x] Accessibility: `role` + `aria-*` props onto the AccessKit tree (macOS AX / Windows UIA / Linux AT-SPI), including names, states, numeric ranges, orientation, set positions and table indexes, with per-element default roles and `getA11yTree()` test dumps
 - [x] Programmatic scroll API (`scrollTo`, `scrollToItem`, `scrollIntoView`, `getScrollOffset`)
 - [x] Cancellable smooth-scroll controllers (`createScrollController`, `useScrollController`) with stable-offset completion
 - [x] Native titlebar drag regions (`windowDragRegion`) and zoom/maximize-restore (`zoomWindow`)

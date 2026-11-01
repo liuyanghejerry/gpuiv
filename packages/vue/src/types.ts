@@ -421,6 +421,8 @@ export interface HighlightSpec {
 
 // ── Element props ────────────────────────────────────────────────────
 
+export type AriaPropValue = string | number | boolean | undefined
+
 // Props that are handled by the renderer directly (not forwarded as custom props).
 export interface ElementProps {
   style?: StyleDesc | Record<string, unknown>
@@ -578,6 +580,8 @@ export interface ElementProps {
   "aria-valuetext"?: string
   /** Heading level, 1-based. */
   "aria-level"?: number
+  /** Other ARIA attributes are forwarded; unsupported attributes are ignored. */
+  [aria: `aria-${string}`]: AriaPropValue
   /** Stable locator id for automation. */
   testId?: string
   /** Internal native animation description used by motion components. */
@@ -609,6 +613,7 @@ type VirtualListShared = {
   "aria-orientation"?: "horizontal" | "vertical"
   "aria-valuetext"?: string
   "aria-level"?: number
+  [aria: `aria-${string}`]: AriaPropValue
   testId?: string
 }
 
