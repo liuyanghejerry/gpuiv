@@ -19,6 +19,7 @@
 - [x] Keyboard events (keyDown, keyUp) with focus management
 - [x] Focus/blur events with automatic FocusHandle creation
 - [x] GPU-backed test renderer with screenshot capture
+- [x] Frame-exact automation video recording (`app.recordVideo()`; MP4/WebM/GIF through ffmpeg)
 - [x] Test resource ownership counters and GPUI entity leak baselines; dedicated macOS memory resource CI gate with production-Bun heap/RSS reports
 - [x] Standalone build (pinned GPUI platform dependencies)
 - [x] Native text input and multiline textarea, with single-line password masking and configurable placeholder ink

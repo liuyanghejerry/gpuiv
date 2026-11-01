@@ -11,6 +11,7 @@ export {
   Locator,
   serveAutomationStdio,
   SseBackend,
+  VideoRecording,
 } from "./client.js"
 export type {
   AutomationBackend,

@@ -646,6 +646,35 @@ describe("locators", () => {
     expect(fake.names()).toEqual(["clockPause", "clockSet", "clockSet"])
     expect(fake.screenshots).toEqual(files)
   })
+
+  it("recordVideo captures screenshots at exact frame timestamps", async () => {
+    const { app, fake } = await makeApp()
+    const video = await app.recordVideo({ path: "review/demo.mp4", fps: 10 })
+    expect(video.nowMs).toBe(1211)
+
+    await video.wait(200)
+
+    expect(video.nowMs).toBe(1411)
+    expect(fake.names()).toEqual(["clockPause", "clockSet", "clockSet", "clockSet"])
+    expect(fake.calls.filter(([name]) => name === "clockSet").map(([, args]) => args[0])).toEqual([
+      1111, 1211, 1311,
+    ])
+    expect(fake.screenshots.map((file) => path.basename(file))).toEqual([
+      "frame-000000.png",
+      "frame-000001.png",
+      "frame-000002.png",
+    ])
+  })
+
+  it("recordVideo rejects a non-positive or non-finite frame rate", async () => {
+    const { app, fake } = await makeApp()
+    for (const fps of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(app.recordVideo({ path: "demo.mp4", fps })).rejects.toMatchObject({
+        code: "Protocol",
+      })
+    }
+    expect(fake.names()).toEqual([])
+  })
 })
 
 describe("liveRendererAsTest", () => {
