@@ -820,12 +820,7 @@ enum WindowCommand {
 /// An automation query must observe one complete paint between its request
 /// and reply, rather than combine the current retained tree with old bounds.
 /// Both callbacks use GPUI's public scheduler, which wakes idle frame sources.
-#[cfg(any(
-    test,
-    target_os = "windows",
-    target_os = "linux",
-    target_os = "freebsd"
-))]
+#[cfg(test)]
 fn after_requested_paint(
     window: &gpui::Window,
     callback: impl FnOnce(&mut gpui::Window, &mut gpui::App) + 'static,
@@ -1581,14 +1576,11 @@ impl GpuixRenderer {
     /// Draw a frame now for a read whose caller requested fresh paint state.
     fn render_now(&self) -> Result<()> {
         #[cfg(target_os = "macos")]
-        return self
-            .update_window_without_view(|window, cx| {
-                window.refresh();
-                window.draw(cx).clear(cx).map_err(|error| error.to_string())?;
-                window.present_cached_frame();
-                Ok(())
-            })?
-            .map_err(Error::from_reason);
+        return self.update_window_without_view(|window, cx| {
+            window.refresh();
+            window.draw(cx).clear(cx);
+            window.present_cached_frame();
+        });
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
