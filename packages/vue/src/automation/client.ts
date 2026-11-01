@@ -4,7 +4,8 @@
 /// as a live app on SSE stdin/stdout. Locators query the retained tree.
 
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
-import { mkdir } from "node:fs/promises"
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import os from "node:os"
 import path from "node:path"
 import {
   AutomationError,
@@ -789,8 +790,123 @@ export class App {
     return paths
   }
 
+  /** Record a video on the paused clock. Every frame is a screenshot taken at
+   *  an exact timestamp, so the result is smooth at any `fps` no matter how
+   *  long a frame takes to render. */
+  async recordVideo(options: { path: string; fps?: number }): Promise<VideoRecording> {
+    const fps = options.fps ?? 60
+    if (!Number.isFinite(fps) || fps <= 0) {
+      throw new AutomationError("Protocol", `fps must be positive and finite, got ${fps}`)
+    }
+    const framesDir = await mkdtemp(path.join(os.tmpdir(), "gpuiv-video-"))
+    const startMs = await this.clock.pause()
+    const recording = new VideoRecording({
+      app: this,
+      path: options.path,
+      fps,
+      startMs,
+      framesDir,
+    })
+    await recording.frame()
+    return recording
+  }
+
   async close(): Promise<void> {
     await this.backend.close()
+  }
+}
+
+/** A video in progress. Created by `app.recordVideo()`. */
+export class VideoRecording {
+  readonly path: string
+  readonly fps: number
+  private frames = 0
+  private stopped = false
+  private readonly app: App
+  private readonly startMs: number
+  private readonly framesDir: string
+
+  constructor(options: {
+    app: App
+    path: string
+    fps: number
+    startMs: number
+    framesDir: string
+  }) {
+    this.app = options.app
+    this.path = options.path
+    this.fps = options.fps
+    this.startMs = options.startMs
+    this.framesDir = options.framesDir
+  }
+
+  /** Clock time of the next frame, in ms. */
+  get nowMs(): number {
+    return this.startMs + (this.frames * 1000) / this.fps
+  }
+
+  /** Set the clock to the next frame time and capture it. */
+  async frame(): Promise<void> {
+    if (this.stopped) {
+      throw new AutomationError("Closed", "Video recording already stopped")
+    }
+    await this.app.clock.set(this.nowMs)
+    const name = `frame-${String(this.frames).padStart(6, "0")}.png`
+    await this.app.screenshot({ path: path.join(this.framesDir, name) })
+    this.frames += 1
+  }
+
+  /** Record `ms` of video, one frame per `1000 / fps` ms of clock time. */
+  async wait(ms: number): Promise<void> {
+    const count = Math.round((ms * this.fps) / 1000)
+    for (let index = 0; index < count; index += 1) await this.frame()
+  }
+
+  /** Encode the frames with ffmpeg, delete them, and resume the clock. */
+  async stop(): Promise<string> {
+    if (this.stopped) return this.path
+    this.stopped = true
+    try {
+      await mkdir(path.dirname(path.resolve(this.path)), { recursive: true })
+      const extension = path.extname(this.path).toLowerCase()
+      const codec =
+        extension === ".webm"
+          ? ["-c:v", "libvpx-vp9", "-b:v", "0", "-crf", "20"]
+          : extension === ".gif"
+            ? []
+            : ["-c:v", "libx264", "-crf", "14", "-pix_fmt", "yuv420p",
+               "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2"]
+      const args = [
+        "-y", "-v", "error",
+        "-framerate", String(this.fps),
+        "-i", path.join(this.framesDir, "frame-%06d.png"),
+        ...codec,
+        this.path,
+      ]
+      await new Promise<void>((resolve, reject) => {
+        const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] })
+        let stderr = ""
+        child.stderr.on("data", (chunk: Buffer) => {
+          stderr += chunk.toString("utf8")
+        })
+        child.on("error", (error) => {
+          reject(
+            new AutomationError(
+              "Unsupported",
+              `recordVideo needs ffmpeg on PATH: ${error.message}`
+            )
+          )
+        })
+        child.on("close", (code) => {
+          if (code === 0) resolve()
+          else reject(new AutomationError("Protocol", `ffmpeg exited with ${code}: ${stderr}`))
+        })
+      })
+    } finally {
+      await rm(this.framesDir, { recursive: true, force: true })
+      await this.app.clock.resume()
+    }
+    return this.path
   }
 }
 
