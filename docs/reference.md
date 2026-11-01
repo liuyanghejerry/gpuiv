@@ -1380,16 +1380,29 @@ PascalCase. `"none"` and `"presentation"` produce no node.
 </div>
 ```
 
-| Prop               | GPUI / AccessKit                          |
-| ------------------ | ----------------------------------------- |
-| `role`             | `.role(Role::…)`                          |
-| `aria-label`       | accessible name                           |
+| Prop | GPUI / AccessKit |
+| --- | --- |
+| `role` | `.role(Role::…)` |
+| `aria-label` | accessible name |
 | `aria-description` | extra description after name, role, value |
-| `aria-id`          | `AXIdentifier` / UIA AutomationId         |
-| `aria-expanded`    | expanded state                            |
-| `aria-selected`    | selected state                            |
-| `aria-valuetext`   | string value                              |
-| `aria-level`       | heading level                             |
+| `aria-id` | `AXIdentifier` / UIA AutomationId |
+| `aria-expanded` | expanded state |
+| `aria-selected` | selected state |
+| `aria-keyshortcuts` | keyboard shortcut |
+| `aria-placeholder` | placeholder text |
+| `aria-checked`, `aria-pressed` | toggled state, including `"mixed"` |
+| `aria-valuenow`, `aria-valuemin`, `aria-valuemax` | numeric value and range |
+| `aria-orientation` | horizontal or vertical orientation |
+| `aria-valuetext` | string value |
+| `aria-level` | heading level |
+| `aria-posinset`, `aria-setsize` | position and size within a set |
+| `aria-rowindex`, `aria-colindex` | row and column indexes |
+| `aria-rowcount`, `aria-colcount` | row and column counts |
+
+Numeric values must be finite numbers, and indexes/counts must be positive
+integers. Invalid values and unknown `aria-*` attributes are ignored.
+`aria-activedescendant` is not mapped: GPUI expects the state on the selected
+child rather than an id reference on the container.
 
 Native defaults, so common elements are not silent:
 

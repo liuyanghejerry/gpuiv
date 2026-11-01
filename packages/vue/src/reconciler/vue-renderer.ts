@@ -154,7 +154,7 @@ function isBuiltIn(node: HostNode): boolean {
 function shouldForwardProp(node: HostNode, key: string): boolean {
   if (RESERVED_PROPS.has(key)) return false
   if (eventTypeForProp(key) && isHandler(node.props[key])) return false
-  if (isBuiltIn(node)) return UNIVERSAL_PROPS.has(key)
+  if (isBuiltIn(node)) return UNIVERSAL_PROPS.has(key) || key.startsWith("aria-")
   return true
 }
 
