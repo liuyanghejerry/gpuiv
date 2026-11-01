@@ -2780,6 +2780,8 @@ it is deferred and snapped back inside the window.
 `renderer.getElementsAt(x, y)` returns the ids under a window point, topmost
 first. It honors overflow clipping, deferred `<anchored>` priority, and
 `pointerEvents`, and never includes elements that did not paint.
+`pointerEvents: "none"` excludes only the element that declares it, matching
+GPUIV hitboxes; descendants remain eligible.
 
 Bounds, automation-tree, and window-size reads use the last completed frame by
 default, so polling does not force paint or wait for the UI thread. Pass
