@@ -79,6 +79,14 @@ it. `custom_surface` in `custom_elements/mod.rs` does this for you.
 
 ## Bounds: a container uses a tracker, a leaf uses `on_painted`
 
+Each threaded renderer publishes completed bounds and viewport into its own
+`SharedPaintedFrame`. The publisher is a deferred canvas with `usize::MAX`
+priority so it runs after `<anchored>` and captures that window's paint state.
+Default reads use this completed snapshot from the JS thread; never route them
+through a UI command, which can block behind a native dialog. Pass
+`forceRender: true` only when automation needs a fresh frame; that draws and
+presents synchronously on the window's owning thread.
+
 `getByTestId(..).click()` needs a recorded box. Two mechanisms, both required:
 
 - **Containers** (`<div>`, `<text>`, `<code>`, `<diff>`, `<markdown>`, `<input>`)

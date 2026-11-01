@@ -168,6 +168,32 @@ describeNative("onLayout (vue)", () => {
     }
   })
 
+  it("publishes bounds, including deferred anchored layers, after paint", () => {
+    const App = defineComponent({
+      setup: () => () => (
+        <div>
+          <div testId="plain" style={{ width: 50, height: 30 }} />
+          <anchored
+            testId="layer"
+            position={{ x: 100, y: 100 }}
+            style={{ width: 40, height: 20 }}
+          />
+        </div>
+      ),
+    })
+    const app = createTestApp(App)
+    try {
+      for (const testId of ["plain", "layer"]) {
+        const id = app.renderer.findByTestId(testId)!.id
+        const painted = app.renderer.getElementBounds(id)
+        expect(painted, testId).not.toBeNull()
+        expect(app.renderer.getPublishedElementBounds(id), testId).toEqual(painted)
+      }
+    } finally {
+      app.unmount()
+    }
+  })
+
   it("reports elements inside a virtual list as they are measured", async () => {
     const sizes: Array<[number, number]> = []
     const App = defineComponent({

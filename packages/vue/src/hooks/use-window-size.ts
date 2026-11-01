@@ -9,15 +9,19 @@ export interface WindowSize {
 
 /** Fallback until the window answers. Only used if the renderer has no size yet. */
 const DEFAULT_WINDOW_SIZE: WindowSize = { width: 800, height: 600 }
+const lastWindowSizes = new WeakMap<NativeRenderer, WindowSize>()
 
 function readWindowSize(renderer: ReturnType<typeof useGpuix>["renderer"]): WindowSize {
   try {
     const size = renderer?.getWindowSize?.()
-    if (size && size.width > 0 && size.height > 0) {
+    if (renderer && size && size.width > 0 && size.height > 0) {
+      lastWindowSizes.set(renderer, { width: size.width, height: size.height })
       return { width: size.width, height: size.height }
     }
   } catch {
-    // Renderer window is still opening.
+    // A failed read says nothing about the size, so keep the last good one.
+    const last = renderer ? lastWindowSizes.get(renderer) : undefined
+    if (last) return { ...last }
   }
   return DEFAULT_WINDOW_SIZE
 }
@@ -124,14 +128,13 @@ export interface WindowInsetsOptions {
 const ZERO_EDGES: EdgeInsets = { top: 0, right: 0, bottom: 0, left: 0 }
 
 function readWindowInsets(renderer: ReturnType<typeof useGpuix>["renderer"]): WindowInsets {
-  let size = { width: 800, height: 600 }
+  const size = readWindowSize(renderer)
   let insets: NativeWindowInsets = {
     safeArea: ZERO_EDGES,
     ime: ZERO_EDGES,
     effective: ZERO_EDGES,
   }
   try {
-    size = renderer?.getWindowSize?.() ?? size
     insets = renderer?.getWindowInsets?.() ?? insets
   } catch {
     // Renderer window is still opening.

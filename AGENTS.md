@@ -190,6 +190,9 @@ text funnel, GPUI ids, bounds trackers, `Theme::metrics`, macOS menu,
 - Every painted string goes through `crate::text` (`selectable_text` for content,
   `chrome_text` for chrome) — **never `div().child(some_string)`**, or the text is
   invisible to selection and to `getPaintedText()`.
+- Bounds, hit-testing and window-size reads use the last completed frame and do
+  not force a repaint. Pass `forceRender: true` only when a fresh frame is
+  required; threaded renderers publish per-window snapshots after deferred paint.
 - Every element needs a host-derived `.id(..)` or gpui silently loses hover,
   active, pointer capture, and its element state. Never `.id(<index>)` — that is
   the host-id namespace; use a formatted `__gpuix_<kind>_<host id>` name. Never

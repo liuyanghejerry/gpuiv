@@ -41,7 +41,7 @@
 - [x] Streaming diff parsing (hunk-level checkpoints; completed files are never re-parsed)
 - [x] IME composition events (`onCompositionStart` / `onCompositionUpdate` / `onCompositionEnd`)
 - [x] Spinner loading primitive (`Spinner`, dots and pulse variants)
-- [x] Element bounds queries (`getElementBounds`, `useElementBounds`)
+- [x] Element bounds and hit-testing queries (`getElementBounds`, `getElementsAt`, `useElementBounds`), with completed-frame snapshots and optional `forceRender`
 - [x] Auto-height transitions (`<AnimateHeight>`)
 - [x] Headless Collapsible (`Collapsible`, `CollapsibleTrigger`, `CollapsiblePanel`; controlled state, keyboard, focus restoration and retained panels)
 - [x] Custom font loading (`loadFont`, `loadFontBytes`)

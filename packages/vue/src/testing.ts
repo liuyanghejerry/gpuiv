@@ -84,6 +84,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   getA11yTree(): string
   getAutomationTree(): string
   getElementBounds(elementId: number): ElementBounds | null
+  getPublishedElementBounds(elementId: number): ElementBounds | null
+  getElementsAt(x: number, y: number): number[]
   getRetainedElementCount(): number
   getResourceStats(): NativeTestResourceStats
   captureEntityLeakBaseline(): void
@@ -722,6 +724,17 @@ export class TestRenderer implements NativeRenderer {
 
   getElementBounds(elementId: number): ElementBounds | null {
     return this.native.getElementBounds(elementId)
+  }
+
+  /** Bounds from the last published frame, with no new paint. This is what
+   *  `getElementBounds` reads on a live Windows or Linux renderer. */
+  getPublishedElementBounds(elementId: number): ElementBounds | null {
+    return this.native.getPublishedElementBounds(elementId)
+  }
+
+  /** Ids of the elements under the window point, topmost first. */
+  getElementsAt(x: number, y: number): number[] {
+    return this.native.getElementsAt(x, y)
   }
 
   /** How many elements the retained tree holds, reachable from the root or

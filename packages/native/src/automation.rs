@@ -7,7 +7,6 @@
 //! TestGpuixRenderer and GpuixRenderer both use this so locators, screenshots,
 //! and clock control do not fork between headless tests and a live window.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -130,6 +129,61 @@ pub fn bounds_tracker(
     .top(px(insets.padding.top))
     .left(px(insets.padding.left))
     .size_full()
+}
+
+/// What the last completed paint produced, readable from any thread.
+#[derive(Default)]
+struct PaintedFrame {
+    bounds: HashMap<u64, ElementBounds>,
+    viewport: Option<(f64, f64)>,
+}
+
+#[derive(Clone, Default)]
+pub struct SharedPaintedFrame(Arc<Mutex<PaintedFrame>>);
+
+// macOS reads its paint state directly, so only Windows and Linux call these.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+impl SharedPaintedFrame {
+    fn publish(&self, bounds: HashMap<u64, ElementBounds>, viewport: gpui::Size<Pixels>) {
+        let mut frame = self.0.lock().unwrap();
+        frame.bounds = bounds;
+        frame.viewport = Some((
+            f64::from(f32::from(viewport.width)),
+            f64::from(f32::from(viewport.height)),
+        ));
+    }
+
+    pub fn bounds(&self, id: u64) -> Option<ElementBounds> {
+        self.0.lock().unwrap().bounds.get(&id).copied()
+    }
+
+    pub fn all_bounds(&self) -> HashMap<u64, ElementBounds> {
+        self.0.lock().unwrap().bounds.clone()
+    }
+
+    /// `None` until the first frame has painted.
+    pub fn viewport(&self) -> Option<(f64, f64)> {
+        self.0.lock().unwrap().viewport
+    }
+}
+
+/// Publish a completed frame after every deferred draw, including `<anchored>`.
+/// Capture the window's own paint state: another window may render before this
+/// deferred canvas paints on the shared UI thread.
+pub fn bounds_frame_publish(
+    frame: SharedPaintedFrame,
+    paint_state: crate::text::paint::SharedPaintState,
+) -> impl IntoElement {
+    gpui::deferred(
+        canvas(
+            |_, _, _| (),
+            move |_, _, window, _| frame.publish(paint_state.all_bounds(), window.viewport_size()),
+        )
+        .absolute()
+        .w(px(0.0))
+        .h(px(0.0)),
+    )
+    .with_priority(usize::MAX)
 }
 
 enum ClockMode {

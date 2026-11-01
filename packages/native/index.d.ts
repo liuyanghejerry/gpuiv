@@ -172,7 +172,7 @@ export declare class GpuixRenderer {
    * the last window closes so the JS frame loop can exit the process.
    */
   requiresTick(): boolean
-  getWindowSize(): WindowSize
+  getWindowSize(forceRender?: boolean | undefined | null): WindowSize
   getWindowInsets(): WindowInsets
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */
   setDebugFrameOverlay(mode: string): string
@@ -394,8 +394,15 @@ export declare class GpuixRenderer {
    * Returns [x, y] or null if the element has no scroll handle.
    */
   getScrollOffset(elementId: number): Array<number> | null
-  getAutomationTree(): string
-  getElementBounds(id: number): ElementBounds | null
+  getAutomationTree(forceRender?: boolean | undefined | null): string
+  getElementBounds(id: number, forceRender?: boolean | undefined | null): ElementBounds | null
+  /**
+   * The elements whose last painted box holds the window point `(x, y)`,
+   * topmost first, like the DOM's `elementsFromPoint`. An element that did
+   * not paint is never listed, `overflow: hidden | scroll` clips what lies
+   * outside it, and `pointer-events: none` is skipped.
+   */
+  getElementsAt(x: number, y: number, forceRender?: boolean | undefined | null): Array<number>
   /**
    * The closest UTF-16 offset in an input/textarea for a window-space
    * point. The point is clamped into the text; -1 means it has not laid out.
@@ -968,6 +975,13 @@ export declare class TestGpuixRenderer {
   focusPreviousWithin(elementId: number): void
   /** Last painted bounds for an element, or null if it was not painted. */
   getElementBounds(id: number): ElementBounds | null
+  /**
+   * Bounds from the last published frame, without painting a new one. This
+   * is what `GpuixRenderer.getElementBounds` returns on Windows and Linux.
+   */
+  getPublishedElementBounds(id: number): ElementBounds | null
+  /** Ids under the window point, topmost first. See the live renderer. */
+  getElementsAt(x: number, y: number): Array<number>
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
