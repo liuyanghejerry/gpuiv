@@ -4,9 +4,11 @@
 //! GPUIV already sets the id. This module sets the role and ARIA fields.
 //! Prop names match the DOM: `aria-label`, not `ariaLabel`.
 //!
-//! `aria-hidden` is deliberately not read: a roless element already produces
-//! no node, so the attribute would only add a prop that never arrives — the
-//! Vue side drops it for built-in elements (not in `UNIVERSAL_PROPS`).
+//! `aria-activedescendant` is deliberately unmapped: GPUI expects the state on
+//! the selected child, not an id reference on the container. `aria-invalid`,
+//! `aria-required`, `aria-modal`, `aria-current`, and `aria-haspopup` have no
+//! builder in the pinned GPUI fork. Unknown attributes, including `aria-hidden`,
+//! are forwarded by Vue and ignored here.
 
 use std::collections::HashMap;
 
@@ -58,43 +60,50 @@ where
     if let Some(selected) = bool_prop(props, "aria-selected") {
         el = el.aria_selected(selected);
     }
-    // GPUI exposes AccessKit's toggle state for radios, checkboxes, switches
-    // and toggle buttons. Keep DOM prop spelling at the Vue boundary.
-    if let Some(toggled) = props
-        .get("aria-checked")
-        .or_else(|| props.get("aria-pressed"))
-    {
-        let state = match toggled {
-            serde_json::Value::Bool(true) => Some(Toggled::True),
-            serde_json::Value::Bool(false) => Some(Toggled::False),
-            serde_json::Value::String(value) if value == "mixed" => Some(Toggled::Mixed),
-            serde_json::Value::String(value) if value == "true" => Some(Toggled::True),
-            serde_json::Value::String(value) if value == "false" => Some(Toggled::False),
-            _ => None,
-        };
-        if let Some(state) = state {
-            el = el.aria_toggled(state);
-        }
+    if let Some(keyshortcuts) = string_prop(props, "aria-keyshortcuts") {
+        el = el.aria_keyshortcuts(keyshortcuts);
     }
-    if let Some(value) = props.get("aria-valuenow").and_then(|value| value.as_f64()) {
+    if let Some(placeholder) = string_prop(props, "aria-placeholder") {
+        el = el.aria_placeholder(placeholder);
+    }
+    // AccessKit has one toggled state for checkboxes and toggle buttons.
+    if let Some(toggled) =
+        toggled_prop(props, "aria-checked").or_else(|| toggled_prop(props, "aria-pressed"))
+    {
+        el = el.aria_toggled(toggled);
+    }
+    if let Some(orientation) = orientation_prop(props, "aria-orientation") {
+        el = el.aria_orientation(orientation);
+    }
+    if let Some(value) = number_prop(props, "aria-valuenow") {
         el = el.aria_numeric_value(value);
     }
-    if let Some(value) = props.get("aria-valuemin").and_then(|value| value.as_f64()) {
+    if let Some(value) = number_prop(props, "aria-valuemin") {
         el = el.aria_min_numeric_value(value);
     }
-    if let Some(value) = props.get("aria-valuemax").and_then(|value| value.as_f64()) {
+    if let Some(value) = number_prop(props, "aria-valuemax") {
         el = el.aria_max_numeric_value(value);
-    }
-    match props
-        .get("aria-orientation")
-        .and_then(|value| value.as_str())
-    {
-        Some("horizontal") => el = el.aria_orientation(Orientation::Horizontal),
-        Some("vertical") => el = el.aria_orientation(Orientation::Vertical),
-        _ => {}
     }
     if let Some(level) = usize_prop(props, "aria-level") {
         el = el.aria_level(level);
+    }
+    if let Some(position) = usize_prop(props, "aria-posinset") {
+        el = el.aria_position_in_set(position);
+    }
+    if let Some(size) = usize_prop(props, "aria-setsize") {
+        el = el.aria_size_of_set(size);
+    }
+    if let Some(index) = usize_prop(props, "aria-rowindex") {
+        el = el.aria_row_index(index);
+    }
+    if let Some(index) = usize_prop(props, "aria-colindex") {
+        el = el.aria_column_index(index);
+    }
+    if let Some(count) = usize_prop(props, "aria-rowcount") {
+        el = el.aria_row_count(count);
+    }
+    if let Some(count) = usize_prop(props, "aria-colcount") {
+        el = el.aria_column_count(count);
     }
     el
 }
@@ -162,6 +171,38 @@ fn usize_prop(props: &HashMap<String, serde_json::Value>, key: &str) -> Option<u
         .and_then(|value| value.as_u64())
         .and_then(|value| usize::try_from(value).ok())
         .filter(|value| *value > 0)
+}
+
+/// ARIA numbers are `f64`. Strings and non-finite values are ignored, while
+/// negative values stay valid for numeric ranges.
+fn number_prop(props: &HashMap<String, serde_json::Value>, key: &str) -> Option<f64> {
+    props
+        .get(key)
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite())
+}
+
+/// `aria-checked` and `aria-pressed` are tri-state: a boolean, or `"mixed"`.
+fn toggled_prop(props: &HashMap<String, serde_json::Value>, key: &str) -> Option<Toggled> {
+    match props.get(key)? {
+        serde_json::Value::Bool(true) => Some(Toggled::True),
+        serde_json::Value::Bool(false) => Some(Toggled::False),
+        serde_json::Value::String(token) => match token.as_str() {
+            "true" => Some(Toggled::True),
+            "false" => Some(Toggled::False),
+            "mixed" => Some(Toggled::Mixed),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn orientation_prop(props: &HashMap<String, serde_json::Value>, key: &str) -> Option<Orientation> {
+    match string_prop(props, key)?.as_str() {
+        "horizontal" => Some(Orientation::Horizontal),
+        "vertical" => Some(Orientation::Vertical),
+        _ => None,
+    }
 }
 
 /// ARIA token → AccessKit role. Unknown tokens are ignored, like a bad style.
@@ -253,8 +294,14 @@ fn role_from_aria(token: &str) -> Option<Role> {
 
 #[cfg(test)]
 mod tests {
-    use super::role_from_aria;
-    use gpui::Role;
+    use super::{number_prop, orientation_prop, role_from_aria, toggled_prop};
+    use gpui::{Orientation, Role, Toggled};
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn props(value: serde_json::Value) -> HashMap<String, serde_json::Value> {
+        HashMap::from([("aria".to_string(), value)])
+    }
 
     #[test]
     fn maps_common_aria_tokens() {
@@ -267,5 +314,47 @@ mod tests {
         assert_eq!(role_from_aria("presentation"), Some(Role::GenericContainer));
         assert_eq!(role_from_aria("Button"), None);
         assert_eq!(role_from_aria("not-a-role"), None);
+    }
+
+    #[test]
+    fn aria_toggle_states_are_tristate() {
+        for (value, expected) in [
+            (json!(true), Some(Toggled::True)),
+            (json!(false), Some(Toggled::False)),
+            (json!("true"), Some(Toggled::True)),
+            (json!("false"), Some(Toggled::False)),
+            (json!("mixed"), Some(Toggled::Mixed)),
+            (json!("Mixed"), None),
+            (json!(1), None),
+            (json!(null), None),
+        ] {
+            assert_eq!(toggled_prop(&props(value), "aria"), expected);
+        }
+    }
+
+    #[test]
+    fn aria_orientation_accepts_only_the_two_tokens() {
+        for (value, expected) in [
+            (json!("horizontal"), Some(Orientation::Horizontal)),
+            (json!("vertical"), Some(Orientation::Vertical)),
+            (json!("diagonal"), None),
+            (json!(true), None),
+        ] {
+            assert_eq!(orientation_prop(&props(value), "aria"), expected);
+        }
+    }
+
+    #[test]
+    fn aria_numbers_are_finite_and_optional() {
+        for (value, expected) in [
+            (json!(42), Some(42.0)),
+            (json!(-12.5), Some(-12.5)),
+            (json!(null), None),
+            (json!("42"), None),
+            (json!(false), None),
+        ] {
+            assert_eq!(number_prop(&props(value), "aria"), expected);
+        }
+        assert_eq!(number_prop(&HashMap::new(), "aria"), None);
     }
 }
