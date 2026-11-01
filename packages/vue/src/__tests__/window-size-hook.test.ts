@@ -99,6 +99,28 @@ describe("shared window-size polling", () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it("keeps the last good window size when a later native read throws", async () => {
+    vi.useFakeTimers()
+    let fail = false
+    const query = vi.fn(() => {
+      if (fail) throw new Error("window query unavailable")
+      return { width: 1000, height: 700 }
+    })
+    let size: Ref<WindowSize> | undefined
+    mount(
+      defineComponent(() => {
+        size = useWindowSize()
+        return () => h("div")
+      }),
+      { getWindowSize: query, applyBatch: () => [] },
+    )
+    expect(size!.value).toEqual({ width: 1000, height: 700 })
+
+    fail = true
+    await vi.advanceTimersByTimeAsync(100)
+    expect(size!.value).toEqual({ width: 1000, height: 700 })
+  })
+
   it("syncs a later subscriber whose setup reading went stale before its mount", async () => {
     vi.useFakeTimers()
     // The shared group is created (and read) during the first setup; the

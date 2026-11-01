@@ -752,10 +752,15 @@ export interface NativeRenderer {
   getSelectedText?(): string | null
   /** Drop the current selection. */
   clearSelection?(): void
-  /** Last painted window-space bounds for an element. */
+  /** Last painted window-space bounds for an element. Pass `forceRender` when
+   *  the read must include mutations that have not painted yet. */
   getElementBounds?(
-    elementId: number
+    elementId: number,
+    forceRender?: boolean
   ): { x: number; y: number; width: number; height: number } | null
+  /** Ids of elements under a window point, topmost first, from the last painted
+   *  frame. Clipping and `pointerEvents` are honored. */
+  getElementsAt?(x: number, y: number, forceRender?: boolean): number[]
   /** Closest UTF-16 text offset for a window-space point in an input. */
   getInputTextOffset?(elementId: number, x: number, y: number): number
   /** `[elementId, utf16Offset]` for the closest painted input candidate. */
@@ -798,7 +803,7 @@ export interface NativeRenderer {
   releasePointerCapture?(): void
 
   // ── Window API ─────────────────────────────────────────────────
-  getWindowSize?(): { width: number; height: number }
+  getWindowSize?(forceRender?: boolean): { width: number; height: number }
   /** Request a content-viewport size in logical pixels, excluding the titlebar.
    *  Dimensions must be positive and finite. The platform applies the request
    *  asynchronously and owns constraints; observe `getWindowSize` / `useWindowSize`

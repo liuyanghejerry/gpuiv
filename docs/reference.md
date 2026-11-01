@@ -2777,6 +2777,16 @@ Every element that accepts `testId` records painted bounds, including `<img>`,
 not of the trigger it is anchored to, so `click()` lands on the menu even when
 it is deferred and snapped back inside the window.
 
+`renderer.getElementsAt(x, y)` returns the ids under a window point, topmost
+first. It honors overflow clipping, deferred `<anchored>` priority, and
+`pointerEvents`, and never includes elements that did not paint.
+
+Bounds, automation-tree, and window-size reads use the last completed frame by
+default, so polling does not force paint or wait for the UI thread. Pass
+`forceRender: true` to `getElementBounds`, `getAutomationTree`, `getElementsAt`,
+or `getWindowSize` when the read must include mutations that have not painted
+yet. Automation locators request a fresh frame before resolving click targets.
+
 `<virtual-list>` is the exception, and it takes no `testId`. gpui's list is not
 an interactive element, so it has nothing to record a box against. Put the
 locator on a wrapping `<div>`.

@@ -322,6 +322,20 @@ pub(crate) fn debug_frame_overlay_stats_js(
     }
 }
 
+/// Draw and present one frame now so paint-recorded state is current when the
+/// caller reads it. Default snapshot reads never take this path.
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+fn render_window_now<C: gpui::AppContext>(
+    window: gpui::AnyWindowHandle,
+    cx: &mut C,
+) -> anyhow::Result<()> {
+    window.update(cx, |_root, window, cx| {
+        window.refresh();
+        window.draw(cx).clear(cx);
+        window.present_cached_frame();
+    })
+}
+
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) -> Result<T> {
     match receiver.recv_timeout(Duration::from_secs(2)) {
@@ -601,6 +615,7 @@ struct OpenWindowRequest {
     callback: Option<EventCallback>,
     selection: SharedSelection,
     canvas_surfaces: crate::canvas::CanvasStore,
+    painted_frame: crate::automation::SharedPaintedFrame,
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
@@ -757,12 +772,8 @@ enum WindowCommand {
         index: usize,
         response: SyncSender<Option<Vec<f64>>>,
     },
-    GetAutomationBounds {
-        response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
-    },
-    GetElementBounds {
-        id: u64,
-        response: SyncSender<Option<crate::automation::ElementBounds>>,
+    RenderNow {
+        response: SyncSender<()>,
     },
     GetInputTextOffset {
         id: u64,
@@ -1190,22 +1201,9 @@ fn run_window_command(
                 response.send(view.virtual_list_geometry(id, index)).ok();
             })
         }
-        WindowCommand::GetAutomationBounds { response } => {
-            window.update(cx, move |view, window, cx| {
-                let state = view.paint_state.clone();
-                cx.notify();
-                window.refresh();
-                after_requested_paint(window, move |_window, _cx| {
-                    response.send(state.all_bounds()).ok();
-                });
-            })
-        }
-        WindowCommand::GetElementBounds { id, response } => {
-            window.update(cx, move |view, _window, _cx| {
-                // The public API returns last-painted bounds, as on macOS.
-                // Polling this snapshot must not force repaint or wait for a
-                // frame; automation's fresh-frame query is handled above.
-                response.send(view.paint_state.get_bounds(id)).ok();
+        WindowCommand::RenderNow { response } => {
+            render_window_now(window.into(), cx).map(|()| {
+                response.send(()).ok();
             })
         }
         WindowCommand::GetInputTextOffset { id, x, y, response } => {
@@ -1479,13 +1477,15 @@ fn open_threaded_window(
             to_gpui_window_options(&request.options, bounds),
             |_window, cx| {
                 cx.new(|_| {
-                    GpuixView::new(
+                    let mut view = GpuixView::new(
                         request.tree.clone(),
                         request.callback.clone(),
                         title,
                         request.selection.clone(),
                         request.canvas_surfaces.clone(),
-                    )
+                    );
+                    view.painted_frame = Some(request.painted_frame.clone());
+                    view
                 })
             },
         )
@@ -1524,6 +1524,9 @@ pub struct GpuixRenderer {
     /// in `init`, before the window opens.
     #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
     window_id: Mutex<u64>,
+    /// Last completed frame, published by this renderer's UI-thread view.
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    painted_frame: crate::automation::SharedPaintedFrame,
     /// This renderer's own window. App-level callbacks (`appReopen`) address
     /// the process's first window through the `GPUI_WINDOW` thread-local
     /// instead; this handle is what the napi methods talk to.
@@ -1575,16 +1578,40 @@ impl GpuixRenderer {
         recv_ui_response(response_receiver, "the GPUI UI command")?.map_err(Error::from_reason)
     }
 
+    /// Draw a frame now for a read whose caller requested fresh paint state.
+    fn render_now(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return self
+            .update_window_without_view(|window, cx| {
+                window.refresh();
+                window.draw(cx).clear(cx).map_err(|error| error.to_string())?;
+                window.present_cached_frame();
+                Ok(())
+            })?
+            .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_window_command(WindowCommand::RenderNow { response })?;
+            return recv_ui_response(receiver, "the forced render");
+        }
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     fn automation_bounds(&self) -> Result<HashMap<u64, crate::automation::ElementBounds>> {
         #[cfg(target_os = "macos")]
         return self.update_window(|view, _window, _cx| view.paint_state.all_bounds());
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        {
-            let (response, receiver) = sync_channel(1);
-            self.send_window_command(WindowCommand::GetAutomationBounds { response })?;
-            return recv_ui_response(receiver, "the automation bounds query");
-        }
+        return Ok(self.painted_frame.all_bounds());
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1600,11 +1627,7 @@ impl GpuixRenderer {
         return self.update_window(move |view, _window, _cx| view.paint_state.get_bounds(id));
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        {
-            let (response, receiver) = sync_channel(1);
-            self.send_window_command(WindowCommand::GetElementBounds { id, response })?;
-            return recv_ui_response(receiver, "the element bounds query");
-        }
+        return Ok(self.painted_frame.bounds(id));
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1616,6 +1639,12 @@ impl GpuixRenderer {
             let _ = id;
             Err(Error::from_reason("Unsupported operating system"))
         }
+    }
+
+    fn elements_at(&self, x: f64, y: f64) -> Result<Vec<u64>> {
+        let bounds = self.automation_bounds()?;
+        let tree = self.tree.lock().unwrap();
+        Ok(tree.elements_at(x, y, &|id| bounds.get(&id).copied()))
     }
 
     fn input_text_offset(&self, id: u64, x: f32, y: f32) -> Result<Option<usize>> {
@@ -1719,6 +1748,8 @@ impl GpuixRenderer {
             ui_commands: Mutex::new(None),
             #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
             window_id: Mutex::new(0),
+            #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+            painted_frame: crate::automation::SharedPaintedFrame::default(),
             #[cfg(target_os = "macos")]
             window: Mutex::new(None),
             #[cfg(target_os = "macos")]
@@ -1938,6 +1969,7 @@ impl GpuixRenderer {
         let tree = self.tree.clone();
         let selection = self.selection.clone();
         let canvas_surfaces = self.canvas_surfaces.clone();
+        let painted_frame = self.painted_frame.clone();
         let callback = self.event_callback_for_view();
         let (command_sender, command_receiver) = mpsc::unbounded();
         let (startup_sender, startup_receiver) = sync_channel(1);
@@ -1980,13 +2012,15 @@ impl GpuixRenderer {
                                 to_gpui_window_options(&window_options, bounds),
                                 |_window, cx| {
                                     cx.new(|_| {
-                                        GpuixView::new(
+                                        let mut view = GpuixView::new(
                                             tree,
                                             callback,
                                             title,
                                             selection,
                                             canvas_surfaces,
-                                        )
+                                        );
+                                        view.painted_frame = Some(painted_frame);
+                                        view
                                     })
                                 },
                             ) {
@@ -2062,6 +2096,7 @@ impl GpuixRenderer {
                     callback: self.event_callback_for_view(),
                     selection: self.selection.clone(),
                     canvas_surfaces: self.canvas_surfaces.clone(),
+                    painted_frame: self.painted_frame.clone(),
                 },
                 response,
             })
@@ -2414,7 +2449,10 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_window_size(&self) -> Result<WindowSize> {
+    pub fn get_window_size(&self, force_render: Option<bool>) -> Result<WindowSize> {
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
         // The paintable size of the window in logical pixels, excluding any
         // platform title bar. This used to answer a hardcoded 800x600, so
         // anything that turned a mouse position into layout coordinates
@@ -2431,6 +2469,10 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         {
+            if let Some((width, height)) = self.painted_frame.viewport() {
+                return Ok(WindowSize { width, height });
+            }
+            // Before the first paint there is no published viewport yet.
             let (response, receiver) = sync_channel(1);
             self.send_window_command(WindowCommand::GetWindowSize { response })?;
             return recv_ui_response(receiver, "the window size query");
@@ -4030,8 +4072,10 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_automation_tree(&self) -> Result<String> {
-        self.request_invalidate()?;
+    pub fn get_automation_tree(&self, force_render: Option<bool>) -> Result<String> {
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
         let bounds = self.automation_bounds()?;
         let tree = self.tree.lock().unwrap();
         let json = tree.to_automation_json(&bounds);
@@ -4040,9 +4084,37 @@ impl GpuixRenderer {
     }
 
     #[napi]
-    pub fn get_element_bounds(&self, id: f64) -> Result<Option<ElementBounds>> {
+    pub fn get_element_bounds(
+        &self,
+        id: f64,
+        force_render: Option<bool>,
+    ) -> Result<Option<ElementBounds>> {
         let id = to_element_id(id)?;
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
         Ok(self.element_bounds(id)?.map(ElementBounds::from_painted))
+    }
+
+    /// The elements whose last painted box holds the window point `(x, y)`,
+    /// topmost first, like the DOM's `elementsFromPoint`. An element that did
+    /// not paint is never listed, `overflow: hidden | scroll` clips what lies
+    /// outside it, and `pointer-events: none` is skipped.
+    #[napi]
+    pub fn get_elements_at(
+        &self,
+        x: f64,
+        y: f64,
+        force_render: Option<bool>,
+    ) -> Result<Vec<f64>> {
+        if force_render == Some(true) {
+            self.render_now()?;
+        }
+        Ok(self
+            .elements_at(x, y)?
+            .into_iter()
+            .map(|id| id as f64)
+            .collect())
     }
 
     /// The closest UTF-16 offset in an input/textarea for a window-space
@@ -5256,6 +5328,8 @@ pub(crate) struct GpuixView {
     /// window's current frame. Render installs it as the thread's current
     /// paint state so paint hooks address their own window.
     pub(crate) paint_state: crate::text::paint::SharedPaintState,
+    /// Completed-frame snapshot for the JS thread on Windows and Linux.
+    pub(crate) painted_frame: Option<crate::automation::SharedPaintedFrame>,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Virtual-list scrolls queued for the next `GpuixView::render`, applied
@@ -5320,6 +5394,7 @@ impl GpuixView {
             motion_states: HashMap::new(),
             selection,
             paint_state: std::sync::Arc::new(crate::text::paint::WindowPaintState::new()),
+            painted_frame: None,
             virtual_lists: HashMap::new(),
             pending_list_scrolls: HashMap::new(),
             selection_drag_position: None,
@@ -6923,6 +6998,9 @@ impl gpui::Render for GpuixView {
                 ))
                 .child(crate::automation::bounds_frame_reset())
                 .child(result)
+                .children(self.painted_frame.clone().map(|frame| {
+                    crate::automation::bounds_frame_publish(frame, self.paint_state.clone())
+                }))
                 .into_any_element()
         };
 

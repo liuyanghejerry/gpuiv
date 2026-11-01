@@ -253,6 +253,8 @@ pub struct TestGpuixRenderer {
     selection: crate::text::SharedSelection,
     /// Uploaded `<canvas>` pixel buffers, shared with `GpuixView`.
     canvas_surfaces: crate::canvas::CanvasStore,
+    /// Completed-frame snapshot matching the threaded production renderer.
+    painted_frame: crate::automation::SharedPaintedFrame,
     /// Window-control requests the bridge records instead of driving: the
     /// offscreen platform window applies fullscreen through async AppKit
     /// animation and does not implement minimize.
@@ -319,6 +321,8 @@ impl TestGpuixRenderer {
         let selection = crate::text::SharedSelection::default();
         let selection_clone = selection.clone();
         let canvas_surfaces = crate::canvas::CanvasStore::default();
+        let painted_frame = crate::automation::SharedPaintedFrame::default();
+        let painted_frame_clone = painted_frame.clone();
 
         // Create VisualTestAppContext with the host's real GPU renderer (Metal
         // on macOS, DirectX on Windows) + TestDispatcher for deterministic
@@ -335,13 +339,15 @@ impl TestGpuixRenderer {
         let window_handle = cx
             .open_offscreen_window(window_size, |_window, app| {
                 app.new(|_cx| {
-                    GpuixView::new(
+                    let mut view = GpuixView::new(
                         tree_clone,
                         callback_clone,
                         "GPUIX Test".to_string(),
                         selection_clone,
                         canvas_surfaces.clone(),
-                    )
+                    );
+                    view.painted_frame = Some(painted_frame_clone);
+                    view
                 })
             })
             .map_err(|e| Error::from_reason(format!("Failed to open test window: {}", e)))?;
@@ -381,6 +387,7 @@ impl TestGpuixRenderer {
             events,
             selection,
             canvas_surfaces,
+            painted_frame,
             fullscreen: RefCell::new(false),
             minimize_calls: RefCell::new(0),
             zoom_calls: RefCell::new(0),
@@ -2356,6 +2363,32 @@ impl TestGpuixRenderer {
             Ok(view.update(cx, |view, _| view.paint_state.get_bounds(id)))
         })?;
         Ok(bounds.map(crate::renderer::ElementBounds::from_painted))
+    }
+
+    /// Bounds from the last published frame, without painting a new one. This
+    /// is what `GpuixRenderer.getElementBounds` returns on Windows and Linux.
+    #[napi]
+    pub fn get_published_element_bounds(
+        &self,
+        id: f64,
+    ) -> Result<Option<crate::renderer::ElementBounds>> {
+        let id = to_element_id(id)?;
+        Ok(self
+            .painted_frame
+            .bounds(id)
+            .map(crate::renderer::ElementBounds::from_painted))
+    }
+
+    /// Ids under the window point, topmost first. See the live renderer.
+    #[napi]
+    pub fn get_elements_at(&self, x: f64, y: f64) -> Result<Vec<f64>> {
+        self.flush()?;
+        let tree = self.tree.lock().unwrap();
+        Ok(tree
+            .elements_at(x, y, &|id| self.painted_frame.bounds(id))
+            .into_iter()
+            .map(|id| id as f64)
+            .collect())
     }
 
     #[napi]

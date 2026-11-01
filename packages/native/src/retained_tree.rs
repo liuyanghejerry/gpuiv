@@ -12,6 +12,15 @@ use std::sync::Arc;
 
 use crate::style::StyleDesc;
 
+/// What one `elements_at` walk carries along.
+struct HitWalk<'a> {
+    x: f64,
+    y: f64,
+    painted_box: &'a dyn Fn(u64) -> Option<crate::automation::ElementBounds>,
+    /// Deferred `anchored` layers met so far, each with its priority and hits.
+    layers: Vec<(u64, Vec<u64>)>,
+}
+
 pub struct RetainedElement {
     pub id: u64,
     pub element_type: String,
@@ -188,6 +197,9 @@ pub struct RetainedTree {
     /// motion states advance for offscreen virtual-list rows too — a build
     /// only visits mounted children, but sync_motion_states walks this set.
     pub motion_ids: HashSet<u64>,
+    /// How many `anchored` elements exist. Without any, an `elements_at` walk
+    /// can drop a clipped subtree whole.
+    anchored_count: usize,
     pub styles: StyleTable,
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
@@ -199,6 +211,7 @@ impl RetainedTree {
         Self {
             elements: ElementMap::default(),
             motion_ids: HashSet::new(),
+            anchored_count: 0,
             styles: StyleTable::default(),
             root_id: None,
             next_revision: 1,
@@ -206,6 +219,7 @@ impl RetainedTree {
     }
 
     pub fn create_element(&mut self, id: u64, element_type: String) {
+        self.anchored_count += usize::from(element_type == "anchored");
         let revision = self.take_revision();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
@@ -270,6 +284,7 @@ impl RetainedTree {
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             self.motion_ids.remove(&id);
+            self.anchored_count -= usize::from(element.element_type == "anchored");
             destroyed.push(id);
             for child_id in element.children {
                 self.destroy_element_recursive(child_id, destroyed);
@@ -443,6 +458,107 @@ impl RetainedTree {
         self.to_json_detail(bounds, false)
     }
 
+    /// The elements whose painted box holds the point, topmost first: the DOM's
+    /// `elementsFromPoint`.
+    ///
+    /// There is no z-index, so tree order is paint order. Walking each
+    /// element's children last to first, and the element after them, yields
+    /// the topmost element first. The exception is a deferred `anchored`
+    /// layer, which gpui paints after the tree by `priority` and without the
+    /// clip of the elements around it: its hits come first.
+    ///
+    /// `painted_box` is the last frame's box. An element that was not painted
+    /// has none and is never hit, though its descendants are still visited.
+    /// `overflow` of `hidden` or `scroll`, per axis, clips descendants.
+    /// `pointer-events: none` applies only to the element that declares it,
+    /// matching GPUIV hitboxes rather than CSS inheritance.
+    pub fn elements_at(
+        &self,
+        x: f64,
+        y: f64,
+        painted_box: &dyn Fn(u64) -> Option<crate::automation::ElementBounds>,
+    ) -> Vec<u64> {
+        let mut walk = HitWalk {
+            x,
+            y,
+            painted_box,
+            layers: Vec::new(),
+        };
+        let mut hits = Vec::new();
+        if let Some(root_id) = self.root_id {
+            self.collect_hits(root_id, false, &mut walk, &mut hits);
+        }
+        // Stable, so layers of one priority stay topmost first.
+        walk.layers.sort_by(|a, b| b.0.cmp(&a.0));
+        let mut ordered: Vec<u64> = walk.layers.into_iter().flat_map(|(_, layer)| layer).collect();
+        ordered.extend(hits);
+        ordered
+    }
+
+    /// `clipped` means an ancestor's clip excludes the point, so only deferred
+    /// layers below can still be hit.
+    fn collect_hits(
+        &self,
+        id: u64,
+        clipped: bool,
+        walk: &mut HitWalk,
+        hits: &mut Vec<u64>,
+    ) {
+        let Some(element) = self.elements.get(&id) else {
+            return;
+        };
+        let style = element.style.as_deref();
+        let own_box = (walk.painted_box)(id);
+        let (x, y) = (walk.x, walk.y);
+        let inside = |bounds: &crate::automation::ElementBounds, horizontal: bool, vertical: bool| {
+            (!horizontal || (x >= bounds.x && x < bounds.x + bounds.width))
+                && (!vertical || (y >= bounds.y && y < bounds.y + bounds.height))
+        };
+
+        let mut clipped = clipped;
+        if let (Some(style), Some(bounds)) = (style, &own_box) {
+            let clips = |axis: Option<&str>| matches!(axis, Some("hidden" | "scroll"));
+            let clip_x = clips(style.overflow_x.as_deref().or(style.overflow.as_deref()));
+            let clip_y = clips(style.overflow_y.as_deref().or(style.overflow.as_deref()));
+            if (clip_x || clip_y) && !inside(bounds, clip_x, clip_y) {
+                if self.anchored_count == 0 {
+                    return;
+                }
+                clipped = true;
+            }
+        }
+
+        let none = style.and_then(|style| style.pointer_events.as_deref()) == Some("none");
+
+        if element.element_type == "anchored" {
+            let deferred = element
+                .custom_props
+                .get("deferred")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
+            if deferred {
+                let priority = element
+                    .custom_props
+                    .get("priority")
+                    .and_then(|value| value.as_u64())
+                    .unwrap_or(1);
+                let mut layer = Vec::new();
+                for &child in element.children.iter().rev() {
+                    self.collect_hits(child, false, walk, &mut layer);
+                }
+                walk.layers.push((priority, layer));
+                return;
+            }
+        }
+
+        for &child in element.children.iter().rev() {
+            self.collect_hits(child, clipped, walk, hits);
+        }
+        if !clipped && !none && own_box.is_some_and(|bounds| inside(&bounds, true, true)) {
+            hits.push(id);
+        }
+    }
+
     fn to_json_detail(
         &self,
         bounds: &std::collections::HashMap<u64, crate::automation::ElementBounds>,
@@ -565,6 +681,168 @@ mod tests {
         tree.append_child(2, 3);
         tree.set_text(3, "hello".to_string());
         tree
+    }
+
+    /// A clipping scroller, overlapping siblings, and an overlay that does not
+    /// take the pointer.
+    fn hit_test_tree() -> (RetainedTree, impl Fn(u64) -> Option<crate::automation::ElementBounds>) {
+        let mut tree = RetainedTree::new();
+        for id in 1..=6 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.root_id = Some(1);
+        for (parent, child) in [(1, 2), (2, 3), (1, 4), (1, 5), (5, 6)] {
+            tree.append_child(parent, child);
+        }
+        let styled = |overflow: Option<&str>, pointer_events: Option<&str>| {
+            Arc::new(StyleDesc {
+                overflow: overflow.map(str::to_string),
+                pointer_events: pointer_events.map(str::to_string),
+                ..Default::default()
+            })
+        };
+        tree.set_style(2, styled(Some("hidden"), None));
+        tree.set_style(5, styled(None, Some("none")));
+        tree.set_style(6, styled(None, Some("auto")));
+        let boxes = [
+            (1, (0.0, 0.0, 100.0, 100.0)),
+            (2, (0.0, 0.0, 50.0, 50.0)),
+            (3, (0.0, 40.0, 50.0, 30.0)),
+            (4, (40.0, 0.0, 50.0, 50.0)),
+            (5, (0.0, 0.0, 100.0, 100.0)),
+            (6, (60.0, 60.0, 20.0, 20.0)),
+        ];
+        let lookup = move |id: u64| {
+            boxes
+                .iter()
+                .find(|(candidate, _)| *candidate == id)
+                .map(|(_, (x, y, width, height))| crate::automation::ElementBounds {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                })
+        };
+        (tree, lookup)
+    }
+
+    #[test]
+    fn elements_at_lists_what_is_under_the_point_topmost_first() {
+        let (tree, painted) = hit_test_tree();
+        assert_eq!(tree.elements_at(45.0, 10.0, &painted), vec![4, 2, 1]);
+        assert_eq!(tree.elements_at(10.0, 45.0, &painted), vec![3, 2, 1]);
+        assert_eq!(tree.elements_at(500.0, 500.0, &painted), Vec::<u64>::new());
+    }
+
+    #[test]
+    fn elements_at_stops_at_the_clip_edge() {
+        let (tree, painted) = hit_test_tree();
+        assert_eq!(tree.elements_at(10.0, 60.0, &painted), vec![1]);
+    }
+
+    #[test]
+    fn elements_at_skips_only_the_element_that_disables_the_pointer() {
+        let (mut tree, painted) = hit_test_tree();
+        assert_eq!(tree.elements_at(10.0, 90.0, &painted), vec![1]);
+        assert_eq!(tree.elements_at(70.0, 70.0, &painted), vec![6, 1]);
+
+        tree.set_style(6, Arc::new(StyleDesc::default()));
+        assert_eq!(tree.elements_at(70.0, 70.0, &painted), vec![6, 1]);
+    }
+
+    #[test]
+    fn elements_at_never_hits_what_was_not_painted() {
+        let (tree, painted) = hit_test_tree();
+        let without_the_sibling = |id: u64| if id == 4 { None } else { painted(id) };
+        assert_eq!(tree.elements_at(45.0, 10.0, &without_the_sibling), vec![2, 1]);
+    }
+
+    fn boxed(
+        boxes: &[(u64, (f64, f64, f64, f64))],
+    ) -> impl Fn(u64) -> Option<crate::automation::ElementBounds> + '_ {
+        move |id| {
+            boxes
+                .iter()
+                .find(|(candidate, _)| *candidate == id)
+                .map(|(_, (x, y, width, height))| crate::automation::ElementBounds {
+                    x: *x,
+                    y: *y,
+                    width: *width,
+                    height: *height,
+                })
+        }
+    }
+
+    #[test]
+    fn elements_at_puts_a_deferred_layer_above_the_tree_and_outside_its_clip() {
+        let mut tree = RetainedTree::new();
+        for (id, kind) in [
+            (1, "div"),
+            (2, "div"),
+            (3, "anchored"),
+            (4, "div"),
+            (5, "div"),
+        ] {
+            tree.create_element(id, kind.to_string());
+        }
+        tree.root_id = Some(1);
+        for (parent, child) in [(1, 2), (2, 3), (3, 4), (1, 5)] {
+            tree.append_child(parent, child);
+        }
+        tree.set_style(
+            2,
+            Arc::new(StyleDesc {
+                overflow: Some("hidden".to_string()),
+                ..Default::default()
+            }),
+        );
+        let boxes = [
+            (1, (0.0, 0.0, 100.0, 100.0)),
+            (2, (0.0, 0.0, 20.0, 20.0)),
+            (4, (50.0, 50.0, 30.0, 30.0)),
+            (5, (40.0, 40.0, 60.0, 60.0)),
+        ];
+        assert_eq!(tree.elements_at(60.0, 60.0, &boxed(&boxes)), vec![4, 5, 1]);
+
+        tree.destroy_element(3);
+        tree.create_element(6, "div".to_string());
+        tree.append_child(2, 6);
+        let with_clipped_child = [
+            (1, (0.0, 0.0, 100.0, 100.0)),
+            (2, (0.0, 0.0, 20.0, 20.0)),
+            (6, (0.0, 0.0, 90.0, 90.0)),
+        ];
+        assert_eq!(tree.elements_at(60.0, 60.0, &boxed(&with_clipped_child)), vec![1]);
+    }
+
+    #[test]
+    fn elements_at_orders_deferred_layers_by_priority() {
+        let mut tree = RetainedTree::new();
+        for (id, kind) in [
+            (1, "div"),
+            (2, "anchored"),
+            (3, "div"),
+            (4, "anchored"),
+            (5, "div"),
+        ] {
+            tree.create_element(id, kind.to_string());
+        }
+        tree.root_id = Some(1);
+        for (parent, child) in [(1, 2), (2, 3), (1, 4), (4, 5)] {
+            tree.append_child(parent, child);
+        }
+        let boxes = [
+            (1, (0.0, 0.0, 100.0, 100.0)),
+            (3, (0.0, 0.0, 100.0, 100.0)),
+            (5, (0.0, 0.0, 100.0, 100.0)),
+        ];
+        assert_eq!(tree.elements_at(10.0, 10.0, &boxed(&boxes)), vec![5, 3, 1]);
+
+        tree.set_custom_prop(2, "priority".to_string(), serde_json::json!(5));
+        assert_eq!(tree.elements_at(10.0, 10.0, &boxed(&boxes)), vec![3, 5, 1]);
+
+        tree.set_custom_prop(2, "deferred".to_string(), serde_json::json!(false));
+        assert_eq!(tree.elements_at(10.0, 10.0, &boxed(&boxes)), vec![5, 3, 1]);
     }
 
     #[test]

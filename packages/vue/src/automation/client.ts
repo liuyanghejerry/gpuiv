@@ -125,8 +125,9 @@ export interface TestAutomationRenderer {  nativeSimulateClick(
   getSelectedText(): string | null
   clearSelection(): void
   captureScreenshot(path: string): void
-  getAutomationTree(): string
-  getElementBounds(elementId: number): ElementBounds | null
+  getAutomationTree(forceRender?: boolean): string
+  getElementBounds(elementId: number, forceRender?: boolean): ElementBounds | null
+  getElementsAt?(x: number, y: number): number[]
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -270,7 +271,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
       offset: this.renderer.getScrollOffset(params.elementId),
     }),
     getTree: () => {
-      const raw = JSON.parse(this.renderer.getAutomationTree()) as unknown
+      const raw = JSON.parse(this.renderer.getAutomationTree(true)) as unknown
       return { tree: raw === null ? null : (raw as TreeNode) }
     },
     getComponentTree: () => ({
@@ -282,7 +283,7 @@ export class InProcessBackend extends ValidatedAutomationBackend {
     getPaintedText: () => ({ text: this.renderer.getPaintedText() }),
     getAllText: () => ({ text: this.renderer.getAllText() }),
     getBounds: (params) => {
-      return { bounds: this.renderer.getElementBounds(params.elementId) ?? null }
+      return { bounds: this.renderer.getElementBounds(params.elementId, true) ?? null }
     },
     getSelectedText: () => ({ text: this.renderer.getSelectedText() }),
     clearSelection: () => {
@@ -830,8 +831,8 @@ export interface LiveAutomationRenderer {
   getSelectedText(): string | null
   clearSelection(): void
   captureScreenshot(path: string): void
-  getAutomationTree(): string
-  getElementBounds(elementId: number): ElementBounds | null
+  getAutomationTree(forceRender?: boolean): string
+  getElementBounds(elementId: number, forceRender?: boolean): ElementBounds | null
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
@@ -910,8 +911,8 @@ export function liveRendererAsTest(
     getSelectedText: () => renderer.getSelectedText(),
     clearSelection: () => renderer.clearSelection(),
     captureScreenshot: (file) => renderer.captureScreenshot(file),
-    getAutomationTree: () => renderer.getAutomationTree(),
-    getElementBounds: (id) => renderer.getElementBounds(id),
+    getAutomationTree: (forceRender) => renderer.getAutomationTree(forceRender),
+    getElementBounds: (id, forceRender) => renderer.getElementBounds(id, forceRender),
     clockPause: () => renderer.clockPause(),
     clockSet: (nowMs) => renderer.clockSet(nowMs),
     clockFastForward: (deltaMs) => renderer.clockFastForward(deltaMs),

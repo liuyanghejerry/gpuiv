@@ -15,7 +15,7 @@ const app = createApp(App, { width: 600, height: 400, focus: false, show: true }
 const renderer = app.renderer
 const find = (node: HostNode): HostNode | undefined => node.props.testId === 'measured' ? node : node.children.map(find).find(Boolean)
 const id = find(app.container)!.id!
-const freshTree = () => JSON.parse((renderer as typeof renderer & { getAutomationTree(): string }).getAutomationTree())
+const freshTree = () => JSON.parse((renderer as typeof renderer & { getAutomationTree(forceRender?: boolean): string }).getAutomationTree(true))
 const treeBounds = (node: any, testId = 'measured'): any => node?.testId === testId ? node.bounds : node?.children?.map((child: any) => treeBounds(child, testId)).find(Boolean)
 let exitCode = 0
 try {
