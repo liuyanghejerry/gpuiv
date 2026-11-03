@@ -2631,6 +2631,7 @@ dependencies = [
  "smallvec",
  "syntect",
  "thiserror 2.0.18",
+ "ttf-parser",
  "two-face",
  "unicode-properties",
  "unicode-segmentation",

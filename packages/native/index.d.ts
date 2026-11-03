@@ -913,6 +913,8 @@ export declare class TestGpuixRenderer {
   setImagePixels(elementId: number, width: number, height: number, pixels: Buffer, format?: string | undefined | null): void
   /** Encoded image bytes onto an `<img>` host node. */
   setImage(elementId: number, bytes: Buffer): void
+  /** Register a font from raw `.ttf`/`.otf` bytes, like `loadFontBytes` on the production renderer. */
+  loadFontBytes(data: Buffer): void
   /**
    * The logical scroll anchor of a `<virtual-list>`:
    * `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything

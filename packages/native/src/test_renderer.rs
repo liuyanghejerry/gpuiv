@@ -1415,6 +1415,24 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Register a font from raw `.ttf`/`.otf` bytes, like
+    /// `GpuixRenderer::load_font_bytes`, and repaint.
+    #[napi]
+    pub fn load_font_bytes(&self, data: Buffer) -> Result<()> {
+        let bytes = data.to_vec();
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| view.register_font(bytes, window, cx))
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?
+            .map_err(Error::from_reason)?;
+
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
     /// Simulate a click at the given window coordinates.
     /// Dispatches MouseDown + MouseUp through GPUI's input pipeline,
     /// which triggers the same event handlers as production.

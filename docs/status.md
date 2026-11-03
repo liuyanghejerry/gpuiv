@@ -45,7 +45,7 @@
 - [x] Element bounds and hit-testing queries (`getElementBounds`, `getElementsAt`, `useElementBounds`), with completed-frame snapshots and optional `forceRender`
 - [x] Auto-height transitions (`<AnimateHeight>`)
 - [x] Headless Collapsible (`Collapsible`, `CollapsibleTrigger`, `CollapsiblePanel`; controlled state, keyboard, focus restoration and retained panels)
-- [x] Custom font loading (`loadFont`, `loadFontBytes`)
+- [x] Custom font loading (`loadFont`, `loadFontBytes`), with malformed fonts rejected before the text system can abort on them
 - [x] Private Beautiful UI component port: bundled fonts, reactive light/dark and reduced-motion themes, shared 60Hz loading/shimmer clock, keyboard controls, editable/resizable records grid with page-scroll previews, native canvas Flowchart, and AgentScreen viewer; [parity and native adaptations](../packages/beautiful-ui/README.md)
 - [x] Private Animal Island component port (`@gpuiv/animal-island`, issue #164): all 39 original Vue families plus React's CountUp, searchable/clearable Select, rich content, native control/digit/panel motion, 101 colour icons and a 40-page comparison gallery at `examples/animal-island.tsx`; [React parity audit and native limits](../packages/animal-island/REACT_PARITY.md)
 - [x] Cross-element text selection
