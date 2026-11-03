@@ -1277,7 +1277,9 @@ fn push_undo_snapshot(history: &mut VecDeque<EditSnapshot>, snapshot: EditSnapsh
     history.push_back(snapshot);
 }
 
-pub(crate) struct TextEditorState {
+/// The text-editor entity backing `<input>`/`<textarea>`. Public because the
+/// public `CustomElement` trait's `editor_entity` returns it.
+pub struct TextEditorState {
     element_id: u64,
     callback: Option<EventCallback>,
     emits_change: bool,

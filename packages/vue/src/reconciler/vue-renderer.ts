@@ -54,52 +54,6 @@ const RESERVED_PROPS = new Set([
 /// Built-in element types that don't use custom props.
 const BUILT_IN_TYPES = new Set(["div", "text"])
 
-/// Event names the native side knows. `onInput` is an alias for `change`.
-const EVENT_TYPES = new Set([
-  "click",
-  "auxClick",
-  "highlight",
-  "motionComplete",
-  "mouseDown",
-  "mouseUp",
-  "mouseEnter",
-  "mouseLeave",
-  "mouseMove",
-  "mouseDownOutside",
-  "contextMenu",
-  "keyDown",
-  "keyUp",
-  "focus",
-  "blur",
-  "scroll",
-  "pinch",
-  "layout",
-  "scrollChange",
-  "fileDrop",
-  "load",
-  "error",
-  "change",
-  "submit",
-  "toggleFile",
-  "showMore",
-  "lineClick",
-  "linkClick",
-  "taskToggle",
-  "visibleRange",
-  "compositionStart",
-  "compositionUpdate",
-  "compositionEnd",
-  "selectionChange",
-  "selectionDrag",
-  "copy",
-  "cut",
-  "paste",
-  "backspaceStart",
-  "undo",
-  "redo",
-  "selectAll",
-])
-
 /// Props that reach Rust on EVERY element type, including div and text.
 const UNIVERSAL_PROPS = new Set([
   // Internal marker for a visual-only overlay subtree (VirtualList sticky
@@ -136,11 +90,21 @@ const UNIVERSAL_PROPS = new Set([
   "aria-level",
 ])
 
+/// The event type a handler prop names, or null for a non-handler prop.
+///
+/// Any prop named `on` + an uppercase letter is a handler (`onGreet` →
+/// `greet`), whatever element it sits on — the native side stores the
+/// listener set generically, so elements other crates register with
+/// `register_custom_element` get custom events without a per-name table
+/// here. Handler-ness is decided by the VALUE at the call sites: a
+/// non-function `onTop={true}` stays a data prop.
 function eventTypeForProp(prop: string): string | null {
   if (!prop.startsWith("on") || prop.length <= 2) return null
+  if (prop[2] !== prop[2].toUpperCase()) return null
   const eventType = prop[2].toLowerCase() + prop.slice(3)
+  // `onInput` is an alias for `change`, matching the DOM-facing surface.
   if (eventType === "input") return "change"
-  return EVENT_TYPES.has(eventType) ? eventType : null
+  return eventType
 }
 
 function isHandler(value: unknown): boolean {
@@ -151,9 +115,9 @@ function isBuiltIn(node: HostNode): boolean {
   return BUILT_IN_TYPES.has(node.type)
 }
 
-function shouldForwardProp(node: HostNode, key: string): boolean {
+function shouldForwardProp(node: HostNode, key: string, value: unknown): boolean {
   if (RESERVED_PROPS.has(key)) return false
-  if (eventTypeForProp(key) && isHandler(node.props[key])) return false
+  if (eventTypeForProp(key) && isHandler(value)) return false
   if (isBuiltIn(node)) return UNIVERSAL_PROPS.has(key) || key.startsWith("aria-")
   return true
 }
@@ -482,7 +446,7 @@ export function createGpuivRendererHost(
         const eventType = eventTypeForProp(key)
         if (eventType && isHandler(value)) {
           applyEvent(node, eventType, value, node.eventOwner)
-        } else if (shouldForwardProp(node, key)) {
+        } else if (shouldForwardProp(node, key, value)) {
           r.setCustomProp(node.id, key, serializeValue(value))
         }
       }
@@ -542,10 +506,17 @@ export function createGpuivRendererHost(
       return
     }
     const eventType = eventTypeForProp(key)
+    const wasHandler = eventType != null && isHandler(node.props[key])
     if (eventType && (isHandler(next) || next == null)) {
       if (next == null) {
+        const wasData = node.props[key] !== undefined && !wasHandler
         delete node.props[key]
         if (node.created) applyEvent(node, eventType, null)
+        // A data value this key held (handler → data → null) must clear on
+        // the Rust side too; the listener removal alone leaves it behind.
+        if (node.created && wasData) {
+          host.renderer.setCustomProp(node.id, key, null)
+        }
       } else {
         node.props[key] = next
         if (instance != null) node.eventOwner = instance
@@ -553,7 +524,13 @@ export function createGpuivRendererHost(
       }
       return
     }
-    if (shouldForwardProp(node, key)) {
+    if (eventType && wasHandler) {
+      // The prop stopped being a handler: drop its listener so the old
+      // handler cannot fire, then let the value flow on as data below.
+      delete node.props[key]
+      if (node.created) applyEvent(node, eventType, null)
+    }
+    if (shouldForwardProp(node, key, next)) {
       if (next == null) delete node.props[key]
       else node.props[key] = next
       if (node.created) {

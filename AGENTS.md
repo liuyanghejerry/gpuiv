@@ -39,6 +39,18 @@ GPUI call makes it safe.
 Prefer the smallest translation. Fewer moving parts is more important than matching any
 other framework's behaviour.
 
+## Custom element names with a `-` belong to other crates
+
+`register_custom_element` (called by external crates that link
+`gpuiv-native`) refuses built-in names and names without a `-`, so an app can
+register `<my-editor>` without GPUIV ever taking that name. A new built-in
+element with a `-` in its name is the one exception and would break that
+promise — don't add one. Other crates compile against the public custom
+element API (`CustomElement`, `CustomRenderContext`, `custom_surface`,
+`register_custom_element`, `EventPayload`); after changing any of them, run
+`cd example-rust-native-element && bun run test` (on this Linux box, prefix
+the sysroot `PKG_CONFIG_PATH` so the addon's cargo build finds fontconfig).
+
 ## Built-in components follow Base UI
 
 Headless controls in `@gpuiv/vue` (`select`, `combobox`, `tooltip`, and any
@@ -95,6 +107,9 @@ Full diagrams and explanation: [Architecture](./docs/architecture.md#architectur
 - `examples/` — chat.tsx (the flagship) and its tests; `scripts/` — dev.ts,
   screenshots.ts; `docs/` — design plans, agents/ deep-dives, upstream/ ledger;
   `zed/` — pinned GPUI fork submodule
+- `example-rust-native-element/` — crate that adds `<rust-greeting>` from Rust
+  through `register_custom_element`; end-to-end test builds its own addon and
+  loads it with `NAPI_RS_NATIVE_LIBRARY_PATH` (runs in CI on arm64 macOS)
 
 This fork has no `zed/crates/gpuix`: Rust changes go directly in
 `packages/native/src/`, TypeScript changes in `packages/vue/`.
@@ -396,6 +411,10 @@ cd packages/vue && bun run test
 
 # Example app tests (chat.perf.test.tsx is the draw/chrome perf regression: assert p95 ms)
 cd examples && bun run test
+
+# A separate crate registers <rust-greeting> via register_custom_element.
+# Builds its own addon with cargo, then loads it with NAPI_RS_NATIVE_LIBRARY_PATH
+cd example-rust-native-element && bun run test
 ```
 
 Use `bun run test`, not `bun test` — the suites are vitest. Vue updates flush on

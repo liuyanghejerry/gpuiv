@@ -134,6 +134,21 @@ jobs:
           path: packages/native/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
+      # End-to-end check that the public custom-element API still compiles and
+      # runs for an external crate (example-rust-native-element). Runs only on
+      # the arm64 macOS build, whose cargo cache holds the shared
+      # packages/native/target the addon's .cargo/config.toml points at; the
+      # first run pays a full compile, later runs reuse the cache.
+      - name: Run external custom element tests
+        if: matrix.settings.target == 'aarch64-apple-darwin'
+        working-directory: .
+        env:
+          CARGO_BUILD_TARGET: aarch64-apple-darwin
+        run: |
+          # The example suite loads @gpuiv/vue from dist/ (gitignored).
+          bun run build:vue
+          cd example-rust-native-element && bun run test
+
   test:
     name: test
     needs: build

@@ -2060,6 +2060,51 @@ The same three components, retuned entirely from `metrics` with no rebuild:
 Languages bundled: Rust, TypeScript, TSX, JavaScript, JSX, Python, Go, JSON,
 Bash, TOML, YAML, Markdown, HTML, CSS, C.
 
+## Your own native elements
+
+A Rust crate can add its own GPUI component as an element. The crate builds its
+own Node addon that links `gpuiv-native`, registers the element at load time,
+and replaces the prebuilt `@gpuiv/native` binary.
+[`example-rust-native-element/`](../example-rust-native-element) is a complete
+crate with an end-to-end test.
+
+```rust
+use gpuiv_native::gpui;
+use gpuiv_native::{
+    custom_surface, emit_event_full, register_custom_element, CustomElement,
+    CustomElementFactory, CustomRenderContext, GpuixView,
+};
+
+struct Greeting { name: String }
+
+impl CustomElement for Greeting {
+    // render() builds GPUI elements through ctx: custom_surface() applies the
+    // host style, records bounds and wires the standard events; ctx.text()
+    // paints selectable text.
+    // ...
+}
+
+#[napi_derive::module_init]
+fn init() {
+    register_custom_element(|| Box::new(GreetingFactory)).unwrap();
+}
+```
+
+The addon's `Cargo.toml` depends on `gpuiv-native` — outside this repository,
+pin the git tag matching the installed `@gpuiv/native` version — with
+`crate-type = ["cdylib"]` and `napi` 3. Build it with `cargo build --release`
+and load it in place of the prebuilt binary by pointing
+`NAPI_RS_NATIVE_LIBRARY_PATH` at the built library. Custom elements must use
+the re-exported `gpuiv_native::gpui`: a second GPUI in the same addon can't
+draw into GPUIV's window.
+
+Element names must contain a `-` (like DOM custom elements) and cannot reuse a
+built-in; `register_custom_element` refuses both. On the Vue side the element
+is just a tag: `h("rust-greeting", { name, onGreet })`. Every prop named `on` +
+an uppercase letter with a function value is a listener — `onGreet` fires when
+the element emits `"greet"`, with any JSON `detail` on the payload, like a DOM
+`CustomEvent`. A non-function value stays a data prop.
+
 ## Supported Elements
 
 | Element         | Description                                      |
