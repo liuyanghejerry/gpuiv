@@ -2255,7 +2255,7 @@ impl TestGpuixRenderer {
         Ok(tree
             .elements
             .get(&id)
-            .map(|e| e.events.contains(&event_type))
+            .map(|e| e.events().contains(&event_type))
             .unwrap_or(false))
     }
 

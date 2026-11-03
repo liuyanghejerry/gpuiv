@@ -719,6 +719,26 @@ test suites through DirectX on Windows.
 > ticks per second and burns **73% CPU on a completely idle app**, versus **1%** when
 > paced.
 
+## Give memory back when idle
+
+A JavaScript engine collects on allocation pressure, so after a burst of work
+(the first mount, opening a long thread) the heap stays at its peak until the
+next burst. `collectGarbageWhenIdle()` runs one full collection once the app
+has stopped committing for a while, then waits for the next burst.
+
+```ts
+import { collectGarbageWhenIdle } from '@gpuiv/vue'
+
+const stop = collectGarbageWhenIdle() // checks every 5s, collects after two quiet checks
+```
+
+It uses `Bun.gc(true)`, or `gc()` where Node runs with `--expose-gc`, and does
+nothing in a runtime that has neither. Quiet means no mutation batch reached a
+renderer and the process is under half a core. The batch count decides, not CPU
+alone, because a focused text field blinks its caret in native code and redraws
+twice a second. Pass `activity`, `collect`, `checkMs`, `quietChecks` or
+`busyCpu` to change what it watches or how often.
+
 ## Native animations
 
 Use **`motion.div`** to animate from an initial style to a target style. Vue

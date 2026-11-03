@@ -83,7 +83,7 @@ pub struct PaintedHighlight {
 /// effectively single-threaded, so the locks are uncontended.
 pub(crate) struct WindowPaintState {
     /// Automation paint bounds keyed by element id, recorded by
-    /// `bounds_tracker` / `track_own_bounds`.
+    /// `track_host_bounds` / `track_own_bounds`.
     bounds: Mutex<HashMap<u64, crate::automation::ElementBounds>>,
     registry: Mutex<Vec<RegEntry>>,
     start_regions: Mutex<Vec<StartRegion>>,
@@ -234,8 +234,9 @@ pub fn selection_frame_reset(
 
 /// Record a selection-start region from an element's painted box.
 ///
-/// Only `bounds_tracker` calls this, so a start region is always the same box
-/// automation already uses. Last painted region that contains the point wins.
+/// Only `track_host_bounds` calls this, so a start region is always the same
+/// box automation already uses. Last painted region that contains the point
+/// wins.
 pub fn record_start_region(bounds: Bounds<gpui::Pixels>, selectable: bool) {
     current_paint_state().record_start_region(bounds, selectable);
 }

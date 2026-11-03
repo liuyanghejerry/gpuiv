@@ -54,6 +54,8 @@ export type { ElementBounds, ElementBoundsOptions, ElementBoundsHandle } from ".
 export { createScrollController, useScrollController } from "./scroll-controller.js"
 export type { ScrollToOptions, ScrollResult } from "./scroll-controller.js"
 export type { WindowSize, WindowSizeOptions, WindowInsets, WindowInsetsOptions } from "./hooks/use-window-size.js"
+export { collectGarbageWhenIdle } from "./idle-gc.js"
+export type { IdleGcOptions } from "./idle-gc.js"
 export { findRanges, useTextSearch } from "./hooks/use-text-search.js"
 export type { FindRangesOptions, TextSearch, TextSearchOptions } from "./hooks/use-text-search.js"
 export type { HighlightSpec } from "./types.js"

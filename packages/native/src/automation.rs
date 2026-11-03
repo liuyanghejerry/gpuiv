@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    canvas, point, px, size, App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent,
+    canvas, point, px, App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent,
     Keystroke, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels,
     Styled, Window,
 };
@@ -58,12 +58,48 @@ pub fn bounds_frame_reset() -> impl IntoElement {
 
 /// Record this element's own painted box, with no extra element in the tree.
 ///
-/// `bounds_tracker` needs a positioned parent and one canvas child, which a leaf
-/// such as `gpui::img` cannot have. Wrapping the leaf in a div instead would
-/// move the layout box: the wrapper would become the flex item and the image
-/// would lose intrinsic sizing and corner clipping.
+/// `track_host_bounds` covers host containers; this is the leaf variant:
+/// an `on_painted` on the element itself, with no selection region or
+/// paint reporter.
 pub fn track_own_bounds<E: gpui::InteractiveElement>(el: E, id: u64) -> E {
     el.on_painted(move |bounds, _, _| record_bounds(id, bounds))
+}
+
+/// Record a host element's painted box, and its selection-start region, for
+/// automation and text selection.
+///
+/// The element reports its own box through `on_painted`, so tracking it adds
+/// nothing to the tree. The previous `bounds_tracker` child doubled the number
+/// of nodes gpui laid out, prepainted and painted for every `<div>` and
+/// `<text>`.
+///
+/// gpui paints nothing for `visibility: hidden`, not the element and not its
+/// children, so a hidden element reports no box and fires no `onLayout`. A
+/// canvas child cannot work around that: it is never painted either.
+///
+/// The box is the border box, which is what a DOM `getBoundingClientRect`
+/// reports. `bounds_tracker` fills the padding box instead.
+///
+/// `report` sees the painted box right after it is recorded. `on_painted`
+/// takes one listener, so the paint-driven events share this one.
+pub fn track_host_bounds<E>(
+    el: E,
+    id: u64,
+    selection_start: Option<bool>,
+    report: Option<PaintReporter>,
+) -> E
+where
+    E: gpui::InteractiveElement,
+{
+    el.on_painted(move |bounds, _, cx| {
+        record_bounds(id, bounds);
+        if let Some(selectable) = selection_start {
+            crate::text::record_start_region(bounds, selectable);
+        }
+        if let Some(report) = &report {
+            report(bounds, cx);
+        }
+    })
 }
 
 pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
@@ -75,61 +111,6 @@ pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
 /// produced; each defers its own event from inside — never emitting
 /// synchronously from paint.
 pub type PaintReporter = Rc<dyn Fn(Bounds<Pixels>, &mut App)>;
-
-pub fn bounds_tracker(
-    id: u64,
-    selection_start: Option<bool>,
-    insets: crate::style::BoundsInsets,
-    report: Option<PaintReporter>,
-) -> impl IntoElement {
-    canvas(
-        |bounds, _, _| bounds,
-        move |bounds, _, _, cx| {
-            // The canvas is absolute at the parent's content-box origin
-            // (border + padding inside) with the padding-box size (border box
-            // minus border). Convert back to the border box — the box GPUI's
-            // hit test uses — so `getElementBounds` and automation locators
-            // agree with what is clickable.
-            let real = Bounds::new(
-                point(
-                    Pixels::from(
-                        f32::from(bounds.origin.x) - insets.padding.left - insets.border.left,
-                    ),
-                    Pixels::from(
-                        f32::from(bounds.origin.y) - insets.padding.top - insets.border.top,
-                    ),
-                ),
-                size(
-                    Pixels::from(
-                        f32::from(bounds.size.width) + insets.border.left + insets.border.right,
-                    ),
-                    Pixels::from(
-                        f32::from(bounds.size.height) + insets.border.top + insets.border.bottom,
-                    ),
-                ),
-            );
-            record_bounds(id, real);
-            if let Some(selectable) = selection_start {
-                crate::text::record_start_region(real, selectable);
-            }
-            if let Some(report) = &report {
-                report(real, cx);
-            }
-        },
-    )
-    // Pinned to the content origin, not a bare `absolute()`: an absolute child
-    // without explicit insets sits at its static position, which follows the
-    // in-flow children — the bottom of a scroller's content when this canvas
-    // paints last (it must paint last: gpui indexes scroll children for
-    // `scroll_to_item` by paint-tree order). `top`/`left` are relative to the
-    // containing block's padding box, so the content origin is one padding in;
-    // this matches the static position the border-box reconstruction below
-    // (`real = canvas − padding − border`) was written for.
-    .absolute()
-    .top(px(insets.padding.top))
-    .left(px(insets.padding.left))
-    .size_full()
-}
 
 /// What the last completed paint produced, readable from any thread.
 #[derive(Default)]

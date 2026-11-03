@@ -2124,9 +2124,15 @@ impl GpuixRenderer {
         let mut tree = self.tree.lock().unwrap();
         let destroyed =
             apply_batch_to_tree(&mut tree, json.as_bytes()).map_err(Error::from_reason)?;
+        let dirty = tree.take_dirty();
         drop(tree);
         self.canvas_surfaces.remove_destroyed(&destroyed);
-        self.request_invalidate()?;
+        // A re-render that changed nothing sends a batch of identical resends.
+        // Waking the window for it makes it rebuild and diff the whole element
+        // tree to draw the frame it already has.
+        if dirty {
+            self.request_invalidate()?;
+        }
         Ok(destroyed)
     }
 
@@ -4794,9 +4800,14 @@ impl WebGpuixRenderer {
         &self,
         json: String,
     ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
-        let destroyed = apply_batch_to_tree(&mut self.tree.lock().unwrap(), json.as_bytes())
+        let mut tree = self.tree.lock().unwrap();
+        let destroyed = apply_batch_to_tree(&mut tree, json.as_bytes())
             .map_err(|error| wasm_bindgen::JsValue::from_str(&error))?;
-        notify_web();
+        let dirty = tree.take_dirty();
+        drop(tree);
+        if dirty {
+            notify_web();
+        }
         Ok(web_number_array(destroyed))
     }
 
@@ -5636,7 +5647,7 @@ impl GpuixView {
             inherited.highlight = tree
                 .elements
                 .get(&declaration)
-                .and_then(|element| element.custom_props.get("highlight"))
+                .and_then(|element| element.custom_props().get("highlight"))
                 .and_then(|value| {
                     resolve_highlight(
                         &mut self.highlights,
@@ -5892,7 +5903,7 @@ fn emit_motion_settled(
         let Some(element) = tree.elements.get(&id) else {
             continue;
         };
-        if !element.events.contains("motionComplete") {
+        if !element.events().contains("motionComplete") {
             continue;
         }
         emit_event_full(callback, id, "motionComplete", |payload| {
@@ -5920,7 +5931,7 @@ fn sync_motion_states(
         let Some(source) = tree
             .elements
             .get(&id)
-            .and_then(|element| element.custom_props.get("motion"))
+            .and_then(|element| element.custom_props().get("motion"))
         else {
             continue;
         };
@@ -6127,8 +6138,7 @@ fn json_usize(value: &serde_json::Value) -> Option<usize> {
 }
 
 fn window_start_from_element(element: &crate::retained_tree::RetainedElement) -> usize {
-    element
-        .custom_props
+    element.custom_props()
         .get("windowStart")
         .and_then(json_usize)
         .unwrap_or(0)
@@ -6145,7 +6155,7 @@ struct VirtualListConfig {
 
 impl VirtualListConfig {
     fn from_element(element: &crate::retained_tree::RetainedElement) -> Self {
-        let prop = |key: &str| element.custom_props.get(key);
+        let prop = |key: &str| element.custom_props().get(key);
         let alignment = match prop("alignment").and_then(serde_json::Value::as_str) {
             Some("bottom") => gpui::ListAlignment::Bottom,
             _ => gpui::ListAlignment::Top,
@@ -6727,28 +6737,19 @@ impl GpuixView {
         }) {
             self.pending_focus_element = None;
         }
-        let tab_index = |element: &crate::retained_tree::RetainedElement| {
-            element
-                .custom_props
-                .get("tabIndex")
-                .and_then(|value| value.as_i64())
-                .and_then(|index| isize::try_from(index).ok())
-        };
-        let needs_focus = |element: &crate::retained_tree::RetainedElement| {
-            matches!(element.element_type.as_str(), "input" | "textarea")
-                || tab_index(element).is_some()
-                || element.events.contains("keyDown")
-                || element.events.contains("keyUp")
-                || element.events.contains("focus")
-                || element.events.contains("blur")
-        };
+        // Only the focusable elements are visited. This runs every frame, and
+        // the rest of the tree is orders of magnitude larger.
+        //
         // Create handles for elements that need focus but don't have one yet.
-        for (&id, element) in &tree.elements {
-            let tab_index = tab_index(element).or_else(|| {
+        for &id in &tree.focusable_ids {
+            let Some(element) = tree.elements.get(&id) else {
+                continue;
+            };
+            let tab_index = element.tab_index().or_else(|| {
                 matches!(element.element_type.as_str(), "input" | "textarea").then_some(0)
             });
 
-            if needs_focus(element) && !self.focus_handles.contains_key(&id) {
+            if !self.focus_handles.contains_key(&id) {
                 let handle = match tab_index {
                     Some(index) => cx.focus_handle().tab_index(index).tab_stop(index >= 0),
                     None => cx.focus_handle(),
@@ -6782,14 +6783,16 @@ impl GpuixView {
         self.focus_subscriptions.retain(|(id, event), _| {
             tree.elements
                 .get(id)
-                .is_some_and(|element| element.events.contains(event))
+                .is_some_and(|element| element.events().contains(event))
         });
-        for (&id, element) in &tree.elements {
-            let Some(handle) = self.focus_handles.get(&id).cloned() else {
+        for &id in &tree.focusable_ids {
+            let (Some(element), Some(handle)) =
+                (tree.elements.get(&id), self.focus_handles.get(&id).cloned())
+            else {
                 continue;
             };
             let focus_key = (id, "focus".to_string());
-            if element.events.contains("focus")
+            if element.events().contains("focus")
                 && !self.focus_subscriptions.contains_key(&focus_key)
             {
                 let callback = callback.clone();
@@ -6799,7 +6802,7 @@ impl GpuixView {
                 self.focus_subscriptions.insert(focus_key, subscription);
             }
             let blur_key = (id, "blur".to_string());
-            if element.events.contains("blur") && !self.focus_subscriptions.contains_key(&blur_key)
+            if element.events().contains("blur") && !self.focus_subscriptions.contains_key(&blur_key)
             {
                 let callback = callback.clone();
                 let subscription = cx.on_blur(&handle, window, move |_this, _window, _cx| {
@@ -6811,7 +6814,7 @@ impl GpuixView {
 
         // Clean up handles for elements that no longer exist.
         self.focus_handles
-            .retain(|id, _| tree.elements.get(id).is_some_and(&needs_focus));
+            .retain(|id, _| tree.focusable_ids.contains(id));
     }
 }
 
@@ -6883,7 +6886,7 @@ impl gpui::Render for GpuixView {
         self.highlights.retain(|id, _| {
             tree.elements
                 .get(id)
-                .is_some_and(|element| element.custom_props.contains_key("highlight"))
+                .is_some_and(|element| element.custom_props().contains_key("highlight"))
         });
         // Pruned by listener, not existence: dropping `onLayout` and adding it
         // back reports the size again, like a fresh observer. The same holds
@@ -6894,14 +6897,14 @@ impl gpui::Render for GpuixView {
                 reports.sizes.retain(|id, _| {
                     tree.elements
                         .get(id)
-                        .is_some_and(|element| element.events.contains("layout"))
+                        .is_some_and(|element| element.events().contains("layout"))
                 });
             }
             if !reports.scrolls.is_empty() {
                 reports.scrolls.retain(|id, _| {
                     tree.elements
                         .get(id)
-                        .is_some_and(|element| element.events.contains("scrollChange"))
+                        .is_some_and(|element| element.events().contains("scrollChange"))
                 });
             }
         }
@@ -7025,7 +7028,7 @@ pub(crate) fn build_element(
 
     // Motion states are advanced once per frame by `sync_motion_states`
     // before the build; here the precomputed visible style is applied.
-    let animated_style = if element.custom_props.contains_key("motion") {
+    let animated_style = if element.custom_props().contains_key("motion") {
         ctx.motion_states
             .get(&id)
             .and_then(|state| state.visible_style(ctx.now))
@@ -7046,8 +7049,7 @@ pub(crate) fn build_element(
     // elements see the same cascade.
     let parent_inherited = ctx.inherited.clone();
     ctx.inherited = parent_inherited.clone().descend(style);
-    if element
-        .custom_props
+    if element.custom_props()
         .get("__gpuivPassThrough")
         .and_then(|value| value.as_bool())
         == Some(true)
@@ -7058,8 +7060,8 @@ pub(crate) fn build_element(
     // A `highlight` here replaces any ancestor's: the nearest declaration wins,
     // and `GroupList::collect` skips nested declarations so an ancestor never
     // resolves or counts matches that will not paint.
-    if let Some(value) = element.custom_props.get("highlight") {
-        let has_listener = element.events.contains("highlight");
+    if let Some(value) = element.custom_props().get("highlight") {
+        let has_listener = element.events().contains("highlight");
         let resolved =
             resolve_highlight(ctx.highlights, ctx.tree, id, value, &Theme::dark(), has_listener);
         if let Some((_, Some(total))) = &resolved {
@@ -7104,7 +7106,7 @@ pub(crate) fn build_element(
             let inherited = ctx.inherited.clone();
             let render_ctx = CustomRenderContext {
                 id,
-                events: &element.events,
+                events: &element.events(),
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
                 style,
@@ -7113,10 +7115,10 @@ pub(crate) fn build_element(
                 selectable: inherited.selectable,
                 selection_wash: inherited.selection_wash,
                 highlight_set: inherited.highlight.clone(),
-                props: &element.custom_props,
+                props: &element.custom_props(),
             };
             ctx.custom_registry
-                .render(custom_type, &element.custom_props, render_ctx, window, cx)
+                .render(custom_type, &element.custom_props(), render_ctx, window, cx)
         }
     };
 
@@ -7229,7 +7231,7 @@ fn build_virtual_list(
         list_state.scroll_to(offset);
     }
 
-    if element.events.contains("visibleRange") {
+    if element.events().contains("visibleRange") {
         let callback = ctx.event_callback.clone();
         let list_id = element.id;
         list_state.set_scroll_handler(move |event, _window, _cx| {
@@ -7264,7 +7266,7 @@ fn build_virtual_list(
     if let Some(style) = element.style.as_deref() {
         list = apply_styles(list, style);
     }
-    let list = apply_accessibility(list, &element.custom_props, None).into_any_element();
+    let list = apply_accessibility(list, &element.custom_props(), None).into_any_element();
     match element
         .style
         .as_deref()
@@ -7439,8 +7441,7 @@ pub(crate) fn build_host_container(
         if let Some(handle) = ctx.focus_handles.get(&element.id) {
             el = el.track_focus(handle);
         }
-        if let Some(tab_index) = element
-            .custom_props
+        if let Some(tab_index) = element.custom_props()
             .get("tabIndex")
             .and_then(|value| value.as_i64())
             .and_then(|index| isize::try_from(index).ok())
@@ -7455,13 +7456,13 @@ pub(crate) fn build_host_container(
     // hear the same string twice.
     let is_text_host = element.element_type == "text" && element.content.is_none();
     let runs_prop = if is_text_host {
-        element.custom_props.get("runs").filter(|value| value.is_array())
+        element.custom_props().get("runs").filter(|value| value.is_array())
     } else {
         None
     };
     let default_role = is_text_host.then_some(gpui::Role::Label);
-    el = apply_accessibility(el, &element.custom_props, default_role);
-    if is_text_host && element.custom_props.get("aria-valuetext").is_none() {
+    el = apply_accessibility(el, &element.custom_props(), default_role);
+    if is_text_host && element.custom_props().get("aria-valuetext").is_none() {
         let content = if let Some(runs) = runs_prop {
             Some(crate::text::runs::host_runs_text(runs).unwrap_or_default())
         } else {
@@ -7537,21 +7538,16 @@ pub(crate) fn build_host_container(
         };
     }
 
-    // Attached AFTER the user children: gpui indexes a scroll container's
-    // children for `ScrollHandle::scroll_to_item` by paint-tree order, and our
-    // `scroll_target` hands it the retained-tree child index. A leading canvas
-    // would shift every index by one, so `scrollIntoView` on a plain scroller
-    // resolved the neighbouring child and computed a no-op offset. The canvas
-    // is pinned to the content origin (see `bounds_tracker`), so trailing
-    // changes neither layout nor paint order.
-    el = el.child(crate::automation::bounds_tracker(
+    // The host's own `on_painted` records its border box (see
+    // `track_host_bounds`) — no canvas child, so gpui indexes a scroll
+    // container's children for `ScrollHandle::scroll_to_item` exactly by the
+    // retained-tree user children our `scroll_target` hands it.
+    el = crate::automation::track_host_bounds(
+        el,
         element.id,
         selection_start_flag(style),
-        style
-            .map(crate::style::bounds_insets)
-            .unwrap_or_default(),
-        paint_reporter(element.id, &element.events, ctx),
-    ));
+        paint_reporter(element.id, &element.events(), ctx),
+    );
 
     // Last, so the thumb paints over the content.
     if let (Some(style), Some(handle)) = (style, ctx.scroll_handles.get(&element.id)) {
@@ -7848,8 +7844,7 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
     event_callback: &Option<EventCallback>,
     force_pointer_capture: bool,
 ) -> E {
-    if element
-        .custom_props
+    if element.custom_props()
         .get("windowDragRegion")
         .and_then(|value| value.as_bool())
         == Some(true)
@@ -7882,8 +7877,7 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
     // browser handler would. Stopping propagation at this element keeps
     // ancestor scrollers from reacting to the same gesture. It works with or
     // without a JS `scroll` listener — a canvas usually wants neither event.
-    let stop_wheel_propagation = element
-        .custom_props
+    let stop_wheel_propagation = element.custom_props()
         .get("stopWheelPropagation")
         .is_some_and(|value| value.as_bool() == Some(true));
 
@@ -7891,7 +7885,7 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
     // Some events (on_hover, on_aux_click) require a stateful element (.id()),
     // which we already set above. Others (on_mouse_down, on_key_down) work
     // on any InteractiveElement.
-    if element.events.contains("click") {
+    if element.events().contains("click") {
         let id = element.id;
         let callback = event_callback.clone();
         // GPUI's higher-level on_click gesture is not finalized by the
@@ -7908,10 +7902,10 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
                 p.is_right_click = Some(false);
             });
         });
-        el = apply_a11y_click(el, &element.events, element.id, event_callback);
+        el = apply_a11y_click(el, &element.events(), element.id, event_callback);
     }
 
-    for event_type in &element.events {
+    for event_type in element.events() {
         let id = element.id;
         let callback = event_callback.clone();
         match event_type.as_str() {
@@ -8009,8 +8003,8 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
             "mouseEnter" | "mouseLeave" => {
                 // Only wire once even if both mouseEnter and mouseLeave are registered.
                 // Check if we already wired on_hover via the other event.
-                let has_enter = element.events.contains("mouseEnter");
-                let has_leave = element.events.contains("mouseLeave");
+                let has_enter = element.events().contains("mouseEnter");
+                let has_leave = element.events().contains("mouseLeave");
                 // Wire on first encounter (mouseEnter sorts before mouseLeave).
                 if event_type.as_str() == "mouseEnter" || !has_enter {
                     let callback_enter = if has_enter {
@@ -8147,7 +8141,7 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
     // Mouse capture is armed by the press. An element that listens for both
     // `mouseDown` and `mouseMove` captures implicitly, like HTML's automatic
     // capture on press; `setPointerCapture` forces it for any element.
-    if (element.events.contains("mouseDown") && element.events.contains("mouseMove"))
+    if (element.events().contains("mouseDown") && element.events().contains("mouseMove"))
         || force_pointer_capture
     {
         el = el.capture_pointer();
@@ -8155,7 +8149,7 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
 
     // A wheel-consuming element with no JS scroll listener still needs the
     // gesture stopped before an ancestor scroller takes it.
-    if stop_wheel_propagation && !element.events.contains("scroll") {
+    if stop_wheel_propagation && !element.events().contains("scroll") {
         el = el.on_scroll_wheel(move |_scroll_event, window, cx| {
             window.prevent_default();
             cx.stop_propagation();
@@ -9116,7 +9110,7 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
                 tree.set_event_listener(id, event_type, has_handler);
             }
             BatchOp::SetRoot { id } => {
-                tree.root_id = Some(id);
+                tree.set_root(id);
             }
             BatchOp::SetCustomProp { id, key, value } => {
                 tree.set_custom_prop(id, key, value);
@@ -9767,9 +9761,9 @@ mod batch_tests {
         let mut out = format!("root={:?}\n", tree.root_id);
         for id in ids {
             let element = &tree.elements[&id];
-            let mut events: Vec<_> = element.events.iter().cloned().collect();
+            let mut events: Vec<_> = element.events().iter().cloned().collect();
             events.sort();
-            let mut props: Vec<_> = element.custom_props.iter().collect();
+            let mut props: Vec<_> = element.custom_props().iter().collect();
             props.sort_by(|(a, _), (b, _)| a.cmp(b));
             out += &format!(
                 "{id} type={} text={:?} style={:?} children={:?} parent={:?} events={events:?} props={props:?} rev={}/{}\n",
@@ -9809,6 +9803,90 @@ mod batch_tests {
             "the failed batch must not leave styles interned"
         );
         assert!(error.contains("setStyle"), "{error}");
+    }
+
+    /// Whether the batch left something a frame would draw differently. The
+    /// window is only woken for these, so a wrong `false` is a stale screen and
+    /// a wrong `true` is a wasted frame.
+    fn dirty_after(tree: &mut RetainedTree, json: &str) -> bool {
+        apply(tree, json).expect("valid batch");
+        tree.take_dirty()
+    }
+
+    const MOUNT: &str = r##"[
+        ["createElement",1,"div"],["createElement",2,"text"],["createElement",3,"div"],
+        ["appendChild",1,2],["appendChild",1,3],["setRoot",1],
+        ["setStyle",1,{"width":100,"backgroundColor":"#112233"}],
+        ["setStyle",3,{"height":10}],
+        ["setText",2,"hello"],
+        ["setEventListener",3,"click",true],
+        ["setCustomProp",3,"aria-label","row"],
+        ["setCustomProp",3,"testId","row"],
+        ["setCustomProp",3,"autoFocus",true]
+    ]"##;
+
+    #[test]
+    fn mounting_marks_the_tree_dirty() {
+        let mut tree = RetainedTree::new();
+        assert!(dirty_after(&mut tree, MOUNT));
+    }
+
+    #[test]
+    fn resending_everything_unchanged_is_not_dirty() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, MOUNT).expect("valid batch");
+        tree.take_dirty();
+
+        // The same ops again, with the style keys reordered: interning keys on
+        // raw bytes, so this reaches `set_style` as a different `Arc`.
+        let resend = r##"[
+            ["setRoot",1],
+            ["setStyle",1,{"backgroundColor":"#112233","width":100}],
+            ["setStyle",3,{"height":10}],
+            ["setText",2,"hello"],
+            ["setEventListener",3,"click",true],
+            ["setCustomProp",3,"aria-label","row"],
+            ["setCustomProp",3,"testId","row"],
+            ["setCustomProp",3,"autoFocus",true],
+            ["setCustomProp",3,"missing",null]
+        ]"##;
+        assert!(!dirty_after(&mut tree, resend));
+    }
+
+    #[test]
+    fn each_kind_of_change_is_dirty() {
+        let changes = [
+            r#"[["setStyle",3,{"height":11}]]"#,
+            r#"[["setText",2,"changed"]]"#,
+            r#"[["setEventListener",3,"click",false]]"#,
+            r#"[["setEventListener",3,"mouseDown",true]]"#,
+            r#"[["setCustomProp",3,"aria-label","other"]]"#,
+            r#"[["setCustomProp",3,"aria-label",null]]"#,
+            r#"[["setCustomProp",3,"testId","other"]]"#,
+            r#"[["setCustomProp",3,"autoFocus",false]]"#,
+            r#"[["createElement",4,"div"]]"#,
+            r#"[["destroyElement",3]]"#,
+            r#"[["insertBefore",1,3,2]]"#,
+            r#"[["setRoot",3]]"#,
+        ];
+        for change in changes {
+            let mut tree = RetainedTree::new();
+            apply(&mut tree, MOUNT).expect("valid batch");
+            tree.take_dirty();
+            assert!(dirty_after(&mut tree, change), "{change} must repaint");
+        }
+    }
+
+    #[test]
+    fn a_rejected_batch_does_not_leave_the_tree_dirty() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, MOUNT).expect("valid batch");
+        tree.take_dirty();
+
+        apply(&mut tree, r#"[["setText",2,"changed"],["setStyle",2,123]]"#)
+            .expect_err("malformed style");
+
+        assert!(!tree.take_dirty());
     }
 
     /// A style that fails halfway through a long batch is unfindable without
@@ -9890,7 +9968,7 @@ mod batch_tests {
             );
             apply(&mut tree, &json).expect("boolean handler state");
             assert_eq!(
-                tree.elements[&1].events.contains("click"),
+                tree.elements[&1].events().contains("click"),
                 expected,
                 "hasHandler {payload}"
             );

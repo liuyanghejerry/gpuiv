@@ -68,7 +68,10 @@ try {
     const label = renderer.getElementBounds(labelNode.id)!
     const owner = await paintedBounds('gallery-nav-scroll')
     const offset = renderer.getScrollOffset(navScrollId)![1]!
-    const top = owner.y - offset
+    // Content children report screen coordinates, and the scroller reports its
+    // viewport border box (which does not move when its content scrolls), so
+    // the viewport top needs no offset arithmetic.
+    const top = owner.y
     if (label.y >= top + 8 && label.y + label.height <= top + owner.height - 8) break
     renderer.scrollTo(navScrollId, 0, offset + top + 80 - label.y)
     await Bun.sleep(250)
@@ -76,8 +79,7 @@ try {
   const navLabelNode = walk(find('nav-select')!).find(node => node.type === 'text' && textContent(node).includes('Select'))!
   const navLabel = renderer.getElementBounds(navLabelNode.id!)!
   const navOwner = await paintedBounds('gallery-nav-scroll')
-  const navOffset = renderer.getScrollOffset(navScrollId)![1]!
-  assert(navLabel.y >= navOwner.y - navOffset && navLabel.y + navLabel.height <= navOwner.y - navOffset + navOwner.height,
+  assert(navLabel.y >= navOwner.y && navLabel.y + navLabel.height <= navOwner.y + navOwner.height,
     'The Select navigation label must be inside the sidebar viewport before clicking')
   await driver.mouse.click({ x: navLabel.x + navLabel.width / 2, y: navLabel.y + navLabel.height / 2 })
   await until(() => Boolean(find('gallery-select')), 'Clicking the sidebar must mount the real Select comparison page')

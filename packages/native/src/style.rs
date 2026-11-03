@@ -460,41 +460,6 @@ pub struct EdgeInsets {
     pub bottom: f32,
 }
 
-/// Padding and border insets of an element, split so the automation bounds
-/// tracker can translate its record canvas back to the border box.
-///
-/// The tracker's canvas is absolutely positioned at the element's
-/// content-box origin (border + padding inside) and sized to the padding box
-/// (border box minus border). Getting the real box back therefore needs each
-/// side's padding + border for the origin, but only the border for the size.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct BoundsInsets {
-    pub padding: EdgeInsets,
-    pub border: EdgeInsets,
-}
-
-/// Resolve an element's padding and border pixels, with the same precedence
-/// as `apply_styles`: a per-side value overrides the shorthand.
-pub fn bounds_insets(style: &StyleDesc) -> BoundsInsets {
-    let side = |value: Option<f64>, shorthand: f64| value.unwrap_or(shorthand) as f32;
-    let pad = style.padding.unwrap_or(0.0);
-    let border = style.border_width.unwrap_or(0.0);
-    BoundsInsets {
-        padding: EdgeInsets {
-            left: side(style.padding_left, pad),
-            top: side(style.padding_top, pad),
-            right: side(style.padding_right, pad),
-            bottom: side(style.padding_bottom, pad),
-        },
-        border: EdgeInsets {
-            left: side(style.border_left_width, border),
-            top: side(style.border_top_width, border),
-            right: side(style.border_right_width, border),
-            bottom: side(style.border_bottom_width, border),
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -678,34 +643,6 @@ mod tests {
     }
 
     #[test]
-    fn bounds_insets_matches_apply_styles_precedence() {
-        let style = StyleDesc {
-            padding: Some(4.0),
-            padding_top: Some(8.0),
-            border_width: Some(2.0),
-            border_left_width: Some(5.0),
-            ..Default::default()
-        };
-        assert_eq!(
-            bounds_insets(&style),
-            BoundsInsets {
-                padding: EdgeInsets {
-                    left: 4.0,
-                    top: 8.0,
-                    right: 4.0,
-                    bottom: 4.0,
-                },
-                border: EdgeInsets {
-                    left: 5.0,
-                    top: 2.0,
-                    right: 2.0,
-                    bottom: 2.0,
-                },
-            }
-        );
-    }
-
-    #[test]
     fn resolves_a_two_stop_linear_gradient() {
         let style: StyleDesc = serde_json::from_str(
             r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"#ff0000","position":0},{"color":"#0000ff","position":1}],"colorSpace":"oklab"}}"##,
@@ -729,14 +666,6 @@ mod tests {
         .unwrap();
 
         assert!(!should_occlude(&style));
-    }
-
-    #[test]
-    fn bounds_insets_defaults_to_zero() {
-        assert_eq!(
-            bounds_insets(&StyleDesc::default()),
-            BoundsInsets::default()
-        );
     }
 
     #[test]
