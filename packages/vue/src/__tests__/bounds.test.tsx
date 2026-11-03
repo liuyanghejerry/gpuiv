@@ -1,7 +1,6 @@
 /** GPU-backed regression tests for element bounds recorded by the automation
- *  host. The bounds canvas is laid out at an element's content-box origin with
- *  the padding-box size, so the record must be translated back to the real
- *  border box — the box GPUI's hit test uses. */
+ *  host. Each element records its own border box from paint (see
+ *  `track_host_bounds`), which is the box GPUI's hit test uses. */
 
 import { defineComponent } from "vue"
 import { describe, expect, it } from "vitest"

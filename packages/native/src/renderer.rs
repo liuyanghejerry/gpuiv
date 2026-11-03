@@ -2145,6 +2145,9 @@ impl GpuixRenderer {
     /// family: GPUI caches a failed family lookup, so text that already fell
     /// back to a system font keeps the fallback even after the font arrives.
     fn add_fonts(&self, fonts: Vec<std::borrow::Cow<'static, [u8]>>) -> Result<()> {
+        for font in &fonts {
+            check_font(font).map_err(Error::from_reason)?;
+        }
         #[cfg(target_os = "macos")]
         {
             GPUI_APP.with(|app| {
@@ -5517,6 +5520,26 @@ impl GpuixView {
         let image =
             crate::custom_elements::img::render_image_from_encoded(bytes, cx.svg_renderer())?;
         self.set_live_image(id, image, window, cx)
+    }
+
+    /// Adds the fonts in `bytes` to the window's text system and repaints, so
+    /// text that names one of them picks it up. Shared by the test renderer;
+    /// production loads fonts on the App thread through
+    /// `GpuixRenderer::add_fonts`, which works before any window exists.
+    pub(crate) fn register_font(
+        &mut self,
+        bytes: Vec<u8>,
+        window: &mut gpui::Window,
+        cx: &mut gpui::Context<Self>,
+    ) -> std::result::Result<(), String> {
+        check_font(&bytes)?;
+        window
+            .text_system()
+            .add_fonts(vec![std::borrow::Cow::Owned(bytes)])
+            .map_err(|error| error.to_string())?;
+        cx.notify();
+        window.refresh();
+        Ok(())
     }
 
     pub(crate) fn scroll_element_into_view(&mut self, id: u64) -> bool {
@@ -10128,5 +10151,52 @@ mod automation_bounds_tests {
         frame(&mut app);
         assert_eq!(reply.get(), Some(220.0));
         app.quit();
+    }
+}
+
+/// Rejects fonts GPUI's text system cannot load. It unwraps the family, full and
+/// PostScript name records and aborts the whole process when one is missing, and
+/// skips a font without an "m" glyph, which would leave the family unresolvable.
+pub(crate) fn check_font(bytes: &[u8]) -> std::result::Result<(), String> {
+    use ttf_parser::name_id::{FAMILY, FULL_NAME, POST_SCRIPT_NAME};
+
+    let face = ttf_parser::Face::parse(bytes, 0)
+        .map_err(|error| format!("not a TrueType or OpenType font: {error}"))?;
+    for (id, what) in [
+        (FAMILY, "family"),
+        (FULL_NAME, "full name"),
+        (POST_SCRIPT_NAME, "PostScript"),
+    ] {
+        let named = face
+            .names()
+            .into_iter()
+            .any(|name| name.name_id == id && name.to_string().is_some());
+        if !named {
+            return Err(format!("font has no {what} name"));
+        }
+    }
+    if face.glyph_index('m').is_none() {
+        return Err("font has no glyph for \"m\"".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod font_tests {
+    use super::check_font;
+
+    #[test]
+    fn check_font_accepts_a_usable_font_and_rejects_the_rest() {
+        let square = include_bytes!("../fixtures/gpuix-test-square.ttf");
+        assert!(check_font(square).is_ok());
+
+        let error = check_font(&[1, 2, 3, 4]).unwrap_err();
+        assert!(error.contains("not a TrueType"), "{error}");
+
+        // GPUI's text system unwraps the name records; a font without them
+        // would abort the process instead of failing the load.
+        let nameless = include_bytes!("../fixtures/gpuix-test-nameless.ttf");
+        let error = check_font(nameless).unwrap_err();
+        assert!(error.contains("full name"), "{error}");
     }
 }

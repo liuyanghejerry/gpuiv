@@ -92,6 +92,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   assertNoNewEntityLeaks(): void
   scrollIntoView(elementId: number): void
   setImage(elementId: number, bytes: Uint8Array): void
+  loadFontBytes(bytes: Uint8Array): void
   setImagePixels(
     elementId: number,
     width: number,
@@ -351,6 +352,13 @@ export class TestRenderer implements NativeRenderer {
   setImage(elementId: number, bytes: Uint8Array): void {
     this.flush()
     this.native.setImage(elementId, bytes)
+    this.flush()
+  }
+
+  /** Register a `.ttf`/`.otf` font from raw bytes so `fontFamily` can name the
+   *  family it declares, then repaint. */
+  loadFontBytes(bytes: Uint8Array): void {
+    this.native.loadFontBytes(bytes)
     this.flush()
   }
 
