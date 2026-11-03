@@ -598,15 +598,12 @@ impl CustomElement for TextEditorElement {
             editor = editor.aria_placeholder(self.placeholder.clone());
         }
         // selection-start region: a drag inside an editor must move the caret,
-        // not start a document selection. The tracker overlays both roles.
-        editor = editor.child(crate::automation::bounds_tracker(
-            ctx.id,
-            Some(false),
-            ctx.style
-                .map(crate::style::bounds_insets)
-                .unwrap_or_default(),
-            None,
-        ));
+        // not start a document selection. `on_painted` also registers the
+        // editor's own border box for automation — custom elements paint
+        // themselves, so nothing else would. Without it, a locator on an
+        // editor fails with "Element has no painted bounds" and `click()` has
+        // no target. `<div>` and `<text>` get this from `build_element`.
+        editor = crate::automation::track_host_bounds(editor, ctx.id, Some(false), None);
         if ctx.events.contains("click") {
             let callback = ctx.event_callback.clone();
             let id = ctx.id;
@@ -631,18 +628,6 @@ impl CustomElement for TextEditorElement {
                 crate::renderer::emit_file_drop(&callback, id, dropped, window.mouse_position());
             });
         }
-        // Custom elements paint themselves, so nothing registers their box for
-        // automation unless the builder does it. Without this, a locator on an
-        // editor fails with "Element has no painted bounds" and `click()` has
-        // no target. `<div>` and `<text>` get this from `build_element`.
-        editor = editor.child(crate::automation::bounds_tracker(
-            ctx.id,
-            None,
-            ctx.style
-                .map(crate::style::bounds_insets)
-                .unwrap_or_default(),
-            None,
-        ));
         editor =
             crate::accessibility::apply_a11y_click(editor, ctx.events, ctx.id, ctx.event_callback);
         editor.into_any_element()

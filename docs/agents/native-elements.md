@@ -77,7 +77,7 @@ host id. Every per-row id here is a formatted name for that reason:
 that applies only the base styles type-checks the prop, serializes it, and drops
 it. `custom_surface` in `custom_elements/mod.rs` does this for you.
 
-## Bounds: a container uses a tracker, a leaf uses `on_painted`
+## Bounds: every element records its own paint
 
 Each threaded renderer publishes completed bounds and viewport into its own
 `SharedPaintedFrame`. The publisher is a deferred canvas with `usize::MAX`
@@ -89,14 +89,21 @@ presents synchronously on the window's owning thread.
 
 `getByTestId(..).click()` needs a recorded box. Two mechanisms, both required:
 
-- **Containers** (`<div>`, `<text>`, `<code>`, `<diff>`, `<markdown>`, `<input>`)
-  add `crate::automation::bounds_tracker(id, selection_start, insets)` as a
-  child. It is `absolute().size_full()`, so the parent must be positioned. Pass
-  `Some(selectable)` when the element also owns a selection-start region; the
-  editor uses `Some(false)` so a drag moves the caret instead of starting a
-  document selection. `custom_surface` attaches it.
+- **Host containers** (`<div>`, `<text>`, and custom elements through
+  `custom_surface`, including `<code>`, `<diff>`, `<markdown>`, `<input>` and
+  the canvas fallback) use
+  `crate::automation::track_host_bounds(el, id, selection_start, report)`,
+  which is gpui's `on_painted` on the element itself — no extra child node to
+  lay out and paint. `on_painted` reports the **border box** (what a DOM
+  `getBoundingClientRect` reports); pass `Some(selectable)` when the element
+  also owns a selection-start region (the editor uses `Some(false)` so a drag
+  moves the caret instead of starting a document selection). `report` is the
+  `PaintReporter` that drives `onLayout`/`onScrollChange`; `on_painted` takes
+  one listener, so the paint-driven events share this one. gpui paints nothing
+  for `visibility: hidden`, so a hidden element reports no box and fires no
+  `onLayout` — no child canvas can work around that (it never paints either).
 - **Leaves** (`<img>`, `<svg>`) and **`<anchored>`** use
-  `crate::automation::track_own_bounds(el, id)`, which is gpui's `on_painted`.
+  `crate::automation::track_own_bounds(el, id)`, also `on_painted`.
   Wrapping a leaf in a div instead would move the layout box: the wrapper
   becomes the flex item, and the image loses intrinsic sizing and corner
   clipping. `<anchored>` uses it because only gpui knows where the overlay

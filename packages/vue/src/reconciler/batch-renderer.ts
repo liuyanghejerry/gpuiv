@@ -31,6 +31,17 @@ import { containerForRenderer, unregisterEventHandlers } from "./event-registry.
 
 export type MutationTuple = (number | string | boolean | object | null)[]
 
+let appliedBatches = 0
+
+/**
+ * How many batches of mutations have reached a renderer, across every queue.
+ * It moves whenever the tree changes, which makes it the signal that an app is
+ * still working: `collectGarbageWhenIdle` waits for it to hold still.
+ */
+export function appliedBatchCount(): number {
+  return appliedBatches
+}
+
 /**
  * Wrap a NativeRenderer with batching support.
  *
@@ -87,6 +98,7 @@ export function wrapWithBatching(
 
       // Preserve the queue on failure so JS and Rust cannot desync.
       const destroyedIds = inner.applyBatch(JSON.stringify(queue))
+      appliedBatches++
       const container = containerForRenderer(inner)
       if (container) {
         for (const id of destroyedIds) {

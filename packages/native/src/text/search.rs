@@ -538,7 +538,7 @@ impl GroupList {
 pub fn is_text_leaf(element: &crate::retained_tree::RetainedElement) -> bool {
     element.element_type == "text"
         && element.children.is_empty()
-        && !element.custom_props.contains_key("highlight")
+        && !element.custom_props().contains_key("highlight")
 }
 
 /// Id of the first run of the adjacent primitive-text run `id` belongs to, or
@@ -569,7 +569,7 @@ fn collect_into(tree: &RetainedTree, id: u64, is_root: bool, out: &mut Vec<Group
     let Some(element) = tree.elements.get(&id) else {
         return;
     };
-    if !is_root && element.custom_props.contains_key("highlight") {
+    if !is_root && element.custom_props().contains_key("highlight") {
         return;
     }
     // Own content is a line of its own. Only for built-ins: `build_custom`

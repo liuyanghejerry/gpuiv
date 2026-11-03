@@ -613,8 +613,7 @@ pub(crate) fn build_canvas(
 ) -> gpui::AnyElement {
     let id = element.id;
     let element_id = gpui::SharedString::from(format!("__gpuix_canvas_{id}"));
-    let object_fit = element
-        .custom_props
+    let object_fit = element.custom_props()
         .get("objectFit")
         .and_then(|value| value.as_str())
         .map(crate::custom_elements::img::ImgObjectFit::from_str)
@@ -635,14 +634,7 @@ pub(crate) fn build_canvas(
         {
             fallback = fallback.relative();
         }
-        fallback = fallback.child(crate::automation::bounds_tracker(
-            id,
-            None,
-            style
-                .map(crate::style::bounds_insets)
-                .unwrap_or_default(),
-            None,
-        ));
+        fallback = crate::automation::track_host_bounds(fallback, id, None, None);
         let fallback =
             crate::renderer::wire_host_events(fallback, element, event_callback, arm_pointer_capture);
         return fallback.into_any_element();

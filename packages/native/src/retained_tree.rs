@@ -8,7 +8,7 @@
 /// passes them as numbers across napi (no string allocation).
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use crate::style::StyleDesc;
 
@@ -36,12 +36,10 @@ pub struct RetainedElement {
     /// through it; `Arc` has no `DerefMut`, so the compiler enforces that.
     pub style: Option<Arc<StyleDesc>>,
     pub content: Option<String>,
-    pub events: HashSet<String>,
     pub children: Vec<u64>,
     pub parent: Option<u64>,
-    /// Props for custom elements (input, editor, diff, etc.).
-    /// Keyed by prop name, values are JSON. Ignored for "div" and "text".
-    pub custom_props: HashMap<String, serde_json::Value>,
+    /// Most host nodes have neither listeners nor custom props.
+    extras: Option<Box<ElementExtras>>,
     /// Take keyboard focus the first time this element gets a focus handle.
     /// Without it an `<input>` is dead until the user clicks it.
     pub auto_focus: bool,
@@ -60,21 +58,73 @@ pub struct RetainedElement {
     pub test_id: Option<String>,
 }
 
+#[derive(Default)]
+struct ElementExtras {
+    events: HashSet<String>,
+    custom_props: HashMap<String, serde_json::Value>,
+}
+
+static EMPTY_EXTRAS: LazyLock<ElementExtras> = LazyLock::new(ElementExtras::default);
+
 impl RetainedElement {
+    /// The element's `tabIndex`, when it has a usable one.
+    pub fn tab_index(&self) -> Option<isize> {
+        self.custom_props()
+            .get("tabIndex")
+            .and_then(|value| value.as_i64())
+            .and_then(|index| isize::try_from(index).ok())
+    }
+
+    /// Whether the element must own a gpui focus handle: it takes text, is in the
+    /// tab order, or listens for a key or focus event.
+    pub fn needs_focus(&self) -> bool {
+        matches!(self.element_type.as_str(), "input" | "textarea")
+            || self.tab_index().is_some()
+            || self.events().contains("keyDown")
+            || self.events().contains("keyUp")
+            || self.events().contains("focus")
+            || self.events().contains("blur")
+    }
+
     pub fn new(id: u64, element_type: String, revision: u64) -> Self {
         Self {
             id,
             element_type,
             style: None,
             content: None,
-            events: HashSet::new(),
             children: Vec::new(),
             parent: None,
+            extras: None,
             auto_focus: false,
             subtree_revision: revision,
             search_revision: revision,
             test_id: None,
-            custom_props: HashMap::new(),
+        }
+    }
+
+    pub fn events(&self) -> &HashSet<String> {
+        &self.extras.as_deref().unwrap_or(&EMPTY_EXTRAS).events
+    }
+
+    pub fn custom_props(&self) -> &HashMap<String, serde_json::Value> {
+        &self
+            .extras
+            .as_deref()
+            .unwrap_or(&EMPTY_EXTRAS)
+            .custom_props
+    }
+
+    fn extras_mut(&mut self) -> &mut ElementExtras {
+        self.extras.get_or_insert_with(Default::default)
+    }
+
+    fn release_empty_extras(&mut self) {
+        if self
+            .extras
+            .as_ref()
+            .is_some_and(|extras| extras.events.is_empty() && extras.custom_props.is_empty())
+        {
+            self.extras = None;
         }
     }
 }
@@ -197,6 +247,10 @@ pub struct RetainedTree {
     /// motion states advance for offscreen virtual-list rows too — a build
     /// only visits mounted children, but sync_motion_states walks this set.
     pub motion_ids: HashSet<u64>,
+    /// Elements that `needs_focus`, in id order. Kept as mutations arrive so the
+    /// per-frame focus sync visits these few instead of every retained element:
+    /// a long chat retains thousands, and nearly none are focusable.
+    pub focusable_ids: std::collections::BTreeSet<u64>,
     /// How many `anchored` elements exist. Without any, an `elements_at` walk
     /// can drop a clipped subtree whole.
     anchored_count: usize,
@@ -204,6 +258,11 @@ pub struct RetainedTree {
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
     next_revision: u64,
+    /// Something a frame would draw changed since the last `take_dirty`. A batch
+    /// of resends, which is what a re-render with unchanged props produces,
+    /// leaves it false, so the window is not asked to rebuild its element tree
+    /// for a frame that would come out identical.
+    dirty: bool,
 }
 
 impl RetainedTree {
@@ -211,10 +270,25 @@ impl RetainedTree {
         Self {
             elements: ElementMap::default(),
             motion_ids: HashSet::new(),
+            focusable_ids: Default::default(),
             anchored_count: 0,
             styles: StyleTable::default(),
             root_id: None,
             next_revision: 1,
+            dirty: false,
+        }
+    }
+
+    /// Whether a frame drawn now would differ from the last one, clearing the
+    /// answer. Call once per applied batch.
+    pub fn take_dirty(&mut self) -> bool {
+        std::mem::take(&mut self.dirty)
+    }
+
+    pub fn set_root(&mut self, id: u64) {
+        if self.root_id != Some(id) {
+            self.root_id = Some(id);
+            self.dirty = true;
         }
     }
 
@@ -223,9 +297,27 @@ impl RetainedTree {
         let revision = self.take_revision();
         self.elements
             .insert(id, RetainedElement::new(id, element_type, revision));
+        self.track_focusable(id);
+    }
+
+    /// Bring `focusable_ids` in line with `id` after anything `needs_focus`
+    /// reads has changed.
+    fn track_focusable(&mut self, id: u64) {
+        if self
+            .elements
+            .get(&id)
+            .is_some_and(RetainedElement::needs_focus)
+        {
+            self.focusable_ids.insert(id);
+        } else {
+            self.focusable_ids.remove(&id);
+        }
     }
 
     fn take_revision(&mut self) -> u64 {
+        // Every content change takes a revision to invalidate caches, so this is
+        // the one place that covers style, text, structure and custom props.
+        self.dirty = true;
         let revision = self.next_revision;
         self.next_revision = self.next_revision.wrapping_add(1).max(1);
         revision
@@ -272,6 +364,9 @@ impl RetainedTree {
         }
         let mut destroyed = Vec::new();
         self.destroy_element_recursive(id, &mut destroyed);
+        if !destroyed.is_empty() {
+            self.dirty = true;
+        }
         if self.root_id == Some(id) {
             self.root_id = None;
         }
@@ -284,6 +379,7 @@ impl RetainedTree {
     fn destroy_element_recursive(&mut self, id: u64, destroyed: &mut Vec<u64>) {
         if let Some(element) = self.elements.remove(&id) {
             self.motion_ids.remove(&id);
+            self.focusable_ids.remove(&id);
             self.anchored_count -= usize::from(element.element_type == "anchored");
             destroyed.push(id);
             for child_id in element.children {
@@ -379,51 +475,76 @@ impl RetainedTree {
 
     pub fn set_event_listener(&mut self, id: u64, event_type: String, has_handler: bool) {
         if let Some(element) = self.elements.get_mut(&id) {
-            if has_handler {
-                element.events.insert(event_type);
+            let changed = if has_handler {
+                element.extras_mut().events.insert(event_type)
+            } else if let Some(extras) = element.extras.as_mut() {
+                let changed = extras.events.remove(&event_type);
+                element.release_empty_extras();
+                changed
             } else {
-                element.events.remove(&event_type);
+                false
+            };
+            // Which listeners exist decides how the element is built, though it
+            // does not touch any cached text.
+            self.dirty |= changed;
+            if changed {
+                self.track_focusable(id);
             }
         }
     }
 
     /// Set a custom prop on an element (for non-div/text elements).
+    ///
+    /// Custom props never change the searchable text of a subtree: a native
+    /// element's strings are matched at paint, not collected into a group. The
+    /// one exception is `highlight` itself appearing or disappearing,
+    /// which changes which subtrees an ancestor skips.
     pub fn set_custom_prop(&mut self, id: u64, key: String, value: serde_json::Value) {
         let mut changed = false;
         let is_highlight = key == "highlight";
         let is_motion = key == "motion";
+        let is_tab_index = key == "tabIndex";
         let was_declaration = self
             .elements
             .get(&id)
-            .is_some_and(|element| element.custom_props.contains_key("highlight"));
+            .is_some_and(|element| element.custom_props().contains_key("highlight"));
         if let Some(element) = self.elements.get_mut(&id) {
             // `autoFocus` applies to every element type, so it is lifted out of
             // the custom-prop map that only custom elements read.
             if key == "autoFocus" {
-                element.auto_focus = value.as_bool().unwrap_or(false);
+                let auto_focus = value.as_bool().unwrap_or(false);
+                self.dirty |= element.auto_focus != auto_focus;
+                element.auto_focus = auto_focus;
                 return;
             }
             if key == "testId" {
-                element.test_id = value.as_str().map(str::to_string);
+                let test_id = value.as_str().map(str::to_string);
+                self.dirty |= element.test_id != test_id;
+                element.test_id = test_id;
                 return;
             }
             if value.is_null() {
-                changed = element.custom_props.remove(&key).is_some();
-            } else {
-                if element.custom_props.get(&key) != Some(&value) {
-                    element.custom_props.insert(key, value);
-                    changed = true;
-                }
+                changed = element
+                    .extras
+                    .as_mut()
+                    .is_some_and(|extras| extras.custom_props.remove(&key).is_some());
+                element.release_empty_extras();
+            } else if element.custom_props().get(&key) != Some(&value) {
+                element.extras_mut().custom_props.insert(key, value);
+                changed = true;
             }
         }
         if !changed {
             return;
         }
+        if is_tab_index {
+            self.track_focusable(id);
+        }
         if is_motion {
             if self
                 .elements
                 .get(&id)
-                .is_some_and(|element| element.custom_props.contains_key("motion"))
+                .is_some_and(|element| element.custom_props().contains_key("motion"))
             {
                 self.motion_ids.insert(id);
             } else {
@@ -440,7 +561,7 @@ impl RetainedTree {
 
     /// Read a custom prop value from an element.
     pub fn get_custom_prop(&self, id: u64, key: &str) -> Option<&serde_json::Value> {
-        self.elements.get(&id)?.custom_props.get(key)
+        self.elements.get(&id)?.custom_props().get(key)
     }
 
     pub fn to_json(
@@ -532,13 +653,13 @@ impl RetainedTree {
 
         if element.element_type == "anchored" {
             let deferred = element
-                .custom_props
+                .custom_props()
                 .get("deferred")
                 .and_then(|value| value.as_bool())
                 .unwrap_or(true);
             if deferred {
                 let priority = element
-                    .custom_props
+                    .custom_props()
                     .get("priority")
                     .and_then(|value| value.as_u64())
                     .unwrap_or(1);
@@ -633,15 +754,15 @@ fn element_to_json(
             }
         }
 
-        if !element.events.is_empty() {
-            let mut events: Vec<String> = element.events.iter().cloned().collect();
+        if !element.events().is_empty() {
+            let mut events: Vec<String> = element.events().iter().cloned().collect();
             events.sort();
             obj.insert("events".to_string(), serde_json::json!(events));
         }
 
-        if !element.custom_props.is_empty() {
+        if !element.custom_props().is_empty() {
             let custom: serde_json::Map<String, serde_json::Value> = element
-                .custom_props
+                .custom_props()
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect();
@@ -681,6 +802,66 @@ mod tests {
         tree.append_child(2, 3);
         tree.set_text(3, "hello".to_string());
         tree
+    }
+
+    #[test]
+    fn cold_event_and_prop_storage_is_released_when_empty() {
+        let mut tree = tree_with_child();
+        assert!(tree.elements[&1].extras.is_none());
+
+        tree.set_event_listener(1, "click".to_string(), true);
+        tree.set_custom_prop(1, "aria-label".to_string(), serde_json::json!("button"));
+        assert!(tree.elements[&1].events().contains("click"));
+        assert_eq!(
+            tree.get_custom_prop(1, "aria-label"),
+            Some(&serde_json::json!("button"))
+        );
+
+        tree.set_event_listener(1, "click".to_string(), false);
+        assert!(tree.elements[&1].extras.is_some());
+        tree.set_custom_prop(1, "aria-label".to_string(), serde_json::Value::Null);
+        assert!(tree.elements[&1].extras.is_none());
+    }
+
+    /// `focusable_ids` stands in for a scan of every element, so it has to
+    /// agree with `needs_focus` after any mutation that can change the answer.
+    #[test]
+    fn focusable_ids_follow_what_needs_focus_reads() {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "input".to_string());
+        tree.create_element(3, "div".to_string());
+        tree.create_element(4, "div".to_string());
+        tree.append_child(1, 2);
+        tree.append_child(1, 3);
+        tree.append_child(1, 4);
+        let focusable =
+            |tree: &RetainedTree| tree.focusable_ids.iter().copied().collect::<Vec<_>>();
+        assert_eq!(focusable(&tree), vec![2], "inputs always take focus");
+
+        tree.set_event_listener(3, "keyDown".to_string(), true);
+        tree.set_custom_prop(4, "tabIndex".to_string(), serde_json::json!(0));
+        assert_eq!(focusable(&tree), vec![2, 3, 4]);
+
+        // A click listener has nothing to do with focus.
+        tree.set_event_listener(1, "click".to_string(), true);
+        assert_eq!(focusable(&tree), vec![2, 3, 4]);
+
+        // Other listeners keep an element in the set until the last one goes.
+        tree.set_event_listener(3, "blur".to_string(), true);
+        tree.set_event_listener(3, "keyDown".to_string(), false);
+        assert_eq!(focusable(&tree), vec![2, 3, 4]);
+        tree.set_event_listener(3, "blur".to_string(), false);
+        assert_eq!(focusable(&tree), vec![2, 4]);
+
+        tree.set_custom_prop(4, "tabIndex".to_string(), serde_json::Value::Null);
+        assert_eq!(focusable(&tree), vec![2]);
+
+        tree.destroy_element(1);
+        assert!(
+            tree.focusable_ids.is_empty(),
+            "destroying a subtree forgets its ids"
+        );
     }
 
     /// A clipping scroller, overlapping siblings, and an overlay that does not
