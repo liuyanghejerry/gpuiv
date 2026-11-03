@@ -134,6 +134,18 @@ jobs:
           path: packages/native/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
+      # End-to-end check that the public custom-element API still compiles and
+      # runs for an external crate (example-rust-native-element). Runs only on
+      # the arm64 macOS build, whose warm packages/native/target the addon's
+      # .cargo/config.toml shares; CARGO_BUILD_TARGET aligns the addon with the
+      # triple napi built, so nothing recompiles GPUI.
+      - name: Run external custom element tests
+        if: matrix.settings.target == 'aarch64-apple-darwin'
+        working-directory: example-rust-native-element
+        env:
+          CARGO_BUILD_TARGET: aarch64-apple-darwin
+        run: bun run test
+
   test:
     name: test
     needs: build

@@ -84,9 +84,9 @@ pub(crate) fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::
 
 /// Abstracted event callback shared by desktop, browser, and test renderers.
 #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
-pub(crate) type EventCallback = Arc<dyn Fn(EventPayload) + Send + Sync>;
+pub type EventCallback = Arc<dyn Fn(EventPayload) + Send + Sync>;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-pub(crate) type EventCallback = Rc<dyn Fn(EventPayload)>;
+pub type EventCallback = Rc<dyn Fn(EventPayload)>;
 
 /// Validate and convert a JS number (f64) to a u64 element ID.
 /// JS numbers are f64 — lossless for integers up to 2^53.
@@ -5302,7 +5302,9 @@ pub(crate) struct PaintReports {
 
 pub(crate) type SharedPaintReports = Rc<RefCell<PaintReports>>;
 
-pub(crate) struct GpuixView {
+/// The root view of a GPUIV window. Custom elements render with its
+/// `Context`, so they can create entities, focus handles and subscriptions.
+pub struct GpuixView {
     pub(crate) tree: Arc<Mutex<RetainedTree>>,
     pub(crate) event_callback: Option<EventCallback>,
     pub(crate) window_title: String,
@@ -8667,7 +8669,7 @@ pub(crate) fn mouse_button_to_u32(button: gpui::MouseButton) -> u32 {
 /// caller customize it via a closure, then sends it through the callback.
 /// Production: queues on Node.js event loop via ThreadsafeFunction.
 /// Tests: pushes to a synchronous Vec for drainEvents().
-pub(crate) fn emit_event_full(
+pub fn emit_event_full(
     callback: &Option<EventCallback>,
     element_id: u64,
     event_type: &str,

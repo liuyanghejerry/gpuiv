@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "examples"
+    "examples",
+    "example-rust-native-element"
   ],
   "scripts": {
     "build": "bun run build:native && bun run build:vue",

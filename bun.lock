@@ -9,6 +9,18 @@
         "typescript": "^5.3.0",
       },
     },
+    "example-rust-native-element": {
+      "name": "@gpuiv/example-rust-native-element",
+      "version": "0.0.0",
+      "dependencies": {
+        "@gpuiv/vue": "workspace:^",
+        "vue": "^3.5.0",
+      },
+      "devDependencies": {
+        "typescript": "^5.3.0",
+        "vitest": "^4.0.18",
+      },
+    },
     "examples": {
       "name": "@gpuiv/examples",
       "version": "0.1.0",
@@ -37,7 +49,7 @@
     },
     "packages/animal-island": {
       "name": "@gpuiv/animal-island",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "dependencies": {
         "@gpuiv/vue": "workspace:*",
       },
@@ -214,6 +226,8 @@
     "@gpuiv/animal-island": ["@gpuiv/animal-island@workspace:packages/animal-island"],
 
     "@gpuiv/beautiful-ui": ["@gpuiv/beautiful-ui@workspace:packages/beautiful-ui"],
+
+    "@gpuiv/example-rust-native-element": ["@gpuiv/example-rust-native-element@workspace:example-rust-native-element"],
 
     "@gpuiv/examples": ["@gpuiv/examples@workspace:examples"],
 

@@ -22,6 +22,7 @@
 - [x] Frame-exact automation video recording (`app.recordVideo()`; MP4/WebM/GIF through ffmpeg)
 - [x] Test resource ownership counters and GPUI entity leak baselines; dedicated macOS memory resource CI gate with production-Bun heap/RSS reports
 - [x] Idle garbage collection (`collectGarbageWhenIdle()`: one full GC after commits go quiet, Bun/Node aware)
+- [x] External Rust custom elements (`register_custom_element`: other crates link `gpuiv-native`, add hyphenated element types with custom `on*` events carrying `detail`; `example-rust-native-element/` proves the surface end-to-end in CI)
 - [x] Standalone build (pinned GPUI platform dependencies)
 - [x] Native text input and multiline textarea, with single-line password masking and configurable placeholder ink
 - [x] Markdown WYSIWYG editor (`<markdown-editor>`): headless ProseMirror model rendered as one native editable block per textblock — GFM tables/tasks/strikethrough, footnotes, `==highlight==`, input rules, format shortcuts, block splitting (enter) and hard breaks (shift-enter), task toggles, cross-block drag selection with markdown copy/paste, ⌘F search decorations, full-height source mode, anchor jumps; heading-specific spacing and rules, padded code blocks, single-width table borders, and muted completed tasks. The partial `theme` prop includes `border`, `codeBlockBackground`, and `tableHeaderBackground` colors; styled spans / decorations / programmatic selection / `selectionChange` / `selectionDrag` / clipboard interception props on `<input>`/`<textarea>`

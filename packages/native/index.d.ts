@@ -1044,8 +1044,8 @@ export interface EventPayload {
   /** Numeric element ID (matches the ID assigned in JS via createElement). */
   elementId: number
   /**
-   * Event type string — matches the key used in EVENT_PROPS on the JS side.
-   * e.g. "click", "mouseDown", "mouseEnter", "keyDown", "scroll", etc.
+   * Event type string. The JS handler prop is `on` + this name capitalized:
+   * "click" → `onClick`, "mouseDown" → `onMouseDown`.
    */
   eventType: string
   /**
@@ -1183,6 +1183,8 @@ export interface EventPayload {
    * Populated for: fileDrop.
    */
   paths?: Array<string>
+  /** Any JSON value, like the DOM's `CustomEvent.detail`. For elements added with `register_custom_element`. */
+  detail?: unknown
   modifiers?: EventModifiers
 }
 

@@ -10,3 +10,6 @@ screenshots/
 # Test output churns every run; the curated set the README links to lives in
 # docs/images and is regenerated with `bun scripts/screenshots.ts`.
 coverage/
+
+# example-rust-native-element: the addon built by its vitest globalSetup
+example-rust-native-element/rust-greeting.node
