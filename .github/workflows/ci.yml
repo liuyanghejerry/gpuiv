@@ -136,15 +136,18 @@ jobs:
 
       # End-to-end check that the public custom-element API still compiles and
       # runs for an external crate (example-rust-native-element). Runs only on
-      # the arm64 macOS build, whose warm packages/native/target the addon's
-      # .cargo/config.toml shares; CARGO_BUILD_TARGET aligns the addon with the
-      # triple napi built, so nothing recompiles GPUI.
+      # the arm64 macOS build, whose cargo cache holds the shared
+      # packages/native/target the addon's .cargo/config.toml points at; the
+      # first run pays a full compile, later runs reuse the cache.
       - name: Run external custom element tests
         if: matrix.settings.target == 'aarch64-apple-darwin'
-        working-directory: example-rust-native-element
+        working-directory: .
         env:
           CARGO_BUILD_TARGET: aarch64-apple-darwin
-        run: bun run test
+        run: |
+          # The example suite loads @gpuiv/vue from dist/ (gitignored).
+          bun run build:vue
+          cd example-rust-native-element && bun run test
 
   test:
     name: test
