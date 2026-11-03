@@ -739,6 +739,31 @@ alone, because a focused text field blinks its caret in native code and redraws
 twice a second. Pass `activity`, `collect`, `checkMs`, `quietChecks` or
 `busyCpu` to change what it watches or how often.
 
+## Portals
+
+Mount content into an element that lives elsewhere in the window with Vue's
+built-in `<Teleport>` — the target is a host element taken from a template
+`ref`, and the renderer attaches the portal's children directly to it.
+
+```tsx
+import { Teleport, ref } from 'vue'
+
+const layer = ref<HostNode | null>(null)
+// <div ref={layer} style={{ position: 'absolute', inset: 0 }} />
+// {layer.value && <Teleport to={layer.value}><Toast /></Teleport>}
+```
+
+Render the Teleport once the target `ref` is set: a portal into an element
+that has not mounted has nowhere to attach. The portal's children are
+appended after whatever the target already holds (empty text anchors mark
+their span) and stay in key order among themselves; the content keeps the
+context of the component that rendered it, as in the DOM. The target must
+belong to the same root as the caller.
+
+For floating menus that must paint above a `<virtual-list>`, use
+[`<anchored>`](#overlay-menus) rather than a portal: a portal changes where
+elements live in the tree, not the order gpui paints them in.
+
 ## Native animations
 
 Use **`motion.div`** to animate from an initial style to a target style. Vue
