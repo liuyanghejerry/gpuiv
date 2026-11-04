@@ -28,7 +28,7 @@ import type {
   StyleDesc,
   WindowKeyEventHandlers,
 } from "../types.js"
-import { wrapWithBatching } from "./batch-renderer.js"
+import { sameMutationValue, wrapWithBatching } from "./batch-renderer.js"
 import {
   attachRoot,
   containerForRenderer,
@@ -357,12 +357,12 @@ export function createGpuivRendererHost(
     patchProp(
       node: HostNode,
       key: string,
-      _prev: unknown,
+      prev: unknown,
       next: unknown,
       _namespace: unknown,
       parentComponent?: ComponentInternalInstance | null
     ): void {
-      patchNodeProp(node, key, next, parentComponent)
+      patchNodeProp(node, key, prev, next, parentComponent)
     },
 
     querySelector(): null {
@@ -473,6 +473,7 @@ export function createGpuivRendererHost(
       host.renderer.setEventListener(node.id, eventType, false)
       return
     }
+    const alreadyListening = container.eventHandlers.get(node.id)?.has(eventType) ?? false
     type Listener = (event: EventPayload) => unknown
     const raw = value as Listener | Listener[]
     // Web `v-on` wraps every listener in callWithAsyncErrorHandling, so a
@@ -488,12 +489,19 @@ export function createGpuivRendererHost(
           for (const fn of Array.isArray(raw) ? raw : [raw]) fn(payload)
         }
     registerEventHandler(container.eventHandlers, node.id, eventType, handler)
-    host.renderer.setEventListener(node.id, eventType, true)
+    // Only the first handler for a type crosses the FFI. Vue re-creates an
+    // inline `onClick={() => ...}` on every render, and re-sending
+    // `setEventListener(true)` for each would only make Rust parse and
+    // discard the same boolean again — the registry swap above is local.
+    if (!alreadyListening) {
+      host.renderer.setEventListener(node.id, eventType, true)
+    }
   }
 
   function patchNodeProp(
     node: HostNode,
     key: string,
+    previous: unknown,
     next: unknown,
     instance?: ComponentInternalInstance | null
   ): void {
@@ -502,7 +510,18 @@ export function createGpuivRendererHost(
     if (key === "style") {
       if (next == null) delete node.props.style
       else node.props.style = next
-      if (node.created) host.renderer.setStyle(node.id, toGpuixStyle(next))
+      if (node.created) {
+        // `style={{ ... }}` is a new object on every render, so the reference
+        // alone says nothing. Compare what would reach Rust and skip the op
+        // when a re-render produced the same style; Rust compares again
+        // post-#189, but this keeps the payload off the FFI and the JSON
+        // string out of the batch. A style mutated in place never gets here —
+        // Vue skips patchProp when the reference did not change.
+        const outgoing = toGpuixStyle(next)
+        if (!sameMutationValue(toGpuixStyle(previous), outgoing)) {
+          host.renderer.setStyle(node.id, outgoing)
+        }
+      }
       return
     }
     const eventType = eventTypeForProp(key)
@@ -531,14 +550,16 @@ export function createGpuivRendererHost(
       if (node.created) applyEvent(node, eventType, null)
     }
     if (shouldForwardProp(node, key, next)) {
+      const existed = key in node.props
       if (next == null) delete node.props[key]
       else node.props[key] = next
       if (node.created) {
-        host.renderer.setCustomProp(
-          node.id,
-          key,
-          serializeValue(next)
-        )
+        // An inline object prop is new on every render; only the serialized
+        // payload matters, so skip the op when it did not change.
+        const serialized = serializeValue(next)
+        if (next == null || !existed || !sameMutationValue(serializeValue(previous), serialized)) {
+          host.renderer.setCustomProp(node.id, key, serialized)
+        }
       }
     }
   }

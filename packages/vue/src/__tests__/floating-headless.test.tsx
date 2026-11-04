@@ -184,7 +184,10 @@ describe("FloatingLayer (headless)", () => {
     const { renderer, anchored, content } = mountLayer({}, { background })
     expect(renderer.lastStyle(anchored)!.background).toEqual(background)
     expect(renderer.lastStyle(anchored)!.backgroundColor).toBeUndefined()
-    expect(renderer.lastStyle(content)!.background).toBeUndefined()
+    // The content's style normalizes to empty here, and an empty style is the
+    // same wire payload as no style — post skip-unchanged-updates neither is
+    // sent. Either way the fill must not repeat on the content.
+    expect(renderer.lastStyle(content)?.background).toBeUndefined()
   })
 
   it("treats a layout-only style as no surface paint and defaults the fill", () => {
