@@ -275,6 +275,7 @@ from upstream through `367ef48`:
 | #190 | Font-loading hardening: `check_font` rejects non-font bytes and fonts with missing name records or `m` glyph before GPUI's text system can abort; `TestGpuixRenderer.loadFontBytes` twin + fixtures (registerFont stays diverged: our `loadFont`/`loadFontBytes` are published and a superset) — upstream `f3eede6` |
 | #191 | External Rust custom-element registration: `register_custom_element` + public custom-element API + `EventPayload.detail`; Vue replaces its fixed `EVENT_TYPES` gate with the `on`+uppercase handler rule (port found and fixed `shouldForwardProp` reading the stale prop value, which broke handler→data switches); `example-rust-native-element/` addon crate proves the surface end-to-end, CI-run on the arm64 macOS build sharing its warm cargo target — upstream `2f3ee31` `5273ce2` `d4ac80d` |
 | #192 | Portals: the built-in `<Teleport to={hostRef}>` is the Vue answer (already worked; no `createPortal` helper); headless + GPU regressions pin structure/order/paint/cleanup, "Portals" docs — upstream `d47fb1d` |
+| #193 | JS host-config perf: `sameMutationValue` + skip unchanged style/custom-prop ops in `patchNodeProp`, `setEventListener(true)` only on first registration; measured 300-row no-change re-render from ~1,451 ops/round to zero. `239f16d`/`a1b3441` moot for Vue, `ab37d93` declined — upstream `239f16d` `b5789d9` `cd76744` `a1b3441` `ab37d93` |
 
 (#5 was auto-closed by branch deletion after its base was squash-merged; its
 content re-landed as #6.)
