@@ -290,7 +290,9 @@ describe("renderer app wiring (headless)", () => {
   it("process-level handlers surface errors without a mounted app", async () => {
     installRuntimeErrorHandlers()
     process.emit("uncaughtException", new Error("process level"))
+    process.emit("unhandledRejection", new Error("rejected at process level"))
     expect(errors.some((line) => line.includes("process level"))).toBe(true)
+    expect(errors.some((line) => line.includes("rejected at process level"))).toBe(true)
     resetApp()
   })
 
@@ -318,6 +320,11 @@ describe("startFrameLoop (headless)", () => {
     })
     vi.advanceTimersByTime(100)
     expect(loop).toBeTruthy()
+    // The inert loop accepts and drops renderers without scheduling anything.
+    const extra = { requiresTick: () => true, tick: () => true }
+    loop.addRenderer(extra)
+    loop.removeRenderer(extra)
+    vi.advanceTimersByTime(100)
     loop.stop()
   })
 
