@@ -46,6 +46,7 @@ EXEMPT: dict[str, str] = {
     "custom_elements/input.rs": "editor element over live gpui entities",
     "custom_elements/markdown.rs": "renders inside GPU frames",
     "lib.rs": "module init glue",
+    "hotkeys.rs": "parser and key tables are unit-tested on every system; the macOS/Windows registration impls need a live event loop",
     "tray.rs": "napi surface over platform tray APIs",
     "url_scheme.rs": "registration needs a live GPUI app",
     "open_urls.rs": "callback arms need a ThreadsafeFunction (live JS env)",
