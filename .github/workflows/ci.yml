@@ -356,8 +356,8 @@ jobs:
         if: steps.tool-cache.outputs.cache-hit != 'true'
         run: cargo install cargo-llvm-cov@0.9.1 --locked
 
-      - name: Cache coverage target
-        uses: actions/cache@v4
+      - name: Restore coverage target
+        uses: actions/cache/restore@v4
         with:
           path: packages/native/target/
           key: native-cov-${{ runner.os }}-${{ hashFiles('packages/native/Cargo.lock') }}
@@ -384,7 +384,12 @@ jobs:
             vulkan-validationlayers
 
       - name: Run unit tests under coverage
-        run: cargo llvm-cov --lib --lcov --output-path lcov.info
+        # The three tests that spin a real GPUI window (Metal/DirectX test
+        # contexts) crash under the llvm-cov runtime on macOS, and all live
+        # in gate-exempt modules (renderer.rs, custom_elements/img.rs), so
+        # the coverage run skips them; serial threads keep an instrumentation
+        # crash attributable to a named test if one ever appears again.
+        run: cargo llvm-cov --lib --lcov --output-path lcov.info -- --test-threads=1 --skip automation_bounds_reply --skip image_filters_color_assets --skip image_filters_last_window
 
       - name: Upload lcov
         uses: actions/upload-artifact@v4
@@ -392,6 +397,13 @@ jobs:
           name: native-lcov-${{ runner.os }}
           path: packages/native/lcov.info
           if-no-files-found: error
+
+      - name: Save coverage target
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: packages/native/target/
+          key: native-cov-${{ runner.os }}-${{ hashFiles('packages/native/Cargo.lock') }}-${{ github.run_id }}
 
   # Merge the per-system lcov files (a line covered anywhere counts) and gate
   # every non-exempt module at 90% merged line coverage. The exempt list and
