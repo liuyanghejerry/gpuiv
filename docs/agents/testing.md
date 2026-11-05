@@ -30,6 +30,38 @@ THROTTLE=utility bun run test chat.perf.test.tsx
 Use `bun run test`, not `bun test` — the suites are vitest, so `bun test` picks
 the wrong runner.
 
+### Coverage
+
+`@gpuiv/vue` coverage runs headless everywhere (v8 provider; the config in
+`packages/vue/vitest.config.ts` excludes the test harness, type-only files and
+re-export barrels):
+
+```bash
+cd packages/vue && bun run test:coverage   # text table + coverage/ HTML
+```
+
+The bar is **≥90% statements and lines per module**. Function coverage on
+`components/select.tsx` sits just under: its context object carries defensive
+no-op placeholders that setup replaces before any child can call them, so they
+are unreachable by construction. GPU-gated suites add coverage on CI that a
+headless run cannot see.
+
+Rust line coverage of `@gpuiv/native` (Linux compile surface — macOS/Windows
+`cfg` code is absent from the binary):
+
+```bash
+rustup component add llvm-tools-preview   # once
+cargo install cargo-llvm-cov --locked     # once
+cd packages/native && CARGO_NET_OFFLINE=true \
+  PKG_CONFIG_PATH="$REPO/tmp/sysroot-debs/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig" \
+  cargo llvm-cov --lib --summary-only
+```
+
+The instrumented build recompiles the whole GPUI tree in debug; expect the
+first run to take a quarter hour. Platform-gated code means the Linux number
+is a floor, not the module's true coverage.
+
+
 `examples/chat.perf.test.tsx` is the automated profile. It uses `createTestApp()`,
 not the live window. Assert **p95 draw / flush ms**, not a per-frame FPS floor.
 
