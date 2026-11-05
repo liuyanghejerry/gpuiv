@@ -198,3 +198,30 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::*;
+
+    #[test]
+    fn recording_a_notification_keeps_its_actions() {
+        let notification = gpui::SystemNotification {
+            tag: "tag-1".into(),
+            title: "Title".into(),
+            body: "Body".into(),
+            actions: vec![gpui::SystemNotificationAction {
+                id: "open".into(),
+                label: "Open".into(),
+            }],
+        };
+        let recorded = RecordedSystemNotification::from(&notification);
+        assert_eq!(recorded.tag, "tag-1");
+        assert_eq!(recorded.title, "Title");
+        assert_eq!(recorded.body, "Body");
+        assert_eq!(recorded.actions.len(), 1);
+        assert_eq!(
+            (recorded.actions[0].id.as_str(), recorded.actions[0].label.as_str()),
+            ("open", "Open")
+        );
+    }
+}

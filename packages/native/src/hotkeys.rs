@@ -573,3 +573,61 @@ mod tests {
         assert_eq!(win_virtual_key("f12"), Some(0x7b));
     }
 }
+
+#[cfg(test)]
+mod platform_tests {
+    use super::{clear, set, validate_for_tests, HotkeyRequest};
+
+    #[test]
+    fn validation_matches_the_parser_without_registering() {
+        assert!(validate_for_tests("cmd+shift+j").is_ok());
+        assert_eq!(
+            validate_for_tests("hyper+q"),
+            Err("unsupported accelerator: \"hyper+q\"".to_string())
+        );
+    }
+
+    #[test]
+    fn set_and_clear_route_through_the_platform_layer() {
+        // On Linux there is nothing to route to; the surfaces must still be
+        // callable and report the platform gap as an error.
+        let result = set(
+            HotkeyRequest {
+                accelerator: "cmd+k".to_string(),
+            },
+            None,
+        );
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
+            assert!(result.is_ok());
+        } else {
+            assert_eq!(
+                result.err().unwrap(),
+                "global shortcuts are implemented on macOS and Windows only"
+            );
+        }
+        clear("cmd+k");
+    }
+}
+
+#[cfg(test)]
+mod key_code_tests {
+    use super::{mac_key_code, win_virtual_key};
+
+    #[test]
+    fn virtual_key_tables_reject_what_the_parser_rejects() {
+        assert_eq!(mac_key_code("a"), Some(0x00));
+        assert_eq!(mac_key_code("m"), Some(0x0c));
+        assert_eq!(mac_key_code("0"), Some(0x1d));
+        assert_eq!(mac_key_code("7"), Some(0x1f + 6));
+        assert_eq!(mac_key_code("f1"), Some(0x7a));
+        assert_eq!(mac_key_code("f12"), Some(0x6f));
+        assert_eq!(mac_key_code("@"), None, "not part of the accepted key set");
+        assert_eq!(mac_key_code("f13"), None, "function keys stop at f12");
+
+        assert_eq!(win_virtual_key("a"), Some(u32::from(b'a')));
+        assert_eq!(win_virtual_key("5"), Some(u32::from(b'5')));
+        assert_eq!(win_virtual_key("f12"), Some(0x7b));
+        assert_eq!(win_virtual_key("-"), None);
+        assert_eq!(win_virtual_key("f13"), None);
+    }
+}

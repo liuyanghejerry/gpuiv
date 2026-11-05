@@ -979,3 +979,87 @@ mod tests {
         assert_eq!(t.bg, grey(0xff));
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::syntax::HighlightKind;
+
+    #[test]
+    fn palette_color_maps_every_capture_kind() {
+        let palette = Theme::light().syntax;
+        // The mapping is a table: each kind reads its own field, and the two
+        // punctuation-ish kinds share one.
+        assert_eq!(palette.color(HighlightKind::Comment), palette.comment);
+        assert_eq!(palette.color(HighlightKind::Keyword), palette.keyword);
+        assert_eq!(palette.color(HighlightKind::String), palette.string);
+        assert_eq!(palette.color(HighlightKind::Number), palette.number);
+        assert_eq!(palette.color(HighlightKind::Type), palette.type_name);
+        assert_eq!(palette.color(HighlightKind::Function), palette.function);
+        assert_eq!(palette.color(HighlightKind::Operator), palette.operator);
+        assert_eq!(palette.color(HighlightKind::Tag), palette.tag);
+        assert_eq!(palette.color(HighlightKind::Invalid), palette.invalid);
+        assert_eq!(
+            palette.color(HighlightKind::Punctuation),
+            palette.color(HighlightKind::Embedded)
+        );
+    }
+
+    #[test]
+    fn heading_overrides_apply_prefixwise_and_lose_the_rest() {
+        let mut theme = Theme::default();
+        theme.metrics.apply(&MetricsOverride {
+            md_heading_sizes: Some(vec![42.0, 43.0]),
+            md_heading_line_heights: Some(vec![50.0, 51.0, 52.0]),
+            ..Default::default()
+        });
+        assert_eq!(theme.metrics.md_heading_sizes[..2], [42.0, 43.0]);
+        // A shorter array leaves the remaining slots at their defaults.
+        assert_eq!(theme.metrics.md_heading_sizes[2], 15.0);
+        assert_eq!(theme.metrics.md_heading_line_heights[..3], [50.0, 51.0, 52.0]);
+    }
+
+    #[test]
+    fn invalid_metrics_are_rejected_not_clamped() {
+        let mut theme = Theme::default();
+        let before = theme.metrics.diff_line_height;
+        theme.metrics.apply(&MetricsOverride {
+            diff_line_height: Some(-3.0),
+            ..Default::default()
+        });
+        assert_eq!(theme.metrics.diff_line_height, before);
+        theme.metrics.apply(&MetricsOverride {
+            diff_line_height: Some(f64::NAN),
+            ..Default::default()
+        });
+        assert_eq!(theme.metrics.diff_line_height, before);
+    }
+
+    #[test]
+    fn diff_layout_hash_ignores_non_diff_metrics() {
+        use std::hash::{DefaultHasher, Hasher};
+        let base = Theme::default();
+        let mut hash_of = |theme: &Theme| {
+            let mut hasher = DefaultHasher::new();
+            theme.metrics.hash_diff_layout_into(&mut hasher);
+            hasher.finish()
+        };
+
+        // Changing a diff row metric must move the hash...
+        let mut taller = base.clone();
+        taller.metrics.apply(&MetricsOverride {
+            diff_line_height: Some(f64::from(base.metrics.diff_line_height) + 1.0),
+            ..Default::default()
+        });
+        assert_ne!(hash_of(&taller), hash_of(&base));
+
+        // ...while a markdown metric must not: resetting the scroll anchor
+        // for a text tweak is the bug this hash exists to prevent.
+        let mut wider_text = base.clone();
+        wider_text.metrics.apply(&MetricsOverride {
+            md_text_size: Some(f64::from(base.metrics.md_text_size) + 1.0),
+            ..Default::default()
+        });
+        assert_eq!(hash_of(&wider_text), hash_of(&base));
+    }
+}

@@ -282,3 +282,52 @@ impl From<gpui::Modifiers> for EventModifiers {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn event_payload_defaults_are_inert() {
+        let payload = EventPayload::default();
+        assert_eq!(payload.element_id, 0.0);
+        assert_eq!(payload.event_type, "");
+        assert!(payload.x.is_none());
+        assert!(payload.detail.is_none());
+        assert!(payload.modifiers.is_none());
+        let modifiers = EventModifiers::default();
+        assert!(!(modifiers.shift || modifiers.ctrl || modifiers.alt || modifiers.cmd));
+    }
+
+    #[test]
+    fn modifiers_convert_from_gpui() {
+        let converted = EventModifiers::from(gpui::Modifiers {
+            control: true,
+            alt: true,
+            ..Default::default()
+        });
+        assert!(converted.ctrl && converted.alt && !converted.shift && !converted.cmd);
+    }
+
+    #[test]
+    fn highlight_matches_convert_from_painted_highlights() {
+        let painted = crate::text::PaintedHighlight {
+            element_id: 7,
+            sub: 1,
+            text: "needle".into(),
+            start: 2,
+            end: 5,
+            active: true,
+            rects: vec![(1.0, 2.0, 3.0, 4.0)],
+        };
+        let converted = HighlightMatch::from(painted);
+        assert_eq!(converted.element_id, 7.0);
+        assert_eq!(converted.sub, 1.0);
+        assert_eq!(converted.text, "needle");
+        assert_eq!((converted.start, converted.end), (2.0, 5.0));
+        assert!(converted.active);
+        let rect = &converted.rects[0];
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (1.0, 2.0, 3.0, 4.0));
+        assert_eq!(converted.rects.len(), 1);
+    }
+}
