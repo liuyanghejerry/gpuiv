@@ -25,7 +25,7 @@ const PORT = 8907
  *  minus the user-app.iife route, the `disconnect` relay and the Electron
  *  BrowserWindow, plus the "MIDDLEWARE_LISTENING" marker this test waits for.
  *  Re-check it when that dependency moves. */
-function middlewareSource(): string {
+export function middlewareSource(port: number = PORT): string {
   return `
 import { createServer } from "node:http"
 import { createApp, toNodeListener } from "h3"
@@ -42,7 +42,7 @@ io.on("connection", (socket) => {
   socket.on("vue-devtools:init", () => socket.broadcast.emit("vue-devtools:init"))
   socket.on("vue-devtools:disconnect", () => socket.broadcast.emit("vue-devtools:disconnect"))
 })
-server.listen(${PORT}, () => console.log("MIDDLEWARE_LISTENING"))
+server.listen(${port}, () => console.log("MIDDLEWARE_LISTENING"))
 `
 }
 
@@ -71,7 +71,7 @@ setInterval(() => {
 `
 }
 
-function collectOutput(child: ReturnType<typeof spawn>) {
+export function collectOutput(child: ReturnType<typeof spawn>) {
   let buf = ""
   child.stdout?.on("data", (chunk) => {
     buf += String(chunk)
@@ -93,7 +93,7 @@ function collectOutput(child: ReturnType<typeof spawn>) {
   }
 }
 
-async function killTree(child: ReturnType<typeof spawn>): Promise<void> {
+export async function killTree(child: ReturnType<typeof spawn>): Promise<void> {
   if (process.platform === "win32") {
     spawn("taskkill", ["/pid", String(child.pid), "/t", "/f"])
   } else {
