@@ -1268,3 +1268,119 @@ mod tests {
         assert_eq!(tree.elements[&1].subtree_revision, after);
     }
 }
+
+#[cfg(test)]
+mod json_and_hit_tests {
+    use super::*;
+    use crate::automation::ElementBounds;
+    use std::collections::HashMap;
+
+    fn styled_tree() -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        tree.create_element(1, "div".to_string());
+        tree.create_element(2, "text".to_string());
+        tree.create_element(3, "div".to_string());
+        tree.create_element(4, "anchored".to_string());
+        tree.create_element(5, "text".to_string());
+        tree.append_child(1, 2);
+        tree.append_child(1, 3);
+        tree.append_child(3, 4);
+        tree.append_child(4, 5);
+        tree.set_text(2, "hello".to_string());
+        tree.set_text(5, "overlay".to_string());
+        tree.set_custom_prop(2, "testId".to_string(), serde_json::json!("row"));
+        tree.set_event_listener(2, "click".to_string(), true);
+        tree.set_custom_prop(1, "highlight".to_string(), serde_json::json!("q"));
+        tree.set_root(1);
+        tree
+    }
+
+    fn bounds_of(entries: &[(u64, f64, f64, f64, f64)]) -> impl Fn(u64) -> Option<ElementBounds> + '_ {
+        move |id| {
+            entries.iter().find(|(entry, ..)| *entry == id).map(|(_, x, y, w, h)| ElementBounds {
+                x: *x,
+                y: *y,
+                width: *w,
+                height: *h,
+            })
+        }
+    }
+
+    #[test]
+    fn full_json_carries_styles_the_locator_tree_does_not() {
+        let mut tree = styled_tree();
+        let style = tree.styles.intern(br#"{"width":100}"#).unwrap();
+        tree.set_style(1, style);
+        let bounds = HashMap::new();
+
+        let full = tree.to_json(&bounds);
+        let full_text = full.to_string();
+        assert!(full_text.contains("\"style\""), "full dumps carry styles");
+        assert!(full_text.contains("click"), "full dumps carry listeners");
+        assert!(full_text.contains("hello"));
+        // The locator dump keeps the tree shape and text but skips the heavy
+        // maps, so a 5k-row list is not 100ms of JSON.
+        let automation_text = tree.to_automation_json(&bounds).to_string();
+        assert!(
+            !automation_text.contains("\"style\""),
+            "locator dumps skip style maps"
+        );
+        assert!(
+            !automation_text.contains("click"),
+            "locator dumps skip listener sets"
+        );
+        assert!(automation_text.contains("hello"));
+    }
+
+    #[test]
+    fn elements_at_walks_topmost_first_and_defers_anchored_layers() {
+        let tree = styled_tree();
+        // A deferred `anchored` layer surfaces its subtree BEFORE every
+        // in-tree hit, whatever the paint order; the anchored element itself
+        // is a container and never answers.
+        let entries = [
+            (1u64, 0.0f64, 0.0f64, 100.0f64, 100.0f64),
+            (2, 0.0, 0.0, 40.0, 10.0),
+            (3, 0.0, 0.0, 100.0, 100.0),
+            (5, 10.0, 0.0, 20.0, 10.0),
+        ];
+        let hits = tree.elements_at(12.0, 5.0, &bounds_of(&entries));
+        assert_eq!(hits.first(), Some(&5u64), "the deferred layer's child is topmost");
+        assert!(hits.contains(&2), "the text under the point is hit");
+        assert_eq!(hits.last(), Some(&1u64), "the root answers last");
+        assert!(!hits.contains(&4), "the anchored container itself stays silent");
+    }
+
+    #[test]
+    fn elements_at_skips_elements_without_painted_bounds() {
+        let tree = styled_tree();
+        let entries = [(2u64, 0.0f64, 0.0f64, 40.0f64, 10.0f64)];
+        let hits = tree.elements_at(5.0, 5.0, &bounds_of(&entries));
+        assert_eq!(hits, vec![2u64], "bounds-less ancestors do not answer");
+    }
+
+    #[test]
+    fn insert_before_a_missing_anchor_appends() {
+        let mut tree = RetainedTree::new();
+        for id in 1..=3 {
+            tree.create_element(id, "div".to_string());
+        }
+        tree.append_child(1, 2);
+        tree.append_child(1, 3);
+        tree.insert_before(1, 3, 99);
+        assert_eq!(tree.elements[&1].children, vec![2, 3], "missing anchor falls back to the end");
+    }
+
+    #[test]
+    fn unchanged_text_keeps_the_revision() {
+        let mut tree = styled_tree();
+        let before = tree.elements[&2].subtree_revision;
+        tree.set_text(2, "hello".to_string());
+        assert_eq!(tree.elements[&2].subtree_revision, before);
+        tree.set_text(2, "changed".to_string());
+        assert!(tree.elements[&2].subtree_revision > before);
+        // `testId` is lifted out of the custom-prop map onto the element.
+        assert_eq!(tree.elements[&2].test_id, Some("row".to_string()));
+        assert_eq!(tree.get_custom_prop(2, "testId"), None);
+    }
+}

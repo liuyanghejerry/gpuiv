@@ -38,3 +38,23 @@ impl OpenUrls {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::OpenUrls;
+
+    #[test]
+    fn batches_queue_in_order_until_a_callback_registers() {
+        let mut queue = OpenUrls::new();
+        // Nothing registered yet, and empty batches never queue.
+        queue.emit(Vec::new());
+        queue.emit(vec!["first://a".to_string()]);
+        queue.emit(vec!["second://b".to_string(), "second://c".to_string()]);
+        // Registering no callback keeps the batches pending.
+        queue.register(None);
+        queue.emit(vec!["third://d".to_string()]);
+        assert_eq!(queue.pending.len(), 3);
+        assert_eq!(queue.pending[0], vec!["first://a".to_string()]);
+        assert_eq!(queue.pending[2], vec!["third://d".to_string()]);
+    }
+}
