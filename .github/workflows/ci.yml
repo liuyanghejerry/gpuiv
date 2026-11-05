@@ -168,9 +168,16 @@ jobs:
           name: bindings-aarch64-apple-darwin
           path: packages/native/
 
-      - name: Run Vue tests
-        run: bun run test
+      - name: Run Vue tests (coverage gate)
+        run: bun run test:coverage
         working-directory: packages/vue
+
+      - name: Upload Vue coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vue-coverage
+          path: packages/vue/coverage/
+          retention-days: 14
 
       - name: Run packager tests
         run: bun run test
@@ -309,6 +316,101 @@ jobs:
           path: tmp/memory-leak-gate/
           if-no-files-found: error
           retention-days: 30
+
+  # Per-OS unit coverage of @gpuiv/native. Each system measures its own
+  # compile surface (platform cfg code only exists where it targets); the
+  # native-coverage-gate job merges them and enforces the 90% per-module bar
+  # on everything that can run under `cargo test --lib`.
+  native-coverage:
+    name: native-coverage - ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: packages/native
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache: false
+          rustflags: ""
+
+      - name: Install llvm-tools
+        run: rustup component add llvm-tools-preview
+
+      - name: Cache cargo-llvm-cov
+        id: tool-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-llvm-cov
+          key: cargo-llvm-cov-0.9.1-${{ runner.os }}
+
+      - name: Install cargo-llvm-cov
+        if: steps.tool-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-llvm-cov@0.9.1 --locked
+
+      - name: Cache coverage target
+        uses: actions/cache@v4
+        with:
+          path: packages/native/target/
+          key: native-cov-${{ runner.os }}-${{ hashFiles('packages/native/Cargo.lock') }}
+          restore-keys: native-cov-${{ runner.os }}-
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        working-directory: .
+        run: |
+          sudo apt-get update -o Acquire::Retries=3 || {
+            echo '::warning::apt update failed; retrying without the Google Chrome repo'
+            sudo grep -rl 'dl.google.com' /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -r rm -f
+            sudo apt-get update
+          }
+          sudo apt-get install -y \
+            gcc g++ clang \
+            libfontconfig-dev \
+            libwayland-dev \
+            libxkbcommon-x11-dev \
+            libx11-xcb-dev \
+            libssl-dev \
+            libzstd-dev \
+            libvulkan1 \
+            vulkan-validationlayers
+
+      - name: Run unit tests under coverage
+        run: cargo llvm-cov --lib --lcov --output-path lcov.info
+
+      - name: Upload lcov
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-lcov-${{ runner.os }}
+          path: packages/native/lcov.info
+          if-no-files-found: error
+
+  # Merge the per-system lcov files (a line covered anywhere counts) and gate
+  # every non-exempt module at 90% merged line coverage. The exempt list and
+  # its reasons live in scripts/native-coverage-gate.py.
+  native-coverage-gate:
+    name: native-coverage-gate
+    needs: native-coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download per-system lcov
+        uses: actions/download-artifact@v4
+        with:
+          path: lcov
+          pattern: native-lcov-*
+
+      - name: Merge and gate
+        run: python3 scripts/native-coverage-gate.py lcov/native-lcov-*/lcov.info
 
   test-windows:
     name: test-windows

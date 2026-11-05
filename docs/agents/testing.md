@@ -32,34 +32,37 @@ the wrong runner.
 
 ### Coverage
 
-`@gpuiv/vue` coverage runs headless everywhere (v8 provider; the config in
-`packages/vue/vitest.config.ts` excludes the test harness, type-only files and
-re-export barrels):
+Coverage is a CI gate on both packages.
 
-```bash
-cd packages/vue && bun run test:coverage   # text table + coverage/ HTML
-```
+**`@gpuiv/vue`** — the macOS `test` job runs the suite as
+`bun run test:coverage`; `packages/vue/vitest.config.ts` enforces **90%
+statements and lines per module** (v8 provider; functions/branches are
+deliberately ungated — `components/select.tsx` carries defensive context
+placeholders that setup replaces before any child can call them). The HTML
+report uploads as the `vue-coverage` artifact. The config excludes the test
+harness, type-only files and re-export barrels.
 
-The bar is **≥90% statements and lines per module**. Function coverage on
-`components/select.tsx` sits just under: its context object carries defensive
-no-op placeholders that setup replaces before any child can call them, so they
-are unreachable by construction. GPU-gated suites add coverage on CI that a
-headless run cannot see.
-
-Rust line coverage of `@gpuiv/native` (Linux compile surface — macOS/Windows
-`cfg` code is absent from the binary):
+**`@gpuiv/native`** — the `native-coverage` matrix runs `cargo llvm-cov --lib`
+on Linux, macOS and Windows, each measuring its own compile surface (platform
+`cfg` code only exists where it targets), and `native-coverage-gate` merges
+the three lcov files — a line covered on any system counts — then gates every
+non-exempt module at **90% merged line coverage**. The exempt list (GPU frame
+paint/build code covered by the GPU test renderer suites, and napi callbacks
+that need a live JS environment) lives with its reasons in
+`scripts/native-coverage-gate.py`; the same script runs locally:
 
 ```bash
 rustup component add llvm-tools-preview   # once
 cargo install cargo-llvm-cov --locked     # once
 cd packages/native && CARGO_NET_OFFLINE=true \
   PKG_CONFIG_PATH="$REPO/tmp/sysroot-debs/sysroot/usr/lib/x86_64-linux-gnu/pkgconfig" \
-  cargo llvm-cov --lib --summary-only
+  cargo llvm-cov --lib --lcov --output-path lcov.info
+python3 ../../scripts/native-coverage-gate.py lcov.info
 ```
 
 The instrumented build recompiles the whole GPUI tree in debug; expect the
-first run to take a quarter hour. Platform-gated code means the Linux number
-is a floor, not the module's true coverage.
+first run to take a quarter hour. A single system's number is a floor — the
+gate always judges the merged view.
 
 
 `examples/chat.perf.test.tsx` is the automated profile. It uses `createTestApp()`,
