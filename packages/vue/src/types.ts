@@ -1163,9 +1163,9 @@ export interface WindowKeyEventHandlers {
   /** Veto-and-observe window closing: while set, an OS close attempt (red
    *  button, ⌘W path) is cancelled and delivered here; call
    *  `renderer.closeWindow()` to close for real. */
-  onWindowShouldClose?: () => void
+  onWindowShouldClose?: (event: EventPayload) => void
   /** A Dock-icon relaunch of the running process (macOS). */
-  onReopen?: () => void
+  onReopen?: (event: EventPayload) => void
   /** Window-level text selection. Fires when the selected ranges change;
    *  `value` is the joined selected text, omitted when the selection is
    *  empty. An unchanged frame does not fire. */
