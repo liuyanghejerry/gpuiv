@@ -105,6 +105,7 @@ export type {
 } from "./canvas/context2d.js"
 export type { GpuixMatrix2D } from "./canvas/matrix.js"
 export {
+  DismissableLayer,
   FloatingLayer,
   floatingRootStyle,
   mergeStyles,
