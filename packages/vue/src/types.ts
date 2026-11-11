@@ -698,9 +698,8 @@ export interface NativeRenderer {
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
   blur?(): void
-  /** Move focus to the next / previous GPUI tab stop. Apps own Tab key
-   *  behavior; call these from a render-level onKeyDown to install a
-   *  traversal policy. */
+  /** Move focus to the next / previous GPUI tab stop — the primitives behind
+   *  the Tab / Shift+Tab defaults. */
   focusNext?(): void
   focusPrevious?(): void
   /** Host id of the focused element, or null when nothing is focused. */
@@ -709,11 +708,9 @@ export interface NativeRenderer {
    *  that subtree only — the primitive behind modal focus traps. */
   focusNextWithin?(elementId: number): void
   focusPreviousWithin?(elementId: number): void
-  /** Enable window-level key events for the owning root. The event id is a
-   *  generation: queued events from an old root carry a stale id and are
-   *  rejected before reaching handlers. */
   /** Arm window-level key events belonging to `eventId`; disarm with
-   *  `false, false`. */
+   *  `false, false`. Roots arm key-down always: the Tab and Escape defaults
+   *  run on the window event. */
   setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
   /** Arm or disarm the window close and reopen observers. Both emit on the
    *  same event id as the window key events. */

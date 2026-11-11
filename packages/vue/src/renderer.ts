@@ -682,7 +682,9 @@ function mountTree(
     registryContainer.tabNavigation = tabNavigation
   }
   try {
-    host.setWindowKeyEvents?.(Boolean(onKeyDown), Boolean(onKeyUp), windowKeyEventId)
+    // Key-down is always on: the Tab and Escape defaults run on the window
+    // event, with or without a render-level onKeyDown observer.
+    host.setWindowKeyEvents?.(true, Boolean(onKeyUp), windowKeyEventId)
     host.setWindowObservers?.(Boolean(onWindowShouldClose), Boolean(onReopen), windowKeyEventId)
     host.setWindowSelectionChange?.(Boolean(onSelectionChange), windowSelectionEventId)
   } catch (error) {

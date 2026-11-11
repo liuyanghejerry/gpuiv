@@ -1341,8 +1341,10 @@ export function createTestApp(
     windowKeyEventId,
     windowSelectionEventId
   )
+  // Key-down always on, like mountTree: the Tab and Escape defaults run on
+  // the window event even without a render-level observer.
   renderer.setWindowKeyEvents(
-    Boolean(options.onKeyDown),
+    true,
     Boolean(options.onKeyUp),
     windowKeyEventId
   )
