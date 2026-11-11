@@ -1096,6 +1096,13 @@ export interface EventPayload {
    */
   isHeld?: boolean
   /**
+   * Id of the GPUI key dispatch that produced this event. Every element
+   * `keyDown` and the trailing `windowKeyDown` of one keystroke share it, so
+   * JS can apply `preventDefault` / `stopPropagation` across them.
+   * Populated for: keyDown, keyUp, windowKeyDown, windowKeyUp.
+   */
+  keystrokeId?: number
+  /**
    * Scroll delta on the X axis (pixels or lines, see `precise`).
    * Populated for: scroll.
    */

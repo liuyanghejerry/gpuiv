@@ -325,12 +325,12 @@ describeNative("window key events (vue)", () => {
     app.unmount()
   })
 
-  it("keeps tab traversal opt-in: typing moves only through focusNext", async () => {
+  it("moves typing focus through inputs on Tab by default", async () => {
     const App = defineComponent({
       setup: () => () => (
         <div style={{ display: "flex", flexDirection: "column", width: "100%", height: "100%", padding: 30, gap: 8 }}>
-          <input value="" placeholder="one" style={{ width: 200, height: 40 }} />
-          <input value="" placeholder="two" style={{ width: 200, height: 40 }} />
+          <input value="" placeholder="one" testId="one" style={{ width: 200, height: 40 }} />
+          <input value="" placeholder="two" testId="two" style={{ width: 200, height: 40 }} />
         </div>
       ),
     })
@@ -345,22 +345,22 @@ describeNative("window key events (vue)", () => {
     await app.settle()
     expect(app.renderer.getPaintedText().filter((s) => s.includes("a"))).toHaveLength(1)
 
-    // Tab is a normal key now: it lands in the editor as text, focus does not
-    // move, so the next character still goes to the first editor.
+    // Tab is the navigation default now: focus moves to the second editor,
+    // and the platform never types "\t" into either one.
     app.renderer.simulateKeystrokes("tab")
     await app.settle()
     app.renderer.simulateKeystrokes("b")
     await app.settle()
     const afterTab = app.renderer.getPaintedText()
-    expect(afterTab.some((s) => s.includes("a") && s.includes("b"))).toBe(true)
-    expect(afterTab.some((s) => s === "b")).toBe(false)
+    expect(afterTab.some((s) => s === "b")).toBe(true)
+    expect(afterTab.some((s) => s.includes("a") && s.includes("b"))).toBe(false)
 
-    // Explicit traversal moves focus; the character lands in the second editor.
-    app.renderer.focusNext()
+    // Shift+Tab walks back; the next character lands in the first editor.
+    app.renderer.simulateKeystrokes("shift-tab")
     await app.settle()
     app.renderer.simulateKeystrokes("c")
     await app.settle()
-    expect(app.renderer.getPaintedText().some((s) => s === "c")).toBe(true)
+    expect(app.renderer.getPaintedText().some((s) => s.includes("a") && s.includes("c"))).toBe(true)
     app.unmount()
   })
 

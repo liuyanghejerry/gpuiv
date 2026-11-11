@@ -244,10 +244,11 @@ describe("Tooltip (headless)", () => {
     app.unmount()
   })
 
-  it("escape on the trigger closes", async () => {
+  it("escape closes the open tooltip layer", async () => {
     const app = mountHeadless(TooltipPlayground())
     await hoverOpen(app)
-    dispatchOnText(app, "Hover me", "keyDown", { key: "escape" })
+    // Escape is a window-level default now: it closes the top dismiss layer.
+    app.windowKeyDown("escape")
     await app.settle()
     expect(isOpen(app)).toBe(false)
     app.unmount()
@@ -332,10 +333,10 @@ describe("Tooltip (headless)", () => {
     app.unmount()
   })
 
-  it("non-escape keys on the trigger leave the tooltip open", async () => {
+  it("non-escape window keys leave the tooltip open", async () => {
     const app = mountHeadless(TooltipPlayground())
     await hoverOpen(app)
-    dispatchOnText(app, "Hover me", "keyDown", { key: "a" })
+    app.windowKeyDown("a")
     await app.settle()
     expect(isOpen(app)).toBe(true)
     app.unmount()

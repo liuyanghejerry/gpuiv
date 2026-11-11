@@ -13,6 +13,7 @@ import {
 import type { EventPayload } from "@gpuiv/native"
 import type { StyleDesc } from "../types.js"
 import {
+  DismissableLayer,
   FloatingLayer,
   floatingRootStyle,
   useControllableState,
@@ -221,10 +222,6 @@ export const TooltipTrigger = defineComponent({
           ;(attrs.onBlur as ((event: EventPayload) => void) | undefined)?.(event)
           context.close()
         },
-        onKeyDown: (event: EventPayload) => {
-          ;(attrs.onKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
-          if (event.key === "escape") context.close()
-        },
       }
       return h("div", triggerProps, slots.default?.())
     }
@@ -255,7 +252,11 @@ export const TooltipContent = defineComponent({
           context.scheduleClose()
         },
       }
-      return h(FloatingLayer, layerProps, slots.default?.())
+      return h(
+        DismissableLayer,
+        { onEscapeKeyDown: () => context.close() },
+        () => h(FloatingLayer, layerProps, slots.default?.()),
+      )
     }
   },
 })

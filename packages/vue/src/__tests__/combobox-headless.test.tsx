@@ -232,7 +232,9 @@ describe("Combobox (headless)", () => {
     await app.settle()
     expect(app.renderer.allTexts()).toContain("Apple")
 
-    dispatchOnText(app, "Toggle", "keyDown", { key: "escape" })
+    // Escape is a window-level default now: it closes the top dismiss layer
+    // the content registered on open.
+    app.windowKeyDown("escape")
     await app.settle()
     expect(app.renderer.allTexts()).not.toContain("Apple")
 
@@ -249,7 +251,7 @@ describe("Combobox (headless)", () => {
 
     keyOnInput(app, "down")
     await app.settle()
-    keyOnInput(app, "escape")
+    app.windowKeyDown("escape")
     await app.settle()
     expect(app.renderer.allTexts()).not.toContain("Apple")
     expect(onValueChange).not.toHaveBeenCalled()

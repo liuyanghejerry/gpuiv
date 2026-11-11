@@ -1,9 +1,11 @@
 /** Shared state and positioning helpers for headless floating controls. */
 
-import { computed, defineComponent, h, ref, type Ref } from "vue"
+import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, type Ref } from "vue"
 import { cloneVNode, isVNode, Comment, Text } from "vue"
-import type { VNode, VNodeChild } from "vue"
-import type { StyleDesc } from "../types.js"
+import type { PropType, VNode, VNodeChild } from "vue"
+import type { StyleDesc, KeyEvent } from "../types.js"
+import { useGpuix } from "../hooks/use-gpuix.js"
+import { pushDismissLayer } from "../reconciler/event-registry.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
@@ -132,8 +134,7 @@ export interface ControllableStateOptions<Value> {
   onChange?: (value: Value) => void
 }
 
-/** Vue version of React's useControllableState — a ref plus a setter. */
-export function useControllableState<Value>(
+/** Vue version of React's useControllableState — a ref plus a setter. */export function useControllableState<Value>(
   options: ControllableStateOptions<Value>
 ): [Ref<Value>, (value: Value) => void] {
   const internal = ref(options.defaultValue) as Ref<Value>
@@ -151,6 +152,34 @@ export function useControllableState<Value>(
   }
   return [current, setValue]
 }
+
+/**
+ * Registers its subtree as a dismiss layer on the renderer's stack. When
+ * Escape reaches the window unprevented, only the top layer's
+ * `onEscapeKeyDown` runs — one Escape closes one overlay, the innermost one.
+ */
+export const DismissableLayer = defineComponent({
+  name: "DismissableLayer",
+  props: {
+    /** Escape reached the window, this layer is on top, and nothing prevented it. */
+    onEscapeKeyDown: {
+      type: Function as PropType<(event: KeyEvent) => void>,
+      required: true,
+    },
+  },
+  setup(props, { slots }) {
+    const { renderer } = useGpuix()
+    let remove: (() => void) | undefined
+    onMounted(() => {
+      if (!renderer) return
+      remove = pushDismissLayer(renderer, {
+        onEscapeKeyDown: (event) => props.onEscapeKeyDown(event),
+      })
+    })
+    onBeforeUnmount(() => remove?.())
+    return () => slots.default?.()
+  },
+})
 
 export interface FloatingContentProps {
   side?: FloatingSide

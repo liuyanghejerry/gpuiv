@@ -478,8 +478,9 @@ export interface ElementProps {
   onMotionComplete?: (event: EventPayload) => void
 
   // ── Keyboard events (need focus: autoFocus, or a click on the element) ──
-  onKeyDown?: (event: EventPayload) => void
-  onKeyUp?: (event: EventPayload) => void
+  /** Fires on the focused element, then on ancestors that declare it. */
+  onKeyDown?: (event: KeyEvent) => void
+  onKeyUp?: (event: KeyEvent) => void
 
   // ── Focus events ───────────────────────────────────────────────
   onFocus?: (event: EventPayload) => void
@@ -1141,10 +1142,24 @@ export interface ElementIdAllocator {
   nextElementId: number
 }
 
+/**
+ * A `keyDown` / `keyUp` event. Element handlers and the window handler of one
+ * keystroke share the flags, like one DOM event bubbling to `window`.
+ */
+export interface KeyEvent extends EventPayload {
+  /** True after any handler of this keystroke called `preventDefault()`. */
+  readonly defaultPrevented: boolean
+  /** Cancel the default action, for example Tab moving focus. */
+  preventDefault(): void
+  /** Skip ancestor `onKeyDown` handlers and the window handler. The default
+   *  action still runs, like the DOM. */
+  stopPropagation(): void
+}
+
 /** Render-level key observers handed to createApp / createTestApp. */
 export interface WindowKeyEventHandlers {
-  onKeyDown?: (event: EventPayload) => void
-  onKeyUp?: (event: EventPayload) => void
+  onKeyDown?: (event: KeyEvent) => void
+  onKeyUp?: (event: KeyEvent) => void
   /** Veto-and-observe window closing: while set, an OS close attempt (red
    *  button, ⌘W path) is cancelled and delivered here; call
    *  `renderer.closeWindow()` to close for real. */
@@ -1155,6 +1170,11 @@ export interface WindowKeyEventHandlers {
    *  `value` is the joined selected text, omitted when the selection is
    *  empty. An unchanged frame does not fire. */
   onSelectionChange?: (event: EventPayload) => void
+  /**
+   * Tab and Shift+Tab move focus through `tabIndex` elements. Defaults to
+   * true. Call `event.preventDefault()` in any `onKeyDown` to keep one Tab.
+   */
+  tabNavigation?: boolean
 }
 
 // One renderer root. Event handlers stay on this object so two live roots
@@ -1172,6 +1192,8 @@ export interface Container {
    *  replacement. */
   windowKeyEventHandlers: WindowKeyEventHandlers
   windowKeyEventId: number
+  /** `render({ tabNavigation })` of the owning root; read at dispatch time. */
+  tabNavigation?: boolean
   /** Separate generation for `selectionChange`; a queued event from an old
    *  root cannot enter its replacement either. */
   windowSelectionEventId: number

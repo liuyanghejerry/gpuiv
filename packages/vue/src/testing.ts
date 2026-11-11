@@ -1355,6 +1355,7 @@ export function createTestApp(
     Boolean(options.onSelectionChange),
     windowSelectionEventId
   )
+  containerForRenderer(renderer)!.tabNavigation = options.tabNavigation
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands — never the commit facade —
   // so provide the raw renderer.

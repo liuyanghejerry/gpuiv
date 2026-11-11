@@ -650,7 +650,7 @@ function mountTree(
   rootComponent: Component,
   options: RenderOptions
 ): GpuivAppHandle {
-  const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen, onSelectionChange } = options
+  const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen, onSelectionChange, tabNavigation } = options
   const previous = mount.handle
   mount.handle = undefined
   if (previous) {
@@ -677,7 +677,10 @@ function mountTree(
   // events from the unmounted tree find no handlers, so they never reach the
   // replacement's observer.
   const registryContainer = containerForRenderer(host)
-  if (registryContainer) registryContainer.onEvent = onEvent
+  if (registryContainer) {
+    registryContainer.onEvent = onEvent
+    registryContainer.tabNavigation = tabNavigation
+  }
   try {
     host.setWindowKeyEvents?.(Boolean(onKeyDown), Boolean(onKeyUp), windowKeyEventId)
     host.setWindowObservers?.(Boolean(onWindowShouldClose), Boolean(onReopen), windowKeyEventId)

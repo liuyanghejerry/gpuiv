@@ -23,7 +23,7 @@ use gpui::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{CustomElement, CustomElementFactory, CustomRenderContext};
-use crate::renderer::{emit_event_full, EventCallback};
+use crate::renderer::{emit_event_full, emit_key_event, EventCallback};
 use crate::theme::Theme;
 
 actions!(
@@ -2788,21 +2788,18 @@ impl gpui::Render for TextEditorState {
             .on_scroll_wheel(cx.listener(Self::on_scroll_wheel))
             .when(self.emits_key_down, move |editor| {
                 editor.on_key_down(move |event, _window, _cx| {
-                    emit_event_full(&key_down_callback, element_id, "keyDown", |payload| {
-                        payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
-                        payload.is_held = Some(event.is_held);
-                        payload.modifiers = Some(event.keystroke.modifiers.into());
-                    });
+                    emit_key_event(
+                        &key_down_callback,
+                        element_id,
+                        "keyDown",
+                        &event.keystroke,
+                        Some(event.is_held),
+                    );
                 })
             })
             .when(self.emits_key_up, move |editor| {
                 editor.on_key_up(move |event, _window, _cx| {
-                    emit_event_full(&key_up_callback, element_id, "keyUp", |payload| {
-                        payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
-                        payload.modifiers = Some(event.keystroke.modifiers.into());
-                    });
+                    emit_key_event(&key_up_callback, element_id, "keyUp", &event.keystroke, None);
                 })
             })
             .w_full()
