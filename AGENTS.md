@@ -128,14 +128,15 @@ interface NativeRenderer {
 
 Element IDs are plain numbers from a JS incrementing counter (u64 in Rust, f64-safe across napi).
 
-The host config talks to a commit-phase `MutationRenderer` facade (`packages/vue/src/reconciler/batch-renderer.ts`): its explicit methods (`createElement`, `setStyle`, …) only push `["opName", ...args]` tuples onto a queue, and `flushMutations()` — invoked on a microtask after Vue's scheduler has run its component update jobs, or synchronously by callers that need the Rust tree current (mount, tests, clock-pinned frames) — flushes the whole queue in **one `applyBatch(json)` FFI call**. The wire format is nine ops:
+The host config talks to a commit-phase `MutationRenderer` facade (`packages/vue/src/reconciler/batch-renderer.ts`): its explicit methods (`createElement`, `setStyle`, …) only push `["opName", ...args]` tuples onto a queue, and `flushMutations()` — invoked on a microtask after Vue's scheduler has run its component update jobs, or synchronously by callers that need the Rust tree current (mount, tests, clock-pinned frames) — flushes the whole queue in **one `applyBatch(json)` FFI call**. The wire format is ten ops:
 
 ```
 ["createElement", id, "type"]      ["setStyle", id, { …style }]   ← raw object
 ["destroyElement", id]             ["setText", id, "content"]
 ["appendChild", parentId, childId] ["setEventListener", id, "type", bool]
 ["insertBefore", parentId, childId, beforeId]
-["setRoot", id]                    ["setCustomProp", id, "key", value]   ← raw JSON value
+["setRoot", id]                    ["setKeyboardFocusDim", bool]
+["setCustomProp", id, "key", value]   ← raw JSON value
 ```
 
 - There is no `removeChild` op: `destroy_element` unlinks the child from its parent and invalidates the parent chain in Rust, and `appendChild`/`insertBefore` re-parent. Never reintroduce a detach op — a dangling child id in `parent.children` or a stale `subtree_revision` cache is the bug it hides.

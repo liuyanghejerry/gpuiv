@@ -240,10 +240,23 @@ export interface StyleDesc {
   selectionColor?: string
 
   // Pseudo-selector styles — applied by GPUI natively (no JS round-trip).
-  // Nesting is one level deep: hover/active cannot contain hover/active.
-  hover?: Omit<StyleDesc, "hover" | "active">
-  active?: Omit<StyleDesc, "hover" | "active">
+  // Nesting is one level deep: a state style cannot contain another.
+  hover?: StateStyleDesc
+  active?: StateStyleDesc
+  /** While focused after keyboard input (Tab), like CSS `:focus-visible`.
+   *  A mouse press never shows it. Needs a focusable element. */
+  focusVisible?: StateStyleDesc
+  /** `false` keeps this focusable element at full opacity while another
+   *  control has keyboard focus. Default dims it. Not inherited. */
+  keyboardFocusDim?: boolean
 }
+
+/** One nested pseudo-selector state: `hover`, `active`, `focusVisible`.
+ *  A state style cannot contain another state style. */
+export type StateStyleDesc = Omit<
+  StyleDesc,
+  "hover" | "active" | "focusVisible" | "keyboardFocusDim"
+>
 
 // Element types supported by GPUIX
 export type ElementType =
@@ -1102,6 +1115,9 @@ export interface MutationRenderer {
   setText(id: number, content: string): void
   setEventListener(id: number, eventType: string, hasHandler: boolean): void
   setRoot(id: number): void
+  /** Window-wide keyboard focus dim. Enqueued once per root creation, so a
+   *  remount without the option restores the default (true). */
+  setKeyboardFocusDim(enabled: boolean): void
   setCustomProp(id: number, key: string, value: object | string | number | boolean | null): void
   flushMutations(): void
 }
@@ -1172,6 +1188,12 @@ export interface WindowKeyEventHandlers {
    * true. Call `event.preventDefault()` in any `onKeyDown` to keep one Tab.
    */
   tabNavigation?: boolean
+  /**
+   * While a control has keyboard focus, every other focusable element dims.
+   * Defaults to true. Set false to draw your own focus look with
+   * `focusVisible`. Per element, use `style.keyboardFocusDim: false`.
+   */
+  keyboardFocusDim?: boolean
 }
 
 // One renderer root. Event handlers stay on this object so two live roots

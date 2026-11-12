@@ -1358,6 +1358,8 @@ export function createTestApp(
     windowSelectionEventId
   )
   containerForRenderer(renderer)!.tabNavigation = options.tabNavigation
+  // Always sent, so a remount without the option restores the default.
+  containerForRenderer(renderer)!.renderer.setKeyboardFocusDim(options.keyboardFocusDim !== false)
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands — never the commit facade —
   // so provide the raw renderer.

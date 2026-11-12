@@ -650,7 +650,7 @@ function mountTree(
   rootComponent: Component,
   options: RenderOptions
 ): GpuivAppHandle {
-  const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen, onSelectionChange, tabNavigation } = options
+  const { onEvent, onKeyDown, onKeyUp, onWindowShouldClose, onReopen, onSelectionChange, tabNavigation, keyboardFocusDim } = options
   const previous = mount.handle
   mount.handle = undefined
   if (previous) {
@@ -680,6 +680,8 @@ function mountTree(
   if (registryContainer) {
     registryContainer.onEvent = onEvent
     registryContainer.tabNavigation = tabNavigation
+    // Always sent, so a remount without the option restores the default.
+    registryContainer.renderer.setKeyboardFocusDim(keyboardFocusDim !== false)
   }
   try {
     // Key-down is always on: the Tab and Escape defaults run on the window

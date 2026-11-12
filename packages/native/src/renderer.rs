@@ -5688,6 +5688,7 @@ impl GpuixView {
                 .map(|(context, _)| context);
         }
 
+        let keyboard_focus = self.keyboard_focus_path(&tree, window, cx);
         let mut build_ctx = BuildCtx {
             tree: &tree,
             event_callback: &callback,
@@ -5705,6 +5706,7 @@ impl GpuixView {
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
             paint_reports: &self.paint_reports,
+            keyboard_focus,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -6096,6 +6098,9 @@ pub(crate) struct BuildCtx<'a> {
     /// What `onLayout`/`onScrollChange` last reported, shared with the paint
     /// closures.
     paint_reports: &'a SharedPaintReports,
+    /// The control holding keyboard focus and its ancestors. See
+    /// `GpuixView::keyboard_focus_path`.
+    pub keyboard_focus: Option<std::sync::Arc<[u64]>>,
 }
 
 /// Style properties that cascade into descendants.
@@ -6746,6 +6751,36 @@ impl GpuixView {
         self.schedule_selection_scroll(cx);
     }
 
+    /// The control holding keyboard focus while the user navigates with the
+    /// keyboard, and its ancestors, or None. Text fields do not count: typing
+    /// is keyboard input too, and dimming the window while someone types is
+    /// noise. A mouse move or a focus change refreshes the window, so the path
+    /// is recomputed each frame.
+    fn keyboard_focus_path(
+        &self,
+        tree: &RetainedTree,
+        window: &gpui::Window,
+        cx: &gpui::App,
+    ) -> Option<std::sync::Arc<[u64]>> {
+        if !tree.keyboard_focus_dim() || !window.last_input_was_keyboard() {
+            return None;
+        }
+        let focused = window.focused(cx)?.id();
+        let (&id, _) = self
+            .focus_handles
+            .iter()
+            .find(|(_, handle)| handle.id() == focused)?;
+        let element = tree.elements.get(&id)?;
+        if matches!(element.element_type.as_str(), "input" | "textarea") {
+            return None;
+        }
+        let path: Vec<u64> = std::iter::successors(Some(id), |id| {
+            tree.elements.get(id).and_then(|element| element.parent)
+        })
+        .collect();
+        Some(path.into())
+    }
+
     /// Sync focus handles with the current element tree.
     /// Creates handles for new focusable elements, subscribes on_focus/on_blur,
     /// and cleans up handles for destroyed elements.
@@ -6943,6 +6978,7 @@ impl gpui::Render for GpuixView {
         let (motion_active, motion_settled) =
             sync_motion_states(&tree, &mut self.motion_states, now);
         let mut highlight_events = Vec::new();
+        let keyboard_focus = self.keyboard_focus_path(&tree, window, cx);
         let result = match tree.root_id {
             Some(root_id) => {
                 let mut ctx = BuildCtx {
@@ -6962,6 +6998,7 @@ impl gpui::Render for GpuixView {
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
                     paint_reports: &self.paint_reports,
+                    keyboard_focus,
                 };
                 let built = build_element(root_id, &mut ctx, window, cx);
                 emit_highlight_events(&callback, &highlight_events);
@@ -7129,6 +7166,7 @@ pub(crate) fn build_element(
                 events: &element.events(),
                 event_callback: ctx.event_callback,
                 focus_handle: ctx.focus_handles.get(&id),
+                keyboard_focus: ctx.keyboard_focus.clone(),
                 style,
                 children: custom_children,
                 selection: ctx.selection.clone(),
@@ -7460,6 +7498,7 @@ pub(crate) fn build_host_container(
     if !pass_through {
         if let Some(handle) = ctx.focus_handles.get(&element.id) {
             el = el.track_focus(handle);
+            el = apply_focus_visible(el, element.id, style, ctx.keyboard_focus.as_deref());
         }
         if let Some(tab_index) = element.custom_props()
             .get("tabIndex")
@@ -8270,6 +8309,39 @@ pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::Dimension
 /// element that only applied the base styles accepted the prop, serialized it,
 /// and dropped it. gpui reads both refinements from the element state behind the
 /// element's `ElementId`, so the caller must have called `.id(..)` first.
+/// Opacity multiplier for every other focusable element while a control has
+/// keyboard focus. Paint only, so it moves nothing.
+const KEYBOARD_FOCUS_DIM: f32 = 0.4;
+
+/// Keyboard focus look for a focusable element, applied right after
+/// `track_focus` (gpui applies focus refinements only to a tracked element).
+///
+/// Two independent states. `focusVisible` styles the element while it has
+/// keyboard focus, like CSS `:focus-visible`. While another control has
+/// keyboard focus, the element dims unless its style sets
+/// `keyboardFocusDim: false`; that also shows at a glance where Tab can go.
+pub(crate) fn apply_focus_visible<E: gpui::InteractiveElement + gpui::Styled>(
+    mut el: E,
+    id: u64,
+    style: Option<&StyleDesc>,
+    keyboard_focus: Option<&[u64]>,
+) -> E {
+    // gpui runs the refinement eagerly, so borrowing the style is fine.
+    if let Some(declared) = style.and_then(|style| style.focus_visible.as_deref()) {
+        el = el.focus_visible(|refinement| apply_styles(refinement, declared));
+    }
+    let opted_out = style.and_then(|style| style.keyboard_focus_dim) == Some(false);
+    match keyboard_focus {
+        // Opacity applies to the subtree, so the focused element's own
+        // focusable ancestors must stay at full opacity too.
+        Some(path) if !opted_out && !path.contains(&id) => {
+            let base = style.and_then(|style| style.opacity).unwrap_or(1.0) as f32;
+            el.opacity(base * KEYBOARD_FOCUS_DIM)
+        }
+        _ => el,
+    }
+}
+
 pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc) -> E
 where
     E: gpui::Styled + gpui::StatefulInteractiveElement,
@@ -8281,6 +8353,8 @@ where
     if let Some(active_style) = style.active.as_deref() {
         el = el.active(|refinement| apply_styles(refinement, active_style));
     }
+    // `focusVisible` needs the focus handle, so `apply_focus_visible` applies
+    // it where the element calls track_focus.
     el
 }
 
@@ -8866,6 +8940,9 @@ enum BatchOp<'a> {
     SetRoot {
         id: u64,
     },
+    SetKeyboardFocusDim {
+        enabled: bool,
+    },
     SetCustomProp {
         id: u64,
         key: String,
@@ -9045,6 +9122,9 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     "setRoot" => BatchOp::SetRoot {
                         id: next_id(&mut seq, "id")?,
                     },
+                    "setKeyboardFocusDim" => BatchOp::SetKeyboardFocusDim {
+                        enabled: next_arg(&mut seq, "enabled")?,
+                    },
                     "setCustomProp" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
                         key: next_arg::<A, StrArg>(&mut seq, "prop key")?.0.into_owned(),
@@ -9160,6 +9240,9 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             }
             BatchOp::SetRoot { id } => {
                 tree.set_root(id);
+            }
+            BatchOp::SetKeyboardFocusDim { enabled } => {
+                tree.set_keyboard_focus_dim(enabled);
             }
             BatchOp::SetCustomProp { id, key, value } => {
                 tree.set_custom_prop(id, key, value);
@@ -10091,6 +10174,52 @@ mod batch_tests {
         apply(&mut tree, r#"[["destroyElement",1]]"#).expect("valid batch");
         tree.styles.sweep();
         assert_eq!(tree.styles.len(), 0);
+    }
+
+    #[test]
+    fn keyboard_focus_dim_flips_the_flag_and_marks_the_frame_dirty() {
+        let mut tree = RetainedTree::new();
+        assert!(tree.keyboard_focus_dim(), "on by default");
+        assert!(!tree.take_dirty(), "a fresh tree has nothing to draw");
+
+        apply(&mut tree, r#"[["setKeyboardFocusDim",false]]"#).expect("valid batch");
+        assert!(!tree.keyboard_focus_dim());
+        assert!(tree.take_dirty(), "the dim change must repaint");
+
+        // An identical resend is not a change.
+        apply(&mut tree, r#"[["setKeyboardFocusDim",false]]"#).expect("valid batch");
+        assert!(!tree.take_dirty(), "an unchanged dim flag is not a change");
+
+        apply(&mut tree, r#"[["setKeyboardFocusDim",true]]"#).expect("valid batch");
+        assert!(tree.keyboard_focus_dim());
+        assert!(tree.take_dirty());
+    }
+
+    #[test]
+    fn a_malformed_keyboard_focus_dim_op_rejects_the_batch() {
+        let mut tree = RetainedTree::new();
+        apply(&mut tree, r#"[["setKeyboardFocusDim",true]]"#).expect("valid batch");
+        assert!(tree.keyboard_focus_dim());
+
+        let error = apply(&mut tree, r#"[["setKeyboardFocusDim","yes"]]"#);
+        assert!(error.is_err(), "a non-bool enabled must reject the batch");
+        assert!(tree.keyboard_focus_dim(), "the tree must be untouched");
+    }
+
+    #[test]
+    fn focus_styles_decode_onto_the_element() {
+        let mut tree = RetainedTree::new();
+        apply(
+            &mut tree,
+            r##"[["createElement",1,"div"],["setStyle",1,{"focusVisible":{"outline":{"width":2,"color":"#89b4fa"}},"keyboardFocusDim":false}]]"##,
+        )
+        .expect("valid batch");
+        let style = tree.elements[&1].style.as_deref().unwrap();
+        let focus_visible = style.focus_visible.as_deref().expect("focusVisible decoded");
+        let outline = focus_visible.outline.as_ref().expect("outline decoded");
+        assert_eq!(outline.width, 2.0);
+        assert_eq!(outline.color, "#89b4fa");
+        assert_eq!(style.keyboard_focus_dim, Some(false));
     }
 }
 

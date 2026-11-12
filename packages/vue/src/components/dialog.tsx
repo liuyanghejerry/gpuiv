@@ -261,9 +261,12 @@ export const DialogPopup = defineComponent({
               role: props.role,
               tabIndex: props.tabIndex,
               // A press inside the popup must never reach the backdrop behind
-              // it. The popup is focused so the first Tab enters it.
+              // it. The popup is focused so the first Tab enters it, but it
+              // takes keys only: it must not dim while another control has
+              // keyboard focus.
               style: {
                 pointerEvents: "auto",
+                keyboardFocusDim: false,
                 ...(attrs.style as StyleDesc | undefined),
               },
               onKeyDown: (event: KeyEvent) => {

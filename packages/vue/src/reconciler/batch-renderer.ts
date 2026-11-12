@@ -4,11 +4,11 @@
 /// first. The outer applyBatch stringify would escape that string again, and
 /// Rust would parse twice. A 10k-row mount spent 626ms in applyBatch that way.
 ///
-/// The wire format is exactly nine ops: createElement, destroyElement,
+/// The wire format is exactly ten ops: createElement, destroyElement,
 /// appendChild, insertBefore, setStyle, setText, setEventListener, setRoot,
-/// setCustomProp — all with raw (unstringified) values. There is no
-/// removeChild op: destroy_element unlinks from the parent itself, and
-/// appendChild/insertBefore re-parent natively.
+/// setKeyboardFocusDim, setCustomProp — all with raw (unstringified) values.
+/// There is no removeChild op: destroy_element unlinks from the parent
+/// itself, and appendChild/insertBefore re-parent natively.
 ///
 /// ## Batch timing
 ///
@@ -132,6 +132,9 @@ export function wrapWithBatching(
     },
     setRoot(id) {
       enqueue(["setRoot", id])
+    },
+    setKeyboardFocusDim(enabled) {
+      enqueue(["setKeyboardFocusDim", enabled])
     },
     setCustomProp(id, key, value) {
       enqueue(["setCustomProp", id, key, value])

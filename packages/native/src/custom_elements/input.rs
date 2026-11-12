@@ -572,6 +572,12 @@ impl CustomElement for TextEditorElement {
                 editor = editor.overflow_hidden();
             }
         }
+        editor = crate::renderer::apply_focus_visible(
+            editor,
+            ctx.id,
+            ctx.style,
+            ctx.keyboard_focus.as_deref(),
+        );
         if ctx
             .style
             .and_then(|style| style.position.as_deref())
