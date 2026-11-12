@@ -155,13 +155,22 @@ describeNative("dialog (vue)", () => {
         </Dialog>
       ),
     })
-    // Not the 1280x800 default, and no JS reads the window size: native must.
+    // Not the 1280x800 default, and no JS sizes the layer: native must track
+    // the real viewport. Windows clamps the offscreen test window to 1024
+    // wide, so the pins read the actual window size instead of the request.
     app = createTestApp(App, { width: 900, height: 500 })
     await app.settle()
+    const size = app.renderer.getWindowSize()
+    expect(size).not.toEqual({ width: 1280, height: 800 })
     const bounds = (testId: string) => app!.renderer.getElementBounds(testIdOf(testId))
-    expect(bounds("portal")).toEqual({ x: 0, y: 0, width: 900, height: 500 })
-    expect(bounds("backdrop")).toEqual({ x: 0, y: 0, width: 900, height: 500 })
-    expect(bounds("popup")).toEqual({ x: 350, y: 200, width: 200, height: 100 })
+    expect(bounds("portal")).toEqual({ x: 0, y: 0, width: size.width, height: size.height })
+    expect(bounds("backdrop")).toEqual({ x: 0, y: 0, width: size.width, height: size.height })
+    expect(bounds("popup")).toEqual({
+      x: (size.width - 200) / 2,
+      y: (size.height - 100) / 2,
+      width: 200,
+      height: 100,
+    })
   })
 
   it("keeps a Dialog open when a handler prevents Escape", async () => {
