@@ -165,12 +165,12 @@ describeNative("dialog (vue)", () => {
     const bounds = (testId: string) => app!.renderer.getElementBounds(testIdOf(testId))
     expect(bounds("portal")).toEqual({ x: 0, y: 0, width: size.width, height: size.height })
     expect(bounds("backdrop")).toEqual({ x: 0, y: 0, width: size.width, height: size.height })
-    expect(bounds("popup")).toEqual({
-      x: (size.width - 200) / 2,
-      y: (size.height - 100) / 2,
-      width: 200,
-      height: 100,
-    })
+    const popup = bounds("popup")
+    // Centered, with layout's half-pixel rounding tolerance.
+    expect(popup.width).toBe(200)
+    expect(popup.height).toBe(100)
+    expect(Math.abs(popup.x - (size.width - 200) / 2)).toBeLessThanOrEqual(1)
+    expect(Math.abs(popup.y - (size.height - 100) / 2)).toBeLessThanOrEqual(1)
   })
 
   it("keeps a Dialog open when a handler prevents Escape", async () => {
