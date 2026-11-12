@@ -25,6 +25,8 @@ export type {
   FocusableNode,
   StateStyle,
 } from "./floating.js"
+export { Button, buttonProps } from "./button.js"
+export type { ButtonBehavior, ButtonProps, ButtonState } from "./button.js"
 export {
   Dialog,
   DialogBackdrop,

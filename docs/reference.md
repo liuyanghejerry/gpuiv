@@ -1582,6 +1582,7 @@ All control components come from the main package:
 | `@gpuiv/vue` | `Dialog` (Root), `DialogTrigger`, `DialogPortal`, `DialogBackdrop`, `DialogPopup`, `DialogTitle`, `DialogDescription`, `DialogClose` |
 | `@gpuiv/vue` | `FloatingLayer` — the positioned layer behind `SelectContent`, usable directly |
 | `@gpuiv/vue` | `Collapsible` (Root), `CollapsibleTrigger`, `CollapsiblePanel` |
+| `@gpuiv/vue` | `Button`, plus the `buttonProps()` helper it is built from |
 
 `Combobox` and `Tooltip` also use the Root / children split. Style the primitives
 and compose them in your application.
@@ -1647,6 +1648,33 @@ without an extra host element, merging its ref and event handlers.
 
 Root, Trigger and Panel accept a style function and a scoped slot receiving
 `{ open, disabled }`, so application components can style their own states.
+
+### Buttons
+
+`Button` is a headless `<button>`: a focusable `div` with `role="button"` that
+activates from a press, Enter (on key-down, not a held repeat) or Space (on
+key-up), like the DOM element. `disabled` removes it from the Tab order
+(`focusableWhenDisabled` keeps it there, for example while a save is in
+flight). `style` may be a function of `{ disabled }`, and `asChild` merges the
+behavior onto your own single child:
+
+```tsx
+import { Button } from '@gpuiv/vue'
+
+<Button
+  testId="save"
+  disabled={saving.value}
+  focusableWhenDisabled
+  onClick={save}
+  style={({ disabled }) => ({ padding: 12, opacity: disabled ? 0.5 : 1 })}
+>
+  Save
+</Button>
+```
+
+`buttonProps({ disabled, onClick, ... })` returns the same props record for
+host elements you wire yourself; `DialogTrigger` and `DialogClose` are built
+on it.
 
 ### Build a local Select
 

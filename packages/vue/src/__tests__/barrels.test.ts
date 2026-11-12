@@ -20,6 +20,8 @@ describe("components barrel", () => {
   it("exports every component family and floating helper", () => {
     expectExports(components, [
       "motion",
+      "Button",
+      "buttonProps",
       "Collapsible",
       "CollapsibleTrigger",
       "CollapsiblePanel",
