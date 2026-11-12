@@ -14,6 +14,7 @@ import {
 import type { EventPayload } from "@gpuiv/native"
 import type { KeyEvent, StyleDesc } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
+import { buttonProps } from "./button.js"
 import {
   DismissableLayer,
   cloneAsChild,
@@ -108,34 +109,29 @@ export const DialogTrigger = defineComponent({
   },
   setup(props, { attrs, slots }) {
     const context = useDialogContext("DialogTrigger")
-    const open = () => {
-      if (!props.disabled) context.setOpen(true)
-    }
     return () => {
-      const disabled = props.disabled
       const triggerProps: Record<string, unknown> = {
         ...(attrs as Record<string, unknown>),
         "aria-expanded": context.open,
-        tabIndex: disabled ? -1 : (props.tabIndex ?? 0),
         ref: (node: { id: number } | null) => {
           context.triggerRef.current = node
         },
-        onClick: (event: EventPayload) => {
-          ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
-          open()
-        },
         // Button semantics: Enter fires on key-down, Space on key-up (its
         // default is cancelled so it never scrolls or types).
-        onKeyDown: (event: KeyEvent) => {
-          ;(attrs.onKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
-          if (disabled || event.defaultPrevented) return
-          if (event.key === "enter" && !event.isHeld) open()
-          if (event.key === "space") event.preventDefault()
-        },
-        onKeyUp: (event: KeyEvent) => {
-          ;(attrs.onKeyUp as ((event: KeyEvent) => void) | undefined)?.(event)
-          if (!disabled && !event.defaultPrevented && event.key === "space") open()
-        },
+        ...buttonProps({
+          disabled: props.disabled,
+          tabIndex: props.tabIndex ?? 0,
+          onClick: (event: EventPayload) => {
+            ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
+            context.setOpen(true)
+          },
+          onKeyDown: (event: KeyEvent) => {
+            ;(attrs.onKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
+          },
+          onKeyUp: (event: KeyEvent) => {
+            ;(attrs.onKeyUp as ((event: KeyEvent) => void) | undefined)?.(event)
+          },
+        }),
       }
       if (props.asChild) {
         return cloneAsChild("DialogTrigger", slots.default?.(), triggerProps)
@@ -317,29 +313,24 @@ export const DialogClose = defineComponent({
   },
   setup(props, { attrs, slots }) {
     const context = useDialogContext("DialogClose")
-    const close = () => {
-      if (!props.disabled) context.setOpen(false)
-    }
     return () => {
-      const disabled = props.disabled
       const closeProps: Record<string, unknown> = {
         ...(attrs as Record<string, unknown>),
-        tabIndex: disabled ? -1 : (props.tabIndex ?? 0),
-        onClick: (event: EventPayload) => {
-          ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
-          close()
-        },
         // Button semantics, like DialogTrigger.
-        onKeyDown: (event: KeyEvent) => {
-          ;(attrs.onKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
-          if (disabled || event.defaultPrevented) return
-          if (event.key === "enter" && !event.isHeld) close()
-          if (event.key === "space") event.preventDefault()
-        },
-        onKeyUp: (event: KeyEvent) => {
-          ;(attrs.onKeyUp as ((event: KeyEvent) => void) | undefined)?.(event)
-          if (!disabled && !event.defaultPrevented && event.key === "space") close()
-        },
+        ...buttonProps({
+          disabled: props.disabled,
+          tabIndex: props.tabIndex ?? 0,
+          onClick: (event: EventPayload) => {
+            ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
+            context.setOpen(false)
+          },
+          onKeyDown: (event: KeyEvent) => {
+            ;(attrs.onKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
+          },
+          onKeyUp: (event: KeyEvent) => {
+            ;(attrs.onKeyUp as ((event: KeyEvent) => void) | undefined)?.(event)
+          },
+        }),
       }
       if (props.asChild) {
         return cloneAsChild("DialogClose", slots.default?.(), closeProps)
