@@ -401,9 +401,11 @@ describeNative('chat example (vue)', () => {
     expect(app.renderer.findByTestId('search-c2')).toBeDefined()
     expect(app.renderer.findByTestId('search-c1')).toBeUndefined()
 
-    // A press outside the card closes the overlay (the dim layer is
-    // pointer-transparent, so the press lands on the transcript beneath).
-    app.renderer.nativeSimulateClick(1100, 700)
+    // A press on the backdrop (outside the card, inside the window) closes the
+    // overlay. Keep the corner inside every platform's test window — Windows
+    // clamps the offscreen window to 1024 wide, so a far-corner x like 1100
+    // would fall outside it and hit nothing.
+    app.renderer.nativeSimulateClick(10, 10)
     await app.settle()
     expect(app.renderer.findByTestId('search-input')).toBeUndefined()
     app.unmount()

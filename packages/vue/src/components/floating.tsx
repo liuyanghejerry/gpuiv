@@ -1,11 +1,22 @@
 /** Shared state and positioning helpers for headless floating controls. */
 
-import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, type Ref } from "vue"
+import {
+  computed,
+  defineComponent,
+  h,
+  inject,
+  onBeforeUnmount,
+  onMounted,
+  provide,
+  ref,
+  type InjectionKey,
+  type Ref,
+} from "vue"
 import { cloneVNode, isVNode, Comment, Text } from "vue"
 import type { PropType, VNode, VNodeChild } from "vue"
 import type { StyleDesc, KeyEvent } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
-import { pushDismissLayer } from "../reconciler/event-registry.js"
+import { pushDismissLayer, type DismissLayer } from "../reconciler/event-registry.js"
 
 export type FloatingSide = "top" | "right" | "bottom" | "left"
 export type FloatingAlign = "start" | "center" | "end"
@@ -153,30 +164,97 @@ export interface ControllableStateOptions<Value> {
   return [current, setValue]
 }
 
+/** Anything a framework hands out for a mounted host element. */
+export interface FocusableNode {
+  readonly id: number
+}
+
+/**
+ * Where an overlay moves focus when it opens or closes, like Base UI's
+ * `initialFocus` / `finalFocus`:
+ *
+ * - `true` or unset: the overlay's default target
+ * - `false`: focus does not move
+ * - an element or a ref to one: that element
+ * - a function: returns one of the above; `null` means the default
+ */
+type FocusTargetValue<Node extends FocusableNode> =
+  | boolean
+  | Node
+  | { readonly current: Node | null }
+  | { readonly value: Node | null }
+
+export type FocusTarget<Node extends FocusableNode = FocusableNode> =
+  | FocusTargetValue<Node>
+  | (() => FocusTargetValue<Node> | null | undefined)
+
+/** Resolve a `FocusTarget` to an element id, or null when focus must stay. */
+export function resolveFocusTarget<Node extends FocusableNode>(
+  target: FocusTarget<Node> | undefined,
+  fallback: () => number | null
+): number | null {
+  const value = typeof target === "function" ? target() : target
+  if (value === undefined && typeof target === "function") return null
+  if (value === undefined || value === null || value === true) return fallback()
+  if (value === false) return null
+  if ("current" in value) return value.current?.id ?? fallback()
+  if ("value" in value) return value.value?.id ?? fallback()
+  return value.id
+}
+
+const DismissLayerContextKey: InjectionKey<DismissLayer> = Symbol("gpuiv-dismiss-layer")
+
+export interface DismissableLayerProps {
+  /** Escape reached the window, this layer is on top, and nothing prevented it. */
+  onEscapeKeyDown: (event: KeyEvent) => void
+  /** Element id to focus when the layer opens; null leaves focus alone. */
+  initialFocus?: () => number | null
+  /** Element id to focus when the layer closes; null leaves focus alone. */
+  finalFocus?: (previous: number | null) => number | null
+}
+
 /**
  * Registers its subtree as a dismiss layer on the renderer's stack. When
  * Escape reaches the window unprevented, only the top layer's
  * `onEscapeKeyDown` runs — one Escape closes one overlay, the innermost one.
+ * Nesting decides stacking, not mount order: a Dialog and a Select that open
+ * in one commit still put the Select above the Dialog.
  */
 export const DismissableLayer = defineComponent({
   name: "DismissableLayer",
   props: {
-    /** Escape reached the window, this layer is on top, and nothing prevented it. */
     onEscapeKeyDown: {
       type: Function as PropType<(event: KeyEvent) => void>,
       required: true,
     },
+    initialFocus: {
+      type: Function as PropType<() => number | null>,
+      default: undefined,
+    },
+    finalFocus: {
+      type: Function as PropType<(previous: number | null) => number | null>,
+      default: undefined,
+    },
   },
   setup(props, { slots }) {
     const { renderer } = useGpuix()
+    const parent = inject(DismissLayerContextKey, undefined)
+    // Read during setup, before this layer's elements are committed. After
+    // the commit an autoFocus inside the layer may already have taken focus.
+    const previousFocus = renderer?.getFocusedElementId?.() ?? null
+    const layer: DismissLayer = {
+      parent,
+      onEscapeKeyDown: (event) => props.onEscapeKeyDown(event),
+      initialFocus: () => props.initialFocus?.() ?? null,
+      finalFocus: (previous) => props.finalFocus?.(previous) ?? null,
+    }
     let remove: (() => void) | undefined
     onMounted(() => {
       if (!renderer) return
-      remove = pushDismissLayer(renderer, {
-        onEscapeKeyDown: (event) => props.onEscapeKeyDown(event),
-      })
+      remove = pushDismissLayer(renderer, layer, { previousFocus })
     })
     onBeforeUnmount(() => remove?.())
+    provide(DismissLayerContextKey, layer)
     return () => slots.default?.()
   },
 })
