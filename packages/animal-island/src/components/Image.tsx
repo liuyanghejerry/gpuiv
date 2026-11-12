@@ -41,8 +41,8 @@
  *    白叉（无 transform）；hover scale(1.06) 砍掉，hover 背景加深保留。
  *  - 键盘/焦点: 原版预览触发是 <button>（原生 Enter/Space）→ role="button" +
  *    tabIndex + activationKeys；`:focus-visible` 黄框 → focused ref + outline。
- *    预览打开聚焦关闭按钮（autoFocus）、Esc 关闭、Tab 圈定（focusNextWithin
- *    拉回，原生 Tab 不可 preventDefault，焦点可能短暂出层再弹回）、关闭后
+ *    预览打开聚焦关闭按钮（autoFocus）、Esc 关闭、Tab 圈定（preventDefault
+ *    取消窗口默认后 focusNextWithin 巡访弹层子树）、关闭后
  *    焦点还原（getFocusedElementId/focusElement）——全部同 Modal 模式。
  *  - `cursor: zoom-in` → "pointer"（GPUIV 无 zoom-in）。
  */
@@ -56,6 +56,7 @@ import {
   type EventPayload,
   type BoxShadow,
   type HostNode,
+  type KeyEvent,
   type StyleDesc,
 } from "@gpuiv/vue"
 import { cardPattern, ease, fonts, type CardColor } from "../tokens.js"
@@ -215,15 +216,16 @@ export const Image = defineComponent({
       previewOpen.value = false
     }
 
-    function onDialogKeyDown(e: EventPayload) {
+    function onDialogKeyDown(e: KeyEvent) {
       if (e.key === "escape") {
         closePreview()
         return
       }
-      // Tab 圈定（同 Modal）：原生 Tab 巡访不可取消，立即拉回弹层子树。
+      // Tab 圈定（同 Modal）：取消窗口 Tab 默认，只在弹层子树内巡访。
       if (e.key === "tab") {
         const id = dialog.value?.id
         if (id == null) return
+        e.preventDefault()
         if (e.modifiers?.shift) renderer?.focusPreviousWithin?.(id)
         else renderer?.focusNextWithin?.(id)
       }

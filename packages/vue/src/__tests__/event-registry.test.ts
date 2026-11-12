@@ -142,11 +142,18 @@ describe("handleGpuixEvent routing", () => {
     expect(container.onEvent).not.toHaveBeenCalled()
 
     expect(handleGpuixEvent({ ...payload("windowKeyDown", id), key: "q" }, renderer)).toBe(true)
-    expect(container.onKeyDown).toHaveBeenCalledExactlyOnceWith({
-      eventType: "keyDown",
-      elementId: 0,
-      key: "q",
-    })
+    expect(container.onKeyDown).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        eventType: "keyDown",
+        elementId: 0,
+        key: "q",
+      })
+    )
+    // The window handler receives a KeyEvent: any handler of the keystroke can
+    // see and set the shared flags.
+    const windowEvent = container.onKeyDown.mock.calls[0][0]
+    expect(windowEvent.defaultPrevented).toBe(false)
+    expect(typeof windowEvent.preventDefault).toBe("function")
     // The observer hears the raw native event, not the normalized one.
     expect(container.onEvent).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ eventType: "windowKeyDown", elementId: id })
@@ -174,15 +181,23 @@ describe("handleGpuixEvent routing", () => {
     )
   })
 
-  it("rejects a window event the root registers no handler for", () => {
+  it("consumes window key events without a handler (defaults), rejects unobserved others", () => {
     const renderer = new StubRenderer()
     const container = attach(renderer, makeContainer({}))
     const id = container.windowKeyEventId
 
-    for (const type of ["windowKeyDown", "windowKeyUp", "windowShouldClose", "appReopen"]) {
+    // Window key events are always consumed: the default actions (Tab moving
+    // focus, Escape closing the top dismiss layer) run with no handler set.
+    for (const type of ["windowKeyDown", "windowKeyUp"]) {
+      expect(handleGpuixEvent(payload(type, id), renderer)).toBe(true)
+    }
+    expect(container.onEvent).toHaveBeenCalledTimes(2)
+
+    // The other window observers still need a registered handler.
+    for (const type of ["windowShouldClose", "appReopen"]) {
       expect(handleGpuixEvent(payload(type, id), renderer)).toBe(false)
     }
-    expect(container.onEvent).not.toHaveBeenCalled()
+    expect(container.onEvent).toHaveBeenCalledTimes(2)
   })
 
   it("gates selectionChange on its own generation id", () => {

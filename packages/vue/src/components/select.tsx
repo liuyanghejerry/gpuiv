@@ -16,9 +16,10 @@ import {
   type VNodeChild,
 } from "vue"
 import type { EventPayload } from "@gpuiv/native"
-import type { StyleDesc } from "../types.js"
+import type { KeyEvent, StyleDesc } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
+  DismissableLayer,
   FloatingLayer,
   cloneAsChild,
   floatingRootStyle,
@@ -49,7 +50,9 @@ interface SelectContextValue {
   triggerPressedWhileOpen: boolean
   dismissedByOutsidePress: boolean
   triggerRef: { current: number | null }
-  setOpen: (open: boolean) => void
+  /** `restoreFocus: false` when the user pressed elsewhere, so the press keeps
+   *  the focus it just gave. */
+  setOpen: (open: boolean, restoreFocus?: boolean) => void
   setActiveValue: (value: string | null) => void
   moveActive: (delta: number) => void
   moveActiveToEdge: (edge: "first" | "last") => void
@@ -144,9 +147,9 @@ export const Select = defineComponent({
       return next
     })
 
-    const setOpen = (nextOpen: boolean) => {
+    const setOpen = (nextOpen: boolean, restoreFocus = true) => {
       setOpenState(nextOpen)
-      if (!nextOpen && context.triggerRef.current != null) {
+      if (!nextOpen && restoreFocus && context.triggerRef.current != null) {
         gpuix.renderer?.focusElement?.(context.triggerRef.current)
       }
     }
@@ -301,9 +304,7 @@ export const SelectTrigger = defineComponent({
         onKeyDown: (event: EventPayload) => {
           ;(attrs.onKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
           if (disabled) return
-          if (event.key === "escape") {
-            context.setOpen(false)
-          } else if (event.key === "home" || event.key === "end") {
+          if (event.key === "home" || event.key === "end") {
             context.moveActiveToEdge(event.key === "home" ? "first" : "last")
           } else if (
             event.key === "down" ||
@@ -347,7 +348,7 @@ export const SelectValue = defineComponent({
 })
 
 export interface SelectContentProps extends FloatingContentProps {
-  onEscapeKeyDown?: (event: EventPayload) => void
+  onEscapeKeyDown?: (event: KeyEvent) => void
 }
 
 export const SelectContent = defineComponent({
@@ -358,35 +359,42 @@ export const SelectContent = defineComponent({
     align: { type: String, default: undefined },
     alignOffset: { type: Number, default: undefined },
     collisionPadding: { type: Number, default: undefined },
-    tabIndex: { type: Number, default: 0 },
+    tabIndex: { type: Number, default: -1 },
   },
   setup(props, { attrs, slots }) {
     const context = useSelectContext("SelectContent")
     return () => {
       if (!context.open) return null
+      const {
+        onEscapeKeyDown: userOnEscapeKeyDown,
+        onKeyDown: userOnKeyDown,
+        onMouseDownOutside: userOnMouseDownOutside,
+        ...restAttrs
+      } = attrs as Record<string, unknown>
       const layerProps: Record<string, unknown> = {
         side: props.side ?? "bottom",
         sideOffset: props.sideOffset ?? 0,
         align: props.align ?? "start",
         alignOffset: props.alignOffset ?? 0,
         collisionPadding: props.collisionPadding ?? 8,
-        ...attrs,
+        ...restAttrs,
         tabIndex: props.tabIndex,
         autoFocus: true,
         style: attrs.style as StyleDesc | undefined,
         onMouseDownOutside: (event: EventPayload) => {
-          ;(attrs.onMouseDownOutside as ((event: EventPayload) => void) | undefined)?.(event)
+          ;(userOnMouseDownOutside as ((event: EventPayload) => void) | undefined)?.(event)
           context.dismissedByOutsidePress = true
           queueMicrotask(() => {
             context.dismissedByOutsidePress = false
           })
-          context.setOpen(false)
+          // The press just gave its target focus; let it keep it.
+          context.setOpen(false, false)
         },
-        onKeyDown: (event: EventPayload) => {
-          ;(attrs.onKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
-          if (event.key === "escape") {
-            ;(attrs.onEscapeKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
-            context.setOpen(false)
+        onKeyDown: (event: KeyEvent) => {
+          ;(userOnKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
+          // The popup is modal, like Base UI: Tab stays inside until it closes.
+          if (event.key === "tab") {
+            event.preventDefault()
             return
           }
           if (context.disabled) return
@@ -410,7 +418,16 @@ export const SelectContent = defineComponent({
           }
         },
       }
-      return h(FloatingLayer, layerProps, slots.default?.())
+      return h(
+        DismissableLayer,
+        {
+          onEscapeKeyDown: (event: KeyEvent) => {
+            ;(userOnEscapeKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
+            context.setOpen(false)
+          },
+        },
+        () => h(FloatingLayer, layerProps, slots.default?.()),
+      )
     }
   },
 })

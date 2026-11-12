@@ -159,7 +159,9 @@ describe("Select (headless)", () => {
     await app.settle()
     await openViaKeyboard(app)
 
-    dispatch(app, "content", "keyDown", { key: "escape" })
+    // Escape is a window-level default now: it closes the top dismiss layer,
+    // which the content registered on open.
+    app.windowKeyDown("escape")
     await app.settle()
     expect(onEscape).toHaveBeenCalledTimes(1)
     expect(findByTestId(app, "content")).toBeUndefined()

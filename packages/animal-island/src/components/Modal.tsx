@@ -2,8 +2,9 @@
  * Preserves node-valued titles/footers, palettes, variant padding and Typewriter.
  * Game panels draw the original organic SVG outline below native content;
  * arbitrary child painting is not clipped to that shape. Native opacity
- * replaces scale entry. WindowLayer replaces DOM Portal. Tab trapping uses
- * native focus correction, and px/percent/auto widths use native layout.
+ * replaces scale entry. WindowLayer replaces DOM Portal. Tab trapping cancels
+ * the window Tab default and walks the subtree, and px/percent/auto widths use
+ * native layout.
  */
 
 import { defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNodeChild } from "vue"
@@ -12,8 +13,8 @@ import {
   motion,
   useGpuix,
   useWindowSize,
-  type EventPayload,
   type HostNode,
+  type KeyEvent,
   type StyleDesc,
 } from "@gpuiv/vue"
 import { colors, ease, fonts } from "../tokens.js"
@@ -103,17 +104,17 @@ export const Modal = defineComponent({
       if (props.maskClosable) cancel()
     }
 
-    function onPanelKeyDown(e: EventPayload) {
+    function onPanelKeyDown(e: KeyEvent) {
       if (e.key === "escape") {
         cancel()
         return
       }
-      // Focus trap approximation (see header): the native Tab walk cannot be
-      // cancelled from JS, so focus may step out of the dialog first; this
-      // immediately re-pins it inside the panel subtree.
+      // Focus trap: cancel the window Tab default, then walk the panel
+      // subtree only.
       if (e.key === "tab") {
         const id = panel.value?.id
         if (id == null) return
+        e.preventDefault()
         if (e.modifiers?.shift) renderer?.focusPreviousWithin?.(id)
         else renderer?.focusNextWithin?.(id)
       }

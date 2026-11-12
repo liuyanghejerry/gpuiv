@@ -1505,20 +1505,32 @@ a `div` when it should receive keyboard focus:
 | `tabIndex={-1}` | Skipped by traversal, but focusable by click or renderer API |
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
-**Applications own the Tab key.** GPUIV installs no process-wide Tab /
-Shift+Tab bindings, so editors and terminals receive the raw key events. For
-classic traversal, call the direct GPUI wrappers from the render-level
-`onKeyDown`:
+**Tab and Escape have DOM-like defaults.** Tab / Shift+Tab move focus through
+`tabIndex` elements, and Escape closes the topmost open dismiss layer (a
+Select, Combobox or Tooltip popup). The defaults run after every element
+`onKeyDown` and the render-level `onKeyDown` had their chance, so any handler
+can cancel one with `event.preventDefault()` — like the DOM. Tab never types
+`"\t"` into a focused `<input>`.
 
 ```tsx
-createApp(App, {
-  onKeyDown(event) {
-    if (event.key !== 'tab') return
-    if (event.modifiers?.shift) app.renderer.focusPrevious?.()
-    else app.renderer.focusNext?.()
-  },
-})
+<div
+  tabIndex={0}
+  onKeyDown={(event) => {
+    // An editor that takes Tab itself:
+    if (event.key === 'tab') event.preventDefault()
+  }}
+>
+  Editor
+</div>
 ```
+
+`createApp` (and `createTestApp`) accept `tabNavigation: false` to turn the
+Tab default off for the whole window — Tab then reaches your handlers as an
+ordinary key.
+
+Element `onKeyDown` handlers receive a `KeyEvent`: `defaultPrevented`,
+`preventDefault()` and `stopPropagation()` are shared by every handler of one
+keystroke, like one DOM event bubbling to the window.
 
 `focusNext()` / `focusPrevious()` map straight onto GPUI's
 `window.focus_next()` / `window.focus_prev()` — the navigation stays in Rust

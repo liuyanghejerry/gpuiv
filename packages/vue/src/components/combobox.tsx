@@ -10,9 +10,10 @@ import {
   type PropType,
 } from "vue"
 import type { EventPayload } from "@gpuiv/native"
-import type { StyleDesc } from "../types.js"
+import type { KeyEvent, StyleDesc } from "../types.js"
 import { useGpuix } from "../hooks/use-gpuix.js"
 import {
+  DismissableLayer,
   FloatingLayer,
   cloneAsChild,
   floatingRootStyle,
@@ -289,17 +290,21 @@ export const ComboboxInput = defineComponent({
           ;(attrs.onFocus as ((event: EventPayload) => void) | undefined)?.(event)
           if (!disabled) context.setOpen(true)
         },
+        // Focus leaving the input closes the popup, like Base UI. Tab moves
+        // focus only when no handler prevented it, so a kept Tab keeps it open.
+        onBlur: (event: EventPayload) => {
+          ;(attrs.onBlur as ((event: EventPayload) => void) | undefined)?.(event)
+          context.setOpen(false)
+        },
         onChange: (event: EventPayload) => {
           ;(attrs.onChange as ((event: EventPayload) => void) | undefined)?.(event)
           context.setInputValue(event.value ?? "")
           if (!disabled) context.setOpen(true)
         },
-        onKeyDown: (event: EventPayload) => {
-          ;(attrs.onKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
+        onKeyDown: (event: KeyEvent) => {
+          ;(attrs.onKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
           if (disabled) return
-          if (event.key === "escape") {
-            context.setOpen(false)
-          } else if (
+          if (
             event.key === "down" ||
             (event.key === "n" && event.modifiers?.ctrl)
           ) {
@@ -353,7 +358,6 @@ export const ComboboxTrigger = defineComponent({
           ;(attrs.onKeyDown as ((event: EventPayload) => void) | undefined)?.(event)
           if (disabled) return
           if (event.key === "down" || event.key === "up") context.setOpen(true)
-          if (event.key === "escape") context.setOpen(false)
         },
       }
       return h("div", triggerProps, slots.default?.())
@@ -408,7 +412,11 @@ export const ComboboxContent = defineComponent({
           context.setOpen(false)
         },
       }
-      return h(FloatingLayer, layerProps, slots.default?.())
+      return h(
+        DismissableLayer,
+        { onEscapeKeyDown: () => context.setOpen(false) },
+        () => h(FloatingLayer, layerProps, slots.default?.()),
+      )
     }
   },
 })

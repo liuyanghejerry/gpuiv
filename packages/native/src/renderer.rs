@@ -5248,40 +5248,42 @@ fn window_key_events(
     gpui::canvas(
         |_, _, _| (),
         move |_, _, window, _| {
-            if key_down || cfg!(all(target_arch = "wasm32", target_os = "unknown")) {
-                let callback = callback.clone();
-                window.on_root_key_event(move |event: &gpui::KeyDownEvent, phase, _window, _cx| {
-                    if phase != gpui::DispatchPhase::Bubble {
-                        return;
-                    }
-                    if key_down {
-                        emit_event_full(&callback, event_id, "windowKeyDown", |payload| {
-                            payload.key = Some(event.keystroke.key.clone());
-                            payload.key_char = event.keystroke.key_char.clone();
-                            payload.is_held = Some(event.is_held);
-                            payload.modifiers = Some(event.keystroke.modifiers.into());
-                        });
-                    }
-                    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
-                    if event.keystroke.key == "tab" {
-                        // Keep browser focus on GPUI's hidden keyboard element.
-                        _cx.stop_propagation();
-                    }
-                });
-            }
-            if key_up {
-                let callback = callback.clone();
-                window.on_root_key_event(move |event: &gpui::KeyUpEvent, phase, _window, _cx| {
-                    if phase != gpui::DispatchPhase::Bubble {
-                        return;
-                    }
-                    emit_event_full(&callback, event_id, "windowKeyUp", |payload| {
-                        payload.key = Some(event.keystroke.key.clone());
-                        payload.key_char = event.keystroke.key_char.clone();
-                        payload.modifiers = Some(event.keystroke.modifiers.into());
-                    });
-                });
-            }
+            // Root capture runs first in GPUI's key dispatch, before every
+            // element listener, so each keystroke gets a fresh id even when an
+            // element later stops propagation.
+            let callback_down = callback.clone();
+            window.on_root_key_event(move |event: &gpui::KeyDownEvent, phase, _window, _cx| {
+                if phase == gpui::DispatchPhase::Capture {
+                    next_keystroke_id();
+                    return;
+                }
+                if key_down {
+                    emit_key_event(
+                        &callback_down,
+                        event_id,
+                        "windowKeyDown",
+                        &event.keystroke,
+                        Some(event.is_held),
+                    );
+                }
+                // Tab is a navigation key, never text, like in a browser field.
+                // Every element listener already ran; stopping here only keeps
+                // the platform from inserting "\t" into the focused <input>.
+                // The JS host decides whether focus moves.
+                if event.keystroke.key == "tab" {
+                    _cx.stop_propagation();
+                }
+            });
+            let callback_up = callback.clone();
+            window.on_root_key_event(move |event: &gpui::KeyUpEvent, phase, _window, _cx| {
+                if phase == gpui::DispatchPhase::Capture {
+                    next_keystroke_id();
+                    return;
+                }
+                if key_up {
+                    emit_key_event(&callback_up, event_id, "windowKeyUp", &event.keystroke, None);
+                }
+            });
         },
     )
     .absolute()
@@ -6980,19 +6982,12 @@ impl gpui::Render for GpuixView {
             let drag_end_view = drag_move_view.clone();
             let root = gpui::div().size_full();
             with_window_menu_actions(root)
-                .when(
-                    self.window_key_down
-                        || self.window_key_up
-                        || cfg!(all(target_arch = "wasm32", target_os = "unknown")),
-                    |root| {
-                        root.child(window_key_events(
-                            callback.clone(),
-                            self.window_key_down,
-                            self.window_key_up,
-                            self.window_key_event_id,
-                        ))
-                    },
-                )
+                .child(window_key_events(
+                    callback.clone(),
+                    self.window_key_down,
+                    self.window_key_up,
+                    self.window_key_event_id,
+                ))
                 .child(selection_frame_reset(
                     self.selection.clone(),
                     move |position, app| {
@@ -8133,23 +8128,20 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
             // (clicked or tabbed to) for these to fire.
             "keyDown" => {
                 el = el.on_key_down(move |key_event, _window, _cx| {
-                    emit_event_full(&callback, id, "keyDown", |p| {
-                        p.key = Some(key_event.keystroke.key.clone());
-                        p.key_char = key_event.keystroke.key_char.clone();
-                        p.is_held = Some(key_event.is_held);
-                        p.modifiers = Some(key_event.keystroke.modifiers.into());
-                    });
+                    emit_key_event(
+                        &callback,
+                        id,
+                        "keyDown",
+                        &key_event.keystroke,
+                        Some(key_event.is_held),
+                    );
                 });
             }
 
             // ── Key up ───────────────────────────────────────────
             "keyUp" => {
                 el = el.on_key_up(move |key_event, _window, _cx| {
-                    emit_event_full(&callback, id, "keyUp", |p| {
-                        p.key = Some(key_event.keystroke.key.clone());
-                        p.key_char = key_event.keystroke.key_char.clone();
-                        p.modifiers = Some(key_event.keystroke.modifiers.into());
-                    });
+                    emit_key_event(&callback, id, "keyUp", &key_event.keystroke, None);
                 });
             }
 
@@ -8684,6 +8676,38 @@ pub fn emit_event_full(
         build(&mut payload);
         cb(payload);
     }
+}
+
+thread_local! {
+    /// Bumped once per GPUI key dispatch, before any key listener runs.
+    static KEYSTROKE_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Emit a key event stamped with the current dispatch's keystroke id.
+///
+/// JS handlers run after GPUI finished dispatching (the event callback is
+/// non-blocking), so they cannot stop GPUI propagation. The id lets the JS host
+/// group one keystroke's element events and its trailing window event, and
+/// apply `preventDefault` / `stopPropagation` across them.
+pub(crate) fn emit_key_event(
+    callback: &Option<EventCallback>,
+    element_id: u64,
+    event_type: &str,
+    keystroke: &gpui::Keystroke,
+    is_held: Option<bool>,
+) {
+    let keystroke_id = KEYSTROKE_ID.with(|id| id.get());
+    emit_event_full(callback, element_id, event_type, |payload| {
+        payload.key = Some(keystroke.key.clone());
+        payload.key_char = keystroke.key_char.clone();
+        payload.is_held = is_held;
+        payload.modifiers = Some(keystroke.modifiers.into());
+        payload.keystroke_id = Some(keystroke_id as f64);
+    });
+}
+
+fn next_keystroke_id() {
+    KEYSTROKE_ID.with(|id| id.set(id.get() + 1));
 }
 
 /// The paint-driven events of one element, as one reporter for the bounds

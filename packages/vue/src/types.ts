@@ -478,8 +478,9 @@ export interface ElementProps {
   onMotionComplete?: (event: EventPayload) => void
 
   // ── Keyboard events (need focus: autoFocus, or a click on the element) ──
-  onKeyDown?: (event: EventPayload) => void
-  onKeyUp?: (event: EventPayload) => void
+  /** Fires on the focused element, then on ancestors that declare it. */
+  onKeyDown?: (event: KeyEvent) => void
+  onKeyUp?: (event: KeyEvent) => void
 
   // ── Focus events ───────────────────────────────────────────────
   onFocus?: (event: EventPayload) => void
@@ -697,9 +698,8 @@ export interface NativeRenderer {
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
   blur?(): void
-  /** Move focus to the next / previous GPUI tab stop. Apps own Tab key
-   *  behavior; call these from a render-level onKeyDown to install a
-   *  traversal policy. */
+  /** Move focus to the next / previous GPUI tab stop — the primitives behind
+   *  the Tab / Shift+Tab defaults. */
   focusNext?(): void
   focusPrevious?(): void
   /** Host id of the focused element, or null when nothing is focused. */
@@ -708,11 +708,9 @@ export interface NativeRenderer {
    *  that subtree only — the primitive behind modal focus traps. */
   focusNextWithin?(elementId: number): void
   focusPreviousWithin?(elementId: number): void
-  /** Enable window-level key events for the owning root. The event id is a
-   *  generation: queued events from an old root carry a stale id and are
-   *  rejected before reaching handlers. */
   /** Arm window-level key events belonging to `eventId`; disarm with
-   *  `false, false`. */
+   *  `false, false`. Roots arm key-down always: the Tab and Escape defaults
+   *  run on the window event. */
   setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
   /** Arm or disarm the window close and reopen observers. Both emit on the
    *  same event id as the window key events. */
@@ -1141,20 +1139,39 @@ export interface ElementIdAllocator {
   nextElementId: number
 }
 
+/**
+ * A `keyDown` / `keyUp` event. Element handlers and the window handler of one
+ * keystroke share the flags, like one DOM event bubbling to `window`.
+ */
+export interface KeyEvent extends EventPayload {
+  /** True after any handler of this keystroke called `preventDefault()`. */
+  readonly defaultPrevented: boolean
+  /** Cancel the default action, for example Tab moving focus. */
+  preventDefault(): void
+  /** Skip ancestor `onKeyDown` handlers and the window handler. The default
+   *  action still runs, like the DOM. */
+  stopPropagation(): void
+}
+
 /** Render-level key observers handed to createApp / createTestApp. */
 export interface WindowKeyEventHandlers {
-  onKeyDown?: (event: EventPayload) => void
-  onKeyUp?: (event: EventPayload) => void
+  onKeyDown?: (event: KeyEvent) => void
+  onKeyUp?: (event: KeyEvent) => void
   /** Veto-and-observe window closing: while set, an OS close attempt (red
    *  button, ⌘W path) is cancelled and delivered here; call
    *  `renderer.closeWindow()` to close for real. */
-  onWindowShouldClose?: () => void
+  onWindowShouldClose?: (event: EventPayload) => void
   /** A Dock-icon relaunch of the running process (macOS). */
-  onReopen?: () => void
+  onReopen?: (event: EventPayload) => void
   /** Window-level text selection. Fires when the selected ranges change;
    *  `value` is the joined selected text, omitted when the selection is
    *  empty. An unchanged frame does not fire. */
   onSelectionChange?: (event: EventPayload) => void
+  /**
+   * Tab and Shift+Tab move focus through `tabIndex` elements. Defaults to
+   * true. Call `event.preventDefault()` in any `onKeyDown` to keep one Tab.
+   */
+  tabNavigation?: boolean
 }
 
 // One renderer root. Event handlers stay on this object so two live roots
@@ -1172,6 +1189,8 @@ export interface Container {
    *  replacement. */
   windowKeyEventHandlers: WindowKeyEventHandlers
   windowKeyEventId: number
+  /** `render({ tabNavigation })` of the owning root; read at dispatch time. */
+  tabNavigation?: boolean
   /** Separate generation for `selectionChange`; a queued event from an old
    *  root cannot enter its replacement either. */
   windowSelectionEventId: number

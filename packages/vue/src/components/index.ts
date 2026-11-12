@@ -9,6 +9,7 @@ export type { VirtualListInstance, WindowedVirtualListProps } from "./virtual-li
 export type { VirtualListScrollTop } from "./virtual-list.js"
 export { VirtualList } from "./virtual-list.js"
 export {
+  DismissableLayer,
   FloatingLayer,
   floatingRootStyle,
   mergeStyles,

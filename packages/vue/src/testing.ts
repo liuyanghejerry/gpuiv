@@ -1341,8 +1341,10 @@ export function createTestApp(
     windowKeyEventId,
     windowSelectionEventId
   )
+  // Key-down always on, like mountTree: the Tab and Escape defaults run on
+  // the window event even without a render-level observer.
   renderer.setWindowKeyEvents(
-    Boolean(options.onKeyDown),
+    true,
     Boolean(options.onKeyUp),
     windowKeyEventId
   )
@@ -1355,6 +1357,7 @@ export function createTestApp(
     Boolean(options.onSelectionChange),
     windowSelectionEventId
   )
+  containerForRenderer(renderer)!.tabNavigation = options.tabNavigation
   const app = gpuivHost.vue.createApp(rootComponent)
   // App code only ever sees application commands — never the commit facade —
   // so provide the raw renderer.

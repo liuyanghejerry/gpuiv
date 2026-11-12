@@ -22,6 +22,7 @@ export type {
   SystemNotificationOptions,
   SystemNotificationResponse,
 } from "./types.js"
+export type { KeyEvent } from "./types.js"
 export { isPackaged, resourcesPath, resolveResourcesPath } from "./packaged.js"
 export type { ResourcesPathInput } from "./packaged.js"
 export { acquireSingleInstance } from "./single-instance.js"
@@ -105,6 +106,7 @@ export type {
 } from "./canvas/context2d.js"
 export type { GpuixMatrix2D } from "./canvas/matrix.js"
 export {
+  DismissableLayer,
   FloatingLayer,
   floatingRootStyle,
   mergeStyles,
