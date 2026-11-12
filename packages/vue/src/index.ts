@@ -22,6 +22,7 @@ export type {
   SystemNotificationOptions,
   SystemNotificationResponse,
 } from "./types.js"
+export type { KeyEvent } from "./types.js"
 export { isPackaged, resourcesPath, resolveResourcesPath } from "./packaged.js"
 export type { ResourcesPathInput } from "./packaged.js"
 export { acquireSingleInstance } from "./single-instance.js"

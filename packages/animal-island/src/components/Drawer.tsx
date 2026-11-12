@@ -15,8 +15,8 @@ import {
   useGpuix,
   useWindowSize,
   type BoxShadow,
-  type EventPayload,
   type HostNode,
+  type KeyEvent,
   type MotionStyle,
   type StyleDesc,
 } from "@gpuiv/vue"
@@ -124,17 +124,17 @@ export const Drawer = defineComponent({
       if (props.maskClosable) requestClose()
     }
 
-    function onPanelKeyDown(e: EventPayload) {
+    function onPanelKeyDown(e: KeyEvent) {
       if (e.key === "escape") {
         requestClose()
         return
       }
-      // Focus trap approximation (same as Modal): the native Tab walk cannot
-      // be cancelled from JS, so focus may step out of the drawer first; this
-      // immediately re-pins it inside the panel subtree.
+      // Focus trap (same as Modal): cancel the window Tab default, then walk
+      // the panel subtree only.
       if (e.key === "tab") {
         const id = panel.value?.id
         if (id == null) return
+        e.preventDefault()
         if (e.modifiers?.shift) renderer?.focusPreviousWithin?.(id)
         else renderer?.focusNextWithin?.(id)
       }

@@ -63,7 +63,7 @@
 import { activationKeys } from "../interaction.js"
 import { motion } from "../motion.js"
 import { computed, defineComponent, h, onBeforeUnmount, onMounted, ref, watch, type PropType } from "vue"
-import { useElementBounds, useGpuix, type EventPayload, type HostNode } from "@gpuiv/vue"
+import { useElementBounds, useGpuix, type EventPayload, type HostNode, type KeyEvent } from "@gpuiv/vue"
 
 import { fonts, ease, radius } from "../tokens.js"
 import { useTheme } from "../theme.js"
@@ -412,7 +412,7 @@ export const PromptBar = defineComponent({
       closeMenus()
     }
 
-    const onTextareaKeyDown = (event: EventPayload) => {
+    const onTextareaKeyDown = (event: KeyEvent) => {
       if (auto.value) {
         stopAuto()
         draft.value = ""
@@ -425,6 +425,9 @@ export const PromptBar = defineComponent({
           return
         }
         if (key === "tab") {
+          // Tab accepts the completion and keeps focus in the textarea, like
+          // a DOM autocomplete; cancel the window Tab default.
+          event.preventDefault()
           const row = rows.value[active.value]
           if (row) pick(row)
           return

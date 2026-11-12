@@ -12,7 +12,7 @@
  */
 import { Blob, File } from "node:buffer"
 import { computed, defineComponent, onBeforeUnmount, ref, watch, type PropType, type VNodeChild } from "vue"
-import { promptForPaths, Spinner, useGpuix, useWindowSize, type EventPayload, type HostNode, type StyleDesc } from "@gpuiv/vue"
+import { promptForPaths, Spinner, useGpuix, useWindowSize, type EventPayload, type HostNode, type KeyEvent, type StyleDesc } from "@gpuiv/vue"
 import { colors, ease, fonts, radius, shadows } from "../tokens.js"
 import { activationKeys } from "../interaction.js"
 import { Icon } from "./Icon.js"
@@ -370,9 +370,10 @@ export const Upload = defineComponent({
           style={{ width: windowSize.value.width, height: windowSize.value.height, backgroundColor: "rgba(15,12,8,0.75)" }}>
           <div ref={previewPanel} role="dialog" aria-label={`预览 ${preview.value.name}`} tabIndex={-1} autoFocus
             testId={props.testId ? `${props.testId}-preview` : undefined}
-            onKeyDown={(event: EventPayload) => {
+            onKeyDown={(event: KeyEvent) => {
               if (event.key === "escape") closePreview()
               else if (event.key === "tab" && previewPanel.value?.id != null) {
+                event.preventDefault()
                 if (event.modifiers?.shift) renderer?.focusPreviousWithin?.(previewPanel.value.id)
                 else renderer?.focusNextWithin?.(previewPanel.value.id)
               }
