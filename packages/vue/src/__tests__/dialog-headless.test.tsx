@@ -13,6 +13,7 @@ import {
   Dialog,
   DialogBackdrop,
   DialogClose,
+  DialogDescription,
   DialogPopup,
   DialogPortal,
   DialogTitle,
@@ -46,12 +47,18 @@ function click(app: HeadlessApp, testId: string) {
 
 /** One synthetic keystroke with a shared id: the element event and the
  *  trailing window event group their flags, like a native dispatch. */
-function keystroke(app: HeadlessApp, target: string | number, key: string, id: number) {
+function keystroke(
+  app: HeadlessApp,
+  target: string | number,
+  key: string,
+  id: number,
+  extra: Record<string, unknown> = {}
+) {
   const elementId = typeof target === "number" ? target : find(app, target)?.id
   if (elementId != null) {
-    app.dispatch({ elementId, eventType: "keyDown", key, keystrokeId: id })
+    app.dispatch({ elementId, eventType: "keyDown", key, keystrokeId: id, ...extra })
   }
-  app.windowKeyDown(key, { keystrokeId: id })
+  app.windowKeyDown(key, { keystrokeId: id, ...extra })
 }
 
 describe("dialog (headless)", () => {
@@ -286,8 +293,7 @@ describe("dialog (headless)", () => {
     expect(renderer.getFocusedElementId()).toBe(launcher)
   })
 
-  it("the modal popup traps Tab; a non-modal popup lets the window default run", async () => {
-    const App = defineComponent({
+  it("the modal popup traps Tab; a non-modal popup lets the window default run", async () => {    const App = defineComponent({
       setup: () => () => (
         <Dialog defaultOpen>
           <DialogPortal>
@@ -330,5 +336,121 @@ describe("dialog (headless)", () => {
     keystroke(app, nonModalPopup, "tab", 2)
     await app.settle()
     expect(nonModalRenderer.getFocusedElementId()).toBeNull()
+  })
+
+  it("activates Trigger and Close like a <button>: Enter down, Space up, disabled", async () => {
+    const opened: boolean[] = []
+    const App = defineComponent({
+      setup: () => () => (
+        <div>
+          <Dialog defaultOpen={false} onOpenChange={(next) => opened.push(next)}>
+            <DialogTrigger testId="open">Open</DialogTrigger>
+            <DialogTrigger testId="disabled" disabled>Disabled</DialogTrigger>
+            <DialogPortal>
+              <DialogBackdrop />
+              <DialogPopup testId="popup" style={popupStyle}>
+                <DialogClose testId="close">Close</DialogClose>
+              </DialogPopup>
+            </DialogPortal>
+          </Dialog>
+        </div>
+      ),
+    })
+    app = mountHeadless(App)
+    await app.settle()
+
+    // Enter activates on key-down; a held repeat does not refire.
+    app.dispatch({ elementId: find(app, "open").id, eventType: "keyDown", key: "enter" })
+    await app.settle()
+    expect(find(app, "popup")).toBeDefined()
+    expect(opened).toEqual([true])
+
+    // Space cancels its default on key-down and activates on key-up.
+    app.dispatch({ elementId: find(app, "close").id, eventType: "keyDown", key: "space" })
+    await app.settle()
+    expect(find(app, "popup")).toBeDefined()
+    app.dispatch({ elementId: find(app, "close").id, eventType: "keyUp", key: "space" })
+    await app.settle()
+    expect(find(app, "popup")).toBeUndefined()
+    expect(opened).toEqual([true, false])
+
+    // Enter also closes from the Close button.
+    app.dispatch({ elementId: find(app, "open").id, eventType: "keyDown", key: "enter" })
+    await app.settle()
+    app.dispatch({ elementId: find(app, "close").id, eventType: "keyDown", key: "enter" })
+    await app.settle()
+    expect(find(app, "popup")).toBeUndefined()
+
+    // A disabled trigger neither joins the tab order nor activates.
+    const disabled = find(app, "disabled")
+    expect(disabled.props.tabIndex).toBe(-1)
+    click(app, "disabled")
+    await app.settle()
+    expect(find(app, "popup")).toBeUndefined()
+    app.dispatch({ elementId: disabled.id, eventType: "keyDown", key: "enter" })
+    app.dispatch({ elementId: disabled.id, eventType: "keyUp", key: "space" })
+    await app.settle()
+    expect(find(app, "popup")).toBeUndefined()
+  })
+
+  it("asChild merges Trigger and Close onto their single child", async () => {
+    const App = defineComponent({
+      setup: () => () => (
+        <Dialog defaultOpen>
+          <DialogTrigger asChild testId="open">
+            <div style={{ width: 80, height: 24 }}>Open</div>
+          </DialogTrigger>
+          <DialogPortal>
+            <DialogBackdrop />
+            <DialogPopup testId="popup" style={popupStyle}>
+              <text>Body</text>
+              <DialogClose asChild testId="close">
+                <div style={{ width: 60, height: 24 }}>Done</div>
+              </DialogClose>
+            </DialogPopup>
+          </DialogPortal>
+        </Dialog>
+      ),
+    })
+    app = mountHeadless(App)
+    await app.settle()
+    // The child itself became the trigger/close: one element, one hit target.
+    const trigger = find(app, "open")
+    expect(trigger.type).toBe("div")
+    expect(app.renderer.textOf(trigger.id)).toBe("Open")
+    expect(app.renderer.hasListener(trigger.id, "click")).toBe(true)
+
+    click(app, "close")
+    await app.settle()
+    expect(find(app, "popup")).toBeUndefined()
+  })
+
+  it("renders Title and Description, and traps Shift+Tab inside a modal popup", async () => {
+    const App = defineComponent({
+      setup: () => () => (
+        <Dialog defaultOpen>
+          <DialogPortal>
+            <DialogBackdrop />
+            <DialogPopup testId="popup" style={popupStyle}>
+              <DialogTitle testId="title">Settings</DialogTitle>
+              <DialogDescription testId="description">Changes apply immediately</DialogDescription>
+            </DialogPopup>
+          </DialogPortal>
+        </Dialog>
+      ),
+    })
+    app = mountHeadless(App)
+    await app.settle()
+    expect(app.renderer.allTexts()).toContain("Settings")
+    expect(app.renderer.allTexts()).toContain("Changes apply immediately")
+    expect(find(app, "title").props.role).toBe("heading")
+
+    const renderer = app.renderer
+    const popup = find(app, "popup").id
+    // Shift+Tab takes the popup's focusPreviousWithin branch and stays
+    // prevented, so the window default never moves focus either.
+    keystroke(app, popup, "tab", 3, { shift: true })
+    await app.settle()
+    expect(renderer.getFocusedElementId()).toBe(popup)
   })
 })
