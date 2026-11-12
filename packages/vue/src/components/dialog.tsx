@@ -108,6 +108,9 @@ export const DialogTrigger = defineComponent({
   },
   setup(props, { attrs, slots }) {
     const context = useDialogContext("DialogTrigger")
+    const open = () => {
+      if (!props.disabled) context.setOpen(true)
+    }
     return () => {
       const disabled = props.disabled
       const triggerProps: Record<string, unknown> = {
@@ -119,7 +122,19 @@ export const DialogTrigger = defineComponent({
         },
         onClick: (event: EventPayload) => {
           ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
-          if (!disabled) context.setOpen(true)
+          open()
+        },
+        // Button semantics: Enter fires on key-down, Space on key-up (its
+        // default is cancelled so it never scrolls or types).
+        onKeyDown: (event: KeyEvent) => {
+          ;(attrs.onKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
+          if (disabled || event.defaultPrevented) return
+          if (event.key === "enter" && !event.isHeld) open()
+          if (event.key === "space") event.preventDefault()
+        },
+        onKeyUp: (event: KeyEvent) => {
+          ;(attrs.onKeyUp as ((event: KeyEvent) => void) | undefined)?.(event)
+          if (!disabled && !event.defaultPrevented && event.key === "space") open()
         },
       }
       if (props.asChild) {
@@ -302,6 +317,9 @@ export const DialogClose = defineComponent({
   },
   setup(props, { attrs, slots }) {
     const context = useDialogContext("DialogClose")
+    const close = () => {
+      if (!props.disabled) context.setOpen(false)
+    }
     return () => {
       const disabled = props.disabled
       const closeProps: Record<string, unknown> = {
@@ -309,7 +327,18 @@ export const DialogClose = defineComponent({
         tabIndex: disabled ? -1 : (props.tabIndex ?? 0),
         onClick: (event: EventPayload) => {
           ;(attrs.onClick as ((event: EventPayload) => void) | undefined)?.(event)
-          if (!disabled) context.setOpen(false)
+          close()
+        },
+        // Button semantics, like DialogTrigger.
+        onKeyDown: (event: KeyEvent) => {
+          ;(attrs.onKeyDown as ((event: KeyEvent) => void) | undefined)?.(event)
+          if (disabled || event.defaultPrevented) return
+          if (event.key === "enter" && !event.isHeld) close()
+          if (event.key === "space") event.preventDefault()
+        },
+        onKeyUp: (event: KeyEvent) => {
+          ;(attrs.onKeyUp as ((event: KeyEvent) => void) | undefined)?.(event)
+          if (!disabled && !event.defaultPrevented && event.key === "space") close()
         },
       }
       if (props.asChild) {

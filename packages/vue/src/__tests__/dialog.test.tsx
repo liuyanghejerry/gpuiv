@@ -113,17 +113,17 @@ describeNative("dialog (vue)", () => {
     // The nested Select popup opens above the dialog.
     app.renderer.simulateKeystrokes("down")
     await app.settle()
-    expect(app.renderer.getAllText().join("|")).toBe("Open|Settings|Alpha|Close|Alpha|Beta")
+    expect(app.renderer.getAllText().filter((text) => text !== "").join("|")).toBe("Open|Settings|Alpha|Close|Alpha|Beta")
 
     // One Escape closes only the Select; the second closes the dialog and
     // restores focus to the trigger.
     app.renderer.simulateKeystrokes("escape")
     await app.settle()
-    expect(app.renderer.getAllText().join("|")).toBe("Open|Settings|Alpha|Close")
+    expect(app.renderer.getAllText().filter((text) => text !== "").join("|")).toBe("Open|Settings|Alpha|Close")
     expect(focusedTestId()).toBe("select")
     app.renderer.simulateKeystrokes("escape")
     await app.settle()
-    expect(app.renderer.getAllText().join("|")).toBe("Open")
+    expect(app.renderer.getAllText().filter((text) => text !== "").join("|")).toBe("Open")
     expect(focusedTestId()).toBe("open")
 
     // Backdrop and popup press semantics: a press on the popup keeps it open,
@@ -134,10 +134,10 @@ describeNative("dialog (vue)", () => {
     const popup = app.renderer.getElementBounds(testIdOf("popup"))
     app.renderer.nativeSimulateClick(popup.x + popup.width - 4, popup.y + 4)
     await app.settle()
-    expect(app.renderer.getAllText().join("|")).toBe("Open|Settings|Alpha|Close")
+    expect(app.renderer.getAllText().filter((text) => text !== "").join("|")).toBe("Open|Settings|Alpha|Close")
     app.renderer.nativeSimulateClick(4, 390)
     await app.settle()
-    expect(app.renderer.getAllText().join("|")).toBe("Open")
+    expect(app.renderer.getAllText().filter((text) => text !== "").join("|")).toBe("Open")
     expect(focusedTestId()).toBe("open")
   })
 
@@ -182,7 +182,7 @@ describeNative("dialog (vue)", () => {
     await app.settle()
     app.renderer.simulateKeystrokes("escape")
     await app.settle()
-    expect(app.renderer.getAllText()).toEqual(["Unsaved"])
+    expect(app.renderer.getAllText().filter((text) => text !== "")).toEqual(["Unsaved"])
   })
 
   it("puts a nested layer above its parent even when both open in one commit", async () => {
@@ -207,7 +207,9 @@ describeNative("dialog (vue)", () => {
     })
     app = createTestApp(App)
     await app.settle()
-    const texts = () => app!.renderer.getAllText().join("|")
+    // Vue brackets slot fragments with empty text anchors; they are layout-free
+    // (collapsed to zero size natively) and filtered from these assertions.
+    const texts = () => app!.renderer.getAllText().filter((text) => text !== "").join("|")
     expect(texts()).toBe("Dialog|Alpha|Menu item")
 
     // Vue mounts the Select's layer before the Dialog's; nesting must still
