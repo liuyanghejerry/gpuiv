@@ -26,6 +26,12 @@ import {
   connectVueDevtools,
   createApp,
   createUpdater,
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogPopup,
+  DialogPortal,
+  DialogTitle,
   finishPendingWindowsUpdate,
   isPackaged,
   motion,
@@ -1101,74 +1107,68 @@ const Inspector = defineComponent({
   },
 })
 
-// Modal card centered over the whole window. The dim layer is
-// pointer-transparent and the card is the only filled surface with
-// onMouseDownOutside on it: a dim layer that took the hit would swallow the
-// outside press and the close would never fire (upstream c98b414).
+// Modal card over the whole window, on the headless Dialog primitives: the
+// portal is a native fill="window" layer (so it covers <virtual-list> and
+// tracks resizes), the Backdrop owns the dim and the outside press, Escape
+// closes through the dismiss layer stack, and focus returns to the caller on
+// close. See upstream `cff4907` (Dialog half).
 const OverlayCard = defineComponent({
   props: {
     title: { type: String, required: true },
+    open: { type: Boolean, required: true },
     onClose: { type: Function as PropType<() => void>, required: true },
     height: { type: Number, default: undefined },
+    initialFocus: {
+      type: Object as PropType<{ current: { id: number } | null } | undefined>,
+      default: undefined,
+    },
   },
   setup(props, { slots }) {
     return () => (
-      <div
-        style={{
-          position: 'absolute',
-          top: 0,
-          right: 0,
-          bottom: 0,
-          left: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          backgroundColor: '#00000066',
-          pointerEvents: 'none',
-        }}
-      >
-        <div
-          onMouseDownOutside={props.onClose}
-          style={{
-            width: 420,
-            height: props.height,
-            maxWidth: '90%',
-            backgroundColor: C.raised,
-            borderRadius: 12,
-            borderWidth: 1,
-            borderColor: C.borderStrong,
-            padding: 16,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-            pointerEvents: 'auto',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
-            <text style={{ fontSize: 14, fontWeight: 600, color: C.text, flexGrow: 1 }}>
-              {props.title}
-            </text>
-            <div
-              testId="overlay-close"
-              onClick={props.onClose}
-              style={{
-                height: 24,
-                paddingLeft: 8,
-                paddingRight: 8,
-                borderRadius: 6,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                hover: { backgroundColor: C.overlay },
-              }}
-            >
-              <text style={{ fontSize: 12, color: C.secondary }}>Close</text>
+      <Dialog open={props.open} onOpenChange={(next: boolean) => { if (!next) props.onClose() }}>
+        <DialogPortal>
+          <DialogBackdrop style={{ backgroundColor: '#00000066' }} />
+          <DialogPopup
+            initialFocus={props.initialFocus}
+            style={{
+              width: 420,
+              height: props.height,
+              maxWidth: '90%',
+              backgroundColor: C.raised,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: C.borderStrong,
+              padding: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center' }}>
+              <DialogTitle style={{ flexGrow: 1 }}>
+                <text style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{props.title}</text>
+              </DialogTitle>
+              <DialogClose
+                testId="overlay-close"
+                style={{
+                  height: 24,
+                  paddingLeft: 8,
+                  paddingRight: 8,
+                  borderRadius: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  hover: { backgroundColor: C.overlay },
+                }}
+              >
+                <text style={{ fontSize: 12, color: C.secondary }}>Close</text>
+              </DialogClose>
             </div>
-          </div>
-          {slots.default?.()}
-        </div>
-      </div>
+            {slots.default?.()}
+          </DialogPopup>
+        </DialogPortal>
+      </Dialog>
     )
   },
 })
@@ -2203,6 +2203,9 @@ export const ChatApp = defineComponent({
     const collapsed = ref(false)
     const inspectorOpen = ref(false)
     const overlay = ref<'search' | 'settings' | null>(null)
+    // The Dialog layer focuses this imperatively on open (explicit beats
+    // same-frame autoFocus), so the input needs no autoFocus of its own.
+    const searchInputRef: { current: { id: number } | null } = { current: null }
     const query = ref('')
     const projectOnly = ref(false)
     const draft = ref('')
@@ -2438,12 +2441,20 @@ export const ChatApp = defineComponent({
           />
         )}
         {overlay.value === 'search' && (
-          <OverlayCard title="Search threads" height={420} onClose={() => (overlay.value = null)}>
+          <OverlayCard
+            title="Search threads"
+            height={420}
+            open
+            onClose={() => (overlay.value = null)}
+            initialFocus={searchInputRef}
+          >
             <input
               testId="search-input"
+              ref={(node: HostNode | null) => {
+                searchInputRef.current = node != null && node.id != null ? { id: node.id } : null
+              }}
               value={query.value}
               placeholder="Filter by title"
-              autoFocus
               theme={CHAT_THEME}
               style={{
                 width: '100%',
@@ -2481,7 +2492,7 @@ export const ChatApp = defineComponent({
           </OverlayCard>
         )}
         {overlay.value === 'settings' && (
-          <OverlayCard title="Settings" onClose={() => (overlay.value = null)}>
+          <OverlayCard title="Settings" open onClose={() => (overlay.value = null)}>
             <text style={{ fontSize: 13, lineHeight: 18, color: C.secondary }}>
               This is the GPUIV chat demo. Threads, drafts, and replies stay in this window.
             </text>

@@ -1579,11 +1579,45 @@ All control components come from the main package:
 | Import | Main parts |
 |---|---|
 | `@gpuiv/vue` | `Select` (Root), `SelectTrigger`, `SelectValue`, `SelectContent`, `SelectItem`, plus `SelectGroup`, `SelectLabel`, `SelectSeparator`, `SelectScrollUpButton`, `SelectScrollDownButton` |
+| `@gpuiv/vue` | `Dialog` (Root), `DialogTrigger`, `DialogPortal`, `DialogBackdrop`, `DialogPopup`, `DialogTitle`, `DialogDescription`, `DialogClose` |
 | `@gpuiv/vue` | `FloatingLayer` — the positioned layer behind `SelectContent`, usable directly |
 | `@gpuiv/vue` | `Collapsible` (Root), `CollapsibleTrigger`, `CollapsiblePanel` |
 
 `Combobox` and `Tooltip` also use the Root / children split. Style the primitives
 and compose them in your application.
+
+### Modal dialogs
+
+`Dialog` follows Base UI's shape: the Root owns the open state, `DialogPortal`
+mounts a full-window layer while open (native `fill: "window"` sizing, so a
+resize never leaves an uncovered strip), `DialogBackdrop` owns the dim and the
+outside press, and `DialogPopup` is the focused surface:
+
+```tsx
+<Dialog open={open.value} onOpenChange={(next) => (open.value = next)}>
+  <DialogTrigger>Open settings</DialogTrigger>
+  <DialogPortal>
+    <DialogBackdrop style={{ backgroundColor: '#00000066' }} />
+    <DialogPopup style={{ width: 420, padding: 16, backgroundColor: '#111827' }}>
+      <DialogTitle>Settings</DialogTitle>
+      <DialogDescription>...</DialogDescription>
+      <DialogClose>Close</DialogClose>
+    </DialogPopup>
+  </DialogPortal>
+</Dialog>
+```
+
+Escape closes through the dismiss layer stack (only the topmost layer, and any
+handler can prevent it); a modal dialog traps Tab inside the popup
+(`focusNextWithin` / `focusPreviousWithin`); focus moves to the popup on open
+and back to the trigger — or, without a trigger, to whatever held focus before —
+on close. `initialFocus` / `finalFocus` override those targets (`false` leaves
+focus, an element/ref/function picks it), and `modal: false` renders a
+non-blocking layer. `DialogTrigger` and `DialogClose` accept `asChild` to merge
+onto your own element.
+
+`DismissableLayer` (what every popup here registers) is exported for custom
+overlays that want the same Escape behavior.
 
 ### Collapsible panels
 
@@ -1780,6 +1814,11 @@ behind the fill, and translucent backgrounds paint only once. The optional
 native `motion` attr also targets this complete surface. Borders, overflow,
 layout, focus and keyboard handlers remain on the inner content.
 `pointerEvents: "none"` disables the anchored occluder.
+
+A raw `<anchored fill="window">` covers the whole viewport instead of tracking a
+trigger: native code sizes it from the window every frame, so a resize follows
+in the same paint with no JS polling, and clicks can never reach an uncovered
+strip. That is what `DialogPortal` uses.
 
 A filled in-flow `div` blocks clicks and hovers behind it. The parent
 scroller still gets the wheel. `position: "absolute"` / `"fixed"` or

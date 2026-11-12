@@ -13,6 +13,7 @@ export {
   FloatingLayer,
   floatingRootStyle,
   mergeStyles,
+  resolveFocusTarget,
   resolveStyle,
   useControllableState,
 } from "./floating.js"
@@ -20,8 +21,26 @@ export type {
   FloatingAlign,
   FloatingContentProps,
   FloatingSide,
+  FocusTarget,
+  FocusableNode,
   StateStyle,
 } from "./floating.js"
+export {
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogDescription,
+  DialogPopup,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
+} from "./dialog.js"
+export type {
+  DialogCloseProps,
+  DialogPopupProps,
+  DialogProps,
+  DialogTriggerProps,
+} from "./dialog.js"
 export {
   Select,
   SelectContent,

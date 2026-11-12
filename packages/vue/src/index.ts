@@ -110,9 +110,34 @@ export {
   FloatingLayer,
   floatingRootStyle,
   mergeStyles,
+  resolveFocusTarget,
   resolveStyle,
   useControllableState,
 } from "./components/floating.js"
+export type {
+  FloatingAlign,
+  FloatingContentProps,
+  FloatingSide,
+  FocusTarget,
+  FocusableNode,
+  StateStyle,
+} from "./components/floating.js"
+export {
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogDescription,
+  DialogPopup,
+  DialogPortal,
+  DialogTitle,
+  DialogTrigger,
+} from "./components/dialog.js"
+export type {
+  DialogCloseProps,
+  DialogPopupProps,
+  DialogProps,
+  DialogTriggerProps,
+} from "./components/dialog.js"
 export {
   Combobox,
   ComboboxContent,
@@ -157,12 +182,6 @@ export {
   SelectTrigger,
   SelectValue,
 } from "./components/select.js"
-export type {
-  FloatingAlign,
-  FloatingContentProps,
-  FloatingSide,
-  StateStyle,
-} from "./components/floating.js"
 export type {
   SelectContentProps,
   SelectItemData,
