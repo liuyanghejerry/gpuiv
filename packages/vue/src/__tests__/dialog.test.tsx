@@ -110,10 +110,13 @@ describeNative("dialog (vue)", () => {
     await app.settle()
     expect(focusedTestId()).toBe("select")
 
-    // The nested Select popup opens above the dialog.
+    // The nested Select popup opens above the dialog. Our retained tree keeps
+    // the deferred layer at its component position (inside the popup, before
+    // Close), so the item texts join mid-list — the paint order above the
+    // dialog is what the layer's deferred priority buys.
     app.renderer.simulateKeystrokes("down")
     await app.settle()
-    expect(app.renderer.getAllText().filter((text) => text !== "").join("|")).toBe("Open|Settings|Alpha|Close|Alpha|Beta")
+    expect(app.renderer.getAllText().filter((text) => text !== "").join("|")).toBe("Open|Settings|Alpha|Alpha|Beta|Close")
 
     // One Escape closes only the Select; the second closes the dialog and
     // restores focus to the trigger.
