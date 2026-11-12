@@ -231,6 +231,7 @@ export type {
   MotionTransition,
   NativeRenderer,
   NativeWindowInsets,
+  StateStyleDesc,
   StyleDesc,
   TextRun,
   SyntaxTheme,

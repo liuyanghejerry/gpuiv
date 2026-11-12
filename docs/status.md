@@ -53,6 +53,7 @@
 - [x] Cross-element text selection
 - [x] Headless Select, Combobox and Tooltip
 - [x] Native `hover` and `active` styles
+- [x] `focusVisible` styles (keyboard-only focus refinement) and the keyboard focus dim (every other focusable element dims to 40% while a control has keyboard focus; per-element and per-window `keyboardFocusDim: false` opt-outs)
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] Wayland layer-shell surfaces (`layerShell` window option: panels, docks, wallpapers; Linux/Wayland only)

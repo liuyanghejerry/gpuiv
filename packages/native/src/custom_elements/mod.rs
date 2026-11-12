@@ -33,6 +33,9 @@ pub struct CustomRenderContext<'a> {
     pub event_callback: &'a Option<EventCallback>,
     /// Pre-created FocusHandle for this element (if it has keyboard/focus listeners).
     pub focus_handle: Option<&'a gpui::FocusHandle>,
+    /// The control holding keyboard focus and its ancestors. See
+    /// `renderer::apply_focus_visible`.
+    pub keyboard_focus: Option<std::sync::Arc<[u64]>>,
     /// Style object from the retained element for layout and appearance.
     pub style: Option<&'a crate::style::StyleDesc>,
     /// Built child elements from the retained tree for this custom node.

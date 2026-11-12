@@ -257,6 +257,8 @@ pub struct RetainedTree {
     pub styles: StyleTable,
     /// The root element ID set by appendChildToContainer.
     pub root_id: Option<u64>,
+    /// Dim other focusables while a control has keyboard focus. Set per root.
+    keyboard_focus_dim: bool,
     next_revision: u64,
     /// Something a frame would draw changed since the last `take_dirty`. A batch
     /// of resends, which is what a re-render with unchanged props produces,
@@ -274,6 +276,7 @@ impl RetainedTree {
             anchored_count: 0,
             styles: StyleTable::default(),
             root_id: None,
+            keyboard_focus_dim: true,
             next_revision: 1,
             dirty: false,
         }
@@ -283,6 +286,17 @@ impl RetainedTree {
     /// answer. Call once per applied batch.
     pub fn take_dirty(&mut self) -> bool {
         std::mem::take(&mut self.dirty)
+    }
+
+    pub fn keyboard_focus_dim(&self) -> bool {
+        self.keyboard_focus_dim
+    }
+
+    pub fn set_keyboard_focus_dim(&mut self, enabled: bool) {
+        if self.keyboard_focus_dim != enabled {
+            self.keyboard_focus_dim = enabled;
+            self.dirty = true;
+        }
     }
 
     pub fn set_root(&mut self, id: u64) {

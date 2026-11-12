@@ -380,7 +380,9 @@ export const SelectContent = defineComponent({
         ...restAttrs,
         tabIndex: props.tabIndex,
         autoFocus: true,
-        style: attrs.style as StyleDesc | undefined,
+        // The popup is focused only to take keys; it must not dim while a
+        // control behind it has keyboard focus.
+        style: { keyboardFocusDim: false, ...(attrs.style as StyleDesc | undefined) },
         onMouseDownOutside: (event: EventPayload) => {
           ;(userOnMouseDownOutside as ((event: EventPayload) => void) | undefined)?.(event)
           context.dismissedByOutsidePress = true

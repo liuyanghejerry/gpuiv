@@ -14,6 +14,7 @@ import type { EventPayload } from "@gpuiv/native"
 import type { NativeRenderer, StyleDesc, HostNode } from "../types.js"
 import { createGpuivRendererHost, type GpuivRendererHost } from "../reconciler/vue-renderer.js"
 import {
+  containerForRenderer,
   handleGpuixEvent,
   idAllocatorFor,
   nextWindowKeyEventId,
@@ -26,6 +27,7 @@ type Op = unknown[]
 export interface HeadlessOptions {
   width?: number
   height?: number
+  keyboardFocusDim?: boolean
   onKeyDown?: (event: EventPayload) => void
   onKeyUp?: (event: EventPayload) => void
   onWindowShouldClose?: (event: EventPayload) => void
@@ -257,6 +259,7 @@ export function mountHeadless(
     windowKeyEventId,
     windowSelectionEventId
   )
+  containerForRenderer(renderer)!.renderer.setKeyboardFocusDim(options.keyboardFocusDim !== false)
   const app = host.vue.createApp(rootComponent as never)
   app.provide(GPUIV_CONTEXT, { renderer })
   app.mount(host.container)

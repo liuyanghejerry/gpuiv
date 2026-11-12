@@ -2851,6 +2851,40 @@ They work on **every** element, including `<text>`, `<code>`, `<markdown>`,
 interactive identity to hold a hovered or pressed state, so put them on a
 wrapping `<div>`.
 
+### Focus-visible and the keyboard focus dim
+
+`focusVisible` is a third nested style object, applied natively while the
+element has focus **after keyboard input** — like CSS `:focus-visible`. A
+mouse press never shows it. The element must be focusable (`tabIndex`, or a
+control like `Button`):
+
+```tsx
+<div
+  tabIndex={0}
+  style={{
+    borderRadius: 8,
+    focusVisible: { outline: { width: 2, color: '#89b4fa' } },
+  }}
+>
+  Tab to me
+</div>
+```
+
+While a control has keyboard focus, **every other focusable element dims to
+40% of its own opacity** (paint only — bounds never move), so both the
+focused element and every Tab target stay visible at a glance. A focused
+text field dims nothing: typing is keyboard input too. Three ways to change
+the behavior:
+
+- `style.keyboardFocusDim: false` keeps one element at full opacity (not
+  inherited). `SelectContent` and `DialogPopup` set it themselves: a popup
+  is focused only to take keys.
+- `createApp(App, { keyboardFocusDim: false })` turns the dim off for the
+  whole window — draw your own focus look with `focusVisible` instead.
+  `createTestApp` accepts the same option.
+- `focusVisible` styles the focused element and does not opt it out of the
+  dim in other frames; the two states are independent.
+
 > **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in your component and render each line as a separate `<text>` element in a flex column:
 >
 > ```tsx
