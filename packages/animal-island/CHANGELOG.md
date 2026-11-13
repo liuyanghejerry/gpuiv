@@ -1,5 +1,13 @@
 # @gpuiv/animal-island
 
+## 0.2.1
+
+### Patch Changes
+
+- cab21fa: Add user-facing npm READMEs with installation instructions, minimal examples, platform notes, and documentation links for the native, Vue, Animal Island, and packager packages.
+- Updated dependencies [cab21fa]
+  - @gpuiv/vue@0.6.1
+
 ## 0.2.0
 
 ### Minor Changes
