@@ -81,6 +81,12 @@ bun --hot chat.tsx
 
 [浏览全部示例](examples/)，还包括[错误边界](examples/error-handling.tsx)、[文件打开](examples/open-files.tsx)、[单实例应用](examples/single-instance.tsx)和 [macOS 窗口毛玻璃效果](examples/blurred-window.tsx)。完成源码构建后，可在 macOS 或 Windows 上运行 `bun scripts/screenshots.ts` 重新生成这组精选截图。
 
+### 基于 GPUIV 构建的完整应用
+
+<a href="docs/images/readme-mini-dsh.png"><img src="docs/images/readme-mini-dsh.png" alt="mini dsh 桌面客户端，包含会话历史、工具执行时间线、Markdown 回复和消息输入框" width="100%" /></a>
+
+**[mini dsh](https://github.com/liuyanghejerry/mini-dsh)** 是基于官方 DeepSeek Harness 的独立桌面客户端，使用 Vue 3、GPUIV 和 Animal Island 构建。它在原生 GPU 渲染界面中整合了会话历史、流式回复、工具执行时间线、`@` 文件引用和 `/` 技能选择。[查看源码](https://github.com/liuyanghejerry/mini-dsh)或[下载 Linux x64 AppImage](https://github.com/liuyanghejerry/mini-dsh/releases/latest)。
+
 ## 快速上手
 
 安装 [Bun](https://bun.sh) 并创建项目。npm 包包含预编译原生二进制文件，无需编译 Rust 即可启动应用。
