@@ -1,5 +1,13 @@
 # @gpuiv/vue
 
+## 0.6.1
+
+### Patch Changes
+
+- cab21fa: Add user-facing npm READMEs with installation instructions, minimal examples, platform notes, and documentation links for the native, Vue, Animal Island, and packager packages.
+- Updated dependencies [cab21fa]
+  - @gpuiv/native@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes
