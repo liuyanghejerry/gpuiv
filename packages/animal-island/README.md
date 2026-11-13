@@ -1,17 +1,49 @@
 # Animal Island for GPUIV
 
-Private workspace port of [animal-island-vue](https://github.com/guokaigdg/animal-island-vue),
-now also aligned with the [React library](https://github.com/guokaigdg/animal-island-ui/tree/c696d16167d01370f822f95db22340b05d837555).
-The original Vue baseline is commit
-[`ac185709`](https://github.com/guokaigdg/animal-island-vue/tree/ac18570956da9da21fe899da438f17d75d2e446d).
-Tracking: [GPUIV #164](https://github.com/liuyanghejerry/gpuiv/issues/164).
+A GPUIV-native port of [animal-island-vue](https://github.com/guokaigdg/animal-island-vue),
+also aligned with the [React library](https://github.com/guokaigdg/animal-island-ui/tree/c696d16167d01370f822f95db22340b05d837555).
+It provides the original cream-and-warm-brown visual language, illustrations,
+motion, and native desktop behavior for [GPUIV](https://github.com/liuyanghejerry/gpuiv)
+applications.
 
 All **39 original Vue component families**, plus React's **CountUp**, have
 native implementations and **40 comparison pages**. `Avatar.Group`/`AvatarGroup`,
 the three specialized Skeleton components, `FormItem` and `FormProvider` are
 additional public companions grouped with their main component pages.
-The [React parity audit](REACT_PARITY.md) checks public APIs, behavior and
-appearance against the pinned React source, including explicit native limits.
+The [React parity audit](https://github.com/liuyanghejerry/gpuiv/blob/main/packages/animal-island/REACT_PARITY.md)
+checks public APIs, behavior and appearance against the pinned React source,
+including explicit native limits.
+
+## Install
+
+```sh
+bun add @gpuiv/animal-island @gpuiv/vue vue
+```
+
+## Use
+
+```tsx
+import { defineComponent } from 'vue'
+import { createApp, useGpuix } from '@gpuiv/vue'
+import { Button, loadAnimalIslandFonts } from '@gpuiv/animal-island'
+
+const App = defineComponent({
+  setup() {
+    const { renderer } = useGpuix()
+    loadAnimalIslandFonts(renderer)
+    return () => <Button type="primary">Get started</Button>
+  },
+})
+
+createApp(App, { title: 'Animal Island', width: 640, height: 400 })
+```
+
+Call `loadAnimalIslandFonts` in the root setup before rendering children so the
+bundled Nunito and Noto Sans SC faces are available on first paint. Components
+use GPUIV's native `StyleDesc` objects and events rather than browser CSS or DOM
+event objects.
+
+## Development
 
 ```sh
 cd packages/animal-island
