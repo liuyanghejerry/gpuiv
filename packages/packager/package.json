@@ -1,6 +1,6 @@
 {
   "name": "@gpuiv/packager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Package GPUIV apps into distributable desktop products (macOS .app, Windows portable exe, Linux tarballs) with bun compile. Requires bun: the CLI and library are TypeScript executed directly.",
   "type": "module",
   "license": "Apache-2.0",

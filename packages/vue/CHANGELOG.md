@@ -1,5 +1,157 @@
 # @gpuiv/vue
 
+## 0.6.0
+
+### Minor Changes
+
+- 4914c7b: Support `display: none` for retained elements and native `filter` motion tracks. Hidden subtrees keep their Vue state and native identity while skipping layout, paint and hit-testing, and matching image-filter lists interpolate on the frame clock while the last filtered frame (or the unfiltered source before the first) stays visible until the next one is ready. Keep every Carousel slide mounted so hidden pages retain local state, add the outgoing-slide crossfade, and keep BackTop's hover scale on one baked rest shadow that scales with the artwork instead of regenerating a filter per frame.
+- 879c2dc: Add selectable `AnsiText` and virtualized `AnsiLog` output with streaming ANSI decoding, sixteen-colour palettes, indexed and RGB colours, and font decorations. Export `createAnsiParser` and `parseAnsi` for application-owned log pipelines.
+  
+  Keep newly appended short-list rows mounted when the native visible range does not change.
+- 04f9021: Expose additional ARIA keyboard shortcuts, placeholders, set positions, table indexes, and counts through the native accessibility tree. Forward unknown `aria-*` props for forward compatibility and ignore invalid values safely.
+- 60ec8d1: Every `createWindow()` window now answers on the automation session: `app.window(index)` returns a view whose locators address that window's tree (window 0 is the main window, the default for existing code). The stdio bus routes each request by its window index to that window's backend, and an index that never opened fails fast with `NotFound` instead of hanging. In-process `connectTest` sessions are unchanged.
+- 3ef4af3: Add `app.recordVideo({ path, fps })` to the automation client. Capture frame-exact MP4, WebM, or GIF recordings with `video.frame()` and `video.wait(ms)`, then encode with ffmpeg and resume the native clock using `video.stop()`.
+- 9cfbb1c: Restore Beautiful UI keyboard actions and source links, resume appended streaming content, and fix virtual rows in small table viewports. Add editable property prompts, column resizing, horizontal scrolling with a fixed Company column, Flowchart, AgentScreen, and a static Surfer preview. Bundle the original font families, match sRGB color mixing, and support a reactive reduced-motion preference.
+  
+  Expose checked/pressed states and numeric ranges in the native accessibility tree so table checkboxes, approval choices, and sliders report their current values.
+- 45f5d31: Tray support: `setTray(renderer, { iconPath, tooltip?, template? }, onClick?)` installs the process tray (macOS `NSStatusItem` via GPUIV-owned platform code — GPUI has no tray API — and Windows `Shell_NotifyIconW` on a message-only window), `clearTray(renderer)` removes it. One tray per process (a second `setTray` replaces the first); `onClick` fires on a tray click. `template: true` renders a monochrome macOS menu-bar template; Windows loads `.ico` (other formats best-effort). Linux reports unsupported (StatusNotifierItem/DBus not implemented) and a tray menu is not offered yet — clicks are the whole surface.
+- d634380: `collectGarbageWhenIdle()` runs one full garbage collection once the app has stopped committing mutations for a while (default: two 5s checks with no batch and under half a core of CPU), then waits for the next burst. Returns a stop function.
+- 4b0558b: Headless `Dialog` components in Base UI's shape: `Dialog` (Root), `DialogTrigger`, `DialogPortal`, `DialogBackdrop`, `DialogPopup`, `DialogTitle`, `DialogDescription`, `DialogClose`. The portal is a new native `<anchored fill="window">` layer — Rust sizes it from the viewport every frame, so a resize never leaves an uncovered strip that clicks could reach. Escape closes through the dismiss layer stack, a modal popup traps Tab inside itself, and focus moves to the popup on open and back to the trigger (or whatever held focus before) on close; `initialFocus` / `finalFocus` override those targets and `modal: false` renders a non-blocking layer. `DismissableLayer` orders nested overlays by nesting rather than mount order, so a Dialog and a Select opening in one commit still stack correctly, and only the topmost layer closes on one Escape. `resolveFocusTarget` is exported for custom overlays.
+- 525a332: macOS frame loop wakes on the display link instead of polling. `GpuixRenderer.setFrameWakeCallback(callback)` registers a weak, coalesced native callback that fires after GPUI queues a display frame, so AppKit input is delivered at display rate (up to 120Hz on ProMotion) and nothing polls while idle. `startFrameLoop` uses it automatically when available, with a 100ms fallback timer for a lost wake (e.g. a hidden window's display link); an explicit `frameMs` keeps fixed-rate timer polling. Other platforms are unchanged.
+- 11b7de2: Add `useElementBounds(ref)` and `<AnimateHeight>`. `useElementBounds` polls the element's last painted window-space bounds through the existing `getElementBounds` renderer API; `AnimateHeight` builds on it to tween a container between `height={0}` and `height="auto"` — the drawer/accordion pattern the web solves with `grid-template-rows: 0fr → 1fr` — with content re-measured continuously while open.
+- eaf511d: A Rust crate can add its own GPUI component as an element: `register_custom_element` stores a factory in a process-wide list that every renderer picks up, and the crate ships its own Node addon loaded through `NAPI_RS_NATIVE_LIBRARY_PATH`. Element names must contain a `-` and cannot reuse a built-in. The public custom-element surface (`CustomElement`, `CustomRenderContext`, `custom_surface`, `wire_standard_events`, `emit_event_full`, `EventCallback`, `GpuixView`, and a re-exported `gpui`) is now importable from `gpuiv_native`; `EventPayload` gains `detail` for custom-event data. See "Your own native elements" in the docs and the runnable `example-rust-native-element/` crate.
+  
+  In `@gpuiv/vue`, every prop named `on` + an uppercase letter with a function value is now an event listener, on any element — not just the built-in event names — so externally registered elements get custom events (`onGreet` → `greet`). A non-function value stays a data prop, and a prop switching between the two keeps listeners and props in sync.
+- 71a105e: Inline `$x^2$` formulas in `<markdown>` now render as baseline-aligned images when the `math` map covers them. The flattener replaces the TeX run with space characters whose measured advances (NBSP / THIN / HAIR SPACE denominations from the live mono font) reserve the formula's exact width, and the text underlay paints the rasterized SVG with its bottom sitting `depth` px below the line baseline — the metadata `renderMathMap` already produced. Selection drags across a formula keep working; copying one copies its placeholder spaces rather than the TeX (the same loss an inline image copies in the DOM), and unmapped formulas keep today's literal-TeX fallback. Formula SVGs rasterize once per element lifetime through gpui's usvg pipeline.
+- d26b1c1: Focus styles, ported from upstream gpuix: a new nested `focusVisible` style object applies natively while an element has focus after keyboard input (like CSS `:focus-visible`; a mouse press never shows it), and while a control has keyboard focus every other focusable element dims to 40% of its own opacity (paint only, bounds never move) so every Tab target stays visible. A focused text field dims nothing. Opt out per element with `style.keyboardFocusDim: false` (SelectContent and DialogPopup do), or for the whole window with `createApp(App, { keyboardFocusDim: false })` and draw your own focus look with `focusVisible: { outline: { … } }`. The dim travels as a new `setKeyboardFocusDim` batch op (one per root creation, so a remount without the option restores the default). Our existing `outline` style object stays the way to paint rings; upstream's flat `outlineWidth`/`outlineColor`/`outlineOffset` props were not adopted.
+- 327fe05: Headless `Button` component (Base UI shape): a focusable `div` that acts like `<button>` — `onClick` from a press, Enter on key-down (not a held repeat) or Space on key-up; `disabled` removes it from the Tab order unless `focusableWhenDisabled` keeps it; `style` can be a function of `{ disabled }`; `asChild` merges the behavior onto your own element. The shared `buttonProps()` helper is exported too, and `DialogTrigger` / `DialogClose` now build on it (they gain `role="button"`, and a disabled trigger no longer fires its own `onClick`).
+- 3f526fe: Add `Collapsible`, `CollapsibleTrigger`, and `CollapsiblePanel` with controlled or default-open state, keyboard activation, scoped focus restoration, retained panel state, and height transitions. Support an optional `AnimateHeight` starting height and filter stale completion events when a transition is interrupted.
+- 811d00a: Report native image decode completion and failure through `onLoad` and `onError`, once per source generation. Include the source and intrinsic dimensions or error in the event payload. Restore Animal Island Image loading fades and error artwork, and Avatar image fallbacks with the original `onError=false` opt-out.
+  
+  Batch image completion repaint notifications on the next GPUI frame so many resources finishing together do not redraw the entire window once per image or stall native queries.
+- 1dd5711: Accept BGRA pixel buffers in live image uploads without swapping color channels on the UI thread.
+- cde4787: Every host element ref now has `scrollIntoView()`, which scrolls the nearest `overflow: "scroll"` parent or `<virtual-list>` until the element is visible. `<img>` refs additionally gain `setImage(bytes)` and `setImagePixels(width, height, rgba)` for live image uploads that bypass `src` and the JSON mutation protocol — the previous GPU image is dropped on replace and on unmount, and a virtual-list child scrolls by its logical index (windowStart-aware), not its windowed child position.
+- 8c272d1: Mermaid fences in `<markdown>` get a rendering channel: ` ```mermaid ` blocks parse as their own block and render from a new `mermaid` map prop — app-supplied images (`{ src }`, typically data-URL SVGs) keyed by the fence source with outer whitespace trimmed, the same convention as the `math` map. Mapped fences paint as image blocks (natural size, clamped by `mdImageMaxHeight` like other markdown images); unmapped fences keep today's labelled `mermaid` code card, never a blank. GPUIV deliberately ships no diagram renderer — mermaid needs a real browser layout, so the producer (headless browser, build step, remote renderer) stays app-side.
+- 435af61: Markdown math: `$$…$$` display formulas render as centered SVG images. The new `@gpuiv/vue/math` subpath exports `renderMathMap(source, options?)`, which scans markdown for `$$…$$` / `$…$` (skipping code spans), renders each formula through MathJax headless (liteAdaptor, self-contained path SVGs, results cached), fixes glyph colour, rewrites ex units to px baked at 2× for crisp GPU downscale, and returns a map to pass as `<markdown math={map}>`. Unmapped display formulas fall back to the literal TeX in a muted card. `$inline$` formulas keep their TeX source visible as an accent mono run — inline baseline-aligned SVG runs need new text-layout mechanics and remain open (the map entries already carry the `depth` metadata that layout will need).
+- 07526d4: Expose test-renderer resource ownership counts and GPUI entity leak baselines so apps can verify repeated mount and unmount cycles release their resources.
+- 28ce86c: `AnimatePresence` keeps leaving children mounted until their exit animation finishes, matching Motion for React. `motion.div` gains an `exit` target and `onMotionComplete`; a child that leaves an `AnimatePresence` swaps `animate` for `exit`, and the node unmounts when the native track reaches the exit target. Completions are generation-aware, so a completion queued for a previous target never unmounts a node that retargeted, and offscreen virtual-list rows settle on schedule (motion now advances per frame over every declared track, not only during element builds). Custom components participate via `usePresence()` / `useIsPresent()`.
+- c785e86: Multiple windows on macOS: `createWindow(root, options)` mounts a component in a new native window after `createApp`. Each window gets its own renderer, so element ids, events, focus, text selection, scroll state, automation bounds and paint logs stay per-window. Renderer state that used to live in process-wide thread-locals (automation bounds, the text-selection registry, paint logs, pending scrolls, the repaint-dirty flag) now lives on the window's view, and `GpuixRenderer` holds its own window handle. The returned handle's `close()` unmounts the tree, closes the OS window and drops the renderer from the frame loop.
+- 4ccbf78: Animate background, text and border colors and single or multiple box shadows on the native frame clock. Preserve visible colors when reversing a transition, interpolate transparent colors without dark fringes, and allow explicit null color targets to restore the base style.
+- 4ccbf78: Support CSS filter functions on native images through cached background processing. Preserve image layout, alpha edges, animation frame delays and source load events while applying color adjustments, blur and contour shadows.
+- 364acfb: Support inset shadows and shadow arrays in native styles through GPUI's existing shadow API. Keep single shadows compatible, preserve CSS's first-shadow-on-top array order, and accept an empty array to clear the shadow stack.
+  
+  Restore Animal Island Switch inset depth and Progress fill highlights to match the React components.
+- 811d00a: Support native `input type="password"` with masked paint, protected copy/cut, and real text editing, selection, and IME coordinates. Add configurable `placeholderColor` to native inputs and textareas, and pass Animal Island Input password mode and placeholder ink through to the native editor.
+- 1c53356: Add `setTrayMenu` for native macOS and Windows tray menus with stable action IDs, separators, disabled entries, replacement and clearing, plus test-renderer support.
+  
+  Refs #50
+  Refs #49
+- a596d9b: Global shortcuts: `registerGlobalShortcut(renderer, accelerator, onTrigger?)` arms a system-wide hotkey that works with any app focused; registering the same accelerator again replaces it, and `unregisterGlobalShortcut(renderer, accelerator)` removes it. Accelerators are `'+'`-separated modifiers (`ctrl`, `alt`/`option`, `shift`, `cmd`/`win`/`super`) then one key (`a`–`z`, `0`–`9`, `f1`–`f12`). macOS uses Carbon `RegisterEventHotKey` (no accessibility permission needed, the AppKit loop pumps Carbon events); Windows uses `RegisterHotKey` on a message-only window (a combination another app claimed fails with a clear error). Linux reports unsupported — X11 `XGrabKey` does not survive Wayland.
+- 4c9458f: `registerUrlScheme` now works on Windows and Linux instead of reporting unsupported. GPUI's platform ports leave the claim unimplemented, so the registration is done in GPUIV's own layer with the same per-user story the packager installs: Windows writes `HKCU\Software\Classes\<scheme>` candidate-handler keys (`URL Protocol` marker, quoted open command — the default-protocol claim remains the user's confirmation, Windows hash-protects protocol UserChoice), Linux merges `x-scheme-handler/<scheme>` into a per-user desktop entry and claims it via `xdg-mime`. Delivery (`onOpenUrls`) was already implemented on both platforms. The packager's `register` command also learned `win.urlSchemes` / `linux.urlSchemes` config for packaging-time declaration.
+- c2ff4ed: `onLayout` on `<div>` and `<text>` reports the element's border box after its first paint and each time its size changes, with no polling of `getElementBounds`. The event payload gains `width` and `height`.
+- 1f3d00a: `onScrollChange` on an `overflow: "scroll"` element reports its scroll offset whenever it moves — wheel, scrollbar drag, `scrollTo`, `scrollIntoView`, or content shrinking under the offset — complementing `onScroll`, which reports only the wheel delta before it is applied. The event payload gains `scrollX` and `scrollY`.
+- e4f04a6: Add the `outline` style: a line outside the border box that takes no layout space, like CSS `outline`. Accepts `{ width, color, offset? }`; `offset` may be negative to draw the line inside. Combined with `focus`-visible styling it draws a focus ring that moves nothing, which a border cannot. Backed by `Style::outline` in the zed fork (`c0d597fd`), with the submodule bump also picking up keyboard-modality pointer-jitter suppression, duplicate tab-stop dedupe and test-window activation.
+- 848c464: Add `getElementsAt(x, y)` for topmost-first element hit testing with clipping, deferred layers, and pointer-event handling. Read bounds, automation trees, and window sizes from the last completed frame without forcing paint or waiting for the UI thread; pass `forceRender: true` when a fresh frame is required. Preserve the last good window size when a native query fails.
+- 60e41d8: Add `resizeWindow(width, height)` to request a window's content size at runtime, with positive finite dimensions and independent routing for each window.
+- deda832: Interactive task lists in read-only `<markdown>`: `- [ ]` / `- [x]` items now render a real checkbox in the marker column instead of the literal `[x]` text. Clicking a checkbox fires a new `onTaskToggle` event carrying the marker's rendered state (`value`) and its byte offsets in `source` (`startIndex`/`endIndex`), so apps flip `[ ]`↔`[x]` in place and re-render. Checkbox geometry (`mdTaskBoxSide`, `mdTaskBoxRadius`, `mdTaskStroke`) joins the theme metrics. Ordered task items keep the number and paint the marker literally.
+- 99a30d2: New style keys: `aspectRatio` sizes the indefinite axis from the definite one, `borderStyle: "dashed"` draws dashed borders, `alignItems` accepts `stretch` and `baseline`, and `justifyContent` accepts `space-evenly`.
+- 211e859: Tab and Escape now have DOM-like defaults. Tab / Shift+Tab move focus through `tabIndex` elements and never type `"\t"` into a focused `<input>`; Escape closes the topmost open dismiss layer (Select, Combobox and Tooltip popups now close through it). The defaults run after every element `onKeyDown` and the render-level `onKeyDown`, so any handler can cancel one with the new `KeyEvent.preventDefault()`; `stopPropagation()` skips the ancestors and the window handler of the same keystroke. `createApp(App, { tabNavigation: false })` turns the Tab default off. Native key events carry a `keystrokeId` that groups one dispatch's element events and its trailing window event.
+  
+  animal-island's Modal, Drawer, Image preview and Upload preview keep their focus traps by cancelling the Tab default before walking the subtree.
+- 2cbf95f: `<text>` accepts a `runs` prop for inline-styled segments: `runs={[{ text: "plain " }, { text: "bold", fontWeight: 700 }, { text: "err", underline: { wavy: true } }]}`. The runs replace any string children, including when the array is empty; non-text children remain. Per-segment `color`, `fontWeight`, `fontStyle`, `fontFamily`, `underline`, `strikethrough` and `backgroundColor` are supported; unset attributes fall back to the element's own style. Selection, search and copy keep working because they key off the concatenated string. Per-run font size is deliberately not offered — a size change would reflow the line.
+- dbdd1dd: `scrollbarColor` paints a native scrollbar thumb: over an `overflow: "scroll"` container on each axis that has more to show, and over a `<virtual-list>`. The thumb follows the scroll offset in the frame it paints, sizes unmeasured virtual rows from the measured ones, takes no pointer input, and `scrollbarWidth` sets its thickness (default 6). Padding on a `<virtual-list>` now insets its rows on all four sides, with the thumb at the list's own edge.
+- 194ce52: `<VirtualList>` grows sticky section headers. Pass `stickyIndices` (logical indices of header rows, ascending) and optionally `renderStickyHeader`; the active section's header pins at the top of the list as an overlay that paints above the rows and passes wheel, selection, and clicks through its host descendants, swapping when the next section's header crosses the top. The header content must paint its own opaque background. Backed by a new `getVirtualListGeometry(elementId, index)` renderer query — `[anchorIndex, viewportX, viewportY, viewportWidth, viewportHeight]` plus item bounds when measured — which is also the primitive for other scroll-driven UI. True in-flow sticky (headers pushed by their successor, interactive overlays) needs a GPUI List change and stays on the fork queue.
+
+### Patch Changes
+
+- 811d00a: Keep bounds polling on Windows and Linux from forcing and waiting for another frame. Share window-size polling between components on the same renderer and interval. Preserve fresh automation snapshots, avoid updating animated height, pattern surfaces, progress bars and carousels when only their screen position changes, batch active Skeleton animations on one timer, and keep distant Animal Island gallery sections out of the active render tree.
+- 73772d7: Fix the TypeScript build for `AnimatePresence` and accept Vue's symbol vnode keys in its public key type.
+- bff363b: Keep packaged helpers testable without modifying Bun 1.4.3's read-only global object, and reject invalid file URL percent escapes consistently across runtimes.
+- 08687c3: Parse the CSS Color 4 slash alpha in canvas `color(srgb …)` styles. `color(srgb 1 0 0 / 50%)` previously parsed to `null` — the `/` token landed in the channel list — so the assignment was silently ignored; the slash form (number or percentage alpha, with or without surrounding whitespace) now works.
+- 08687c3: Render the `ComboboxValue` scoped slot. The slot check used the React `children.length` idiom on a Vue slot function, whose arity is always 0 after Vue's normalization, so the slot never ran and the raw value (or placeholder) was always shown. Any provided slot now receives the current value and its content is rendered.
+- 5600352: Coalesce macOS repaints into the frame loop. Every `applyBatch` used to draw a full frame (build + Taffy layout + paint) synchronously inside the FFI call — with live components flushing ~130 batches/s (spinners, bounds polls, streamed text) and scrolling rebuilding the largest part of the tree, that pinned a CPU core and dropped frames. Batches now only mark the tree dirty; the frame loop's `tick()` draws once per tick, which also caps the paint rate at the loop's 16ms cadence (~60fps). Same-frame paths (selection drag, IME) keep their explicit `window.refresh()`. Scroll CPU on the component gallery measured 100% → ~40% of a core; the frame loop's default interval moved from 8ms to 16ms to match the paint cap.
+- 5e230dd: Convert supported numeric and px values in Vue string, object, and array style bindings before sending them to the native renderer, including hover and active styles.
+- 5e230dd: Destroy the native host container when an app or test app unmounts so remounts, Reload, and resetApp do not accumulate retained nodes.
+- 5e230dd: Route each event handler in a listener array through Vue's error handling so async rejections reach error boundaries and a handled error does not skip the remaining listeners.
+- 5e230dd: Keep runtime error observers, overlays, and Reload actions on the window that fails so a secondary window cannot discard the main window's state. Close the current mounted tree after an overlay or reload.
+- d2a05c5: Honor explicit transparent floating backgrounds and paint each surface fill once, with its drop shadows behind the fill. Animate the complete floating surface so translucent panels and SVG silhouettes retain their intended background during entrance motion.
+- 9f4fa9b: Fix live automation flaking after the display-link frame loop: a lost wake (macOS stops display-link delivery to occluded windows) now falls back to the platform's default poll rate instead of 100ms, so a tree paints within one poll after a commit and locator clicks reading last-painted bounds no longer race the first paint. `launch()` also pipes the live child's stderr through to the test output instead of dropping it, so a misbehaving child is visible in CI logs.
+- 21f87c4: Text search keeps whole matches on non-trivial Unicode. Greek final sigma now matches exact uppercase words (`ΟΣ` finds `ΟΣ`), a case-insensitive hit that ends inside an expansion (like `İ` folding to `i` + combining dot) maps back to the complete original character, and projected ranges that overlap an earlier match are dropped instead of double-reporting. Every Unicode mark category now counts as part of a word for `wholeWord`, so decomposed accents no longer break matches — in the native matcher and in `findRanges` alike. Search needles are also compiled once per query instead of per text group, which trims per-keystroke highlight cost on long documents.
+- 94f6dc6: Keep the renderer injection key stable across Bun hot reloads so updated components retain access to their existing window's renderer.
+- 9f4fa9b: Hover ends when the pointer leaves the window. GPUI now clears hover state on the window-exit event (previously hover stuck to the last hit element until the pointer returned), and the test renderer gains `simulateMouseExit` / `nativeSimulateMouseExit(x, y)` so apps can regress the platform's no-final-move exit in GPU-backed tests.
+- 05167b2: Paste shortcuts now propagate when the clipboard has no text. `Cmd+V` / `Ctrl+V` on an `<input>` or `<textarea>` reaches `onKeyDown` (element and window) when the clipboard is empty, image-only, or holds Finder-copied files, so applications can handle those pastes themselves. A read-only editor propagates too. Mixed text-and-image clipboard content still pastes its text natively.
+- 0a97051: Pump macOS input every 8ms instead of 16ms so trackpad events and display-link callbacks are not limited by a 60Hz JavaScript timer. Keep elapsed-work budgeting, dirty-frame coalescing, and the slower Windows/Linux shutdown poll.
+- 08687c3: Stop `<markdown-editor>` from crashing on clipboard events that arrive right after a document-shrinking edit. Two native events delivered in the same tick share the previous render's handler closures; a cut/copy/paste carrying a block position the document no longer contains threw ProseMirror's `RangeError`. Position-taking paths now no-op on stale positions instead.
+- d2a05c5: Wait for every animated descendant before removing an exiting subtree, reset completion when it reenters, and prevent completion reporters from retriggering each other. Keep dialogs with animated buttons responsive while closing.
+- 5e95285: Provide a complete Bun quick start and organize the README around runnable native demos, with a screenshot gallery and links to the full API reference.
+- 5eb859f: `FloatingLayer` now copies border radii (uniform and per-corner), `visibility`, and `opacity` — including their hover/active refinements — onto its outer anchored surface, so the fallback fill no longer shows square corners behind rounded Select/Combobox/Tooltip popups and nested opacity no longer multiplies against that fill. `pointerEvents: "none"` now disables the anchored occluder so hidden or non-interactive overlays do not steal hits.
+- 811d00a: Support Home and End in an open Select menu to highlight the first or last enabled mounted option. Keep the selected value unchanged until activation and ignore these keys while the menu is closed.
+- 1880c00: A re-render that produces the same values no longer sends mutations for them. Inline `style={{ ... }}` objects and object-valued props are new on every render but identical in content; they are now compared by their serialized payload and skipped, and a swapped inline event handler re-registers locally without re-sending `setEventListener`. On a 300-row styled list, a no-change re-render went from ~1,450 redundant ops (styles, props, listener flags — each JSON-stringified across the FFI and parsed by Rust just to be discarded) to zero; a Rust-side comparison still guards the remaining ops.
+- ac3dacc: Locators deduplicate descendants of overlapping matches. When a parent selector matches nested elements (for example the same `testId` on a wrapper and an inner card), the shared subtree was walked once per match, so `count()` over-reported, `all()` listed duplicates, and `element()` threw a false ambiguity error. Each subtree is now visited once per collection, preserving depth-first order.
+- bff363b: Load the automation protocol reliably in SSR and CommonJS interoperability environments by using Zod's namespace import.
+- Updated dependencies [4914c7b]
+- Updated dependencies [811d00a]
+- Updated dependencies [04f9021]
+- Updated dependencies [9f8bfdc]
+- Updated dependencies [9cfbb1c]
+- Updated dependencies [db827bd]
+- Updated dependencies [1d71992]
+- Updated dependencies [8796694]
+- Updated dependencies [1d71992]
+- Updated dependencies [45f5d31]
+- Updated dependencies [5600352]
+- Updated dependencies [4b0558b]
+- Updated dependencies [0e61dee]
+- Updated dependencies [525a332]
+- Updated dependencies [11b7de2]
+- Updated dependencies [eaf511d]
+- Updated dependencies [1f3d00a]
+- Updated dependencies [71a105e]
+- Updated dependencies [811d00a]
+- Updated dependencies [d2a05c5]
+- Updated dependencies [d26b1c1]
+- Updated dependencies [db48ea0]
+- Updated dependencies [21f87c4]
+- Updated dependencies [9f4fa9b]
+- Updated dependencies [811d00a]
+- Updated dependencies [1dd5711]
+- Updated dependencies [cde4787]
+- Updated dependencies [811d00a]
+- Updated dependencies [05167b2]
+- Updated dependencies [89705dc]
+- Updated dependencies [11b7de2]
+- Updated dependencies [8c272d1]
+- Updated dependencies [435af61]
+- Updated dependencies [435af61]
+- Updated dependencies [07526d4]
+- Updated dependencies [28ce86c]
+- Updated dependencies [c785e86]
+- Updated dependencies [157efc4]
+- Updated dependencies [4ccbf78]
+- Updated dependencies [4ccbf78]
+- Updated dependencies [364acfb]
+- Updated dependencies [811d00a]
+- Updated dependencies [d634380]
+- Updated dependencies [1c53356]
+- Updated dependencies [a596d9b]
+- Updated dependencies [4c9458f]
+- Updated dependencies [c2ff4ed]
+- Updated dependencies [1f3d00a]
+- Updated dependencies [e4f04a6]
+- Updated dependencies [993101d]
+- Updated dependencies [848c464]
+- Updated dependencies [07526d4]
+- Updated dependencies [07526d4]
+- Updated dependencies [60e41d8]
+- Updated dependencies [deda832]
+- Updated dependencies [99a30d2]
+- Updated dependencies [211e859]
+- Updated dependencies [60909c6]
+- Updated dependencies [2cbf95f]
+- Updated dependencies [dbdd1dd]
+- Updated dependencies [194ce52]
+  - @gpuiv/native@0.6.0
+
 ## 0.5.0
 
 ### Minor Changes
