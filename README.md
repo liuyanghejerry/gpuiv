@@ -81,6 +81,12 @@ bun --hot chat.tsx
 
 [Browse all examples](examples/), including [error boundaries](examples/error-handling.tsx), [file opening](examples/open-files.tsx), [single-instance apps](examples/single-instance.tsx), and [macOS window vibrancy](examples/blurred-window.tsx). To regenerate the curated screenshots on macOS or Windows, run `bun scripts/screenshots.ts` after building the repository.
 
+### Built with GPUIV
+
+<a href="docs/images/readme-mini-dsh.png"><img src="docs/images/readme-mini-dsh.png" alt="mini dsh desktop client with conversation history, a tool execution timeline, Markdown responses, and a message composer" width="100%" /></a>
+
+**[mini dsh](https://github.com/liuyanghejerry/mini-dsh)** is a standalone desktop client for the official DeepSeek Harness, built with Vue 3, GPUIV, and Animal Island. It combines session history, streaming responses, tool timelines, `@` file references, and `/` skill selection in a native GPU-rendered interface. [View the source](https://github.com/liuyanghejerry/mini-dsh) or [download the Linux x64 AppImage](https://github.com/liuyanghejerry/mini-dsh/releases/latest).
+
 ## Quick start
 
 Install [Bun](https://bun.sh) and create a project. The npm packages include prebuilt native binaries; you can start an app without compiling Rust.
