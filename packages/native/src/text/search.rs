@@ -582,8 +582,11 @@ fn collect_into(tree: &RetainedTree, id: u64, is_root: bool, out: &mut Vec<Group
         .filter(|text| !text.is_empty() && paints_own_content)
     {
         out.push(Group::new(
-            vec![(crate::text::selection_key(id, 0), 0..content.len())],
-            content.clone(),
+            vec![(
+                element.text_key.clone().unwrap_or_else(|| crate::text::selection_key(id, 0)),
+                0..content.len(),
+            )],
+            content.to_string(),
         ));
     }
 
@@ -604,7 +607,10 @@ fn collect_into(tree: &RetainedTree, id: u64, is_root: bool, out: &mut Vec<Group
         let start = pending_text.len();
         pending_text.push_str(content);
         pending.push((
-            crate::text::selection_key(child_id, 0),
+            child
+                .text_key
+                .clone()
+                .unwrap_or_else(|| crate::text::selection_key(child_id, 0)),
             start..pending_text.len(),
         ));
     }

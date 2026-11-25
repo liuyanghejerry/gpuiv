@@ -1,0 +1,139 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>bench-oss browser</title>
+<style>
+  html, body { margin: 0; height: 100%; font-family: sans-serif; }
+  #app, .fill { width: 100%; height: 100%; position: relative; }
+  .rn-scroll { width: 100%; height: 100%; overflow-y: scroll; display: flex; flex-direction: column; align-items: center; background: #fff; }
+  .rn-view { width: 100px; height: 100px; background: red; margin: 5px; flex-shrink: 0; }
+  .rn-text { font-size: 14px; color: #000; flex-shrink: 0; }
+  .rn-image { width: 100px; height: 100px; margin: 5px; flex-shrink: 0; }
+  .rn-sep { margin: 10px; height: 5px; width: 100%; background: black; flex-shrink: 0; }
+  .table { width: 100%; height: 100%; overflow-y: scroll; display: flex; flex-direction: column; background: #fff; }
+  .row { display: flex; flex-direction: row; flex-shrink: 0; border-top: 1px solid #ddd; }
+  .row.danger { background: #f2dede; }
+  .c1 { width: 8.333%; padding: 8px; box-sizing: border-box; }
+  .c4 { width: 33.333%; padding: 8px; box-sizing: border-box; cursor: pointer; }
+  .c6 { width: 50%; padding: 8px; box-sizing: border-box; }
+  .t { font-size: 14px; line-height: 20px; color: #333; }
+</style>
+<script src="/vue.global.prod.js"></script>
+</head>
+<body>
+<div id="app"></div>
+<script type="module">
+import { createDataSource, JSFB_OPS, RN_SCENARIOS, stats } from "/shared.js"
+const { createApp, defineComponent, h, nextTick, ref, shallowRef, triggerRef } = Vue
+const params = new URLSearchParams(location.search)
+const RN_RUNS = Number(params.get("rnRuns") ?? 5)
+const JSFB_RUNS = Number(params.get("jsfbRuns") ?? 10)
+const JSFB_WARMUP = Number(params.get("jsfbWarmup") ?? 3)
+const SUITE = params.get("suite") ?? "all"
+
+// Time to next paint: the rAF callback runs before style/layout/paint of the
+// frame that carries the commit; a task posted from it runs after that paint.
+const painted = () => new Promise((r) => requestAnimationFrame(() => { const c = new MessageChannel(); c.port1.onmessage = r; c.port2.postMessage(0) }))
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+async function measure(action) {
+  const t0 = performance.now()
+  action()
+  await nextTick()
+  const tJs = performance.now()
+  await painted()
+  const t1 = performance.now()
+  return { total: t1 - t0, js: tJs - t0, frame: t1 - tJs }
+}
+const settleIdle = async () => { await sleep(60); if (window.gc) gc(); await sleep(40) }
+const summarize = (s) => ({ total: stats(s.map((x) => x.total)), js: stats(s.map((x) => x.js)).median, frame: stats(s.map((x) => x.frame)).median })
+
+// ── RN scenarios ──
+const rnScenario = shallowRef(null)
+const RnApp = defineComponent({ setup: () => () => {
+  const s = rnScenario.value, children = []
+  if (s) {
+    children.push(h("div", { class: "rn-sep" }))
+    for (let i = 0; i < s.count; i++) {
+      if (s.kind === "view") children.push(h("div", { key: i, class: "rn-view" }))
+      else if (s.kind === "text") children.push(h("span", { key: i, class: "rn-text" }, `Nice text: ${i}`))
+      else children.push(h("img", { key: i, src: "/kitten.png", class: "rn-image" }))
+    }
+  }
+  return h("div", { class: "rn-scroll" }, children)
+} })
+
+// ── js-framework-benchmark ──
+const rows = shallowRef([]), selected = ref()
+const buildData = createDataSource()
+const store = {
+  run: () => { rows.value = buildData(1000); selected.value = undefined },
+  runLots: () => { rows.value = buildData(10000); selected.value = undefined },
+  add: () => { rows.value = rows.value.concat(buildData(1000)) },
+  update: () => { const r = rows.value; for (let i = 0; i < r.length; i += 10) r[i] = { ...r[i], label: r[i].label + " !!!" }; triggerRef(rows) },
+  clear: () => { rows.value = []; selected.value = undefined },
+  swapRows: () => { const r = rows.value; if (r.length > 998) { const a = r[1]; r[1] = r[998]; r[998] = a; triggerRef(rows) } },
+  remove: (id) => { const r = rows.value; r.splice(r.findIndex((d) => d.id === id), 1); triggerRef(rows) },
+  select: (id) => { selected.value = id },
+}
+const Row = defineComponent({ props: { row: Object, selected: Boolean }, setup: (props) => () => {
+  const { id, label } = props.row
+  return h("div", { class: props.selected ? "row danger" : "row" }, [
+    h("div", { class: "c1" }, [h("span", { class: "t" }, String(id))]),
+    h("div", { class: "c4", onClick: () => store.select(id) }, [h("span", { class: "t" }, label)]),
+    h("div", { class: "c1", onClick: () => store.remove(id) }, [h("span", { class: "t" }, "×")]),
+    h("div", { class: "c6" }),
+  ])
+} })
+const JsfbApp = defineComponent({ setup: () => () => h("div", { class: "table" }, rows.value.map((row) => h(Row, { key: row.id, row, selected: row.id === selected.value }))) })
+
+const which = ref("rn")
+createApp({ setup: () => () => h("div", { class: "fill" }, [h(which.value === "rn" ? RnApp : JsfbApp)]) }).mount("#app")
+await painted()
+
+const results = { meta: { host: "chromium-dom", ua: navigator.userAgent, dpr: devicePixelRatio, size: [innerWidth, innerHeight] } }
+if (SUITE === "all" || SUITE === "rn") {
+  which.value = "rn"; await measure(() => {})
+  results.rn = {}
+  for (const sc of RN_SCENARIOS) {
+    const samples = []
+    for (let i = 0; i <= RN_RUNS; i++) {
+      await measure(() => { rnScenario.value = null }); await settleIdle()
+      const s = await measure(() => { rnScenario.value = { kind: sc.kind, count: sc.count } })
+      if (i > 0) samples.push(s)
+    }
+    results.rn[sc.name] = { ...summarize(samples), samples }
+  }
+  await measure(() => { rnScenario.value = null })
+}
+if (SUITE === "all" || SUITE === "jsfb") {
+  which.value = "jsfb"; await measure(() => {})
+  results.jsfb = {}
+  const plans = {
+    "create 1k rows": [store.clear, store.run],
+    "replace all 1k rows": [store.run, store.run],
+    "partial update (every 10th of 1k)": [store.run, store.update],
+    "select row": [store.run, () => store.select(rows.value[1].id)],
+    "swap rows": [store.run, store.swapRows],
+    "remove row": [store.run, () => store.remove(rows.value[4].id)],
+    "create 10k rows": [store.clear, store.runLots],
+    "append 1k to 10k rows": [store.runLots, store.add],
+    "clear 1k rows": [store.run, store.clear],
+  }
+  for (const op of JSFB_OPS) {
+    const samples = []
+    for (let i = 0; i < JSFB_WARMUP + JSFB_RUNS; i++) {
+      await measure(plans[op][0]); await settleIdle()
+      const s = await measure(plans[op][1])
+      if (i >= JSFB_WARMUP) samples.push(s)
+    }
+    results.jsfb[op] = { ...summarize(samples), samples }
+  }
+  await measure(store.runLots)
+  if (performance.memory) results.jsHeap10kRowsMB = performance.memory.usedJSHeapSize / 1048576
+}
+await fetch("/results", { method: "POST", body: JSON.stringify(results) })
+document.title = "done"
+</script>
+</body>
+</html>

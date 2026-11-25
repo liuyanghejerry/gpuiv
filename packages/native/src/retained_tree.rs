@@ -35,7 +35,14 @@ pub struct RetainedElement {
     /// Read it with `.as_deref()` to get `Option<&StyleDesc>`. Never mutate
     /// through it; `Arc` has no `DerefMut`, so the compiler enforces that.
     pub style: Option<Arc<StyleDesc>>,
-    pub content: Option<String>,
+    /// Text owned by this node (a text instance, or `setText` on a `div`).
+    /// A `SharedString` so the per-frame build hands gpui a refcount bump
+    /// instead of copying the string into a fresh allocation every frame.
+    pub content: Option<gpui::SharedString>,
+    /// Selection key of this node's own text run (`"{id}:0"`), made once
+    /// when content is first set instead of `format!`-ed on every frame by
+    /// every painted run. `None` until the node has content.
+    pub text_key: Option<Arc<str>>,
     pub children: Vec<u64>,
     pub parent: Option<u64>,
     /// Most host nodes have neither listeners nor custom props.
@@ -92,6 +99,7 @@ impl RetainedElement {
             element_type,
             style: None,
             content: None,
+            text_key: None,
             children: Vec::new(),
             parent: None,
             extras: None,
@@ -477,8 +485,11 @@ impl RetainedTree {
     pub fn set_text(&mut self, id: u64, content: String) {
         let mut changed = false;
         if let Some(element) = self.elements.get_mut(&id) {
-            if element.content.as_ref() != Some(&content) {
-                element.content = Some(content);
+            if element.content.as_deref() != Some(content.as_str()) {
+                element.content = Some(content.into());
+                if element.text_key.is_none() {
+                    element.text_key = Some(crate::text::selection_key(id, 0));
+                }
                 changed = true;
             }
         }
@@ -733,7 +744,7 @@ fn element_to_json(
     if let Some(ref content) = element.content {
         obj.insert(
             "text".to_string(),
-            serde_json::Value::String(content.clone()),
+            serde_json::Value::String(content.to_string()),
         );
     }
 

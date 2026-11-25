@@ -2282,7 +2282,7 @@ impl TestGpuixRenderer {
     pub fn get_text(&self, id: f64) -> Result<Option<String>> {
         let id = to_element_id(id)?;
         let tree = self.tree.lock().unwrap();
-        Ok(tree.elements.get(&id).and_then(|e| e.content.clone()))
+        Ok(tree.elements.get(&id).and_then(|e| e.content.as_deref().map(str::to_string)))
     }
 
     /// Get the full tree as JSON for snapshot testing.
@@ -2507,7 +2507,7 @@ impl TestGpuixRenderer {
     fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
         if let Some(element) = tree.elements.get(&id) {
             if let Some(ref content) = element.content {
-                texts.push(content.clone());
+                texts.push(content.to_string());
             }
             for &child_id in &element.children {
                 Self::collect_text(child_id, tree, texts);
