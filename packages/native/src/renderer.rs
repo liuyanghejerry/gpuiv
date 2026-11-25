@@ -4620,7 +4620,7 @@ impl GpuixRenderer {
 fn collect_text(id: u64, tree: &RetainedTree, texts: &mut Vec<String>) {
     if let Some(element) = tree.elements.get(&id) {
         if let Some(ref content) = element.content {
-            texts.push(content.clone());
+            texts.push(content.to_string());
         }
         for &child_id in &element.children {
             collect_text(child_id, tree, texts);
@@ -7134,7 +7134,18 @@ pub(crate) fn build_element(
         // listener, and then silently did nothing.
         "div" | "text" => {
             ctx.custom_registry.destroy(id);
-            build_host_container(element, style, ctx, window, cx)
+            match plain_text_instance(element, style, ctx) {
+                Some(content) => {
+                    // A host `div` with no style removes any scroll handle it
+                    // once owned; an instance never has one, but keep the
+                    // invariant that a non-scroller holds no handle.
+                    ctx.scroll_handles.remove(&id);
+                    text_content(element, content, ctx)
+                        .record_bounds_as(id)
+                        .into_any_element()
+                }
+                None => build_host_container(element, style, ctx, window, cx),
+            }
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -7573,8 +7584,8 @@ pub(crate) fn build_host_container(
     });
     if let Some(runs) = host_runs {
         el = el.child(text_runs_element(element.id, &runs, ctx));
-    } else if let Some(content) = element.content.as_deref().filter(|c| !c.is_empty()) {
-        el = el.child(text_content(element.id, content, ctx));
+    } else if let Some(content) = element.content.as_ref().filter(|c| !c.is_empty()) {
+        el = el.child(text_content(element, content, ctx));
     }
 
     // Children
@@ -8215,29 +8226,66 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
     el
 }
 
-/// A selectable text run owned by `element_id`. Runs are left to gpui so the
+/// A selectable text run owned by `element`. Runs are left to gpui so the
 /// text keeps inheriting colour, weight and family from ancestor styles.
-fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElement {
+///
+/// The retained content is already a `SharedString` and the selection key is
+/// cached on the node, so a frame clones two refcounts here, not two strings.
+fn text_content(
+    element: &crate::retained_tree::RetainedElement,
+    content: &gpui::SharedString,
+    ctx: &BuildCtx,
+) -> crate::text::paint::TextRunElement {
     if !ctx.inherited.selectable {
         // Still logged: `getPaintedText()` promises every painted string, and a
         // `userSelect: "none"` label is exactly the chrome tests want to assert.
-        return crate::text::chrome_text(gpui::SharedString::from(content.to_string()), None);
+        return crate::text::paint::chrome_text_run(content.clone(), None);
     }
-    selectable_text(crate::text::SelectableText {
+    crate::text::paint::selectable_text_run(crate::text::SelectableText {
         highlight: ctx
             .inherited
             .highlight
             .clone()
             .map(crate::text::HighlightSource::Resolved),
+        key: element.text_key.clone(),
         ..crate::text::SelectableText::new(
-            element_id,
+            element.id,
             0,
-            gpui::SharedString::from(content.to_string()),
+            content.clone(),
             None,
             ctx.selection.clone(),
             ctx.inherited.selection_wash,
         )
     })
+}
+
+/// The retained text instance a string child becomes (Vue `createText`, or
+/// `setElementText` on a host `<text>`): type `text`, non-empty content of its
+/// own, and nothing a host `div` would act on.
+///
+/// Such a node used to get the full `build_host_container` treatment — a
+/// stateful gpui `div` with its own Taffy node — around its one text run.
+/// That `div` carried no style, listener, focus, role (so no AX node: gpui
+/// only emits one for an explicit role) or children; its only output was the
+/// automation bounds `track_host_bounds` records, which equal the run's own
+/// box (a block wrapper around one auto-sized leaf adds no geometry). The run
+/// now records those bounds itself and is the node's only element.
+fn plain_text_instance<'a>(
+    element: &'a crate::retained_tree::RetainedElement,
+    style: Option<&StyleDesc>,
+    ctx: &BuildCtx,
+) -> Option<&'a gpui::SharedString> {
+    let content = element.content.as_ref().filter(|content| !content.is_empty())?;
+    (element.element_type == "text"
+        && style.is_none()
+        && element.children.is_empty()
+        && element.events().is_empty()
+        && element.custom_props().is_empty()
+        && element.test_id.is_none()
+        && !element.auto_focus
+        && !ctx.focus_handles.contains_key(&element.id)
+        && ctx.pointer_capture_target != Some(element.id))
+    .then_some(content)
 }
 
 /// Styled segments of a host `<text runs={…}>`. The runs already carry their

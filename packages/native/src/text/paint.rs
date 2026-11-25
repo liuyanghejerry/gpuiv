@@ -20,7 +20,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 
 use gpui::{
-    canvas, div, point, prelude::*, px, quad, size, BorderStyle, Bounds, Hsla, SharedString,
+    canvas, point, prelude::*, px, quad, size, BorderStyle, Bounds, Hsla, SharedString,
     StyledText, TextLayout, TextRun, Window,
 };
 
@@ -258,18 +258,125 @@ fn utf16_offset(text: &str, byte: usize) -> usize {
 /// tags, diff file headers. It still lands in the paint log so tests can assert
 /// on it, but a drag across the block never copies it.
 pub fn chrome_text(text: SharedString, runs: Option<Vec<TextRun>>) -> gpui::AnyElement {
+    chrome_text_run(text, runs).into_any_element()
+}
+
+/// [`chrome_text`] as its concrete element, for callers that still need to
+/// configure it (see [`TextRunElement::record_bounds_as`]).
+pub(crate) fn chrome_text_run(text: SharedString, runs: Option<Vec<TextRun>>) -> TextRunElement {
     let styled = match runs {
         Some(runs) => StyledText::new(text.clone()).with_runs(runs),
         None => StyledText::new(text.clone()),
     };
-    let log = canvas(
-        |_, _, _| (),
-        move |_, _, _, _| current_paint_state().record_painted_text(text.clone()),
+    TextRunElement::new(
+        styled,
+        Box::new(move |_, _, _| current_paint_state().record_painted_text(text)),
     )
-    .absolute()
-    .w(px(0.0))
-    .h(px(0.0));
-    div().relative().child(log).child(styled).into_any_element()
+}
+
+/// Paint-time work for one text run, given its laid-out text. Runs right
+/// before the glyphs, so anything it paints sits under them.
+type TextUnderlay = Box<dyn FnOnce(&TextLayout, &mut Window, &mut gpui::App)>;
+
+/// A text run as ONE gpui element: gpui's `StyledText`, plus the paint-time
+/// work (washes, selection registration, paint log) that must see its
+/// `TextLayout`.
+///
+/// This used to be `div().relative().child(canvas(..).absolute()).child(styled)`
+/// — three elements and three Taffy nodes per run, rebuilt every frame. The
+/// canvas only needed the shared `TextLayout` and to paint before the glyphs.
+/// Layout and prepaint delegate to `StyledText` unchanged through gpui's
+/// public `Element` trait, so the run lays out exactly as a bare `StyledText`
+/// does (a block wrapper around a single auto-sized leaf added no geometry),
+/// and nothing here re-applies or overrides state gpui computed.
+pub(crate) struct TextRunElement {
+    styled: StyledText,
+    underlay: Option<TextUnderlay>,
+    /// Host id whose automation bounds this run's painted box stands for.
+    bounds_id: Option<u64>,
+}
+
+impl TextRunElement {
+    fn new(styled: StyledText, underlay: TextUnderlay) -> Self {
+        Self {
+            styled,
+            underlay: Some(underlay),
+            bounds_id: None,
+        }
+    }
+
+    /// Record this run's painted box as host element `id`'s automation
+    /// bounds — what `track_host_bounds` records for a host `div`. Lets a
+    /// retained text instance paint as this element alone, with no host
+    /// `div` around it whose only job was to report the same box.
+    pub(crate) fn record_bounds_as(mut self, id: u64) -> Self {
+        self.bounds_id = Some(id);
+        self
+    }
+}
+
+impl gpui::Element for TextRunElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&gpui::GlobalElementId>,
+        inspector_id: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) -> (gpui::LayoutId, Self::RequestLayoutState) {
+        self.styled.request_layout(id, inspector_id, window, cx)
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&gpui::GlobalElementId>,
+        inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<gpui::Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) {
+        self.styled
+            .prepaint(id, inspector_id, bounds, request_layout, window, cx)
+    }
+
+    fn paint(
+        &mut self,
+        id: Option<&gpui::GlobalElementId>,
+        inspector_id: Option<&gpui::InspectorElementId>,
+        bounds: Bounds<gpui::Pixels>,
+        request_layout: &mut Self::RequestLayoutState,
+        prepaint: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut gpui::App,
+    ) {
+        if let Some(id) = self.bounds_id {
+            crate::automation::record_bounds(id, bounds);
+        }
+        if let Some(underlay) = self.underlay.take() {
+            underlay(self.styled.layout(), window, cx);
+        }
+        self.styled
+            .paint(id, inspector_id, bounds, request_layout, prepaint, window, cx)
+    }
+}
+
+impl IntoElement for TextRunElement {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
 }
 
 /// Selection key for an element. `sub` distinguishes multiple text runs painted
@@ -310,6 +417,12 @@ pub struct InlineImage {
 pub type InlineImageCache =
     std::rc::Rc<std::cell::RefCell<HashMap<String, Option<Arc<gpui::RenderImage>>>>>;
 
+thread_local! {
+    /// Default [`SelectableText::image_cache`]. Keyed by source string, so
+    /// sharing it between runs that did not bring their own cache is safe.
+    static EMPTY_IMAGE_CACHE: InlineImageCache = InlineImageCache::default();
+}
+
 pub struct SelectableText {
     /// Element that owns the run, and the run's index within it. The selection
     /// key is derived from these, so nothing has to parse it back apart.
@@ -346,6 +459,10 @@ pub struct SelectableText {
     /// that must never merge with its neighbour, which is every custom element.
     pub group: Option<u64>,
     pub highlight: Option<HighlightSource>,
+    /// Precomputed [`selection_key`] for `(element_id, sub)`. Retained text
+    /// caches it on the node, so the hot path skips a `format!` per run per
+    /// frame. `None` derives it.
+    pub key: Option<Arc<str>>,
 }
 
 impl SelectableText {
@@ -367,11 +484,15 @@ impl SelectableText {
             extra_wash: None,
             links: Vec::new(),
             images: Vec::new(),
-            image_cache: std::rc::Rc::new(std::cell::RefCell::new(HashMap::new())),
+            // Every plain `<text>` run builds one of these per frame and
+            // almost none carry images: share one empty cache per thread
+            // instead of allocating an `Rc<RefCell<HashMap>>` per run.
+            image_cache: EMPTY_IMAGE_CACHE.with(Clone::clone),
             on_link: None,
             selectable: true,
             group: None,
             highlight: None,
+            key: None,
         }
     }
 }
@@ -379,6 +500,11 @@ impl SelectableText {
 /// A selectable text element: `StyledText` with a canvas underlay that paints
 /// the selection wash and registers into the frame registry.
 pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
+    selectable_text_run(opts).into_any_element()
+}
+
+/// [`selectable_text`] as its concrete element.
+pub(crate) fn selectable_text_run(opts: SelectableText) -> TextRunElement {
     let SelectableText {
         element_id,
         sub,
@@ -394,20 +520,18 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         selectable,
         group,
         highlight,
+        key,
     } = opts;
-    let key = selection_key(element_id, sub);
+    let key = key.unwrap_or_else(|| selection_key(element_id, sub));
 
     let styled = match runs {
         Some(runs) => StyledText::new(text.clone()).with_runs(runs),
         None => StyledText::new(text.clone()),
     };
-    let layout = styled.layout().clone();
-
-    let underlay = canvas(
-        |_, _, _| (),
-        move |_, _, window, cx| {
+    let underlay: TextUnderlay = Box::new(
+        move |layout: &TextLayout, window: &mut Window, cx: &mut gpui::App| {
             if let Some(paint) = &extra_wash {
-                paint(&layout, window);
+                paint(layout, window);
             }
             if !images.is_empty() {
                 paint_inline_images(&layout, &images, &image_cache, window, cx);
@@ -448,20 +572,14 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
                     group,
                 });
             }
-            current_paint_state().record_painted_text(text.clone());
             if let Some(on_link) = &on_link {
-                register_link_listener(window, &layout, &links, on_link, &selection);
+                register_link_listener(window, layout, &links, on_link, &selection);
             }
+            current_paint_state().record_painted_text(text);
         },
-    )
-    .absolute()
-    .size_full();
+    );
 
-    div()
-        .relative()
-        .child(underlay)
-        .child(styled)
-        .into_any_element()
+    TextRunElement::new(styled, underlay)
 }
 
 /// Paint inline images into their placeholder gaps. Runs at paint time, when
