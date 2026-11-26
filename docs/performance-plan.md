@@ -138,10 +138,29 @@ candidates, all GPUI work:
 the plain 10k case: suspect per-frame element allocation and the per-node
 bounds and paint registries.
 
-### 4. Virtual-list clear path
+### 4. Virtual-list clear path ✅
 
-Clearing 1k rows applies a batch in 12.6 ms with `<virtual-list>`, against
-3.2 ms plain. Profile the `ListState` teardown and unmount path.
+The 12.6 ms clear with `<virtual-list>` did not reproduce on current `main`.
+Clearing 1k rows takes 4.6 ms virtualized and 5.4 ms plain, with the batch
+at about 2.9 ms in both, so the original number was noise from a loaded
+machine. `bench-oss/idle-probe.ts` also shows a virtual list costs nothing
+while idle (about 0.1% CPU).
+
+Looking into it found a real scaling bug: clearing or appending to a long
+list cost O(n²).
+
+- **Rust:** `destroy_element` unlinked each child with a scan of its
+  parent's whole child list. Consecutive `destroyElement` ops in a batch now
+  go through `RetainedTree::destroy_elements`, which unlinks each parent in
+  one pass.
+- **JS:** the mirror used `indexOf` + `splice(0, 1)` per removed child and
+  scanned for every freshly appended child. It now uses `shift`/`pop` for the
+  ends and the mirror's exact `parent` pointers instead of scans.
+
+| Clear | `applyBatch` | JS |
+|---|---:|---:|
+| 10k rows | 31 → 15 ms | 17 → 12 ms |
+| 20k rows | 93 → 30 ms | 49 → 22 ms |
 
 ### 5. Steer long lists to `<virtual-list>`
 
