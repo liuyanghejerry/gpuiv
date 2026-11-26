@@ -190,6 +190,44 @@ export function createHostNode(
   return { id, type, text, props: {}, parent: null, children: [], created: false }
 }
 
+// Plain scroll containers rebuild, lay out, and paint every retained child on
+// every frame. Warn once per container in dev mode when it grows past this
+// threshold so apps move long collections to `<virtual-list>`.
+const LONG_SCROLL_LIST_THRESHOLD = 300
+const warnedLongScrollContainers = new WeakSet<HostNode>()
+
+function isPlainScrollStyle(style: unknown): boolean {
+  if (style == null) return false
+  const resolved = toGpuixStyle(style)
+  const overflowX = resolved.overflowX ?? resolved.overflow
+  const overflowY = resolved.overflowY ?? resolved.overflow
+  return overflowX === "scroll" || overflowY === "scroll"
+}
+
+function maybeWarnLongScrollContainer(node: HostNode): void {
+  if (
+    process.env.NODE_ENV === "production" ||
+    node.type !== "div" ||
+    node.children.length <= LONG_SCROLL_LIST_THRESHOLD ||
+    warnedLongScrollContainers.has(node)
+  ) {
+    return
+  }
+  if (!isPlainScrollStyle(node.props.style)) return
+  let realChildren = 0
+  for (const child of node.children) {
+    if (child.id != null) realChildren++
+  }
+  if (realChildren <= LONG_SCROLL_LIST_THRESHOLD) return
+  warnedLongScrollContainers.add(node)
+  const label = typeof node.props.testId === "string" ? ` (testId="${node.props.testId}")` : ""
+  console.warn(
+    `[gpuiv] Plain scroll <div>${label} has ${realChildren} children. ` +
+      `Plain scroll containers build and lay out every child on every frame; ` +
+      `use <virtual-list> for long collections.`
+  )
+}
+
 // ── Batching host ────────────────────────────────────────────────────
 
 export interface GpuivBatchedHost {
@@ -522,6 +560,7 @@ export function createGpuivRendererHost(
           host.renderer.setStyle(node.id, outgoing)
         }
       }
+      maybeWarnLongScrollContainer(node)
       return
     }
     const eventType = eventTypeForProp(key)
@@ -635,6 +674,7 @@ export function createGpuivRendererHost(
       if (alreadyChild) removeFromParentMirror(child)
       host.renderer.appendChild(resolvedParent.id!, child.id!)
       resolvedParent.children.push(child)
+      maybeWarnLongScrollContainer(resolvedParent)
       return
     }
 
@@ -646,6 +686,7 @@ export function createGpuivRendererHost(
       host.renderer.appendChild(resolvedParent.id!, child.id!)
       resolvedParent.children.push(child)
     }
+    maybeWarnLongScrollContainer(resolvedParent)
 
     // Compute the Rust insertion index for a given anchor: the anchor's
     // position, or, for comment anchors, the next real (non-comment) node.

@@ -132,11 +132,30 @@ candidates, all GPUI work:
 - A move-only replay for cached views (zed#67326), followed by GPUIV rows
   as cached views.
 
-### 3. Memory of large plain trees
+### 3. Memory of large plain trees ✅ investigated, no contained fix
 
-10k plain rows sit at 1.7 GB RSS, against 482 MB virtualized. Heap-profile
-the plain 10k case: suspect per-frame element allocation and the per-node
-bounds and paint registries.
+`bench-oss/memory-probe.ts` splits RSS into the JS heap and native memory,
+and runs repaints to find the steady state (Linux, 10k table rows):
+
+| | JS heap | native above an empty window |
+|---|---:|---:|
+| plain scroll `div` | 115 MB | ~870 MB (~90 KB per row) |
+| `<virtual-list>` | 115 MB | ~60 MB |
+
+- **Not a leak:** native memory levels off after about 10 repaints and stays
+  flat through 40.
+- **Not fragmentation:** glibc `malloc_stats` reports it as in use, and
+  jemalloc (`LD_PRELOAD`) gives the same RSS.
+- **What it is:** GPUI's working set for a frame that builds every element.
+  That covers the element arena, Taffy nodes, scene, hitboxes and dispatch
+  tree, held about two frames deep. GPUIV's retained tree is the same in
+  both modes.
+- **Retained text layouts (#207)** add about 100 MB of it, about 3.3 KB per
+  text for 30k texts. That is the cost of the 20% frame-time win: each text
+  keeps the 2–4 width probes a flex pass repeats every frame.
+
+Reducing it is the same structural GPUI work as item 2. Until then the
+mitigation is `<virtual-list>`, which item 5 steers people to.
 
 ### 4. Virtual-list clear path ✅
 
@@ -162,10 +181,13 @@ list cost O(n²).
 | 10k rows | 31 → 15 ms | 17 → 12 ms |
 | 20k rows | 93 → 30 ms | 49 → 22 ms |
 
-### 5. Steer long lists to `<virtual-list>`
+### 5. Steer long lists to `<virtual-list>` ✅
 
-The reference already says so. Add a dev-mode warning when one plain
-scroll container retains more than about 300 children.
+The reference already says so. `vue-renderer.ts` now emits a one-time
+dev-mode `console.warn` (`NODE_ENV !== "production"`) whenever a plain
+scroll `<div>` (`overflow` / `overflowX` / `overflowY: "scroll"`) retains
+more than 300 real children, pointing to `<virtual-list>`. Covered by
+`packages/vue/src/__tests__/long-scroll-warning.test.ts`.
 
 ### 6. Track the numbers in CI
 
