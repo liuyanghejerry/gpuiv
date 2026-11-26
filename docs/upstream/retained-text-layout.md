@@ -58,6 +58,11 @@ The fix is in GPUI's `elements/text.rs`, as one commit on `gpuix-gpuiv`:
   not copy lines.
 - **Default unchanged:** a `TextLayout::default()` keeps nothing across
   frames and behaves exactly as before.
+- **Fonts added at runtime:** the key names fonts by family, but a family can
+  resolve to a different face once its file is added (a family requested
+  before `add_fonts` falls back to another font). `TextSystem` bumps a font
+  generation in `add_fonts`, and the key includes it. CI's `fonts.test.tsx`
+  caught this on the first version, as a second fork commit.
 
 GPUIV keeps one retained layout per host text run (`RetainedTextLayouts` in
 `renderer.rs`). Entries the previous frame did not build are dropped every
@@ -77,8 +82,9 @@ frame. That is structural, and is the subject of performance-plan item 2.
 
 Verification:
 
-- GPUI tests `retained_layout_reuses_unchanged_measurements` and
-  `retained_layout_remeasures_changed_inputs`.
+- GPUI tests `retained_layout_reuses_unchanged_measurements`,
+  `retained_layout_remeasures_changed_inputs` and
+  `retained_layout_remeasures_after_fonts_are_added`.
 - `bench-oss/text-dynamics.ts` changes content, wrap width, font size and
   weight across frames. Its output is identical between the old and new
   builds.
@@ -86,7 +92,8 @@ Verification:
 
 ## Status: diverged (fork-local), pending upstream proposal
 
-The patch lives on `liuyanghejerry/zed:gpuix-gpuiv` on top of the Taffy
+The patch lives on `liuyanghejerry/zed:gpuix-gpuiv` as two commits
+(`ebbe35fe1` and the font-generation follow-up), on top of the Taffy
 context-release patch ([taffy-context-release.md](./taffy-context-release.md)).
 Its branch head is `gpuix-retained-text-layout`.
 
