@@ -9299,15 +9299,29 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
 
     // Phase 3: apply. Cannot fail.
     let mut destroyed_ids: Vec<f64> = Vec::new();
+    // Consecutive destroys (a cleared list sends one per row) are applied
+    // together: `destroy_elements` unlinks each parent in one pass instead of
+    // one scan of its children per destroyed row. Same result as one at a
+    // time; any other op flushes them first, so ordering is preserved.
+    let mut pending_destroys: Vec<u64> = Vec::new();
+    fn flush_destroys(tree: &mut RetainedTree, pending: &mut Vec<u64>, destroyed_ids: &mut Vec<f64>) {
+        if !pending.is_empty() {
+            let destroyed = tree.destroy_elements(pending);
+            destroyed_ids.extend(destroyed.iter().map(|&id| id as f64));
+            pending.clear();
+        }
+    }
     for batch_op in parsed {
+        if let BatchOp::DestroyElement { id } = batch_op {
+            pending_destroys.push(id);
+            continue;
+        }
+        flush_destroys(tree, &mut pending_destroys, &mut destroyed_ids);
         match batch_op {
             BatchOp::CreateElement { id, element_type } => {
                 tree.create_element(id, element_type);
             }
-            BatchOp::DestroyElement { id } => {
-                let destroyed = tree.destroy_element(id);
-                destroyed_ids.extend(destroyed.iter().map(|&id| id as f64));
-            }
+            BatchOp::DestroyElement { .. } => unreachable!("destroys are collected above"),
             BatchOp::AppendChild {
                 parent_id,
                 child_id,
@@ -9346,6 +9360,8 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
             }
         }
     }
+
+    flush_destroys(tree, &mut pending_destroys, &mut destroyed_ids);
 
     // Release styles nothing references any more. Without this a dragged
     // element, which produces a distinct style every frame, would grow the

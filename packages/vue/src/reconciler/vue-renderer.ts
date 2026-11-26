@@ -567,8 +567,20 @@ export function createGpuivRendererHost(
   function removeFromParentMirror(node: HostNode): void {
     const parent = node.parent
     if (!parent) return
-    const index = parent.children.indexOf(node)
-    if (index !== -1) parent.children.splice(index, 1)
+    const children = parent.children
+    // Vue unmounts a cleared list front to back, so the node is nearly always
+    // first. `shift()` is O(1) on JSC; `indexOf` + `splice(0, 1)` rescans and
+    // moves the rest, which made clearing n rows O(n²) (28 ms at 20k rows).
+    if (children[0] === node) {
+      children.shift()
+      return
+    }
+    if (children[children.length - 1] === node) {
+      children.pop()
+      return
+    }
+    const index = children.indexOf(node)
+    if (index !== -1) children.splice(index, 1)
   }
 
   function removeNode(node: HostNode): void {
@@ -590,6 +602,11 @@ export function createGpuivRendererHost(
       materialize(containerNode)
     }
     const resolvedParent = parent
+    // Whether `child` is already in this parent's mirror (a move within the
+    // parent). The mirror keeps `parent` pointers exact, so this replaces an
+    // `indexOf` scan: a freshly created child is never in the list, and
+    // scanning for it on every append made mounting n rows O(n²).
+    const alreadyChild = child.parent === parent
     // Move across parents: mirror-only. There is no removeChild wire op —
     // the appendChild/insertBefore below re-parents natively.
     if (child.parent && child.parent !== parent) {
@@ -600,8 +617,10 @@ export function createGpuivRendererHost(
     let at = -1
     // Comment nodes are pure anchors — mirror only, never sent to Rust.
     if (child.id == null) {
-      const existing = resolvedParent.children.indexOf(child)
-      if (existing !== -1) resolvedParent.children.splice(existing, 1)
+      if (alreadyChild) {
+        const existing = resolvedParent.children.indexOf(child)
+        if (existing !== -1) resolvedParent.children.splice(existing, 1)
+      }
       resolveAnchorIndex()
       resolvedParent.children.splice(at, 0, child)
       return
@@ -611,9 +630,9 @@ export function createGpuivRendererHost(
     if (!resolvedParent.created) materialize(resolvedParent)
     if (!child.created) materialize(child)
 
-    if (anchor === child || anchor == null || !resolvedParent.children.includes(anchor)) {
-      const existing = resolvedParent.children.indexOf(child)
-      if (existing !== -1) resolvedParent.children.splice(existing, 1)
+    // `anchor.parent` stands in for `children.includes(anchor)`, as above.
+    if (anchor === child || anchor == null || anchor.parent !== resolvedParent) {
+      if (alreadyChild) removeFromParentMirror(child)
       host.renderer.appendChild(resolvedParent.id!, child.id!)
       resolvedParent.children.push(child)
       return
@@ -642,7 +661,7 @@ export function createGpuivRendererHost(
         at = resolvedParent.children.length
         return
       }
-      const existing = resolvedParent.children.indexOf(child)
+      const existing = alreadyChild ? resolvedParent.children.indexOf(child) : -1
       if (existing !== -1) {
         resolvedParent.children.splice(existing, 1)
         if (existing < index) index--
