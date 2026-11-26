@@ -189,11 +189,14 @@ scroll `<div>` (`overflow` / `overflowX` / `overflowY: "scroll"`) retains
 more than 300 real children, pointing to `<virtual-list>`. Covered by
 `packages/vue/src/__tests__/long-scroll-warning.test.ts`.
 
-### 6. Track the numbers in CI
+### 6. Track the numbers in CI ✅
 
-Run `bench-oss` on the macOS runner with the `GPUIV_PERF_GATE` pattern used
-by `beautiful-ui.perf.test.tsx`. Publish the tables to the step summary, and
-gate only on gross regressions.
+`examples/bench-oss.perf.test.tsx` + `examples/vitest.perf-oss.config.ts`
+(`bun run test:perf:oss`) runs the key RN and js-framework-benchmark
+scenarios on the macOS GPU test renderer (`createTestApp`), publishes a
+Markdown table to `$GITHUB_STEP_SUMMARY`, uploads
+`tmp/bench-oss-perf-gate/metrics.json`, and gates on gross regressions in
+the `beautiful-ui-performance` macOS CI job.
 
 ## Running the benchmarks
 

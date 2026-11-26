@@ -203,7 +203,7 @@ jobs:
         working-directory: packages/animal-island
 
       - name: Run example tests
-        run: bun run test --exclude beautiful-ui.perf.test.tsx --exclude memory-leak.test.ts
+        run: bun run test --exclude beautiful-ui.perf.test.tsx --exclude bench-oss.perf.test.tsx --exclude memory-leak.test.ts
         working-directory: examples
 
   # Reuse the release Metal binding. Run budgets separately from correctness
@@ -259,6 +259,20 @@ jobs:
         with:
           name: beautiful-ui-performance
           path: tmp/beautiful-ui-perf-gate/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Track OSS benchmarks
+        run: bun run test:perf:oss
+        working-directory: examples
+        timeout-minutes: 3
+
+      - name: Upload OSS benchmark measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-oss-performance
+          path: tmp/bench-oss-perf-gate/
           if-no-files-found: error
           retention-days: 30
 
@@ -482,7 +496,7 @@ jobs:
         working-directory: packages/animal-island
 
       - name: Run example tests
-        run: bun run test --exclude beautiful-ui.perf.test.tsx --exclude memory-leak.test.ts
+        run: bun run test --exclude beautiful-ui.perf.test.tsx --exclude bench-oss.perf.test.tsx --exclude memory-leak.test.ts
         working-directory: examples
 
   # Desktop products for the chat example, built through @gpuiv/packager.
