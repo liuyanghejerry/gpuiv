@@ -82,19 +82,55 @@ Follow-ups:
   per frame each.
 - The structural cost that remains is item 2.
 
-### 2. Make unchanged or off-screen subtrees cheap per frame
+### 2. Make unchanged or off-screen subtrees cheap per frame (in progress)
 
-The plain-scroll select-row case is 40× slower than the DOM. Options, in
-the order AGENTS.md requires (GPUI first):
+**Where a frame goes.** A temporary phase timer in `Window::draw_roots`
+measured the frame after a trivial change, after item 1:
 
-- Find a GPUI mechanism that culls off-screen children of an
-  `overflow: scroll` container, or that reuses last frame's layout for a
-  clean subtree. Search `zed/crates/gpui` and zed issues and PRs.
-- If none exists, propose one upstream (`remorses/zed`, `gpuix` branch) before
-  writing any GPUIV-side caching keyed on `subtree_revision`.
+| Tree | build | Taffy | prepaint | paint |
+|---|---:|---:|---:|---:|
+| 1000 table rows | 18 ms | **35 ms** | 7 ms | 9.5 ms |
+| 5000 `<text>` | 14 ms | **18 ms** | 4.7 ms | 8.5 ms |
+| 5000 empty `div` | 8 ms | 1.4 ms | 3 ms | 3.7 ms |
 
-Measure with the js-framework-benchmark select, swap and remove rows, and
-partial update, all in plain mode.
+GPUI only culls off-screen work at the end: a quad outside the content mask
+is dropped when it is added to the scene. Build, Taffy, prepaint and paint
+still run for every element.
+
+**GPUI options found:**
+
+- Cached views (`Entity::cached` / `AnyView::cached`) reuse a subtree's
+  prepaint and paint. But they need a definite size from the composer, and
+  their cache key includes the origin, so every scroll frame misses
+  ([zed#67326](https://github.com/zed-industries/zed/issues/67326), open).
+  They also drop accessibility nodes
+  ([zed#66690](https://github.com/zed-industries/zed/issues/66690), open).
+- GPUIV's selection, paint-log and bounds registries are rebuilt during
+  paint, so a replayed paint would lose them. Cached views do not fit
+  arbitrary retained subtrees until those issues are solved.
+
+**Step 2a ✅: retained text measurements.** A GPUI fork patch adds
+`TextLayout::retained()`. A text run reuses last frame's shaping when its
+inputs and wrap width are unchanged
+([retained-text-layout.md](./upstream/retained-text-layout.md)).
+
+| Tree | Taffy | Frame |
+|---|---:|---:|
+| 1000 table rows | 35 → 20 ms | 78 → 62 ms (−20%) |
+| 5000 `<text>` | 18 → 12 ms | 50 → 45 ms (−10%) |
+
+**What remains** is mostly Taffy solving a tree that GPUI rebuilds from
+scratch every frame, plus building and painting every element. The next
+candidates, all GPUI work:
+
+- Retain the Taffy tree across frames and mark only changed nodes dirty.
+  This is a large GPUI change; Longbridge's `gpui-fast` fork went this way.
+- Skip prepaint and paint for children of an overflow container that lie
+  entirely outside its content mask. This saves about 15–20% for large
+  plain lists. It needs care for tab stops, focus, automation bounds and
+  the selection registry of off-screen nodes.
+- A move-only replay for cached views (zed#67326), followed by GPUIV rows
+  as cached views.
 
 ### 3. Memory of large plain trees
 

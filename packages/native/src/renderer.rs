@@ -5363,6 +5363,8 @@ pub struct GpuixView {
     /// that have the listener. Shared with the paint closures that compare
     /// against it.
     paint_reports: SharedPaintReports,
+    /// Retained text layouts across frames. See [`RetainedTextLayouts`].
+    text_layouts: RetainedTextLayouts,
     /// Whether the JS renderer asked for window-level key events, and the
     /// event id (generation) they belong to. A queued event from an old root
     /// carries a stale id and must not enter its replacement.
@@ -5413,6 +5415,7 @@ impl GpuixView {
             clock: crate::automation::AutomationClock::new(),
             highlights: HashMap::new(),
             paint_reports: SharedPaintReports::default(),
+            text_layouts: RetainedTextLayouts::default(),
             window_key_down: false,
             window_key_up: false,
             window_key_event_id: 0,
@@ -5707,6 +5710,7 @@ impl GpuixView {
             highlight_events: &mut highlight_events,
             paint_reports: &self.paint_reports,
             keyboard_focus,
+            text_layouts: &mut self.text_layouts,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -6101,6 +6105,47 @@ pub(crate) struct BuildCtx<'a> {
     /// The control holding keyboard focus and its ancestors. See
     /// `GpuixView::keyboard_focus_path`.
     pub keyboard_focus: Option<std::sync::Arc<[u64]>>,
+    /// Retained gpui text layouts for host text runs. See [`RetainedTextLayouts`].
+    pub text_layouts: &'a mut RetainedTextLayouts,
+}
+
+/// One retained gpui [`gpui::TextLayout`] per host text run, kept across
+/// frames so gpui can reuse a run's measurements when its text, resolved
+/// style and wrap width are unchanged (see `TextLayout::retained`). Without
+/// it every frame re-shapes and re-wraps every `<text>` in the tree, which
+/// was most of Taffy's time in a frame over a large text tree.
+///
+/// Only runs built this frame or last frame are kept: `begin_frame` drops
+/// whatever the previous frame did not build, so removed elements and rows a
+/// virtual list scrolled away release their layouts.
+#[derive(Default)]
+pub(crate) struct RetainedTextLayouts {
+    current: rustc_hash::FxHashMap<u64, gpui::TextLayout>,
+    previous: rustc_hash::FxHashMap<u64, gpui::TextLayout>,
+}
+
+impl RetainedTextLayouts {
+    /// Called once per root render, before any run is built.
+    fn begin_frame(&mut self) {
+        std::mem::swap(&mut self.current, &mut self.previous);
+        self.current.clear();
+    }
+
+    /// The retained layout for `id`'s run. A second build of the same run in
+    /// one frame (gpui may build a virtual-list row more than once) gets a
+    /// fresh, unshared layout: two live elements must never share one, since
+    /// each `request_layout` restarts its in-frame state.
+    fn layout_for(&mut self, id: u64) -> gpui::TextLayout {
+        if self.current.contains_key(&id) {
+            return gpui::TextLayout::default();
+        }
+        let layout = self
+            .previous
+            .remove(&id)
+            .unwrap_or_else(gpui::TextLayout::retained);
+        self.current.insert(id, layout.clone());
+        layout
+    }
 }
 
 /// Style properties that cascade into descendants.
@@ -6979,6 +7024,7 @@ impl gpui::Render for GpuixView {
             sync_motion_states(&tree, &mut self.motion_states, now);
         let mut highlight_events = Vec::new();
         let keyboard_focus = self.keyboard_focus_path(&tree, window, cx);
+        self.text_layouts.begin_frame();
         let result = match tree.root_id {
             Some(root_id) => {
                 let mut ctx = BuildCtx {
@@ -6999,6 +7045,7 @@ impl gpui::Render for GpuixView {
                     highlight_events: &mut highlight_events,
                     paint_reports: &self.paint_reports,
                     keyboard_focus,
+                    text_layouts: &mut self.text_layouts,
                 };
                 let built = build_element(root_id, &mut ctx, window, cx);
                 emit_highlight_events(&callback, &highlight_events);
@@ -8234,14 +8281,16 @@ pub(crate) fn wire_host_events<E: gpui::StatefulInteractiveElement>(
 fn text_content(
     element: &crate::retained_tree::RetainedElement,
     content: &gpui::SharedString,
-    ctx: &BuildCtx,
+    ctx: &mut BuildCtx,
 ) -> crate::text::paint::TextRunElement {
+    let layout = ctx.text_layouts.layout_for(element.id);
     if !ctx.inherited.selectable {
         // Still logged: `getPaintedText()` promises every painted string, and a
         // `userSelect: "none"` label is exactly the chrome tests want to assert.
-        return crate::text::paint::chrome_text_run(content.clone(), None);
+        return crate::text::paint::chrome_text_run(content.clone(), None, Some(layout));
     }
     crate::text::paint::selectable_text_run(crate::text::SelectableText {
+        layout: Some(layout),
         highlight: ctx
             .inherited
             .highlight

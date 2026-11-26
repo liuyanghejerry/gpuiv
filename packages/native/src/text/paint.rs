@@ -258,15 +258,23 @@ fn utf16_offset(text: &str, byte: usize) -> usize {
 /// tags, diff file headers. It still lands in the paint log so tests can assert
 /// on it, but a drag across the block never copies it.
 pub fn chrome_text(text: SharedString, runs: Option<Vec<TextRun>>) -> gpui::AnyElement {
-    chrome_text_run(text, runs).into_any_element()
+    chrome_text_run(text, runs, None).into_any_element()
 }
 
 /// [`chrome_text`] as its concrete element, for callers that still need to
 /// configure it (see [`TextRunElement::record_bounds_as`]).
-pub(crate) fn chrome_text_run(text: SharedString, runs: Option<Vec<TextRun>>) -> TextRunElement {
+pub(crate) fn chrome_text_run(
+    text: SharedString,
+    runs: Option<Vec<TextRun>>,
+    layout: Option<TextLayout>,
+) -> TextRunElement {
     let styled = match runs {
         Some(runs) => StyledText::new(text.clone()).with_runs(runs),
         None => StyledText::new(text.clone()),
+    };
+    let styled = match layout {
+        Some(layout) => styled.with_layout(layout),
+        None => styled,
     };
     TextRunElement::new(
         styled,
@@ -463,6 +471,9 @@ pub struct SelectableText {
     /// caches it on the node, so the hot path skips a `format!` per run per
     /// frame. `None` derives it.
     pub key: Option<Arc<str>>,
+    /// A retained gpui layout to measure into (`TextLayout::retained`), so
+    /// an unchanged run reuses last frame's shaping. `None` lays out fresh.
+    pub layout: Option<TextLayout>,
 }
 
 impl SelectableText {
@@ -493,6 +504,7 @@ impl SelectableText {
             group: None,
             highlight: None,
             key: None,
+            layout: None,
         }
     }
 }
@@ -521,12 +533,17 @@ pub(crate) fn selectable_text_run(opts: SelectableText) -> TextRunElement {
         group,
         highlight,
         key,
+        layout,
     } = opts;
     let key = key.unwrap_or_else(|| selection_key(element_id, sub));
 
     let styled = match runs {
         Some(runs) => StyledText::new(text.clone()).with_runs(runs),
         None => StyledText::new(text.clone()),
+    };
+    let styled = match layout {
+        Some(layout) => styled.with_layout(layout),
+        None => styled,
     };
     let underlay: TextUnderlay = Box::new(
         move |layout: &TextLayout, window: &mut Window, cx: &mut gpui::App| {

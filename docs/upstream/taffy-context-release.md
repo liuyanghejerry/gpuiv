@@ -19,7 +19,7 @@ reach around GPUI's invariants in its native translation.
 
 To run a strict gate now, `.gitmodules` temporarily tracks
 `liuyanghejerry/zed:gpuix-gpuiv`, containing this patch as one commit on top of the `remorses/zed` `gpuix` head. The
-current commit is `94d048eb`, on top of `ebcbb24` (2026-11-25). Earlier pins stay
+current commit is `94d048eb`, on top of `ebcbb24` (2026-11-25). Since 2026-11-26 the branch also carries the retained text layout patch (`ebbe35fe1`, [retained-text-layout.md](./retained-text-layout.md)) on top of it; rebase both together. Earlier pins stay
 reachable on archive branches, such as `gpuix-gpuiv-f77e5cf`.
 The build checkout still uses its local `gpuix` branch. The patch is committed
 and reachable on the remote; development takes place in a separate worktree.
